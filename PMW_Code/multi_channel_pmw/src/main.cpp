@@ -10,9 +10,9 @@ void setup() {
     Serial.println("Debug: PWM initialized at 300Hz");
 
     // Test with higher duty cycles to make waves more visible
-    pwmDriver.setDutyCycle(0, 0.5); // Channel 0 - 50% duty
-	pwmDriver.setDutyCycle(5, 0.5); // Channel 5 - 50% duty
-    pwmDriver.setDutyCycle(6, 0.5); // Channel 6 - 50% duty
+    pwmDriver.setDutyCycle(0, 0.5); // Channel 0 - pin 11
+	pwmDriver.setDutyCycle(5, 0.5); // Channel 5 - pin 5
+    pwmDriver.setDutyCycle(6, 0.5); // Channel 6 - pin 6
     Serial.println("Debug: Duty cycles set");
 
 	pwmDriver.setPhase(0, 0.0);

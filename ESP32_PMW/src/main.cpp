@@ -1,46 +1,85 @@
-#include <Arduino.h>
-#include "PhasePWM.h" 
+/**
+ * ESP32 4-Channel Software Phase-Shifted PWM
+ * * DYNAMIC DUTY CYCLE VERSION
+ * * METHOD: Non-blocking micros() polling (Time Slicing).
+ * * FREQUENCY: 300 Hz
+ * * NOTE: We use micros() because millis() is too coarse for 300Hz (3.3ms period).
+ */
 
-// ================= CONFIGURATION =================
+#include "Arduino.h"
 
-// Total Channels: 1 Master (Hidden) + 4 User Channels
-#define TOTAL_CHANNELS 5 
+// --- Configuration ---
+const int PIN_PHASE_0   = 15; //A
+const int PIN_PHASE_90  = 33; //C
+const int PIN_PHASE_180 = 12; //B
+const int PIN_PHASE_270 = 27; //D
 
-// Pin Definitions
-// Index 0 is the Hidden Master (Pin 14) - connects to SYNC_INPUT_PIN
-// Indices 1-4 are the User Pins (Oscilloscope probes go here)
-const int CHANNEL_PINS[TOTAL_CHANNELS] = {14, 15, 32, 33, 27};
+const int PWM_FREQ_HZ = 50;
+const unsigned long PERIOD_US = 1000000 / PWM_FREQ_HZ;
 
-// Sync Wiring: Connect Pin 14 -> Pin 4 physically!
-#define SYNC_INPUT_PIN 4  
+// --- Dynamic Variables ---
+// Change this variable anywhere in your code to adjust brightness/width
+float dutyCyclePercent = 50.0; 
 
-// PWM Settings
-#define PWM_FREQ_HZ 350 // 350 Hz
-
-// PWM generator
-PhasePWM generator(CHANNEL_PINS, TOTAL_CHANNELS, SYNC_INPUT_PIN, PWM_FREQ_HZ);
+// Calculated internally
+unsigned long dutyWidthUS; 
+unsigned long offset0, offset90, offset180, offset270;
 
 void setup() {
-    Serial.begin(115200);
-    delay(1000);
-    Serial.println("Initializing 4-Channel Fixed Phase PWM...");
+  Serial.begin(115200);
+  Serial.println("Starting Dynamic PWM...");
+  Serial.print("Period: "); Serial.print(PERIOD_US); Serial.println(" us");
 
-    if (!generator.begin()) {
-        Serial.println("Failed to start PWM.");
-        while(1);
-    }
+  pinMode(PIN_PHASE_0, OUTPUT);
+  pinMode(PIN_PHASE_90, OUTPUT);
+  pinMode(PIN_PHASE_180, OUTPUT);
+  pinMode(PIN_PHASE_270, OUTPUT);
 
-    // initialise channel (four)
-    float phase = 0.0;
-    float phase_diff = 360.0 / (TOTAL_CHANNELS - 1);
+  // Calculate fixed phase offsets (0%, 25%, 50%, 75% of period)
+  offset0   = 0;
+  offset90  = PERIOD_US / 4;
+  offset180 = PERIOD_US / 2;
+  offset270 = (PERIOD_US * 3) / 4;
+}
 
-    for (int i = 0; i < TOTAL_CHANNELS - 1; i++) {
-        generator.setPhase(i, phase);
-        generator.setDuty(i, 50.0);
-        phase += phase_diff;
-    }
+// Helper to check if we are inside the "Active" window for a phase
+bool checkPhase(unsigned long currentPos, unsigned long shift, unsigned long width) {
+  unsigned long endPos = (shift + width) % PERIOD_US;
+  
+  if (shift < endPos) {
+    // Normal active range (e.g., Start: 100, End: 200)
+    return (currentPos >= shift && currentPos < endPos);
+  } else {
+    // Wrapping active range (e.g., Start: 3000, End: 100)
+    return (currentPos >= shift || currentPos < endPos);
+  }
 }
 
 void loop() {
-    delay(1000);
+  // 1. Time Capture & Sync
+  // We capture time ONCE. All logic uses this snapshot.
+  // This provides the "compensation" for calculation delays, ensuring
+  // all pins switch based on the exact same moment in time.
+  unsigned long now = micros();
+  unsigned long cyclePos = now % PERIOD_US;
+
+  // 2. Update Pulse Width (allows dynamic adjustment)
+  dutyWidthUS = (PERIOD_US * (unsigned long)dutyCyclePercent) / 100;
+
+  // 3. Calculate States
+  // We calculate all states BEFORE writing to minimize time gap between pins
+  bool s0   = checkPhase(cyclePos, offset0,   dutyWidthUS);
+  bool s90  = checkPhase(cyclePos, offset90,  dutyWidthUS);
+  bool s180 = checkPhase(cyclePos, offset180, dutyWidthUS);
+  bool s270 = checkPhase(cyclePos, offset270, dutyWidthUS);
+
+  // 4. Write to Pins
+  digitalWrite(PIN_PHASE_0,   s0);
+  digitalWrite(PIN_PHASE_90,  s90);
+  digitalWrite(PIN_PHASE_180, s180);
+  digitalWrite(PIN_PHASE_270, s270);
+  
+  // Optional: Add a small delay to prevent CPU hogging if other tasks need to run
+  // but keep it small to maintain PWM resolution.
+  // delayMicroseconds(10); 
 }

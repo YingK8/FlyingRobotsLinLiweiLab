@@ -1,8 +1,9 @@
 /**
- * ESP32 4-Channel Smooth Phase Controller (Jitter-Free)
- * * 修复: 解决了改变频率时的波形抖动/断裂问题
- * * 原理: 使用"相位累加器" (Phase Accumulator) 代替绝对时间取模
- * * 功能: 保持波形连续性 (Phase Continuity)
+ * ESP32 4-Channel Smooth Phase Controller (Debugged & Optimized)
+ * * FIXES:
+ * 1. Changed pwmFreqHz to FLOAT. (Integer truncation prevented 0.5Hz steps).
+ * 2. Fixed Setup logic which jumped straight to 50Hz, skipping the sweep.
+ * 3. Optimized Loop: Moved math out of the main loop to prevent jitter.
  */
 
 #include "Arduino.h"
@@ -14,129 +15,126 @@ const int PIN_PHASE_180 = 12; // B组
 const int PIN_PHASE_270 = 27; // D组
 
 // --- 动态运行变量 ---
-int pwmFreqHz = 10;
-float periodUs = 1000000.0 / pwmFreqHz; // 使用 float 提高精度
+float pwmFreqHz = 10.0; // Changed to FLOAT to support 0.5 increments
+float periodUs = 1000000.0 / pwmFreqHz;
 
-// --- 相位累加器变量 ---
-// 这些变量用于追踪我们在波形中的当前位置，而不是依赖系统绝对时间
-float currentCyclePos = 0;       // 当前周期内的位置 (0 -> periodUs)
-unsigned long lastLoopMicros = 0; // 上次循环的时间
+// --- 相位累加器 ---
+float currentCyclePos = 0;       
+unsigned long lastLoopMicros = 0;
 
-// --- 频率控制变量 ---
+// --- 频率控制 ---
 unsigned long lastFreqUpdateTime = 0;
-int targetFreqHz = 257;
-float FreqStep = 10.0;
-int stepT = 500000;
+unsigned long loopStartTime = 0;
+float targetFreqHz = 50.0;
+float FreqStep = 0.5; 
 
-// --- 独立 Duty Cycle 变量 (0.0 - 100.0) ---
+// --- 独立 Duty Cycle (0.0 - 100.0) ---
 float dutyCycle0   = 50.0; 
 float dutyCycle90  = 50.0; 
 float dutyCycle180 = 50.0; 
 float dutyCycle270 = 50.0; 
 
-// --- 内部计算变量 ---
-unsigned long width0, width90, width180, width270;
-unsigned long offset0, offset90, offset180, offset270;
+// --- 预计算参数 (Optimization) ---
+// Pre-calculate start and end times to keep the loop extremely fast
+struct PhaseParams {
+  float start;
+  float end;
+  bool wraps;
+};
+PhaseParams p0, p90, p180, p270;
+
+// Helper to calculate parameters (Moved out of loop)
+void updatePhaseParams() {
+  auto calc = [](float offsetFactor, float duty) -> PhaseParams {
+    PhaseParams p;
+    float width = periodUs * duty / 100.0;
+    p.start = periodUs * offsetFactor;
+    p.end = p.start + width;
+    
+    // Handle wrapping (pulse crosses the cycle boundary)
+    if (p.end > periodUs) {
+      p.end -= periodUs;
+      p.wraps = true;
+    } else {
+      p.wraps = false;
+    }
+    return p;
+  };
+
+  p0   = calc(0.00, dutyCycle0);
+  p90  = calc(0.25, dutyCycle90);
+  p180 = calc(0.50, dutyCycle180);
+  p270 = calc(0.75, dutyCycle270);
+}
 
 /**
  * 设置频率并保持相位连续性
- * 关键算法: 频率改变时，按照比例缩放当前的位置
  */
-void setFrequency(int newHz) {
-  if (newHz < 1 || newHz > 1000) return;
+void setFrequency(float newHz) {
+  if (newHz < 1.0 || newHz > 1000.0) return;
 
   float oldPeriod = periodUs;
   float newPeriod = 1000000.0 / newHz;
 
-  // 1. 计算我们当前在旧周期中的百分比位置 (Ratio)
+  // 1. Scale current position to maintain phase continuity
   float ratio = currentCyclePos / oldPeriod;
+  currentCyclePos = ratio * newPeriod;
 
-  // 2. 更新频率和周期
+  // 2. Update Globals
   pwmFreqHz = newHz;
   periodUs = newPeriod;
 
-  // 3. 将当前位置映射到新周期 (保持百分比不变)
-  // 这就像拉伸橡皮筋一样，波形不会断裂
-  currentCyclePos = ratio * newPeriod;
-
-  // 4. 重新计算相位偏移点
-  offset0   = 0;
-  offset90  = (unsigned long)(periodUs * 0.25);
-  offset180 = (unsigned long)(periodUs * 0.50);
-  offset270 = (unsigned long)(periodUs * 0.75);
-
-  offset0   = 0;
-  offset90  = (unsigned long)(periodUs / 4);
-  offset180 = (unsigned long)(periodUs / 2);
-  offset270 = (unsigned long)(periodUs * 3 / 4);
+  // 3. Recalculate thresholds
+  updatePhaseParams();
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("--- ESP32 无抖动磁场控制器 ---");
+  Serial.println("--- ESP32 Debugged Controller ---");
   
   pinMode(PIN_PHASE_0, OUTPUT);
   pinMode(PIN_PHASE_90, OUTPUT);
   pinMode(PIN_PHASE_180, OUTPUT);
   pinMode(PIN_PHASE_270, OUTPUT);
 
+  // Initialize at the START frequency (10Hz), not the target (50Hz)
+  setFrequency(pwmFreqHz); 
+  
   lastLoopMicros = micros();
-}
-
-// 辅助函数: 检查相位窗口
-bool checkPhase(float currentPos, unsigned long shift, unsigned long width) {
-  if (width == 0) return false;
-  
-  // 浮点数比较，加上一点容差
-  float endPos = shift + width;
-  
-  // 处理跨越周期末尾的情况 (Wrap around)
-  // 如果 结束点 > 周期，说明窗口跨越了 0点
-  if (endPos > periodUs) {
-    float wrappedEnd = endPos - periodUs;
-    return (currentPos >= shift || currentPos < wrappedEnd);
-  } else {
-    // 正常情况
-    return (currentPos >= shift && currentPos < endPos);
-  }
+  loopStartTime = millis();
 }
 
 void loop() {
-  // 1. 计算时间增量 (Delta Time)
+  // 1. Time Stepping (Addition only - Fast)
   unsigned long now = micros();
   unsigned long dt = now - lastLoopMicros;
   lastLoopMicros = now;
 
-  // 2. 频率平滑扫描控制
-  // 每 0.1秒 增加 10Hz
-  if (now - lastFreqUpdateTime >= stepT) { 
-    lastFreqUpdateTime = now;
-    if (pwmFreqHz < targetFreqHz) {
-      setFrequency(pwmFreqHz + FreqStep);
-    } else if (pwmFreqHz > targetFreqHz) {
-      setFrequency(pwmFreqHz - FreqStep);
+  // 2. Frequency Sweep Logic
+  // Wait 8 seconds, then sweep from 10Hz to 50Hz
+  if (millis() - loopStartTime >= 8000) {
+    if (now - lastFreqUpdateTime >= 100000) { // Every 0.1s
+      lastFreqUpdateTime = now;
+      
+      // Floating point comparison handles the 0.5 steps correctly now
+      if (pwmFreqHz < targetFreqHz) {
+        setFrequency(pwmFreqHz + FreqStep);
+      } else if (pwmFreqHz > targetFreqHz) {
+        setFrequency(pwmFreqHz - FreqStep);
+      }
     }
   }
 
-  // 3. 推进相位累加器
-  // 我们手动增加位置，而不是询问系统时间
+  // 3. Advance Phase Accumulator
   currentCyclePos += dt;
-
-  // 4. 处理周期循环
-  while (currentCyclePos >= periodUs) {
+  if (currentCyclePos >= periodUs) {
     currentCyclePos -= periodUs;
   }
 
-  // 5. 计算脉宽
-  width0   = periodUs * dutyCycle0 / 100.0;
-  width90  = periodUs * dutyCycle90 / 100.0;
-  width180 = periodUs * dutyCycle180 / 100.0;
-  width270 = (unsigned long)(periodUs * dutyCycle270 / 100.0);
-
-  // 6. 更新引脚
-  // 使用当前累加的位置进行判断
-  digitalWrite(PIN_PHASE_0,   checkPhase(currentCyclePos, offset0,   width0));
-  digitalWrite(PIN_PHASE_90,  checkPhase(currentCyclePos, offset90,  width90));
-  digitalWrite(PIN_PHASE_180, checkPhase(currentCyclePos, offset180, width180));
-  digitalWrite(PIN_PHASE_270, checkPhase(currentCyclePos, offset270, width270));
+  // 4. Pin Output (Comparison only - Very Fast)
+  // Logic: "If wrapping, active if OUTSIDE the gap. If normal, active INSIDE the range."
+  digitalWrite(PIN_PHASE_0,   p0.wraps   ? (currentCyclePos >= p0.start   || currentCyclePos < p0.end)   : (currentCyclePos >= p0.start   && currentCyclePos < p0.end));
+  digitalWrite(PIN_PHASE_90,  p90.wraps  ? (currentCyclePos >= p90.start  || currentCyclePos < p90.end)  : (currentCyclePos >= p90.start  && currentCyclePos < p90.end));
+  digitalWrite(PIN_PHASE_180, p180.wraps ? (currentCyclePos >= p180.start || currentCyclePos < p180.end) : (currentCyclePos >= p180.start && currentCyclePos < p180.end));
+  digitalWrite(PIN_PHASE_270, p270.wraps ? (currentCyclePos >= p270.start || currentCyclePos < p270.end) : (currentCyclePos >= p270.start && currentCyclePos < p270.end));
 }

@@ -14,7 +14,7 @@ const int PIN_PHASE_180 = 12; // B组
 const int PIN_PHASE_270 = 27; // D组
 
 // --- 动态运行变量 ---
-int pwmFreqHz = 50;
+int pwmFreqHz = 10;
 float periodUs = 1000000.0 / pwmFreqHz; // 使用 float 提高精度
 
 // --- 相位累加器变量 ---
@@ -24,8 +24,9 @@ unsigned long lastLoopMicros = 0; // 上次循环的时间
 
 // --- 频率控制变量 ---
 unsigned long lastFreqUpdateTime = 0;
-int targetFreqHz = 350;
+int targetFreqHz = 257;
 float FreqStep = 10.0;
+int stepT = 500000;
 
 // --- 独立 Duty Cycle 变量 (0.0 - 100.0) ---
 float dutyCycle0   = 50.0; 
@@ -63,6 +64,11 @@ void setFrequency(int newHz) {
   offset90  = (unsigned long)(periodUs * 0.25);
   offset180 = (unsigned long)(periodUs * 0.50);
   offset270 = (unsigned long)(periodUs * 0.75);
+
+  offset0   = 0;
+  offset90  = (unsigned long)(periodUs / 4);
+  offset180 = (unsigned long)(periodUs / 2);
+  offset270 = (unsigned long)(periodUs * 3 / 4);
 }
 
 void setup() {
@@ -74,7 +80,6 @@ void setup() {
   pinMode(PIN_PHASE_180, OUTPUT);
   pinMode(PIN_PHASE_270, OUTPUT);
 
-  setFrequency(50); 
   lastLoopMicros = micros();
 }
 
@@ -104,7 +109,7 @@ void loop() {
 
   // 2. 频率平滑扫描控制
   // 每 0.1秒 增加 10Hz
-  if (now - lastFreqUpdateTime >= 100000) { 
+  if (now - lastFreqUpdateTime >= stepT) { 
     lastFreqUpdateTime = now;
     if (pwmFreqHz < targetFreqHz) {
       setFrequency(pwmFreqHz + FreqStep);

@@ -2,51 +2,59 @@
 #define PHASE_CONTROLLER_H
 
 #include "Arduino.h"
+#include "HardwareSerial.h"
 
 class PhaseController {
-public:
-    // Constructor: Define the 4 pins for 0, 90, 180, 270 degrees
-    PhaseController(const int* pins, const float* phaseOffsetsDegrees, int numChannels);
-
-    // Initialize pins and state
-    void begin(float initialFreqHz = 10.0);
-
-    // Main loop ticker - call this as fast as possible in void loop()
-    void run();
-
-    // Setters
-    void setFrequency(float newHz);
-    void setDutyCycle(int channel, float dutyPercent); // Channel 0-3
-    void setGlobalDutyCycle(float dutyPercent);        // Set all at once
+  protected: // Changed to PROTECTED for inheritance
+    int _numChannels;
+    int* _pins;
+    float* _phaseOffsetsPct;
+    float* _dutyCycles;
     
-    // Getters
-    float getFrequency() const;
-
-private:
-    // --- Hardware Config ---
-    int _pins[4]; // Stores pin numbers for 0, 90, 180, 270
-
-    // --- State Variables ---
-    float _pwmFreqHz;
-    float _periodUs;
-    float _currentCyclePos;
+    // Independent Time & State per Channel
+    float* _freqsHz;        
+    float* _periodsUs;      
+    float* _cyclePositions; 
+    
     unsigned long _lastLoopMicros;
 
-    // --- Duty Cycles (0.0 - 100.0) ---
-    float _dutyCycles[4];
+    // Sync Variables
+    bool _syncEnabled;
+    bool _isServer;
+    HardwareSerial* _syncSerial;
 
-    // --- Optimization Structure ---
     struct PhaseParams {
         float start;
         float end;
         bool wraps;
     };
+    PhaseParams* _params;
 
-    // One param set for each channel
-    PhaseParams _params[4]; 
+    // Helper to update internal math
+    void updatePhaseParams(int channel);
 
-    // --- Internal Logic ---
-    void updatePhaseParams();
+  public:
+    PhaseController(const int* pins, const float* phaseOffsetsDegrees, int numChannels);
+    virtual ~PhaseController(); // Virtual destructor
+    
+    void begin(float initialFreqHz);
+    void enableSync(bool isServer, HardwareSerial* serial, int rxPin, int txPin, long baud);
+    
+    // Basic Setters
+    void setFrequency(int channel, float newHz);
+    void setGlobalFrequency(float newHz);
+    void setDutyCycle(int channel, float dutyPercent);
+    
+    // Needed for the sequencer to control phase dynamically
+    void setPhase(int channel, float degrees);
+
+    // Getters
+    float getFrequency(int channel) const;
+    float getPhase(int channel) const;
+    float getDutyCycle(int channel) const;
+
+    // Core Loop
+    void run();
 };
 
 #endif

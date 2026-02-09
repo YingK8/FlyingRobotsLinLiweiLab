@@ -30,7 +30,7 @@ class PhaseController {
     bool _hasSyncedOnce;
     
     // Constants
-    const unsigned long SYNC_INTERVAL_US = 300000000UL; // 5 Minutes
+    const unsigned long SYNC_INTERVAL_US = 5000000UL; // 5 Seconds between sync pulses
 
     struct PhaseParams {
         float start;

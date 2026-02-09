@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include "PhaseController.h"
 
+// Initialise static member for timer sync functions!
+PhaseController* PhaseController::_isrInstance = nullptr;
+
 PhaseController::PhaseController(const int* pins, const float* phaseOffsetsDegrees, int numChannels) {
     _numChannels = numChannels;
     _syncEnabled = false; 
@@ -26,7 +29,7 @@ PhaseController::PhaseController(const int* pins, const float* phaseOffsetsDegre
 
     _lastLoopMicros = 0;
     _hasSyncedOnce = false;
-    _lastPinState = false;
+    _isrPulseReady = false;
 }
 
 PhaseController::~PhaseController() {
@@ -51,7 +54,10 @@ void PhaseController::begin(float initialFreqHz) {
             digitalWrite(_syncPin, LOW);
             _lastSyncTime = micros(); // Init timer
         } else {
-            pinMode(_syncPin, INPUT_PULLDOWN); // Use Pulldown to avoid floating triggers
+            pinMode(_syncPin, INPUT_PULLDOWN); 
+            // Client uses Interrupts
+            _isrInstance = this;
+            attachInterrupt(digitalPinToInterrupt(_syncPin), _onSyncInterrupt, CHANGE);
         }
     }
 
@@ -63,6 +69,22 @@ void PhaseController::enableSync(bool isServer, int syncPin) {
     _isServer = isServer;
     _syncPin = syncPin;
     _syncEnabled = true;
+}
+
+// Static ISR for High-Speed Capture
+void IRAM_ATTR PhaseController::_onSyncInterrupt() {
+    if (_isrInstance) {
+        bool state = digitalRead(_isrInstance->_syncPin);
+        unsigned long now = micros();
+        if (state) {
+            // Rising Edge: Start Timer
+            _isrInstance->_isrPulseStart = now;
+        } else {
+            // Falling Edge: Capture Width & Flag Ready
+            _isrInstance->_isrPulseWidth = now - _isrInstance->_isrPulseStart;
+            _isrInstance->_isrPulseReady = true;
+        }
+    }
 }
 
 void PhaseController::setFrequency(int channel, float newHz) {
@@ -133,58 +155,49 @@ void PhaseController::run() {
     // --- HARDWARE SYNC LOGIC (GPIO 4) ---
     if (_syncEnabled) {
         if (_isServer) {
-            // === SERVER LOGIC ===
-            // Generate pulse every 5 minutes (SYNC_INTERVAL_US)
+            // === SERVER LOGIC (Generates Pulse) ===
+            // Generate pulse every 1 second
             if (now - _lastSyncTime >= SYNC_INTERVAL_US) {
                 digitalWrite(_syncPin, HIGH);
-                delayMicroseconds(50000); // 50ms pulse
+                delayMicroseconds(1000); // 1ms pulse (Interrupts can catch short pulses easily)
                 digitalWrite(_syncPin, LOW);
                 _lastSyncTime = now;
             }
         } 
         else {
-            // === CLIENT LOGIC ===
-            bool currentPinState = digitalRead(_syncPin);
-            
-            // Rising Edge Detection
-            if (currentPinState && !_lastPinState) {
-                _pinRiseTime = now;
-            }
-            
-            // Falling Edge Detection (End of Pulse)
-            if (!currentPinState && _lastPinState) {
-                unsigned long duration = now - _pinRiseTime;
+            // === CLIENT LOGIC (Process ISR Data) ===
+            if (_isrPulseReady) {
+                _isrPulseReady = false; // Reset flag
                 
+                unsigned long duration = _isrPulseWidth;
+                unsigned long pulseTime = _isrPulseStart; // Captured in ISR
+
                 // Case 1: Startup Pulse (> 2 seconds)
                 if (duration > 2000000UL) {
-                    // Hard Reset to 0
                     for(int i=0; i<_numChannels; i++) _cyclePositions[i] = 0;
-                    _lastSyncTime = _pinRiseTime; 
+                    _lastSyncTime = pulseTime; 
                     _hasSyncedOnce = true;
                 }
-                // Case 2: Periodic Pulse (Short, e.g., 50ms)
+                // Case 2: Periodic Pulse (1ms)
                 else if (_hasSyncedOnce) {
-                    // Calculate Deviation
-                    unsigned long actualInterval = _pinRiseTime - _lastSyncTime;
+                    unsigned long actualInterval = pulseTime - _lastSyncTime;
                     long error = (long)(actualInterval - SYNC_INTERVAL_US);
                     
-                    // Subtract drift from counters ("subtract that amount from the micros() counter")
+                    // Subtract drift
                     for(int i=0; i<_numChannels; i++) {
                         _cyclePositions[i] -= error;
                         
-                        // Handle wrapping (Safe float modulo)
+                        // Handle wrapping
                         while(_cyclePositions[i] < 0) _cyclePositions[i] += _periodsUs[i];
                         while(_cyclePositions[i] >= _periodsUs[i]) _cyclePositions[i] -= _periodsUs[i];
                     }
-                    _lastSyncTime = _pinRiseTime;
+                    _lastSyncTime = pulseTime;
                 }
-                // Case 3: First pulse seen (late joiner) -> Treat as baseline
                 else {
-                    _lastSyncTime = _pinRiseTime;
+                    _lastSyncTime = pulseTime;
                     _hasSyncedOnce = true;
                 }
             }
-            _lastPinState = currentPinState;
         }
     }
 

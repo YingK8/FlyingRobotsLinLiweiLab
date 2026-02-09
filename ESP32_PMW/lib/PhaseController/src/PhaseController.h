@@ -23,14 +23,20 @@ class PhaseController {
     bool _isServer;
     int _syncPin;
     
-    // Hardware Sync State
-    unsigned long _lastSyncTime;    // Last time we sent/received a pulse
-    unsigned long _pinRiseTime;     // For measuring pulse width/interval
-    bool _lastPinState;
+    // Hardware Sync State (ISR)
+    static PhaseController* _isrInstance; // Static pointer for ISR
+    volatile unsigned long _isrPulseStart;
+    volatile unsigned long _isrPulseWidth;
+    volatile bool _isrPulseReady;
+    
+    unsigned long _lastSyncTime;    
     bool _hasSyncedOnce;
     
     // Constants
-    const unsigned long SYNC_INTERVAL_US = 5000000UL; // 5 Seconds between sync pulses
+    const unsigned long SYNC_INTERVAL_US = 1000000UL; // 1 Second (Faster Refresh)
+
+    // ISR Function (Must be static and in IRAM)
+    static void IRAM_ATTR _onSyncInterrupt();
 
     struct PhaseParams {
         float start;

@@ -21,7 +21,16 @@ class PhaseController {
     // Sync Variables
     bool _syncEnabled;
     bool _isServer;
-    HardwareSerial* _syncSerial;
+    int _syncPin;
+    
+    // Hardware Sync State
+    unsigned long _lastSyncTime;    // Last time we sent/received a pulse
+    unsigned long _pinRiseTime;     // For measuring pulse width/interval
+    bool _lastPinState;
+    bool _hasSyncedOnce;
+    
+    // Constants
+    const unsigned long SYNC_INTERVAL_US = 300000000UL; // 5 Minutes
 
     struct PhaseParams {
         float start;
@@ -38,7 +47,7 @@ class PhaseController {
     virtual ~PhaseController(); // Virtual destructor
     
     void begin(float initialFreqHz);
-    void enableSync(bool isServer, HardwareSerial* serial, int rxPin, int txPin, long baud);
+    void enableSync(bool isServer, int syncPin);
     
     // Basic Setters
     void setFrequency(int channel, float newHz);

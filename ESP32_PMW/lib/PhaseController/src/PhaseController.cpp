@@ -25,6 +25,8 @@ PhaseController::PhaseController(const int* pins, const float* phaseOffsetsDegre
     }
 
     _lastLoopMicros = 0;
+    _hasSyncedOnce = false;
+    _lastPinState = false;
 }
 
 PhaseController::~PhaseController() {
@@ -33,19 +35,34 @@ PhaseController::~PhaseController() {
 }
 
 void PhaseController::begin(float initialFreqHz) {
+    // Pin Setup
     for(int i = 0; i < _numChannels; i++) {
         pinMode(_pins[i], OUTPUT);
         digitalWrite(_pins[i], LOW);
     }
+
+    // Sync Pin Setup
+    if (_syncEnabled) {
+        if (_isServer) {
+            pinMode(_syncPin, OUTPUT);
+            // Startup Pulse: High for 3 seconds to reset clients
+            digitalWrite(_syncPin, HIGH);
+            delay(3000); 
+            digitalWrite(_syncPin, LOW);
+            _lastSyncTime = micros(); // Init timer
+        } else {
+            pinMode(_syncPin, INPUT_PULLDOWN); // Use Pulldown to avoid floating triggers
+        }
+    }
+
     setGlobalFrequency(initialFreqHz);
     _lastLoopMicros = micros();
 }
 
-void PhaseController::enableSync(bool isServer, HardwareSerial* serial, int rxPin, int txPin, long baud) {
+void PhaseController::enableSync(bool isServer, int syncPin) {
     _isServer = isServer;
-    _syncSerial = serial;
+    _syncPin = syncPin;
     _syncEnabled = true;
-    _syncSerial->begin(baud, SERIAL_8N1, rxPin, txPin);
 }
 
 void PhaseController::setFrequency(int channel, float newHz) {
@@ -113,19 +130,61 @@ void PhaseController::run() {
 
     if (dt > _periodsUs[0] * 2 && _periodsUs[0] > 0) dt = 0; 
 
-    // Sync Logic
-    if (_syncEnabled && !_isServer) {
-        if (_syncSerial->available() >= 3) {
-            if (_syncSerial->read() == 0xFF) { 
-                uint8_t h = _syncSerial->read();
-                uint8_t l = _syncSerial->read();
-                uint16_t freqInt = (h << 8) | l;
-                float syncedFreq = freqInt / 10.0;
-                
-                if (abs(syncedFreq - _freqsHz[0]) > 0.09) setGlobalFrequency(syncedFreq);
-                for(int i=0; i<_numChannels; i++) _cyclePositions[i] = 0;
-                while(_syncSerial->available()) _syncSerial->read();
+    // --- HARDWARE SYNC LOGIC (GPIO 4) ---
+    if (_syncEnabled) {
+        if (_isServer) {
+            // === SERVER LOGIC ===
+            // Generate pulse every 5 minutes (SYNC_INTERVAL_US)
+            if (now - _lastSyncTime >= SYNC_INTERVAL_US) {
+                digitalWrite(_syncPin, HIGH);
+                delayMicroseconds(50000); // 50ms pulse
+                digitalWrite(_syncPin, LOW);
+                _lastSyncTime = now;
             }
+        } 
+        else {
+            // === CLIENT LOGIC ===
+            bool currentPinState = digitalRead(_syncPin);
+            
+            // Rising Edge Detection
+            if (currentPinState && !_lastPinState) {
+                _pinRiseTime = now;
+            }
+            
+            // Falling Edge Detection (End of Pulse)
+            if (!currentPinState && _lastPinState) {
+                unsigned long duration = now - _pinRiseTime;
+                
+                // Case 1: Startup Pulse (> 2 seconds)
+                if (duration > 2000000UL) {
+                    // Hard Reset to 0
+                    for(int i=0; i<_numChannels; i++) _cyclePositions[i] = 0;
+                    _lastSyncTime = _pinRiseTime; 
+                    _hasSyncedOnce = true;
+                }
+                // Case 2: Periodic Pulse (Short, e.g., 50ms)
+                else if (_hasSyncedOnce) {
+                    // Calculate Deviation
+                    unsigned long actualInterval = _pinRiseTime - _lastSyncTime;
+                    long error = (long)(actualInterval - SYNC_INTERVAL_US);
+                    
+                    // Subtract drift from counters ("subtract that amount from the micros() counter")
+                    for(int i=0; i<_numChannels; i++) {
+                        _cyclePositions[i] -= error;
+                        
+                        // Handle wrapping (Safe float modulo)
+                        while(_cyclePositions[i] < 0) _cyclePositions[i] += _periodsUs[i];
+                        while(_cyclePositions[i] >= _periodsUs[i]) _cyclePositions[i] -= _periodsUs[i];
+                    }
+                    _lastSyncTime = _pinRiseTime;
+                }
+                // Case 3: First pulse seen (late joiner) -> Treat as baseline
+                else {
+                    _lastSyncTime = _pinRiseTime;
+                    _hasSyncedOnce = true;
+                }
+            }
+            _lastPinState = currentPinState;
         }
     }
 
@@ -134,11 +193,6 @@ void PhaseController::run() {
         _cyclePositions[i] += dt;
         if (_cyclePositions[i] >= _periodsUs[i]) {
             _cyclePositions[i] -= _periodsUs[i];
-            if (i == 0 && _syncEnabled && _isServer) {
-                uint16_t fScaled = (uint16_t)(_freqsHz[0] * 10);
-                uint8_t packet[3] = {0xFF, (uint8_t)((fScaled >> 8) & 0xFF), (uint8_t)(fScaled & 0xFF)};
-                _syncSerial->write(packet, 3);
-            }
         }
         bool active;
         if (_params[i].wraps) active = (_cyclePositions[i] >= _params[i].start || _cyclePositions[i] < _params[i].end);

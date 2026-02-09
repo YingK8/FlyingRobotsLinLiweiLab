@@ -6,8 +6,7 @@ const int PINS[] = {15, 33, 12, 27};
 const float PHASES[] = {0.0, 90.0, 180.0, 270.0};
 const int NUM_CHANNELS = 4;
 
-const int PIN_RX = 16;
-const int PIN_TX = 17;
+const int SYNC_PIN = 4;
 
 PhaseSequencer* sequencer;
 
@@ -17,8 +16,15 @@ void setup() {
   Serial.println(IS_SERVER ? "SERVER" : "CLIENT");
 
   sequencer = new PhaseSequencer(PINS, PHASES, NUM_CHANNELS);
-  sequencer->enableSync(IS_SERVER, &Serial2, PIN_RX, PIN_TX, 921600);
-  sequencer->begin(10.0);
+  
+  // Update: Use GPIO 4 Sync
+  sequencer->enableSync(IS_SERVER, SYNC_PIN);
+  
+  sequencer->begin(10.0); // initialFreqHz = 10Hz
+
+  if (IS_SERVER) {
+      Serial.println("Starting Realtime Control...");
+  }
 }
 
 void loop() {

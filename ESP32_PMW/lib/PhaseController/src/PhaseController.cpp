@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include "PhaseController.h"
+#include "driver/gpio.h"
+// #include "soc/gpio_struct.h"
 
 // Initialise static member for timer sync functions!
 PhaseController* PhaseController::_isrInstance = nullptr;
@@ -40,21 +42,24 @@ PhaseController::~PhaseController() {
 void PhaseController::begin(float initialFreqHz) {
     // Pin Setup
     for(int i = 0; i < _numChannels; i++) {
-        pinMode(_pins[i], OUTPUT);
-        digitalWrite(_pins[i], LOW);
+        // pinMode(_pins[i], OUTPUT);
+        // digitalWrite(_pins[i], LOW);
+        gpio_set_direction(_pins[i], GPIO_MODE_OUTPUT);
+        gpio_set_level(_pins[i], LOW);
     }
 
     // Sync Pin Setup
     if (_syncEnabled) {
         if (_isServer) {
-            pinMode(_syncPin, OUTPUT);
+            gpio_set_direction(_syncPin, GPIO_MODE_OUTPUT);
             // Startup Pulse: High for 3 seconds to reset clients
-            digitalWrite(_syncPin, HIGH);
+            gpio_set_level(_syncPin, HIGH);
             delay(3000); 
-            digitalWrite(_syncPin, LOW);
+            gpio_set_level(_syncPin, LOW);
             _lastSyncTime = micros(); // Init timer
         } else {
-            pinMode(_syncPin, INPUT_PULLDOWN); 
+            gpio_set_direction(_syncPin, GPIO_MODE_INPUT);
+            gpio_set_pull_mode(_syncPin, GPIO_PULLDOWN_ONLY);
             // Client uses Interrupts
             _isrInstance = this;
             attachInterrupt(digitalPinToInterrupt(_syncPin), _onSyncInterrupt, CHANGE);
@@ -74,7 +79,7 @@ void PhaseController::enableSync(bool isServer, int syncPin) {
 // Static ISR for High-Speed Capture
 void IRAM_ATTR PhaseController::_onSyncInterrupt() {
     if (_isrInstance) {
-        bool state = digitalRead(_isrInstance->_syncPin);
+        bool state = gpio_get_level(_isrInstance->_syncPin);
         unsigned long now = micros();
         if (state) {
             // Rising Edge: Start Timer
@@ -158,9 +163,9 @@ void PhaseController::run() {
             // === SERVER LOGIC (Generates Pulse) ===
             // Generate pulse every 1 second
             if (now - _lastSyncTime >= SYNC_INTERVAL_US) {
-                digitalWrite(_syncPin, HIGH);
+                gpio_set_level(_syncPin, HIGH);
                 delayMicroseconds(1000); // 1ms pulse (Interrupts can catch short pulses easily)
-                digitalWrite(_syncPin, LOW);
+                gpio_set_level(_syncPin, LOW);
                 _lastSyncTime = now;
             }
         } 
@@ -210,6 +215,6 @@ void PhaseController::run() {
         bool active;
         if (_params[i].wraps) active = (_cyclePositions[i] >= _params[i].start || _cyclePositions[i] < _params[i].end);
         else active = (_cyclePositions[i] >= _params[i].start && _cyclePositions[i] < _params[i].end);
-        digitalWrite(_pins[i], active); 
+        gpio_set_level(_pins[i], active); 
     }
 }

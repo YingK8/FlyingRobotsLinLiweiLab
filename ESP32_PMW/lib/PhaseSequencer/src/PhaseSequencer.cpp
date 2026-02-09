@@ -54,21 +54,21 @@ void PhaseSequencer::rampDuty(int channel, float targetPct, unsigned long durati
 
 // --- Buffered Setters ---
 void PhaseSequencer::setFrequencyNext(int channel, float hz) {
-    if(channel < 0 || channel >= _numChannels) return;
+    if (channel < 0 || channel >= _numChannels || _freqRamps[channel].active) return;
     _nextFreqs[channel] = hz;
     _dirtyFreqs[channel] = true;
     _freqRamps[channel].active = false; // Override active ramp
 }
 
 void PhaseSequencer::setPhaseNext(int channel, float deg) {
-    if(channel < 0 || channel >= _numChannels) return;
+    if(channel < 0 || channel >= _numChannels || _phaseRamps[channel].active) return;
     _nextPhases[channel] = deg;
     _dirtyPhases[channel] = true;
     _phaseRamps[channel].active = false;
 }
 
 void PhaseSequencer::setDutyNext(int channel, float pct) {
-    if(channel < 0 || channel >= _numChannels) return;
+    if(channel < 0 || channel >= _numChannels || _dutyRamps[channel].active) return;
     _nextDuties[channel] = pct;
     _dirtyDuties[channel] = true;
     _dutyRamps[channel].active = false;

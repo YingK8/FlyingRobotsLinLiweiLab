@@ -34,4 +34,10 @@ void loop() {
   // if (analogRead(A0) > 2000) {
   //    sequencer->setFrequencyNext(0, 60.0); // Applies in next run()
   // }
+
+  for (int channel = 0; channel < NUM_CHANNELS; channel++) {
+    sequencer->setFrequencyNext(channel, 10.0);
+    sequencer->rampFrequency(channel, 100.0,
+                             10000); // Ramp channel to 100Hz over 10 seconds
+  }
 }

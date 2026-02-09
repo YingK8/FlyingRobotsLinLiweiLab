@@ -38,7 +38,7 @@ class PhaseSequencer : public PhaseController {
     void processRamp(RampState& ramp, int channel, int type); // type: 0=Freq, 1=Phase, 2=Duty
 
   public:
-    PhaseSequencer(const int* pins, const float* phaseOffsetsDegrees, int numChannels);
+    PhaseSequencer(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels);
     ~PhaseSequencer();
 
     // --- High Level API ---

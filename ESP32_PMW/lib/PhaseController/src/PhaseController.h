@@ -7,7 +7,7 @@
 class PhaseController {
   protected: // Changed to PROTECTED for inheritance
     int _numChannels;
-    int* _pins;
+    gpio_num_t* _pins;
     float* _phaseOffsetsPct;
     float* _dutyCycles;
     
@@ -21,7 +21,7 @@ class PhaseController {
     // Sync Variables
     bool _syncEnabled;
     bool _isServer;
-    int _syncPin;
+    gpio_num_t _syncPin;
     
     // Hardware Sync State (ISR)
     static PhaseController* _isrInstance; // Static pointer for ISR
@@ -49,11 +49,11 @@ class PhaseController {
     void updatePhaseParams(int channel);
 
   public:
-    PhaseController(const int* pins, const float* phaseOffsetsDegrees, int numChannels);
+    PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels);
     virtual ~PhaseController(); // Virtual destructor
     
     void begin(float initialFreqHz);
-    void enableSync(bool isServer, int syncPin);
+    void enableSync(bool isServer, gpio_num_t syncPin);
     
     // Basic Setters
     void setFrequency(int channel, float newHz);

@@ -1,16 +1,17 @@
 #include <Arduino.h>
 #include "PhaseController.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 // #include "soc/gpio_struct.h"
 
 // Initialise static member for timer sync functions!
 PhaseController* PhaseController::_isrInstance = nullptr;
 
-PhaseController::PhaseController(const int* pins, const float* phaseOffsetsDegrees, int numChannels) {
+PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels) {
     _numChannels = numChannels;
     _syncEnabled = false; 
 
-    _pins = new int[_numChannels];
+    _pins = new gpio_num_t[_numChannels];
     _phaseOffsetsPct = new float[_numChannels];
     _dutyCycles = new float[_numChannels];
     _params = new PhaseParams[_numChannels];
@@ -56,7 +57,7 @@ void PhaseController::begin(float initialFreqHz) {
             gpio_set_level(_syncPin, HIGH);
             delay(3000); 
             gpio_set_level(_syncPin, LOW);
-            _lastSyncTime = micros(); // Init timer
+            _lastSyncTime = esp_timer_get_time(); // Init timer
         } else {
             gpio_set_direction(_syncPin, GPIO_MODE_INPUT);
             gpio_set_pull_mode(_syncPin, GPIO_PULLDOWN_ONLY);
@@ -67,10 +68,10 @@ void PhaseController::begin(float initialFreqHz) {
     }
 
     setGlobalFrequency(initialFreqHz);
-    _lastLoopMicros = micros();
+    _lastLoopMicros = esp_timer_get_time();
 }
 
-void PhaseController::enableSync(bool isServer, int syncPin) {
+void PhaseController::enableSync(bool isServer, gpio_num_t syncPin) {
     _isServer = isServer;
     _syncPin = syncPin;
     _syncEnabled = true;
@@ -80,7 +81,7 @@ void PhaseController::enableSync(bool isServer, int syncPin) {
 void IRAM_ATTR PhaseController::_onSyncInterrupt() {
     if (_isrInstance) {
         bool state = gpio_get_level(_isrInstance->_syncPin);
-        unsigned long now = micros();
+        unsigned long now = esp_timer_get_time();
         if (state) {
             // Rising Edge: Start Timer
             _isrInstance->_isrPulseStart = now;
@@ -151,7 +152,7 @@ void PhaseController::updatePhaseParams(int channel) {
 }
 
 void PhaseController::run() {
-    unsigned long now = micros();
+    unsigned long now = esp_timer_get_time(); // switched to ESP-IDF version of micros(), it returns a 64bit value, but it auto-truncates to 32bits!
     unsigned long dt = now - _lastLoopMicros;
     _lastLoopMicros = now;
 

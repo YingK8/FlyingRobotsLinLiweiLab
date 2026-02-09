@@ -2,11 +2,11 @@
 #include "PhaseSequencer.h"
 
 const bool IS_SERVER = true; 
-const int PINS[] = {15, 33, 12, 27}; 
+const gpio_num_t PINS[] = {GPIO_NUM_15, GPIO_NUM_33, GPIO_NUM_12, GPIO_NUM_27}; 
 const float PHASES[] = {0.0, 90.0, 180.0, 270.0};
 const int NUM_CHANNELS = 4;
 
-const int SYNC_PIN = 4;
+const gpio_num_t SYNC_PIN = GPIO_NUM_4;
 
 PhaseSequencer* sequencer;
 

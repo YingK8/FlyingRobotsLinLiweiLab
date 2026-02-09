@@ -1,7 +1,7 @@
 #include "Arduino.h"
 #include "PhaseSequencer.h"
 
-PhaseSequencer::PhaseSequencer(const int* pins, const float* phaseOffsetsDegrees, int numChannels) 
+PhaseSequencer::PhaseSequencer(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels) 
     : PhaseController(pins, phaseOffsetsDegrees, numChannels) {
     
     _freqRamps = new RampState[numChannels];

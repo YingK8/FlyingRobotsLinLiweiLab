@@ -1,221 +1,266 @@
-#include <Arduino.h>
 #include "PhaseController.h"
-#include "driver/gpio.h"
-#include "esp_timer.h"
-// #include "soc/gpio_struct.h"
 
-// Initialise static member for timer sync functions!
 PhaseController* PhaseController::_isrInstance = nullptr;
 
 PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels) {
     _numChannels = numChannels;
-    _syncEnabled = false; 
+    _periodicTimer = nullptr;
 
     _pins = new gpio_num_t[_numChannels];
     _phaseOffsetsPct = new float[_numChannels];
     _dutyCycles = new float[_numChannels];
     _params = new PhaseParams[_numChannels];
-    
     _freqsHz = new float[_numChannels];
-    _periodsUs = new float[_numChannels];
-    _cyclePositions = new float[_numChannels];
+
+    _lastSyncTimeUs = 0;
+    _averagedPeriodUs = 20000;
+    _lastIsrTimeUs = 0;
+    _filterIdx = 0;
+    _firstSyncReceived = false;
+
+    for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = 20000;
 
     for (int i = 0; i < _numChannels; i++) {
         _pins[i] = pins[i];
         _phaseOffsetsPct[i] = constrain(phaseOffsetsDegrees[i], 0.0, 360.0) / 360.0;
         _dutyCycles[i] = 50.0;
-        
-        _freqsHz[i] = 10.0;
-        _periodsUs[i] = 1000000.0 / _freqsHz[i];
-        _cyclePositions[i] = 0;
+        _freqsHz[i] = 50.0;
     }
-
-    _lastLoopMicros = 0;
-    _hasSyncedOnce = false;
-    _isrPulseReady = false;
 }
 
 PhaseController::~PhaseController() {
-    delete[] _pins; delete[] _phaseOffsetsPct; delete[] _dutyCycles;
-    delete[] _params; delete[] _freqsHz; delete[] _periodsUs; delete[] _cyclePositions;
+    if (_periodicTimer) {
+        esp_timer_stop(_periodicTimer);
+        esp_timer_delete(_periodicTimer);
+    }
+    delete[] _pins; delete[] _phaseOffsetsPct; 
+    delete[] _dutyCycles; delete[] _params; 
+    delete[] _freqsHz;
 }
 
 void PhaseController::begin(float initialFreqHz) {
-    // Pin Setup
     for(int i = 0; i < _numChannels; i++) {
-        // pinMode(_pins[i], OUTPUT);
-        // digitalWrite(_pins[i], LOW);
+        gpio_reset_pin(_pins[i]);
         gpio_set_direction(_pins[i], GPIO_MODE_OUTPUT);
-        gpio_set_level(_pins[i], LOW);
-    }
-
-    // Sync Pin Setup
-    if (_syncEnabled) {
-        if (_isServer) {
-            gpio_set_direction(_syncPin, GPIO_MODE_OUTPUT);
-            // Startup Pulse: High for 3 seconds to reset clients
-            gpio_set_level(_syncPin, HIGH);
-            delay(3000); 
-            gpio_set_level(_syncPin, LOW);
-            _lastSyncTime = esp_timer_get_time(); // Init timer
-        } else {
-            gpio_set_direction(_syncPin, GPIO_MODE_INPUT);
-            gpio_set_pull_mode(_syncPin, GPIO_PULLDOWN_ONLY);
-            // Client uses Interrupts
-            _isrInstance = this;
-            attachInterrupt(digitalPinToInterrupt(_syncPin), _onSyncInterrupt, CHANGE);
-        }
+        gpio_set_level(_pins[i], 0);
     }
 
     setGlobalFrequency(initialFreqHz);
-    _lastLoopMicros = esp_timer_get_time();
+
+    // COMPILE-TIME OPTIMIZED SETUP
+    #if USE_SYNC
+        #if SYNC_AS_SERVER
+            // Master: Output Sync
+            gpio_reset_pin(_syncPin);
+            gpio_set_direction(_syncPin, GPIO_MODE_OUTPUT);
+            gpio_set_level(_syncPin, 0);
+            _lastSyncTimeUs = esp_timer_get_time();
+        #else
+            // Client: Input Sync
+            gpio_reset_pin(_syncPin);
+            gpio_set_direction(_syncPin, GPIO_MODE_INPUT);
+            gpio_set_pull_mode(_syncPin, GPIO_PULLDOWN_ONLY);
+            _isrInstance = this;
+            attachInterrupt(digitalPinToInterrupt(_syncPin), _onSyncInterrupt, RISING);
+        #endif
+    #else
+        _lastSyncTimeUs = esp_timer_get_time();
+    #endif
+
+    const esp_timer_create_args_t timer_args = {
+        .callback = &_timerCallback,
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "pwm_gen"
+    };
+
+    esp_timer_create(&timer_args, &_periodicTimer);
+    esp_timer_start_periodic(_periodicTimer, 25); 
 }
 
-void PhaseController::enableSync(bool isServer, gpio_num_t syncPin) {
-    _isServer = isServer;
-    _syncPin = syncPin;
-    _syncEnabled = true;
-}
+void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
+    PhaseController* self = (PhaseController*)arg;
+    int64_t now = esp_timer_get_time();
 
-// Static ISR for High-Speed Capture
-void IRAM_ATTR PhaseController::_onSyncInterrupt() {
-    if (_isrInstance) {
-        bool state = gpio_get_level(_isrInstance->_syncPin);
-        unsigned long now = esp_timer_get_time();
-        if (state) {
-            // Rising Edge: Start Timer
-            _isrInstance->_isrPulseStart = now;
-        } else {
-            // Falling Edge: Capture Width & Flag Ready
-            _isrInstance->_isrPulseWidth = now - _isrInstance->_isrPulseStart;
-            _isrInstance->_isrPulseReady = true;
-        }
-    }
-}
-
-void PhaseController::setFrequency(int channel, float newHz) {
-    if (channel < 0 || channel >= _numChannels) return;
-    if (newHz < 0.1 || newHz > 5000.0) return; 
-
-    float oldPeriod = _periodsUs[channel];
-    float newPeriod = 1000000.0 / newHz;
-
-    // Elastic time scaling
-    if (oldPeriod > 0) {
-        _cyclePositions[channel] = (_cyclePositions[channel] / oldPeriod) * newPeriod;
-    } else {
-        _cyclePositions[channel] = 0;
-    }
-
-    _freqsHz[channel] = newHz;
-    _periodsUs[channel] = newPeriod;
-    updatePhaseParams(channel);
-}
-
-void PhaseController::setGlobalFrequency(float newHz) {
-    for(int i = 0; i < _numChannels; i++) {
-        setFrequency(i, newHz);
-    }
-}
-
-void PhaseController::setDutyCycle(int channel, float dutyPercent) {
-    if(channel < 0 || channel >= _numChannels) return;
-    _dutyCycles[channel] = constrain(dutyPercent, 0.0, 100.0);
-    updatePhaseParams(channel);
-}
-
-void PhaseController::setPhase(int channel, float degrees) {
-    if(channel < 0 || channel >= _numChannels) return;
-    float pct = degrees / 360.0;
-    while(pct >= 1.0) pct -= 1.0;
-    while(pct < 0.0) pct += 1.0;
+    int64_t lastSync;
+    int64_t period;
     
-    _phaseOffsetsPct[channel] = pct;
-    updatePhaseParams(channel);
+    portENTER_CRITICAL_ISR(&self->_spinlock);
+    lastSync = self->_lastSyncTimeUs;
+    period = self->_averagedPeriodUs;
+    portEXIT_CRITICAL_ISR(&self->_spinlock);
+
+    // Client fallback: If waiting for first sync, use default period
+    #if USE_SYNC && !SYNC_AS_SERVER
+        if (!self->_firstSyncReceived) {
+            // Defaults to 20000us if period is invalid
+            if (period < 100) period = 20000; 
+        }
+    #endif
+
+    // Calculate position
+    int64_t timeInCycle = (now - lastSync) % period;
+    if (timeInCycle < 0) timeInCycle += period;
+
+    // Master Sync Generation
+    #if USE_SYNC && SYNC_AS_SERVER
+        // Set sync high for first 50% of cycle
+        gpio_set_level(self->_syncPin, (timeInCycle < (period / 2)) ? 1 : 0);
+    #endif
+
+    // Channel Generation
+    // If Master + Sync: Only Channel 0. Else: All channels.
+    #if USE_SYNC && SYNC_AS_SERVER
+        const int channelLimit = 1;
+    #else
+        const int channelLimit = self->_numChannels;
+    #endif
+
+    for (int i = 0; i < channelLimit; i++) {
+        // Local copies for speed
+        unsigned long start = self->_params[i].startUs;
+        unsigned long end = self->_params[i].endUs;
+        
+        // Logic simplified: active if (now >= start) AND (now < end), handling wrapping
+        bool active = self->_params[i].wraps ? 
+                      (timeInCycle >= start || timeInCycle < end) : 
+                      (timeInCycle >= start && timeInCycle < end);
+        
+        gpio_set_level(self->_pins[i], active ? 1 : 0);
+    }
 }
 
-float PhaseController::getFrequency(int channel) const { return _freqsHz[channel]; }
-float PhaseController::getPhase(int channel) const { return _phaseOffsetsPct[channel] * 360.0; }
-float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
+void IRAM_ATTR PhaseController::_onSyncInterrupt() {
+    #if USE_SYNC && !SYNC_AS_SERVER
+        if (!_isrInstance) return;
+
+        int64_t now = esp_timer_get_time();
+        
+        portENTER_CRITICAL_ISR(&_isrInstance->_spinlock);
+        
+        // 1. Measure Period with Glitch Filter
+        if (_isrInstance->_lastIsrTimeUs > 0) {
+            int64_t delta = now - _isrInstance->_lastIsrTimeUs;
+            
+            if (delta > 2000) {
+                // Missed Pulse Compensation (if delta ~2x average)
+                int64_t currentAvg = _isrInstance->_averagedPeriodUs;
+                int64_t sample = delta;
+                
+                if (currentAvg > 0 && abs(delta - 2*currentAvg) < (currentAvg / 2)) {
+                    sample = delta / 2;
+                }
+
+                _isrInstance->_periodBuffer[_isrInstance->_filterIdx] = sample;
+                _isrInstance->_filterIdx = (_isrInstance->_filterIdx + 1) % FREQ_FILTER_SIZE;
+                
+                int64_t sum = 0;
+                for(int i=0; i<FREQ_FILTER_SIZE; i++) sum += _isrInstance->_periodBuffer[i];
+                _isrInstance->_averagedPeriodUs = sum / FREQ_FILTER_SIZE;
+            }
+        }
+        
+        _isrInstance->_lastIsrTimeUs = now;
+        
+        // 2. APPLY LATENCY COMPENSATION
+        // "Rewind" the sync time by the latency amount.
+        // This makes the system think the sync happened earlier, 
+        // forcing the phase output to happen earlier (advancing phase).
+        _isrInstance->_lastSyncTimeUs = now - SYNC_LATENCY_US;
+        
+        _isrInstance->_firstSyncReceived = true;
+        
+        portEXIT_CRITICAL_ISR(&_isrInstance->_spinlock);
+    #endif
+}
+
+void PhaseController::enableSync(gpio_num_t syncPin) {
+    #if USE_SYNC
+        _syncPin = syncPin;
+    #endif
+}
 
 void PhaseController::updatePhaseParams(int channel) {
-    float width = _periodsUs[channel] * _dutyCycles[channel] / 100.0;
-    _params[channel].start = _periodsUs[channel] * _phaseOffsetsPct[channel];
-    _params[channel].end = _params[channel].start + width;
+    #if USE_SYNC && SYNC_AS_SERVER
+        if (channel > 0) return;
+    #endif
 
-    if (_params[channel].end > _periodsUs[channel]) {
-        _params[channel].end -= _periodsUs[channel];
+    float period = (float)_averagedPeriodUs; 
+    float width = period * _dutyCycles[channel] / 100.0;
+    
+    // Master is forced to 0.0, Client uses input
+    #if USE_SYNC && SYNC_AS_SERVER
+        float effectivePhasePct = 0.0f;
+    #else
+        float effectivePhasePct = _phaseOffsetsPct[channel];
+    #endif
+
+    _params[channel].startUs = (unsigned long)(period * effectivePhasePct);
+    _params[channel].endUs = _params[channel].startUs + (unsigned long)width;
+
+    if (_params[channel].endUs > period) {
+        _params[channel].endUs -= (unsigned long)period;
         _params[channel].wraps = true;
     } else {
         _params[channel].wraps = false;
     }
 }
 
+void PhaseController::setGlobalFrequency(float newHz) {
+    #if USE_SYNC && !SYNC_AS_SERVER
+        return; // Client ignores manual freq
+    #endif
+
+    int64_t newPeriod = (int64_t)(1000000.0 / newHz);
+    
+    portENTER_CRITICAL(&_spinlock);
+    _averagedPeriodUs = newPeriod;
+    for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = newPeriod;
+    portEXIT_CRITICAL(&_spinlock);
+    
+    for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
+}
+
+void PhaseController::setFrequency(int channel, float newHz) {
+    #if USE_SYNC && !SYNC_AS_SERVER
+        return;
+    #endif
+    _freqsHz[channel] = newHz;
+}
+
+void PhaseController::setDutyCycle(int channel, float dutyPercent) {
+    _dutyCycles[channel] = constrain(dutyPercent, 0.0, 100.0);
+    updatePhaseParams(channel);
+}
+
+void PhaseController::setPhase(int channel, float degrees) {
+    #if USE_SYNC && SYNC_AS_SERVER
+        return; // Master ignores phase
+    #endif
+
+    float pct = degrees / 360.0;
+    while(pct >= 1.0) pct -= 1.0;
+    while(pct < 0.0) pct += 1.0;
+    _phaseOffsetsPct[channel] = pct;
+    updatePhaseParams(channel);
+}
+
+float PhaseController::getFrequency(int channel) const { 
+    return 1000000.0 / _averagedPeriodUs; 
+}
+float PhaseController::getPhase(int channel) const { 
+    #if USE_SYNC && SYNC_AS_SERVER
+        return 0.0;
+    #else
+        return _phaseOffsetsPct[channel] * 360.0;
+    #endif
+}
+float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
+
 void PhaseController::run() {
-    unsigned long now = esp_timer_get_time(); // switched to ESP-IDF version of micros(), it returns a 64bit value, but it auto-truncates to 32bits!
-    unsigned long dt = now - _lastLoopMicros;
-    _lastLoopMicros = now;
-
-    if (dt > _periodsUs[0] * 2 && _periodsUs[0] > 0) dt = 0; 
-
-    // --- HARDWARE SYNC LOGIC (GPIO 4) ---
-    if (_syncEnabled) {
-        if (_isServer) {
-            // === SERVER LOGIC (Generates Pulse) ===
-            // Generate pulse every 1 second
-            if (now - _lastSyncTime >= SYNC_INTERVAL_US) {
-                gpio_set_level(_syncPin, HIGH);
-                delayMicroseconds(1000); // 1ms pulse (Interrupts can catch short pulses easily)
-                gpio_set_level(_syncPin, LOW);
-                _lastSyncTime = now;
-            }
-        } 
-        else {
-            // === CLIENT LOGIC (Process ISR Data) ===
-            if (_isrPulseReady) {
-                _isrPulseReady = false; // Reset flag
-                
-                unsigned long duration = _isrPulseWidth;
-                unsigned long pulseTime = _isrPulseStart; // Captured in ISR
-
-                // Case 1: Startup Pulse (> 2 seconds)
-                if (duration > 2000000UL) {
-                    for(int i=0; i<_numChannels; i++) _cyclePositions[i] = 0;
-                    _lastSyncTime = pulseTime; 
-                    _hasSyncedOnce = true;
-                }
-                // Case 2: Periodic Pulse (1ms)
-                else if (_hasSyncedOnce) {
-                    unsigned long actualInterval = pulseTime - _lastSyncTime;
-                    long error = (long)(actualInterval - SYNC_INTERVAL_US);
-                    
-                    // Subtract drift
-                    for(int i=0; i<_numChannels; i++) {
-                        _cyclePositions[i] -= error;
-                        
-                        // Handle wrapping
-                        while(_cyclePositions[i] < 0) _cyclePositions[i] += _periodsUs[i];
-                        while(_cyclePositions[i] >= _periodsUs[i]) _cyclePositions[i] -= _periodsUs[i];
-                    }
-                    _lastSyncTime = pulseTime;
-                }
-                else {
-                    _lastSyncTime = pulseTime;
-                    _hasSyncedOnce = true;
-                }
-            }
-        }
-    }
-
-    // Signal Generation Loop
-    for(int i = 0; i < _numChannels; i++) {
-        _cyclePositions[i] += dt;
-        if (_cyclePositions[i] >= _periodsUs[i]) {
-            _cyclePositions[i] -= _periodsUs[i];
-        }
-        bool active;
-        if (_params[i].wraps) active = (_cyclePositions[i] >= _params[i].start || _cyclePositions[i] < _params[i].end);
-        else active = (_cyclePositions[i] >= _params[i].start && _cyclePositions[i] < _params[i].end);
-        gpio_set_level(_pins[i], active); 
+    static unsigned long lastUpdate = 0;
+    if (esp_timer_get_time() - lastUpdate > 100000) { 
+        lastUpdate = esp_timer_get_time();
+        for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
     }
 }

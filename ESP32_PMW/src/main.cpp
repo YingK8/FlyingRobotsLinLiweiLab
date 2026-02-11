@@ -1,43 +1,50 @@
-#include "Arduino.h"
-#include "PhaseSequencer.h"
+#include <Arduino.h>
+#include "PhaseController.h"
 
-const bool IS_SERVER = true; 
-const gpio_num_t PINS[] = {GPIO_NUM_15, GPIO_NUM_33, GPIO_NUM_12, GPIO_NUM_27}; 
-const float PHASES[] = {0.0, 90.0, 180.0, 270.0};
-const int NUM_CHANNELS = 4;
+// === CONFIGURATION ===
+// NOTE: Channel number must be < 8 for efficient handling, though strict limit depends on pin count
+// These settings only apply if your device is a client. a server will ignore these!
+const int NUM_CHANNELS = 2;
+const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_18, GPIO_NUM_32}; 
+const float INITIAL_PHASES[NUM_CHANNELS] = {90.0, 180.0};
+// === CONFIGURATION ===
 
+// Pin used for synchronization
 const gpio_num_t SYNC_PIN = GPIO_NUM_4;
 
-PhaseSequencer* sequencer;
+PhaseController controller(PWM_PINS, INITIAL_PHASES, NUM_CHANNELS);
 
 void setup() {
-  Serial.begin(115200);
-  Serial.print("--- ESP32 Phase Sequencer: ");
-  Serial.println(IS_SERVER ? "SERVER" : "CLIENT");
+    Serial.begin(115200);
+    Serial.println("Starting ESP-IDF Timer PhaseController...");
 
-  sequencer = new PhaseSequencer(PINS, PHASES, NUM_CHANNELS);
-  
-  // Update: Use GPIO 4 Sync
-  sequencer->enableSync(IS_SERVER, SYNC_PIN);
-  
-  sequencer->begin(10.0); // initialFreqHz = 10Hz
+    // 1. Configure Sync
+    controller.enableSync(SYNC_PIN);
 
-  if (IS_SERVER) {
-      Serial.println("Starting Realtime Control...");
-  }
+    // 2. Begin Generation
+    // The high-resolution timer starts automatically inside begin()
+    controller.begin(50.0);
 }
 
 void loop() {
-  sequencer->run();
-  
-  // Example of using buffered setters for dynamic control:
-  // if (analogRead(A0) > 2000) {
-  //    sequencer->setFrequencyNext(0, 60.0); // Applies in next run()
-  // }
+    // The waveform generation is now handled by a 25us periodic hardware timer interrupt.
+    // It runs completely independently of this loop.
+    
+    // We only need to call run() to handle housekeeping (re-calculating params based on average freq)
+    controller.run();
 
-  for (int channel = 0; channel < NUM_CHANNELS; channel++) {
-    sequencer->setFrequencyNext(channel, 10.0);
-    sequencer->rampFrequency(channel, 100.0,
-                             10000); // Ramp channel to 100Hz over 10 seconds
-  }
+    // // Example: Print status safely
+    // static unsigned long lastPrint = 0;
+    // if (millis() - lastPrint > 1000) {
+    //     lastPrint = millis();
+    //     if (!isMaster) {
+    //          // Print the measured frequency derived from the sync pin
+    //          Serial.printf("Synced Freq: %.2f Hz\n", controller.getFrequency(0));
+    //     } else {
+    //          Serial.println("Master Mode Running");
+    //     }
+    // }
+    
+    // You can now use delay() or other blocking code without affecting the waveform
+    // delay(50); 
 }

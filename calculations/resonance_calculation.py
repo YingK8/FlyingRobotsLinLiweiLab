@@ -7,13 +7,13 @@ def solve_circuit():
     # Frequencies where you want the current to SPIKE (Impedance = 0)
     # STRATEGY: To widen the 50Hz band, we use "Stagger Tuning".
     # We target 45Hz and 55Hz instead of just 50Hz. This creates a wider "valley".
-    target_freqs_hz = [40, 60, 100, 250] 
+    target_freqs_hz = [10, 50, 100, 250] 
     
     # Component Values (Fixed)
-    L1 = 4.7e-3   # 6.7 mH (Load)
-    L2 = 4.7e-3   # Tank 1
-    L3 = 4.7e-3   # Tank 2
-    L4 = 4.7e-3   # Tank 3 (Added for stagger tuning)
+    L1 = 6.64e-3   # 6.7 mH (Load)
+    L2 = 11.21e-3   # Tank 1
+    L3 = 16.35e-3   # Tank 2
+    L4 = 10.5e-3   # Tank 3 (Added for stagger tuning)
 
     # Convert targets to angular frequency (rad/s)
     w_targets = np.array([2 * np.pi * f for f in target_freqs_hz])

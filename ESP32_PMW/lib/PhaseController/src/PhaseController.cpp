@@ -212,10 +212,33 @@ void PhaseController::setGlobalFrequency(float newHz) {
     #endif
 
     int64_t newPeriod = (int64_t)(1000000.0 / newHz);
+    int64_t now = esp_timer_get_time();
     
     portENTER_CRITICAL(&_spinlock);
+
+    // === PHASE CONTINUITY CORRECTION ===
+    // If we simply change the period, (now - lastSync) % newPeriod will jump.
+    // We must adjust _lastSyncTimeUs so the relative phase is preserved.
+    if (_averagedPeriodUs > 0) {
+        // 1. Where are we in the OLD cycle?
+        int64_t oldPos = (now - _lastSyncTimeUs) % _averagedPeriodUs;
+        if (oldPos < 0) oldPos += _averagedPeriodUs;
+
+        // 2. What is that as a fraction? (0.0 to 1.0)
+        // Using double for precision calculation, but keeping it fast
+        double phaseRatio = (double)oldPos / (double)_averagedPeriodUs;
+
+        // 3. What is the equivalent position in the NEW cycle?
+        int64_t newPos = (int64_t)(phaseRatio * newPeriod);
+
+        // 4. Adjust Start Time
+        // Effectively: NewStart = Now - NewPos
+        _lastSyncTimeUs = now - newPos;
+    }
+
     _averagedPeriodUs = newPeriod;
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = newPeriod;
+    
     portEXIT_CRITICAL(&_spinlock);
     
     for(int i=0; i<_numChannels; i++) updatePhaseParams(i);

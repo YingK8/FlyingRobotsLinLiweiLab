@@ -2,64 +2,68 @@
 #include "PhaseController.h"
 
 // === CONFIGURATION ===
-// NOTE: Channel number must be < 8 for efficient handling, though strict limit depends on pin count
 const int NUM_CHANNELS = 4;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_12, GPIO_NUM_27, GPIO_NUM_33, GPIO_NUM_15}; 
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 90.0, 180.0, 270.0};
-// === CONFIGURATION ===
-
-// Pin used for synchronization
 const gpio_num_t SYNC_PIN = GPIO_NUM_4;
+
+// Ramp Constants
+const float START_FREQ = 0.0f;
+const float END_FREQ = 200.0f;
+const float RAMP_DURATION_MS = 120000.0f; // 30 seconds
+const float SLOPE = (END_FREQ - START_FREQ) / (RAMP_DURATION_MS / 1000.0f); // Hz per second
+// === CONFIGURATION ===
 
 PhaseController controller(PWM_PINS, INITIAL_PHASES, NUM_CHANNELS);
 
-// State tracking variables
 unsigned long startTime;
+unsigned long lastPrintTime = 0;
 bool rampFinished = false;
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Starting ESP-IDF Timer PhaseController...");
+    while(!Serial); // Wait for Serial on some boards
+    Serial.println("ESP32 PhaseController: Ramping 1Hz to 300Hz...");
 
     // 1. Configure Sync
     controller.enableSync(SYNC_PIN);
 
-    // 2. Begin Generation
-    // Start at initial frequency of 10Hz
-    controller.begin(10.0);
+    // 2. Begin Generation at 1Hz
+    controller.begin(START_FREQ);
     
-    // Record start time
     startTime = millis();
 }
 
 void loop() {
-    // Housekeeping for phase controller
+    // Required housekeeping for the timer-based controller
     controller.run();
 
-    // Logic Timing
     unsigned long elapsed = millis() - startTime;
 
-    // --- FREQUENCY RAMP LOGIC ---
-    
-    // Phase 1: Hold 10Hz for first 8 seconds (0s - 8s)
-    if (elapsed < 8000) {
-        // Do nothing, already set to 10Hz in setup()
-    } 
-    // Phase 2: Ramp from 10Hz to 250Hz over 10 seconds (8s - 18s)
-    else if (elapsed < 18000) {
-        // Calculate progress (0.0 to 10.0 seconds)
-        float rampTimeSeconds = (elapsed - 8000) / 1000.0f;
+    if (elapsed < RAMP_DURATION_MS) {
+        // Linear Ramp Calculation
+        float elapsedSeconds = elapsed / 1000.0f;
+        float currentFreq = START_FREQ + (SLOPE * elapsedSeconds);
         
-        // Linear Ramp Equation: Freq = Start + (Slope * Time)
-        // Slope = (250Hz - 10Hz) / 10s = 24Hz/s
-        float currentFreq = 10.0f + (24.0f * rampTimeSeconds);
+        // Safety bound
+        if (currentFreq > END_FREQ) currentFreq = END_FREQ;
         
         controller.setGlobalFrequency(currentFreq);
+
+        // Print frequency every 1000ms for debugging
+        if (millis() - lastPrintTime > 1000) {
+            Serial.print("Ramping... Current Freq: ");
+            Serial.print(currentFreq);
+            Serial.println(" Hz");
+            lastPrintTime = millis();
+        }
     } 
-    // Phase 3: Hold 250Hz (18s+)
     else if (!rampFinished) {
-        controller.setGlobalFrequency(250.0);
-        Serial.println("Ramp Complete. Holding 250Hz.");
+        // Finalize at 300Hz
+        controller.setGlobalFrequency(END_FREQ);
+        Serial.print("Ramp Complete. Target reached: ");
+        Serial.print(END_FREQ);
+        Serial.println(" Hz");
         rampFinished = true;
     }
 }

@@ -33,8 +33,10 @@ PhaseController::~PhaseController() {
         esp_timer_stop(_periodicTimer);
         esp_timer_delete(_periodicTimer);
     }
-    delete[] _pins; delete[] _phaseOffsetsPct; 
-    delete[] _dutyCycles; delete[] _params; 
+    delete[] _pins; 
+    delete[] _phaseOffsetsPct; 
+    delete[] _dutyCycles; 
+    delete[] _params; 
     delete[] _freqsHz;
 }
 
@@ -109,7 +111,6 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
     #endif
 
     // Channel Generation
-    // If Master + Sync: Only Channel 0. Else: All channels.
     #if USE_SYNC && SYNC_AS_SERVER
         const int channelLimit = 1;
     #else
@@ -121,7 +122,6 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         unsigned long start = self->_params[i].startUs;
         unsigned long end = self->_params[i].endUs;
         
-        // Logic simplified: active if (now >= start) AND (now < end), handling wrapping
         bool active = self->_params[i].wraps ? 
                       (timeInCycle >= start || timeInCycle < end) : 
                       (timeInCycle >= start && timeInCycle < end);
@@ -163,9 +163,6 @@ void IRAM_ATTR PhaseController::_onSyncInterrupt() {
         _isrInstance->_lastIsrTimeUs = now;
         
         // 2. APPLY LATENCY COMPENSATION
-        // "Rewind" the sync time by the latency amount.
-        // This makes the system think the sync happened earlier, 
-        // forcing the phase output to happen earlier (advancing phase).
         _isrInstance->_lastSyncTimeUs = now - SYNC_LATENCY_US;
         
         _isrInstance->_firstSyncReceived = true;
@@ -185,10 +182,12 @@ void PhaseController::updatePhaseParams(int channel) {
         if (channel > 0) return;
     #endif
 
+    // NOTE: This function should ideally be called within a critical section
+    // or when the lock is held, as it reads and writes shared state.
+    
     float period = (float)_averagedPeriodUs; 
     float width = period * _dutyCycles[channel] / 100.0;
     
-    // Master is forced to 0.0, Client uses input
     #if USE_SYNC && SYNC_AS_SERVER
         float effectivePhasePct = 0.0f;
     #else
@@ -217,31 +216,23 @@ void PhaseController::setGlobalFrequency(float newHz) {
     portENTER_CRITICAL(&_spinlock);
 
     // === PHASE CONTINUITY CORRECTION ===
-    // If we simply change the period, (now - lastSync) % newPeriod will jump.
-    // We must adjust _lastSyncTimeUs so the relative phase is preserved.
     if (_averagedPeriodUs > 0) {
-        // 1. Where are we in the OLD cycle?
         int64_t oldPos = (now - _lastSyncTimeUs) % _averagedPeriodUs;
         if (oldPos < 0) oldPos += _averagedPeriodUs;
 
-        // 2. What is that as a fraction? (0.0 to 1.0)
-        // Using double for precision calculation, but keeping it fast
         double phaseRatio = (double)oldPos / (double)_averagedPeriodUs;
-
-        // 3. What is the equivalent position in the NEW cycle?
         int64_t newPos = (int64_t)(phaseRatio * newPeriod);
 
-        // 4. Adjust Start Time
-        // Effectively: NewStart = Now - NewPos
         _lastSyncTimeUs = now - newPos;
     }
 
     _averagedPeriodUs = newPeriod;
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = newPeriod;
     
-    portEXIT_CRITICAL(&_spinlock);
-    
+    // Update params immediately inside lock to prevent tearing
     for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
+    
+    portEXIT_CRITICAL(&_spinlock);
 }
 
 void PhaseController::setFrequency(int channel, float newHz) {
@@ -252,8 +243,13 @@ void PhaseController::setFrequency(int channel, float newHz) {
 }
 
 void PhaseController::setDutyCycle(int channel, float dutyPercent) {
+    if (channel < 0 || channel >= _numChannels) return;
+
+    // Fix: Critical section added to prevent race conditions during updates
+    portENTER_CRITICAL(&_spinlock);
     _dutyCycles[channel] = constrain(dutyPercent, 0.0, 100.0);
     updatePhaseParams(channel);
+    portEXIT_CRITICAL(&_spinlock);
 }
 
 void PhaseController::setPhase(int channel, float degrees) {
@@ -264,8 +260,11 @@ void PhaseController::setPhase(int channel, float degrees) {
     float pct = degrees / 360.0;
     while(pct >= 1.0) pct -= 1.0;
     while(pct < 0.0) pct += 1.0;
+    
+    portENTER_CRITICAL(&_spinlock);
     _phaseOffsetsPct[channel] = pct;
     updatePhaseParams(channel);
+    portEXIT_CRITICAL(&_spinlock);
 }
 
 float PhaseController::getFrequency(int channel) const { 
@@ -281,9 +280,18 @@ float PhaseController::getPhase(int channel) const {
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
 void PhaseController::run() {
+    // Ramps removed. This method now only handles sync drift compensation.
+    // If the external sync frequency changes, we need to periodically recalculate 
+    // the pulse widths (in microseconds) to maintain the correct duty cycle %.
+    
     static unsigned long lastUpdate = 0;
     if (esp_timer_get_time() - lastUpdate > 100000) { 
         lastUpdate = esp_timer_get_time();
-        for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
+        
+        portENTER_CRITICAL(&_spinlock);
+        for(int i=0; i<_numChannels; i++) {
+            updatePhaseParams(i);
+        }
+        portEXIT_CRITICAL(&_spinlock);
     }
 }

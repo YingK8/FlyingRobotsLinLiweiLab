@@ -1,0 +1,6 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "2026-02-21_06-11-36")(type "KiCad")(uri "${KIPRJMOD}/libraries/ul_DRV8874PWPR/KiCADv6/2026-02-21_06-11-36.kicad_sym")(options "")(descr ""))
+  (lib (name "XT30UPB-M")(type "KiCad")(uri "${KIPRJMOD}/libraries/XT30UPB-M/XT30UPB-M.kicad_sym")(options "")(descr ""))
+  (lib (name "XT60PW-M")(type "KiCad")(uri "${KIPRJMOD}/libraries/XT60PW-M/XT60PW-M.kicad_sym")(options "")(descr ""))
+)

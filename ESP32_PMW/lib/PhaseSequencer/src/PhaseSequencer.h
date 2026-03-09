@@ -35,7 +35,7 @@ public:
 
     // Queue Builders
     void reserve(size_t size); 
-    void addDutyCycleTask(float d0, float d1, float d2, float d3);
+    void addDutyCycleTask(const float* dutyCycles, int numChannels);
     void addWaitTask(uint32_t durationMs);
     void addLinearRampTask(float startHz, float endHz, uint32_t durationMs);
     void addEaseRampTask(float startHz, float endHz, uint32_t durationMs);

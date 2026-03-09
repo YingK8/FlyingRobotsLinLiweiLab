@@ -2,7 +2,7 @@
 
 PhaseController* PhaseController::_isrInstance = nullptr;
 
-PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels) {
+PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {
     _numChannels = numChannels;
     _periodicTimer = nullptr;
 
@@ -23,7 +23,7 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     for (int i = 0; i < _numChannels; i++) {
         _pins[i] = pins[i];
         _phaseOffsetsPct[i] = constrain(phaseOffsetsDegrees[i], 0.0, 360.0) / 360.0;
-        _dutyCycles[i] = 50.0;
+        _dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
         _freqsHz[i] = 50.0;
     }
 }

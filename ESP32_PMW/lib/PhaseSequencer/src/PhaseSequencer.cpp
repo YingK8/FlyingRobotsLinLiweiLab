@@ -10,8 +10,11 @@ void PhaseSequencer::reserve(size_t size) {
     _queue.reserve(size);
 }
 
-void PhaseSequencer::addDutyCycleTask(float d0, float d1, float d2, float d3) {
-    SequenceTask task = {TASK_SET_DUTY_CYCLES, 0, 0.0, 0.0, {d0, d1, d2, d3}};
+void PhaseSequencer::addDutyCycleTask(const float* dutyCycles, int numChannels) {
+    SequenceTask task = {TASK_SET_DUTY_CYCLES, 0, 0.0, 0.0, {0,0,0,0}};
+    for (int i = 0; i < numChannels; i++) {
+        task.dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
+    }
     _queue.push_back(task);
 }
 

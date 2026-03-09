@@ -26,7 +26,7 @@ struct PhaseParams {
 
 class PhaseController {
 public:
-    PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels);
+    PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels);
     ~PhaseController();
 
     void begin(float initialFreqHz);

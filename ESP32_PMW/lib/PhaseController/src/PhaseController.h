@@ -6,17 +6,17 @@
 
 // Configuration Defines
 // (Ensure these match your project settings or are defined here)
-#ifndef USE_SYNC
-#define USE_SYNC 1 
-#endif
+// #ifndef USE_SYNC
+// #define USE_SYNC 1 
+// #endif
 
 // Set to 1 for Master (Output Sync), 0 for Client (Input Sync)
-#ifndef SYNC_AS_SERVER
-#define SYNC_AS_SERVER 0
-#endif
+// #ifndef SYNC_AS_SERVER
+// #define SYNC_AS_SERVER 0
+// #endif
 
 #define FREQ_FILTER_SIZE 5
-#define SYNC_LATENCY_US 50 // Tuning value for latency compensation
+// #define SYNC_LATENCY_US 50 // Tuning value for latency compensation
 
 struct PhaseParams {
     unsigned long startUs;

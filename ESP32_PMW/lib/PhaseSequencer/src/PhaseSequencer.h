@@ -1,62 +1,61 @@
-#ifndef PHASE_SEQUENCER_H
-#define PHASE_SEQUENCER_H
-
-#include "Arduino.h"
+#pragma once
+#include <Arduino.h>
+#include <vector>
 #include "PhaseController.h"
+#include "esp_timer.h" 
 
-class PhaseSequencer : public PhaseController {
-  private:
-    struct RampState {
-        bool active;
-        float startVal;
-        float targetVal;
-        unsigned long startTime;
-        unsigned long delayMs;
-        unsigned long durationMs;
-    };
-
-    // Arrays to store ramp state for each channel
-    RampState* _freqRamps;
-    RampState* _phaseRamps;
-    RampState* _dutyRamps;
-
-    // --- NEW: Buffered State for Loop Updates ---
-    float* _nextFreqs;
-    float* _nextPhases;
-    float* _nextDuties;
-    bool* _dirtyFreqs;
-    bool* _dirtyPhases;
-    bool* _dirtyDuties;
-
-    unsigned long _lastRampUpdate;
-    const unsigned long RAMP_UPDATE_INTERVAL_MS = 10; // Update control loop at 100Hz
-
-    float interpolate(float start, float target, float progress) {
-        return start + (target - start) * progress;
-    }
-
-    void processRamp(RampState& ramp, int channel, int type); // type: 0=Freq, 1=Phase, 2=Duty
-
-  public:
-    PhaseSequencer(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels);
-    ~PhaseSequencer();
-
-    // --- High Level API ---
-
-    // Smoothly change values over time
-    void rampFrequency(int channel, float targetHz, unsigned long durationMs, unsigned long delayMs = 0);
-    void rampPhase(int channel, float targetDeg, unsigned long durationMs, unsigned long delayMs = 0);
-    void rampDuty(int channel, float targetPct, unsigned long durationMs, unsigned long delayMs = 0);
-
-    // --- NEW: Buffered Setters ---
-    // Use these in the main loop for dynamic control.
-    // Changes are buffered and applied efficiently in the next run() call.
-    void setFrequencyNext(int channel, float hz);
-    void setPhaseNext(int channel, float deg);
-    void setDutyNext(int channel, float pct);
-
-    // Override run to handle buffers + ramps + signal generation
-    void run(); 
+// Define the types of commands our queue can execute
+enum TaskType {
+    TASK_SET_DUTY_CYCLES, 
+    TASK_WAIT,            
+    TASK_RAMP_LINEAR,     
+    TASK_RAMP_EASE        
 };
 
-#endif
+struct SequenceTask {
+    TaskType type;
+    int64_t durationUs; 
+    float startFreq;
+    float endFreq;
+    float dutyCycles[4]; 
+};
+
+// --- NEW: Pre-computed Trajectory Point ---
+// Stores the explicit state of all channels at a given microsecond in time
+struct TrajectoryPoint {
+    int64_t timeUs;
+    float freq[4];
+    float duty[4];
+    float phase[4];
+};
+
+class PhaseSequencer {
+public:
+    PhaseSequencer(PhaseController* phaseCtrl);
+
+    // Queue Builders
+    void reserve(size_t size); 
+    void addDutyCycleTask(float d0, float d1, float d2, float d3);
+    void addWaitTask(uint32_t durationMs);
+    void addLinearRampTask(float startHz, float endHz, uint32_t durationMs);
+    void addEaseRampTask(float startHz, float endHz, uint32_t durationMs);
+    
+    // --- NEW: Compiler ---
+    // Computes all float math upfront into a trajectory buffer
+    void compile(uint32_t resolutionMs, float initialFreq, const float* initialDuty, const float* initialPhase);
+
+    // Control
+    void start();
+    void run();
+    bool isDone() const;
+
+private:
+    PhaseController* _phaseCtrl;
+    std::vector<SequenceTask> _queue;
+    std::vector<TrajectoryPoint> _trajectory; // The pre-computed LUT
+    
+    size_t _currentFrameIdx;
+    int64_t _taskStartTimeUs; 
+
+    float easeInOut(float t);
+};

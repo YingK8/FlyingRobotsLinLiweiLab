@@ -1,134 +1,137 @@
-#include "Arduino.h"
 #include "PhaseSequencer.h"
 
-PhaseSequencer::PhaseSequencer(const gpio_num_t* pins, const float* phaseOffsetsDegrees, int numChannels) 
-    : PhaseController(pins, phaseOffsetsDegrees, numChannels) {
-    
-    _freqRamps = new RampState[numChannels];
-    _phaseRamps = new RampState[numChannels];
-    _dutyRamps = new RampState[numChannels];
-    
-    // Allocate Buffers
-    _nextFreqs = new float[numChannels];
-    _nextPhases = new float[numChannels];
-    _nextDuties = new float[numChannels];
-    
-    _dirtyFreqs = new bool[numChannels];
-    _dirtyPhases = new bool[numChannels];
-    _dirtyDuties = new bool[numChannels];
-    
-    _lastRampUpdate = 0;
+PhaseSequencer::PhaseSequencer(PhaseController* phaseCtrl) {
+    _phaseCtrl = phaseCtrl;
+    _currentFrameIdx = 0;
+    _taskStartTimeUs = 0;
+}
 
-    // Initialize States
-    for(int i=0; i<numChannels; i++) {
-        _freqRamps[i].active = false;
-        _phaseRamps[i].active = false;
-        _dutyRamps[i].active = false;
-        
-        _dirtyFreqs[i] = false;
-        _dirtyPhases[i] = false;
-        _dirtyDuties[i] = false;
+void PhaseSequencer::reserve(size_t size) {
+    _queue.reserve(size);
+}
+
+void PhaseSequencer::addDutyCycleTask(float d0, float d1, float d2, float d3) {
+    SequenceTask task = {TASK_SET_DUTY_CYCLES, 0, 0.0, 0.0, {d0, d1, d2, d3}};
+    _queue.push_back(task);
+}
+
+void PhaseSequencer::addWaitTask(uint32_t durationMs) {
+    SequenceTask task = {TASK_WAIT, (int64_t)durationMs * 1000LL, 0.0, 0.0, {0,0,0,0}};
+    _queue.push_back(task);
+}
+
+void PhaseSequencer::addLinearRampTask(float startHz, float endHz, uint32_t durationMs) {
+    if (durationMs == 0) durationMs = 1;
+    SequenceTask task = {TASK_RAMP_LINEAR, (int64_t)durationMs * 1000LL, startHz, endHz, {0,0,0,0}};
+    _queue.push_back(task);
+}
+
+void PhaseSequencer::addEaseRampTask(float startHz, float endHz, uint32_t durationMs) {
+    if (durationMs == 0) durationMs = 1; 
+    SequenceTask task = {TASK_RAMP_EASE, (int64_t)durationMs * 1000LL, startHz, endHz, {0,0,0,0}};
+    _queue.push_back(task);
+}
+
+float PhaseSequencer::easeInOut(float t) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// =========================================================
+// TRAJECTORY COMPILER: Generates the buffer upfront
+// =========================================================
+void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const float* initialDuty, const float* initialPhase) {
+    _trajectory.clear();
+    
+    int64_t currentTimeUs = 0;
+    float curFreq[4] = {initialFreq, initialFreq, initialFreq, initialFreq};
+    float curDuty[4] = {initialDuty[0], initialDuty[1], initialDuty[2], initialDuty[3]};
+    float curPhase[4] = {initialPhase[0], initialPhase[1], initialPhase[2], initialPhase[3]};
+    
+    for (const auto& task : _queue) {
+        if (task.type == TASK_SET_DUTY_CYCLES) {
+            for(int i=0; i<4; i++) curDuty[i] = task.dutyCycles[i];
+            
+            TrajectoryPoint pt;
+            pt.timeUs = currentTimeUs;
+            for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+            _trajectory.push_back(pt);
+            
+        } else if (task.type == TASK_WAIT) {
+            currentTimeUs += task.durationUs;
+            
+            TrajectoryPoint pt;
+            pt.timeUs = currentTimeUs;
+            for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+            _trajectory.push_back(pt);
+            
+        } else if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE) {
+            int64_t stepUs = (int64_t)resolutionMs * 1000LL;
+            int64_t elapsed = 0;
+            
+            // Generate intermediate points based on requested resolution
+            while (elapsed <= task.durationUs) {
+                float t = (float)elapsed / task.durationUs;
+                if (task.type == TASK_RAMP_EASE) t = easeInOut(t);
+                
+                for(int i=0; i<4; i++) {
+                    curFreq[i] = task.startFreq + t * (task.endFreq - task.startFreq);
+                }
+                
+                TrajectoryPoint pt;
+                pt.timeUs = currentTimeUs + elapsed;
+                for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+                _trajectory.push_back(pt);
+                
+                elapsed += stepUs;
+            }
+            
+            // Ensure exact final value is snapped to at the end
+            for(int i=0; i<4; i++) curFreq[i] = task.endFreq;
+            currentTimeUs += task.durationUs;
+            
+            TrajectoryPoint pt;
+            pt.timeUs = currentTimeUs;
+            for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+            _trajectory.push_back(pt);
+        }
     }
 }
 
-PhaseSequencer::~PhaseSequencer() {
-    delete[] _freqRamps; delete[] _phaseRamps; delete[] _dutyRamps;
-    delete[] _nextFreqs; delete[] _nextPhases; delete[] _nextDuties;
-    delete[] _dirtyFreqs; delete[] _dirtyPhases; delete[] _dirtyDuties;
+void PhaseSequencer::start() {
+    if (_trajectory.empty()) return; // Must compile first!
+    _currentFrameIdx = 0;
+    _taskStartTimeUs = esp_timer_get_time();
 }
 
-void PhaseSequencer::rampFrequency(int channel, float targetHz, unsigned long durationMs, unsigned long delayMs) {
-    if(channel < 0 || channel >= _numChannels) return;
-    _freqRamps[channel] = {true, getFrequency(channel), targetHz, millis(), delayMs, durationMs};
+bool PhaseSequencer::isDone() const {
+    return _currentFrameIdx >= _trajectory.size();
 }
 
-void PhaseSequencer::rampPhase(int channel, float targetDeg, unsigned long durationMs, unsigned long delayMs) {
-    if(channel < 0 || channel >= _numChannels) return;
-    _phaseRamps[channel] = {true, getPhase(channel), targetDeg, millis(), delayMs, durationMs};
-}
-
-void PhaseSequencer::rampDuty(int channel, float targetPct, unsigned long durationMs, unsigned long delayMs) {
-    if(channel < 0 || channel >= _numChannels) return;
-    _dutyRamps[channel] = {true, getDutyCycle(channel), targetPct, millis(), delayMs, durationMs};
-}
-
-// --- Buffered Setters ---
-void PhaseSequencer::setFrequencyNext(int channel, float hz) {
-    if (channel < 0 || channel >= _numChannels || _freqRamps[channel].active) return;
-    _nextFreqs[channel] = hz;
-    _dirtyFreqs[channel] = true;
-    _freqRamps[channel].active = false; // Override active ramp
-}
-
-void PhaseSequencer::setPhaseNext(int channel, float deg) {
-    if(channel < 0 || channel >= _numChannels || _phaseRamps[channel].active) return;
-    _nextPhases[channel] = deg;
-    _dirtyPhases[channel] = true;
-    _phaseRamps[channel].active = false;
-}
-
-void PhaseSequencer::setDutyNext(int channel, float pct) {
-    if(channel < 0 || channel >= _numChannels || _dutyRamps[channel].active) return;
-    _nextDuties[channel] = pct;
-    _dirtyDuties[channel] = true;
-    _dutyRamps[channel].active = false;
-}
-
-void PhaseSequencer::processRamp(RampState& ramp, int channel, int type) {
-    if (!ramp.active) return;
-
-    unsigned long now = millis();
-    unsigned long elapsed = now - ramp.startTime;
-
-    if (elapsed < ramp.delayMs) return; 
-
-    unsigned long rampElapsed = elapsed - ramp.delayMs;
-    float progress = 0.0;
-
-    if (ramp.durationMs == 0) {
-        progress = 1.0; 
-    } else {
-        progress = (float)rampElapsed / (float)ramp.durationMs;
-        if (progress > 1.0) { progress = 1.0; }
-    }
-
-    float currentVal = interpolate(ramp.startVal, ramp.targetVal, progress);
-
-    if (type == 0) PhaseController::setFrequency(channel, currentVal);
-    else if (type == 1) PhaseController::setPhase(channel, currentVal);
-    else if (type == 2) PhaseController::setDutyCycle(channel, currentVal);
-
-    if (progress >= 1.0) { ramp.active = false; }
-}
-
+// =========================================================
+// HIGH-SPEED HOT LOOP: No math, just pointer lookups
+// =========================================================
 void PhaseSequencer::run() {
-    // 0. Apply Buffered Changes (High Priority / Loop Updates)
-    for(int i=0; i<_numChannels; i++) {
-        if (_dirtyFreqs[i]) {
-            PhaseController::setFrequency(i, _nextFreqs[i]);
-            _dirtyFreqs[i] = false;
-        }
-        if (_dirtyPhases[i]) {
-            PhaseController::setPhase(i, _nextPhases[i]);
-            _dirtyPhases[i] = false;
-        }
-        if (_dirtyDuties[i]) {
-            PhaseController::setDutyCycle(i, _nextDuties[i]);
-            _dirtyDuties[i] = false;
-        }
-    }
+    if (_trajectory.empty()) return;
 
-    // 1. Base Run (Generate Signal)
-    PhaseController::run();
+    int64_t nowUs = esp_timer_get_time() - _taskStartTimeUs;
 
-    // 2. Process Ramps (Throttled background task)
-    if (millis() - _lastRampUpdate >= RAMP_UPDATE_INTERVAL_MS) {
-        _lastRampUpdate = millis();
+    // Fast-forward through the trajectory buffer based on elapsed time
+    while (_currentFrameIdx < _trajectory.size() && nowUs >= _trajectory[_currentFrameIdx].timeUs) {
         
-        for(int i=0; i<_numChannels; i++) {
-            processRamp(_freqRamps[i], i, 0); 
-            processRamp(_phaseRamps[i], i, 1); 
-            processRamp(_dutyRamps[i], i, 2); 
+        TrajectoryPoint& pt = _trajectory[_currentFrameIdx];
+        
+        // Push pre-calculated states into the phase controller
+        _phaseCtrl->setGlobalFrequency(pt.freq[0]); // Uses index 0 as global freq fallback
+        
+        for(int i = 0; i < 4; i++) {
+            // Note: If PhaseController adds per-channel frequency later, uncomment this:
+            // _phaseCtrl->setFrequency(i, pt.freq[i]); 
+            _phaseCtrl->setDutyCycle(i, pt.duty[i]);
+            _phaseCtrl->setPhase(i, pt.phase[i]);
         }
+        
+        _currentFrameIdx++;
     }
 }

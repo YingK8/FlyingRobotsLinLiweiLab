@@ -7,9 +7,11 @@
 // Define the types of commands our queue can execute
 enum TaskType {
     TASK_SET_DUTY_CYCLES, 
+    TASK_SET_PHASES,      // NEW: Instant phase snap
     TASK_WAIT,            
     TASK_RAMP_LINEAR,     
-    TASK_RAMP_EASE        
+    TASK_RAMP_EASE,
+    TASK_RAMP_PHASE       // NEW: Phase interpolation
 };
 
 struct SequenceTask {
@@ -18,9 +20,10 @@ struct SequenceTask {
     float startFreq;
     float endFreq;
     float dutyCycles[4]; 
+    float startPhases[4]; // NEW
+    float endPhases[4];   // NEW
 };
 
-// --- NEW: Pre-computed Trajectory Point ---
 // Stores the explicit state of all channels at a given microsecond in time
 struct TrajectoryPoint {
     int64_t timeUs;
@@ -36,12 +39,13 @@ public:
     // Queue Builders
     void reserve(size_t size); 
     void addDutyCycleTask(const float* dutyCycles, int numChannels);
+    void addPhaseTask(const float* phases, int numChannels); // NEW
     void addWaitTask(uint32_t durationMs);
     void addLinearRampTask(float startHz, float endHz, uint32_t durationMs);
     void addEaseRampTask(float startHz, float endHz, uint32_t durationMs);
-    
-    // --- NEW: Compiler ---
-    // Computes all float math upfront into a trajectory buffer
+    void addPhaseRampTask(const float* startPhases, const float* endPhases, uint32_t durationMs);
+
+    // Compiler
     void compile(uint32_t resolutionMs, float initialFreq, const float* initialDuty, const float* initialPhase);
 
     // Control
@@ -52,7 +56,7 @@ public:
 private:
     PhaseController* _phaseCtrl;
     std::vector<SequenceTask> _queue;
-    std::vector<TrajectoryPoint> _trajectory; // The pre-computed LUT
+    std::vector<TrajectoryPoint> _trajectory; 
     
     size_t _currentFrameIdx;
     int64_t _taskStartTimeUs; 

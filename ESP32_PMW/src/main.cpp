@@ -12,46 +12,66 @@ const gpio_num_t SYNC_PIN = GPIO_NUM_4;
 PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
 PhaseSequencer seq(&controller);
 
+void addBlockSpin(PhaseSequencer& seq, int revolutions, float startFreqHz, float endFreqHz);
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    Serial.println("ESP32 Sequence Controller Example");
 
-    // 1. Init phase controller
-    controller.enableSync(SYNC_PIN);
+    controller.enableSync(SYNC_PIN);     
+    controller.begin(1.0f);      
+
+    // Water Takeoff Configuration
+    seq.addLinearRampTask(1.0f, 250.0f, 60000); // 1Hz to 250Hz over 60000ms (60s)
+    seq.compile(10, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES); 
+
+    // Dry Takeoff Configuration
+    // seq.addEaseRampTask(1.0f, 250.0, 20000); // 1Hz to 250Hz over 20000ms (20s)
+    // seq.compile(10, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES); 
     
-    // Note: Start at a nominal frequency, not 0! 
-    // We achieve 0Hz DC by setting duty cycles to 100/0, not by stopping the frequency.
-    controller.begin(5.0f); 
-
-    // === COMPILE THE TAKEOFF QUEUE ===
-    
-    // Step 1: 0Hz DC Pole Alignment
-    // Output static HIGH on Ch 0/2, LOW on Ch 1/3 (modify array pattern to fit your specific motor)
-    seq.addDutyCycleTask(100.0, 0.0, 100.0, 0.0); 
-    seq.addWaitTask(1000); // Hold DC for 1 second
-
-    // Step 2: Restore normal running duty cycles
-    seq.addDutyCycleTask(INITIAL_DUTY_CYCLES, NUM_CHANNELS); 
-
-    // Step 3: Ease-In Ease-Out Ramp Profile
-    // Ramps from 5Hz to 220Hz over 10000ms (10 seconds)
-    seq.addEaseRampTask(5.0, 220.0, 10000); 
-
-    // === COMPILE TRAJECTORY ===
-    // This turns all the tasks above into an explicit, pre-calculated 
-    // high-speed Look-Up Table (LUT) so the ESP32 hot loop does zero math.
-    // resolution = 10ms step sizes
-    Serial.println("Compiling trajectory...");
-    float initDuty[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
-    seq.compile(10, 10.0f, initDuty, INITIAL_PHASES);
-
-    // Kickoff the sequence
-    Serial.println("Starting Takeoff Sequence...");
-    seq.start();
+    seq.start();                                                
 }
 
 void loop() {
-    controller.run(); // Maintain hardware timer drift compensation
-    seq.run(); // Evaluate state machine queue (Now running purely on the pre-compiled LUT)
+    controller.run(); // hardware timer drift compensation
+    seq.run(); // state machine queue
+}
+
+void addBlockSpin(PhaseSequencer& seq, int revolutions, float startFreqHz, float endFreqHz) {
+    if (startFreqHz <= 0.0f || endFreqHz <= 0.0f || revolutions <= 0) return;
+    
+    const float vertical_on[4]   = {100.0, 0.0, 100.0, 0.0};
+    const float horizontal_on[4] = {0.0, 100.0, 0.0, 100.0};
+    const float phase_up[4]      = {0.0, 0.0, 180.0, 180.0}; 
+    const float phase_right[4]   = {180.0, 0.0, 0.0, 180.0}; 
+    const float phase_down[4]    = {180.0, 180.0, 0.0, 0.0}; 
+    const float phase_left[4]    = {0.0, 180.0, 180.0, 0.0}; 
+
+    int totalSteps = revolutions * 4;
+
+    for (int step = 0; step < totalSteps; step++) {
+        // Interpolate the frequency for the current step (linear acceleration)
+        float t = totalSteps > 1 ? (float)step / (totalSteps - 1) : 1.0f;
+        float currentFreq = startFreqHz + t * (endFreqHz - startFreqHz);
+        
+        // Calculate precise wait time for this specific 90-degree step
+        uint32_t stepTimeMs = (uint32_t)(1000.0f / (currentFreq * 4.0f));
+
+        int phaseState = step % 4;
+
+        if (phaseState == 0) {
+            seq.addDutyCycleTask(vertical_on, 4);
+            seq.addPhaseTask(phase_up, 4); 
+        } else if (phaseState == 1) {
+            seq.addDutyCycleTask(horizontal_on, 4);
+            seq.addPhaseTask(phase_right, 4);
+        } else if (phaseState == 2) {
+            seq.addDutyCycleTask(vertical_on, 4);
+            seq.addPhaseTask(phase_down, 4);
+        } else if (phaseState == 3) {
+            seq.addDutyCycleTask(horizontal_on, 4);
+            seq.addPhaseTask(phase_left, 4);
+        }
+        seq.addWaitTask(stepTimeMs);
+    }
 }

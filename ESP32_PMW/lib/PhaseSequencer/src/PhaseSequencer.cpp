@@ -10,28 +10,61 @@ void PhaseSequencer::reserve(size_t size) {
     _queue.reserve(size);
 }
 
+// Updated builders to zero-initialize the new struct fields automatically
 void PhaseSequencer::addDutyCycleTask(const float* dutyCycles, int numChannels) {
-    SequenceTask task = {TASK_SET_DUTY_CYCLES, 0, 0.0, 0.0, {0,0,0,0}};
+    SequenceTask task = {}; // Zero-initializes all fields
+    task.type = TASK_SET_DUTY_CYCLES;
     for (int i = 0; i < numChannels; i++) {
         task.dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
     }
     _queue.push_back(task);
 }
 
+void PhaseSequencer::addPhaseTask(const float* phases, int numChannels) {
+    SequenceTask task = {}; 
+    task.type = TASK_SET_PHASES;
+    for (int i = 0; i < numChannels; i++) {
+        task.endPhases[i] = phases[i];
+    }
+    _queue.push_back(task);
+}
+
 void PhaseSequencer::addWaitTask(uint32_t durationMs) {
-    SequenceTask task = {TASK_WAIT, (int64_t)durationMs * 1000LL, 0.0, 0.0, {0,0,0,0}};
+    SequenceTask task = {};
+    task.type = TASK_WAIT;
+    task.durationUs = (int64_t)durationMs * 1000LL;
     _queue.push_back(task);
 }
 
 void PhaseSequencer::addLinearRampTask(float startHz, float endHz, uint32_t durationMs) {
     if (durationMs == 0) durationMs = 1;
-    SequenceTask task = {TASK_RAMP_LINEAR, (int64_t)durationMs * 1000LL, startHz, endHz, {0,0,0,0}};
+    SequenceTask task = {};
+    task.type = TASK_RAMP_LINEAR;
+    task.durationUs = (int64_t)durationMs * 1000LL;
+    task.startFreq = startHz;
+    task.endFreq = endHz;
     _queue.push_back(task);
 }
 
 void PhaseSequencer::addEaseRampTask(float startHz, float endHz, uint32_t durationMs) {
     if (durationMs == 0) durationMs = 1; 
-    SequenceTask task = {TASK_RAMP_EASE, (int64_t)durationMs * 1000LL, startHz, endHz, {0,0,0,0}};
+    SequenceTask task = {};
+    task.type = TASK_RAMP_EASE;
+    task.durationUs = (int64_t)durationMs * 1000LL;
+    task.startFreq = startHz;
+    task.endFreq = endHz;
+    _queue.push_back(task);
+}
+
+void PhaseSequencer::addPhaseRampTask(const float* startPhases, const float* endPhases, uint32_t durationMs) {
+    if (durationMs == 0) durationMs = 1; 
+    SequenceTask task = {};
+    task.type = TASK_RAMP_PHASE;
+    task.durationUs = (int64_t)durationMs * 1000LL;
+    for (int i = 0; i < 4; i++) {
+        task.startPhases[i] = startPhases[i];
+        task.endPhases[i] = endPhases[i];
+    }
     _queue.push_back(task);
 }
 
@@ -41,9 +74,6 @@ float PhaseSequencer::easeInOut(float t) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-// =========================================================
-// TRAJECTORY COMPILER: Generates the buffer upfront
-// =========================================================
 void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const float* initialDuty, const float* initialPhase) {
     _trajectory.clear();
     
@@ -61,6 +91,14 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const flo
             for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
             _trajectory.push_back(pt);
             
+        } else if (task.type == TASK_SET_PHASES) {
+            for(int i=0; i<4; i++) curPhase[i] = task.endPhases[i];
+            
+            TrajectoryPoint pt;
+            pt.timeUs = currentTimeUs;
+            for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+            _trajectory.push_back(pt);
+
         } else if (task.type == TASK_WAIT) {
             currentTimeUs += task.durationUs;
             
@@ -73,7 +111,6 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const flo
             int64_t stepUs = (int64_t)resolutionMs * 1000LL;
             int64_t elapsed = 0;
             
-            // Generate intermediate points based on requested resolution
             while (elapsed <= task.durationUs) {
                 float t = (float)elapsed / task.durationUs;
                 if (task.type == TASK_RAMP_EASE) t = easeInOut(t);
@@ -90,8 +127,39 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const flo
                 elapsed += stepUs;
             }
             
-            // Ensure exact final value is snapped to at the end
             for(int i=0; i<4; i++) curFreq[i] = task.endFreq;
+            currentTimeUs += task.durationUs;
+            
+            TrajectoryPoint pt;
+            pt.timeUs = currentTimeUs;
+            for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+            _trajectory.push_back(pt);
+
+        } else if (task.type == TASK_RAMP_PHASE) {
+            int64_t stepUs = (int64_t)resolutionMs * 1000LL;
+            int64_t elapsed = 0;
+            
+            while (elapsed <= task.durationUs) {
+                float t = (float)elapsed / task.durationUs;
+                
+                // We ease-in/ease-out the phase angle shift to prevent magnetic "jerks" 
+                // when the field starts morphing from an ellipse to a circle.
+                t = easeInOut(t); 
+                
+                for(int i=0; i<4; i++) {
+                    // Linear interpolation handles the 0->90 and 180->270 shifts perfectly.
+                    curPhase[i] = task.startPhases[i] + t * (task.endPhases[i] - task.startPhases[i]);
+                }
+                
+                TrajectoryPoint pt;
+                pt.timeUs = currentTimeUs + elapsed;
+                for(int i=0; i<4; i++) { pt.freq[i] = curFreq[i]; pt.duty[i] = curDuty[i]; pt.phase[i] = curPhase[i]; }
+                _trajectory.push_back(pt);
+                
+                elapsed += stepUs;
+            }
+            
+            for(int i=0; i<4; i++) curPhase[i] = task.endPhases[i];
             currentTimeUs += task.durationUs;
             
             TrajectoryPoint pt;
@@ -103,7 +171,7 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq, const flo
 }
 
 void PhaseSequencer::start() {
-    if (_trajectory.empty()) return; // Must compile first!
+    if (_trajectory.empty()) return; 
     _currentFrameIdx = 0;
     _taskStartTimeUs = esp_timer_get_time();
 }
@@ -120,17 +188,13 @@ void PhaseSequencer::run() {
 
     int64_t nowUs = esp_timer_get_time() - _taskStartTimeUs;
 
-    // Fast-forward through the trajectory buffer based on elapsed time
     while (_currentFrameIdx < _trajectory.size() && nowUs >= _trajectory[_currentFrameIdx].timeUs) {
         
         TrajectoryPoint& pt = _trajectory[_currentFrameIdx];
         
-        // Push pre-calculated states into the phase controller
-        _phaseCtrl->setGlobalFrequency(pt.freq[0]); // Uses index 0 as global freq fallback
+        _phaseCtrl->setGlobalFrequency(pt.freq[0]); 
         
         for(int i = 0; i < 4; i++) {
-            // Note: If PhaseController adds per-channel frequency later, uncomment this:
-            // _phaseCtrl->setFrequency(i, pt.freq[i]); 
             _phaseCtrl->setDutyCycle(i, pt.duty[i]);
             _phaseCtrl->setPhase(i, pt.phase[i]);
         }

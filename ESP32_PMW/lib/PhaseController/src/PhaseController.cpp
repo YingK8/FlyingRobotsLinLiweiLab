@@ -1,5 +1,4 @@
 #include "PhaseController.h"
-
 PhaseController* PhaseController::_isrInstance = nullptr;
 
 PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {

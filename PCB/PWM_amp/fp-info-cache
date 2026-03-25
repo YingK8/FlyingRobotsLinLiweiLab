@@ -1,4 +1,4 @@
-25636035775216498
+25621869298587406
 Audio_Module
 Reverb_BTDR-1H
 Digital Reverberation Unit, http://www.belton.co.kr/inc/downfile.php?seq=17&file=pdf (footprint from http://www.uk-electronic.de/PDF/BTDR-1.pdf)
@@ -57140,34 +57140,6 @@ ceramic
 0
 3
 3
-DRV8874PW
-PWP0016J_L
-
-DRV8874PWPR 
-0
-32
-32
-DRV8874PW
-PWP0016J_M
-
-DRV8874PWPR 
-0
-32
-32
-DRV8874PW
-PWP0016J_N
-
-DRV8874PWPR 
-0
-32
-32
-DRV8874PW
-PWP0016J_NV
-
-DRV8874PWPR 
-0
-17
-17
 Diode_SMD
 D_0201_0603Metric
 Diode SMD 0201 (0603 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: https://www.vishay.com/docs/20052/crcw0201e3.pdf), generated with kicad-footprint-generator
@@ -59184,27 +59156,6 @@ One digit LED 7 segment SA39-11 SC39-11 SA39-12 SC39-12
 0
 10
 10
-EEH-ZC1H10
-CAP_EEH-ZC_10P3X10P3_PAN
-
-EEH-ZC1H101P 
-0
-2
-2
-EEH-ZC1H10
-CAP_EEH-ZC_10P3X10P3_PAN-L
-
-EEH-ZC1H101P 
-0
-2
-2
-EEH-ZC1H10
-CAP_EEH-ZC_10P3X10P3_PAN-M
-
-EEH-ZC1H101P 
-0
-2
-2
 Ferrite_THT
 LairdTech_28C0236-0JW-10
 Ferrite, vertical, LairdTech 28C0236-0JW-10, https://assets.lairdtech.com/home/brandworld/files/28C0236-0JW-10.pdf, JW Miller core https://www.bourns.com/products/magnetic-products/j.w.-miller-through-hole-ferrite-beads-emi-filters
@@ -67913,13 +67864,6 @@ Yellow 5381 Series LED
 0
 2
 2
-Library
-PinHeader_1x04_P2.54mm_Vertical
-Through hole straight pin header, 1x04, 2.54mm pitch, single row
-Through hole pin header THT 1x04 2.54mm single row
-0
-16
-4
 Module
 A20_OLINUXINO_LIME2
 A20 Olinuxino LIME2, 1.2GHz, 512-1024MB RAM, Micro-SD, NAND or eMMC, 1000Mbit Ethernet
@@ -95920,6 +95864,13 @@ Logo WEEE
 0
 0
 0
+TP
+TestPoint_THTPad_D3.0mm_Drill1.5mm
+THT pad as test Point, diameter 3.0mm, hole diameter 1.5mm
+test point THT pad
+0
+1
+1
 TerminalBlock
 TerminalBlock_Altech_AK300-2_P5.00mm
 Altech AK300 terminal block, pitch 5.0mm, 45 degree angled, see http://www.mouser.com/ds/2/16/PCBMETRC-24178.pdf
@@ -102724,17 +102675,10 @@ Varistor VF
 0
 2
 2
-XT30UPB-M
-AMASS_XT30UPB-M
+xt30
+xt30
 
 
 0
 2
 2
-XT60PW-M
-AMASS_XT60PW-M
-
-
-0
-4
-4

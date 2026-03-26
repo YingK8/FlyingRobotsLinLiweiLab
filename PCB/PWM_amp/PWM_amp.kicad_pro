@@ -54,14 +54,6 @@
       "diff_pair_dimensions": [],
       "drc_exclusions": [
         [
-          "unconnected_items|220225000|128494427|de679399-d77e-44f6-a7a3-d2048c58f6e0|d61a8fc3-3d92-4a1b-aaea-6432cb24f40f",
-          ""
-        ],
-        [
-          "unconnected_items|220319500|112628709|1e140e0e-bb1a-4a3e-a0c9-ee4adf0ccba3|f0acded8-51e4-4103-9cb2-04667fbd3b05",
-          ""
-        ],
-        [
           "unconnected_items|228462539|102770185|14ca8e19-6b74-4c20-b0e5-b9c51b33dcf7|e17f1bff-5cba-46cc-b959-beca35df4ca0",
           ""
         ],
@@ -503,7 +495,7 @@
       "gencad": "",
       "idf": "",
       "netlist": "",
-      "plot": "prod/",
+      "plot": "prod2/",
       "pos_files": "",
       "specctra_dsn": "",
       "step": "PWM_amp.step",

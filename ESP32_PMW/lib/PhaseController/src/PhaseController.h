@@ -22,6 +22,7 @@ struct PhaseParams {
     unsigned long startUs;
     unsigned long endUs;
     bool wraps;
+    bool alwaysOn;
 };
 
 class PhaseController {
@@ -38,6 +39,7 @@ public:
     void setGlobalFrequency(float newHz);
     void setFrequency(int channel, float newHz);
     void setDutyCycle(int channel, float dutyPercent);
+    // Phase is center-referenced: degrees specify pulse midpoint in the cycle.
     void setPhase(int channel, float degrees);
     
     // Getters

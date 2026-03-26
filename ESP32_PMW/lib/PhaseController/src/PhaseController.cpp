@@ -120,10 +120,15 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         // Local copies for speed
         unsigned long start = self->_params[i].startUs;
         unsigned long end = self->_params[i].endUs;
-        
-        bool active = self->_params[i].wraps ? 
-                      (timeInCycle >= start || timeInCycle < end) : 
-                      (timeInCycle >= start && timeInCycle < end);
+
+        bool active;
+        if (self->_params[i].alwaysOn) {
+            active = true;
+        } else {
+            active = self->_params[i].wraps ?
+                         (timeInCycle >= start || timeInCycle < end) :
+                         (timeInCycle >= start && timeInCycle < end);
+        }
         
         gpio_set_level(self->_pins[i], active ? 1 : 0);
     }
@@ -184,8 +189,20 @@ void PhaseController::updatePhaseParams(int channel) {
     // NOTE: This function should ideally be called within a critical section
     // or when the lock is held, as it reads and writes shared state.
     
-    float period = (float)_averagedPeriodUs; 
-    float width = period * _dutyCycles[channel] / 100.0;
+    int64_t period = _averagedPeriodUs;
+    if (period <= 0) {
+        period = 1;
+    }
+
+    auto normalizeToPeriod = [period](int64_t t) -> int64_t {
+        int64_t m = t % period;
+        if (m < 0) m += period;
+        return m;
+    };
+
+    int64_t width = (int64_t)(period * _dutyCycles[channel] / 100.0f + 0.5f);
+    if (width < 0) width = 0;
+    if (width > period) width = period;
     
     #if USE_SYNC && SYNC_AS_SERVER
         float effectivePhasePct = 0.0f;
@@ -193,15 +210,29 @@ void PhaseController::updatePhaseParams(int channel) {
         float effectivePhasePct = _phaseOffsetsPct[channel];
     #endif
 
-    _params[channel].startUs = (unsigned long)(period * effectivePhasePct);
-    _params[channel].endUs = _params[channel].startUs + (unsigned long)width;
+    int64_t center = (int64_t)(period * effectivePhasePct + 0.5f);
+    center = normalizeToPeriod(center);
 
-    if (_params[channel].endUs > period) {
-        _params[channel].endUs -= (unsigned long)period;
-        _params[channel].wraps = true;
-    } else {
+    if (width >= period) {
+        _params[channel].startUs = 0;
+        _params[channel].endUs = 0;
         _params[channel].wraps = false;
+        _params[channel].alwaysOn = true;
+        return;
     }
+
+    _params[channel].alwaysOn = false;
+
+    int64_t halfWidth = width / 2;
+    int64_t start = center - halfWidth;
+    int64_t end = start + width;
+
+    start = normalizeToPeriod(start);
+    end = normalizeToPeriod(end);
+
+    _params[channel].startUs = (unsigned long)start;
+    _params[channel].endUs = (unsigned long)end;
+    _params[channel].wraps = (end <= start) && (width > 0);
 }
 
 void PhaseController::setGlobalFrequency(float newHz) {

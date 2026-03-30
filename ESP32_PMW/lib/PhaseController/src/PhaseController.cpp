@@ -1,4 +1,5 @@
 #include "PhaseController.h"
+#include "driver/ledc.h"
 PhaseController* PhaseController::_isrInstance = nullptr;
 
 PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {
@@ -16,6 +17,11 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _lastIsrTimeUs = 0;
     _filterIdx = 0;
     _firstSyncReceived = false;
+    
+    // Carrier PWM initialization
+    _carrierPin = GPIO_NUM_NC;
+    _carrierFreqHz = 10000.0;
+    _carrierDutyCyclePct = 100.0;
 
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = 20000;
 
@@ -120,15 +126,10 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         // Local copies for speed
         unsigned long start = self->_params[i].startUs;
         unsigned long end = self->_params[i].endUs;
-
-        bool active;
-        if (self->_params[i].alwaysOn) {
-            active = true;
-        } else {
-            active = self->_params[i].wraps ?
-                         (timeInCycle >= start || timeInCycle < end) :
-                         (timeInCycle >= start && timeInCycle < end);
-        }
+        
+        bool active = self->_params[i].wraps ? 
+                      (timeInCycle >= start || timeInCycle < end) : 
+                      (timeInCycle >= start && timeInCycle < end);
         
         gpio_set_level(self->_pins[i], active ? 1 : 0);
     }
@@ -189,20 +190,8 @@ void PhaseController::updatePhaseParams(int channel) {
     // NOTE: This function should ideally be called within a critical section
     // or when the lock is held, as it reads and writes shared state.
     
-    int64_t period = _averagedPeriodUs;
-    if (period <= 0) {
-        period = 1;
-    }
-
-    auto normalizeToPeriod = [period](int64_t t) -> int64_t {
-        int64_t m = t % period;
-        if (m < 0) m += period;
-        return m;
-    };
-
-    int64_t width = (int64_t)(period * _dutyCycles[channel] / 100.0f + 0.5f);
-    if (width < 0) width = 0;
-    if (width > period) width = period;
+    float period = (float)_averagedPeriodUs; 
+    float width = period * _dutyCycles[channel] / 100.0;
     
     #if USE_SYNC && SYNC_AS_SERVER
         float effectivePhasePct = 0.0f;
@@ -210,29 +199,15 @@ void PhaseController::updatePhaseParams(int channel) {
         float effectivePhasePct = _phaseOffsetsPct[channel];
     #endif
 
-    int64_t center = (int64_t)(period * effectivePhasePct + 0.5f);
-    center = normalizeToPeriod(center);
+    _params[channel].startUs = (unsigned long)(period * effectivePhasePct);
+    _params[channel].endUs = _params[channel].startUs + (unsigned long)width;
 
-    if (width >= period) {
-        _params[channel].startUs = 0;
-        _params[channel].endUs = 0;
+    if (_params[channel].endUs > period) {
+        _params[channel].endUs -= (unsigned long)period;
+        _params[channel].wraps = true;
+    } else {
         _params[channel].wraps = false;
-        _params[channel].alwaysOn = true;
-        return;
     }
-
-    _params[channel].alwaysOn = false;
-
-    int64_t halfWidth = width / 2;
-    int64_t start = center - halfWidth;
-    int64_t end = start + width;
-
-    start = normalizeToPeriod(start);
-    end = normalizeToPeriod(end);
-
-    _params[channel].startUs = (unsigned long)start;
-    _params[channel].endUs = (unsigned long)end;
-    _params[channel].wraps = (end <= start) && (width > 0);
 }
 
 void PhaseController::setGlobalFrequency(float newHz) {
@@ -324,4 +299,64 @@ void PhaseController::run() {
         }
         portEXIT_CRITICAL(&_spinlock);
     }
+}
+
+void PhaseController::initCarrierPWM(gpio_num_t pin, float freqHz, float dutyPercent) {
+    if (pin == GPIO_NUM_NC) return;
+    if (freqHz <= 0.0f) return;
+    
+    _carrierPin = pin;
+    _carrierFreqHz = freqHz;
+    
+    // Configure LEDC channel
+    ledc_channel_config_t ledc_channel = {
+        .gpio_num = pin,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LEDC_TIMER_0,
+        .duty = 0,
+        .hpoint = 0,
+        .flags = {.output_invert = 0}
+    };
+
+    // Configure LEDC timer
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_10_BIT, // 10-bit resolution
+        .timer_num = LEDC_TIMER_0,
+        .freq_hz = (uint32_t)freqHz,
+        .clk_cfg = LEDC_AUTO_CLK
+    };
+    
+    // Apply configurations
+    ledc_timer_config(&ledc_timer);
+    ledc_channel_config(&ledc_channel);
+
+    // Apply initial duty only after timer/channel are configured.
+    this->setCarrierDutyCycle(dutyPercent);
+}
+
+void PhaseController::setCarrierDutyCycle(float dutyPercent) {
+    if (_carrierPin == GPIO_NUM_NC) return;
+    if (_carrierFreqHz <= 0.0f) return;
+    
+    // Calculate period in milliseconds
+    float periodMs = 1000.0 / _carrierFreqHz;
+    
+    // Calculate min and max duty cycle percentages
+    // Min duty: must allow at least MIN_ON_OFF_MS for the off period
+    // Max duty: must allow at least MIN_ON_OFF_MS for the on period
+    float minDutyCycle = (MIN_ON_OFF_MS / periodMs) * 100.0f;
+    float maxDutyCycle = 100.0f - minDutyCycle;
+    
+    // Clamp the duty cycle
+    _carrierDutyCyclePct = constrain(dutyPercent, minDutyCycle, maxDutyCycle);
+    
+    // Convert percentage to 10-bit value (0-1023)
+    uint32_t dutyValue = (uint32_t)((_carrierDutyCyclePct / 100.0f) * ((1 << 10) - 1));
+    
+    // Apply duty cycle
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dutyValue);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }

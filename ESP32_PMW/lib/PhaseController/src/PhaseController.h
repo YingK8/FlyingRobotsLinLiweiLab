@@ -16,13 +16,13 @@
 // #endif
 
 #define FREQ_FILTER_SIZE 5
+
 // #define SYNC_LATENCY_US 50 // Tuning value for latency compensation
 
 struct PhaseParams {
     unsigned long startUs;
     unsigned long endUs;
     bool wraps;
-    bool alwaysOn;
 };
 
 class PhaseController {
@@ -39,7 +39,6 @@ public:
     void setGlobalFrequency(float newHz);
     void setFrequency(int channel, float newHz);
     void setDutyCycle(int channel, float dutyPercent);
-    // Phase is center-referenced: degrees specify pulse midpoint in the cycle.
     void setPhase(int channel, float degrees);
     
     // Getters
@@ -50,7 +49,14 @@ public:
     // Sync Configuration
     void enableSync(gpio_num_t syncPin);
 
+    // Carrier PWM Configuration
+    void initCarrierPWM(gpio_num_t pin, float freqHz = 10000.0, float dutyPercent = 50.0);
+    void setCarrierDutyCycle(float dutyPercent);
+
 private:
+    // Minimum on/off period constraint: 0.0 ms
+    const float MIN_ON_OFF_MS = 0.0f;
+
     // Internal methods
     static void IRAM_ATTR _timerCallback(void* arg);
     static void IRAM_ATTR _onSyncInterrupt();
@@ -61,6 +67,11 @@ private:
     gpio_num_t* _pins;
     esp_timer_handle_t _periodicTimer;
     gpio_num_t _syncPin;
+    
+    // Carrier PWM
+    gpio_num_t _carrierPin;
+    float _carrierFreqHz;
+    float _carrierDutyCyclePct;
     
     // State Arrays
     float* _phaseOffsetsPct;

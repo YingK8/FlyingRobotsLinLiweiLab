@@ -16,29 +16,9 @@ const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_4;
 
 // === PWM PIN 21 CONFIGURATION ===
-const int PWM_PIN_21 = 21;
-const int PWM_FREQ = 20000; // 20kHz
-const int PWM_MAX_REQUESTED_RESOLUTION = 8;
-int pwmResolutionBits = PWM_MAX_REQUESTED_RESOLUTION;
-int pwmMaxDuty = (1 << PWM_MAX_REQUESTED_RESOLUTION) - 1;
-int dutyCycle = pwmMaxDuty / 2; // Start at 50%
-
-int clampResolutionForFrequency(int requestedResolution, uint32_t frequencyHz) {
-    int maxSupportedResolution = requestedResolution;
-
-    while (maxSupportedResolution > 1) {
-        uint32_t maxFreqAtResolution = LEDC_APB_CLK_HZ / (1UL << maxSupportedResolution);
-        if (frequencyHz <= maxFreqAtResolution) {
-            break;
-        }
-        maxSupportedResolution--;
-    }
-
-    if (maxSupportedResolution < 1) {
-        maxSupportedResolution = 1;
-    }
-    return maxSupportedResolution;
-}
+const gpio_num_t PWM_PIN = GPIO_NUM_21;
+const int PWM_FREQ = 50000; // 20kHz
+float pwm = 50.0;
 
 PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
 PhaseSequencer seq(&controller);
@@ -49,25 +29,7 @@ void setup() {
 
     controller.enableSync(SYNC_PIN);     
     controller.begin(1.0f);    
-    
-    // For high frequency PWM, reduce resolution if needed to keep clocking valid.
-    pwmResolutionBits = clampResolutionForFrequency(PWM_MAX_REQUESTED_RESOLUTION, PWM_FREQ);
-    pwmMaxDuty = (1 << pwmResolutionBits) - 1;
-    dutyCycle = pwmMaxDuty / 2;
-
-    bool pwmAttachOk = ledcAttach(PWM_PIN_21, PWM_FREQ, pwmResolutionBits);
-    if (!pwmAttachOk) {
-        Serial.printf("PWM attach failed on pin %d\n", PWM_PIN_21);
-    }
-    ledcWrite(PWM_PIN_21, dutyCycle);
-
-    Serial.printf(
-        "PWM pin=%d freq=%dHz resolution=%dbit maxDuty=%d\n",
-        PWM_PIN_21,
-        PWM_FREQ,
-        pwmResolutionBits,
-        pwmMaxDuty
-    );
+    controller.initCarrierPWM(PWM_PIN, PWM_FREQ, pwm);
     
     // Water Takeoff Configuration¨
     // seq.addWaitTask(1000); // 5 second delay before starting
@@ -85,22 +47,27 @@ void setup() {
 void loop() {
     controller.run(); // hardware timer drift compensation
     seq.run(); // state machine queue
-    
-    // Handle serial input for PWM duty cycle control
-    if (Serial.available() > 0) {
-        char cmd = Serial.read();
-        
-        if (cmd == 'a' || cmd == 'A') {
-            int step = max(1, pwmMaxDuty / 20); // ~5% step
-            dutyCycle = min(pwmMaxDuty, dutyCycle + step);
-            ledcWrite(PWM_PIN_21, dutyCycle);
-            Serial.printf("Duty cycle increased: %d/%d (%.1f%%)\n", dutyCycle, pwmMaxDuty, (dutyCycle * 100.0) / pwmMaxDuty);
+
+    // Triangle ramp: 10s up + 10s down = 20s full cycle.
+    static unsigned long lastDutyUpdateMs = 0;
+    const unsigned long nowMs = millis();
+    if (nowMs - lastDutyUpdateMs >= 20) {
+        lastDutyUpdateMs = nowMs;
+
+        const float dutyMin = 0.0f;
+        const float dutyMax = 100.0f;
+        const unsigned long cycleMs = 20000UL;
+        const unsigned long halfCycleMs = cycleMs / 2UL;
+        const unsigned long t = nowMs % cycleMs;
+
+        if (t < halfCycleMs) {
+            const float progress = (float)t / (float)halfCycleMs;
+            pwm = dutyMin + (dutyMax - dutyMin) * progress;
+        } else {
+            const float progress = (float)(t - halfCycleMs) / (float)halfCycleMs;
+            pwm = dutyMax - (dutyMax - dutyMin) * progress;
         }
-        else if (cmd == 'd' || cmd == 'D') {
-            int step = max(1, pwmMaxDuty / 20); // ~5% step
-            dutyCycle = max(0, dutyCycle - step);
-            ledcWrite(PWM_PIN_21, dutyCycle);
-            Serial.printf("Duty cycle decreased: %d/%d (%.1f%%)\n", dutyCycle, pwmMaxDuty, (dutyCycle * 100.0) / pwmMaxDuty);
-        }
+
+        controller.setCarrierDutyCycle(pwm);
     }
 }

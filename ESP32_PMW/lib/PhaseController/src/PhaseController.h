@@ -48,6 +48,10 @@ public:
     // Sync Configuration
     void enableSync(gpio_num_t syncPin);
 
+    // Carrier PWM Configuration
+    void initCarrierPWM(gpio_num_t carrierPin, float carrierFreqHz = 10000.0);
+    void setCarrierDutyCycle(float dutyPercent);
+
 private:
     // Internal methods
     static void IRAM_ATTR _timerCallback(void* arg);
@@ -71,6 +75,13 @@ private:
     int64_t _averagedPeriodUs;
     int64_t _periodBuffer[FREQ_FILTER_SIZE];
     int _filterIdx;
+    
+    // Carrier PWM State
+    gpio_num_t _carrierPin;
+    float _carrierFreqHz;
+    uint8_t _carrierChannel;
+    float _carrierDutyCycle;
+    bool _carrierInitialized;
     
     // ISR variables
     static PhaseController* _isrInstance;

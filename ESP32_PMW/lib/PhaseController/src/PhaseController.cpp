@@ -16,6 +16,12 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _lastIsrTimeUs = 0;
     _filterIdx = 0;
     _firstSyncReceived = false;
+    
+    _carrierPin = GPIO_NUM_NC;
+    _carrierFreqHz = 10000.0;
+    _carrierChannel = 0;
+    _carrierDutyCycle = 50.0;
+    _carrierInitialized = false;
 
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = 20000;
 
@@ -294,3 +300,43 @@ void PhaseController::run() {
         portEXIT_CRITICAL(&_spinlock);
     }
 }
+
+void PhaseController::initCarrierPWM(gpio_num_t carrierPin, float carrierFreqHz) {
+    _carrierPin = carrierPin;
+    _carrierFreqHz = constrain(carrierFreqHz, 1.0, 40000000.0); // ESP32 LEDC range
+    
+    // Use LEDC channel 0 for carrier PWM
+    // ledcSetup(channel, frequency, resolution)
+    // Using 10-bit resolution (0-1023) for good granularity
+    ledcSetup(0, (uint32_t)_carrierFreqHz, 10);
+    ledcAttachPin(_carrierPin, 0);
+    
+    _carrierChannel = 0;
+    _carrierInitialized = true;
+    
+    // Apply current duty cycle
+    setCarrierDutyCycle(_carrierDutyCycle);
+}
+
+void PhaseController::setCarrierDutyCycle(float dutyPercent) {
+    if (!_carrierInitialized) return;
+    
+    // Calculate minimum on/off period constraint: 0.025 ms = 25 microseconds
+    const float minOnOffPeriodUs = 25.0;
+    float periodUs = 1000000.0 / _carrierFreqHz;
+    
+    // Calculate minimum and maximum duty cycle percentages
+    // Minimum duty: 25 us on, (remaining) off
+    // Maximum duty: (remaining) on, 25 us off
+    float minDutyPct = (minOnOffPeriodUs / periodUs) * 100.0;
+    float maxDutyPct = 100.0 - minDutyPct;
+    
+    // Clamp duty cycle to valid range
+    float clampedDuty = constrain(dutyPercent, minDutyPct, maxDutyPct);
+    _carrierDutyCycle = clampedDuty;
+    
+    // Convert percentage to LEDC duty value (10-bit: 0-1023)
+    uint32_t dutyValue = (uint32_t)((clampedDuty / 100.0) * 1023);
+    ledcWrite(_carrierChannel, dutyValue);
+}
+

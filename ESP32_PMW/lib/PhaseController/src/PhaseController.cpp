@@ -1,5 +1,5 @@
 #include "PhaseController.h"
-#include "driver/ledc.h"
+
 PhaseController* PhaseController::_isrInstance = nullptr;
 
 PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {
@@ -17,11 +17,11 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _lastIsrTimeUs = 0;
     _filterIdx = 0;
     _firstSyncReceived = false;
-    
-    // Carrier PWM initialization
-    _carrierPin = GPIO_NUM_NC;
+
+    // Carrier PWM initialization (multi-channel)
+    _carrierPinsArray = nullptr;
     _carrierFreqHz = 10000.0;
-    _carrierDutyCyclePct = 100.0;
+    _carrierDutyCyclePct = nullptr;
 
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = 20000;
 
@@ -43,6 +43,8 @@ PhaseController::~PhaseController() {
     delete[] _dutyCycles; 
     delete[] _params; 
     delete[] _freqsHz;
+    if (_carrierPinsArray) delete[] _carrierPinsArray;
+    if (_carrierDutyCyclePct) delete[] _carrierDutyCyclePct;
 }
 
 void PhaseController::begin(float initialFreqHz) {
@@ -301,26 +303,18 @@ void PhaseController::run() {
     }
 }
 
-void PhaseController::initCarrierPWM(gpio_num_t pin, float freqHz, float dutyPercent) {
-    if (pin == GPIO_NUM_NC) return;
-    if (freqHz <= 0.0f) return;
-    
-    _carrierPin = pin;
-    _carrierFreqHz = freqHz;
-    
-    // Configure LEDC channel
-    ledc_channel_config_t ledc_channel = {
-        .gpio_num = pin,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = LEDC_CHANNEL_0,
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = LEDC_TIMER_0,
-        .duty = 0,
-        .hpoint = 0,
-        .flags = {.output_invert = 0}
-    };
+void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const float* dutyPercents) {
+    if (!pins || !dutyPercents || freqHz <= 0.0f) return;
 
-    // Configure LEDC timer
+    // Allocate arrays for carrier pins and duty cycles if not already done
+    if (!_carrierPinsArray) {
+        _carrierPinsArray = new gpio_num_t[_numChannels];
+        _carrierDutyCyclePct = new float[_numChannels];
+    }
+
+    _carrierFreqHz = freqHz;
+
+    // Configure LEDC timer (shared for all channels)
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_10_BIT, // 10-bit resolution
@@ -328,35 +322,50 @@ void PhaseController::initCarrierPWM(gpio_num_t pin, float freqHz, float dutyPer
         .freq_hz = (uint32_t)freqHz,
         .clk_cfg = LEDC_AUTO_CLK
     };
-    
-    // Apply configurations
     ledc_timer_config(&ledc_timer);
-    ledc_channel_config(&ledc_channel);
 
-    // Apply initial duty only after timer/channel are configured.
-    this->setCarrierDutyCycle(dutyPercent);
+    for (int i = 0; i < _numChannels; i++) {
+        gpio_num_t pin = pins[i];
+        float duty = dutyPercents[i];
+        _carrierPinsArray[i] = pin;
+        _carrierDutyCyclePct[i] = duty;
+
+        if (pin == GPIO_NUM_NC) continue;
+
+        ledc_channel_config_t ledc_channel = {
+            .gpio_num = pin,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = (ledc_channel_t)i,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = LEDC_TIMER_0,
+            .duty = (uint32_t)((duty / 100.0f) * ((1 << 10) - 1)),
+            .hpoint = 0,
+            .flags = {.output_invert = 0}
+        };
+        ledc_channel_config(&ledc_channel);
+    }
 }
 
-void PhaseController::setCarrierDutyCycle(float dutyPercent) {
-    if (_carrierPin == GPIO_NUM_NC) return;
+void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
+    if (channel < 0 || channel >= _numChannels) return;
+    if (!_carrierPinsArray || !_carrierDutyCyclePct) return;
+    if (_carrierPinsArray[channel] == GPIO_NUM_NC) return;
     if (_carrierFreqHz <= 0.0f) return;
-    
+
     // Calculate period in milliseconds
-    float periodMs = 1000.0 / _carrierFreqHz;
-    
+    float periodMs = 1000.0f / _carrierFreqHz;
+
     // Calculate min and max duty cycle percentages
-    // Min duty: must allow at least MIN_ON_OFF_MS for the off period
-    // Max duty: must allow at least MIN_ON_OFF_MS for the on period
     float minDutyCycle = (MIN_ON_OFF_MS / periodMs) * 100.0f;
     float maxDutyCycle = 100.0f - minDutyCycle;
-    
+
     // Clamp the duty cycle
-    _carrierDutyCyclePct = constrain(dutyPercent, minDutyCycle, maxDutyCycle);
-    
+    _carrierDutyCyclePct[channel] = constrain(dutyPercent, minDutyCycle, maxDutyCycle);
+
     // Convert percentage to 10-bit value (0-1023)
-    uint32_t dutyValue = (uint32_t)((_carrierDutyCyclePct / 100.0f) * ((1 << 10) - 1));
-    
-    // Apply duty cycle
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, dutyValue);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    uint32_t dutyValue = (uint32_t)((_carrierDutyCyclePct[channel] / 100.0f) * ((1 << 10) - 1));
+
+    // Apply duty cycle to the correct channel
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)channel, dutyValue);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)channel);
 }

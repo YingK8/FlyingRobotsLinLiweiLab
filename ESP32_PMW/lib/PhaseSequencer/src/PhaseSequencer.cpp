@@ -18,7 +18,12 @@ void PhaseSequencer::addDutyCycleTask(const float *dutyCycles,
   SequenceTask task = {}; // Zero-initializes all fields
   task.type = TASK_SET_DUTY_CYCLES;
   for (int i = 0; i < numChannels; i++) {
-    task.dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
+    float value = dutyCycles[i];
+    if (value < 0.0f)
+      value = 0.0f;
+    if (value > 100.0f)
+      value = 100.0f;
+    task.dutyCycles[i] = value;
   }
   _queue.push_back(task);
 }
@@ -29,7 +34,12 @@ void PhaseSequencer::addCarrierDutyCycleTask(const float *carrierDutyCycles,
   SequenceTask task = {}; // Zero-initializes all fields
   task.type = TASK_SET_DUTY_CYCLES;
   for (int i = 0; i < numChannels; i++) {
-    task.carrierDuties[i] = constrain(carrierDutyCycles[i], 0.0, 100.0);
+    float value = carrierDutyCycles[i];
+    if (value < 0.0f)
+      value = 0.0f;
+    if (value > 100.0f)
+      value = 100.0f;
+    task.carrierDuties[i] = value;
   }
   _queue.push_back(task);
 }
@@ -114,9 +124,9 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
       TrajectoryPoint pt;
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
-        pt.freq[i] = task.freq[i];
-        pt.duty[i] = task.duty[i];
-        pt.phase[i] = task.phase[i];
+        pt.freq[i] = task.startFreq;
+        pt.duty[i] = task.dutyCycles[i];
+        pt.phase[i] = task.startPhases[i];
         pt.carrierDuties[i] = task.carrierDuties[i];
       }
       _trajectory.push_back(pt);
@@ -125,14 +135,10 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
       continue;
     }
     if (task.type == TASK_SET_DUTY_CYCLES) {
-      for (int i = 0; i < 4; i++) {
-        curDuty[i] = task.dutyCycles[i];
-        // Carrier duty
-        pt.carrierDuties[i] = task.carrierDuties[i];
-      }
       TrajectoryPoint pt;
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
+        curDuty[i] = task.dutyCycles[i];
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];

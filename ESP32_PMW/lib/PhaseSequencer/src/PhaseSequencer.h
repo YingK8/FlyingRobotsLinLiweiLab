@@ -1,5 +1,5 @@
 #pragma once
-#include "PhaseController.h"
+#include "../../PhaseController/src/PhaseController.h"
 #include "esp_timer.h"
 #include <Arduino.h>
 #include <vector>
@@ -11,8 +11,9 @@ enum TaskType {
   TASK_WAIT,
   TASK_RAMP_LINEAR,
   TASK_RAMP_EASE,
-  TASK_RAMP_PHASE, // NEW: Phase interpolation
-  TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON import)
+  TASK_RAMP_PHASE,      // NEW: Phase interpolation
+  TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON
+                        // import)
 };
 
 struct SequenceTask {

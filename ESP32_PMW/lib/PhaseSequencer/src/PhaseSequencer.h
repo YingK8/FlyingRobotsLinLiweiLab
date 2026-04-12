@@ -11,7 +11,8 @@ enum TaskType {
   TASK_WAIT,
   TASK_RAMP_LINEAR,
   TASK_RAMP_EASE,
-  TASK_RAMP_PHASE // NEW: Phase interpolation
+  TASK_RAMP_PHASE, // NEW: Phase interpolation
+  TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON import)
 };
 
 struct SequenceTask {
@@ -48,6 +49,11 @@ public:
    * @param size Number of tasks to reserve.
    */
   void reserve(size_t size);
+  /**
+   * @brief Add a generic sequence task to the queue.
+   * @param pt The SequenceTask to add.
+   */
+  void addSequenceTask(SequenceTask task);
   /**
    * @brief Add a duty cycle set task for all channels.
    * @param dutyCycles Array of duty cycles.

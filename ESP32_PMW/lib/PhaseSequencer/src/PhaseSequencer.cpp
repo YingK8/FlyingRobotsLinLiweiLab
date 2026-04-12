@@ -8,6 +8,10 @@ PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
 
 void PhaseSequencer::reserve(size_t size) { _queue.reserve(size); }
 
+void PhaseSequencer::addSequenceTask(SequenceTask task) {
+  _queue.push_back(task);
+}
+
 // Updated builders to zero-initialize the new struct fields automatically
 void PhaseSequencer::addDutyCycleTask(const float *dutyCycles,
                                       int numChannels) {
@@ -106,6 +110,20 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
                        initialPhase[3]};
 
   for (const auto &task : _queue) {
+    if (task.type == TASK_TRAJECTORY_POINT) {
+      TrajectoryPoint pt;
+      pt.timeUs = currentTimeUs;
+      for (int i = 0; i < 4; i++) {
+        pt.freq[i] = task.freq[i];
+        pt.duty[i] = task.duty[i];
+        pt.phase[i] = task.phase[i];
+        pt.carrierDuties[i] = task.carrierDuties[i];
+      }
+      _trajectory.push_back(pt);
+      // If durationUs is used as a delta, increment currentTimeUs
+      currentTimeUs += task.durationUs;
+      continue;
+    }
     if (task.type == TASK_SET_DUTY_CYCLES) {
       for (int i = 0; i < 4; i++) {
         curDuty[i] = task.dutyCycles[i];

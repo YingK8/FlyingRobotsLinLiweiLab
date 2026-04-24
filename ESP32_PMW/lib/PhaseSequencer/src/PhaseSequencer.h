@@ -7,6 +7,7 @@
 // Define the types of commands our queue can execute
 enum TaskType {
   TASK_SET_DUTY_CYCLES,
+  TASK_SET_CARRIER_DUTY_CYCLES,
   TASK_SET_PHASES, // NEW: Instant phase snap
   TASK_WAIT,
   TASK_RAMP_LINEAR,

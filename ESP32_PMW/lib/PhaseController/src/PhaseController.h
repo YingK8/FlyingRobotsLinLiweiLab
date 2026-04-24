@@ -136,6 +136,9 @@ private:
   gpio_num_t *_carrierPinsArray = nullptr;
   float _carrierFreqHz;
   float *_carrierDutyCyclePct = nullptr;
+  ledc_mode_t _carrierSpeedMode = LEDC_LOW_SPEED_MODE;
+  ledc_timer_t _carrierTimer = LEDC_TIMER_0;
+  uint8_t _carrierDutyResolutionBits = 10;
 
   // State Arrays
   float *_phaseOffsetsPct;

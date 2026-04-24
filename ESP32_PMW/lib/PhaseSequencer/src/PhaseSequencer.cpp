@@ -1,4 +1,5 @@
 #include "PhaseSequencer.h"
+#include <math.h>
 
 PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
@@ -32,7 +33,7 @@ void PhaseSequencer::addDutyCycleTask(const float *dutyCycles,
 void PhaseSequencer::addCarrierDutyCycleTask(const float *carrierDutyCycles,
                                              int numChannels) {
   SequenceTask task = {}; // Zero-initializes all fields
-  task.type = TASK_SET_DUTY_CYCLES;
+  task.type = TASK_SET_CARRIER_DUTY_CYCLES;
   for (int i = 0; i < numChannels; i++) {
     float value = carrierDutyCycles[i];
     if (value < 0.0f)
@@ -118,16 +119,18 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
                       initialDuty[3]};
   float curPhase[4] = {initialPhase[0], initialPhase[1], initialPhase[2],
                        initialPhase[3]};
+  float curCarrier[4] = {NAN, NAN, NAN, NAN};
 
   for (const auto &task : _queue) {
     if (task.type == TASK_TRAJECTORY_POINT) {
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         pt.freq[i] = task.startFreq;
         pt.duty[i] = task.dutyCycles[i];
         pt.phase[i] = task.startPhases[i];
         pt.carrierDuties[i] = task.carrierDuties[i];
+        curCarrier[i] = task.carrierDuties[i];
       }
       _trajectory.push_back(pt);
       // If durationUs is used as a delta, increment currentTimeUs
@@ -135,14 +138,26 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
       continue;
     }
     if (task.type == TASK_SET_DUTY_CYCLES) {
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         curDuty[i] = task.dutyCycles[i];
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = task.carrierDuties[i];
+        pt.carrierDuties[i] = curCarrier[i];
+      }
+      _trajectory.push_back(pt);
+
+    } else if (task.type == TASK_SET_CARRIER_DUTY_CYCLES) {
+      TrajectoryPoint pt = {};
+      pt.timeUs = currentTimeUs;
+      for (int i = 0; i < 4; i++) {
+        curCarrier[i] = task.carrierDuties[i];
+        pt.freq[i] = curFreq[i];
+        pt.duty[i] = curDuty[i];
+        pt.phase[i] = curPhase[i];
+        pt.carrierDuties[i] = curCarrier[i];
       }
       _trajectory.push_back(pt);
 
@@ -150,24 +165,26 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
       for (int i = 0; i < 4; i++)
         curPhase[i] = task.endPhases[i];
 
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];
+        pt.carrierDuties[i] = curCarrier[i];
       }
       _trajectory.push_back(pt);
 
     } else if (task.type == TASK_WAIT) {
       currentTimeUs += task.durationUs;
 
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];
+        pt.carrierDuties[i] = curCarrier[i];
       }
       _trajectory.push_back(pt);
 
@@ -184,12 +201,13 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
           curFreq[i] = task.startFreq + t * (task.endFreq - task.startFreq);
         }
 
-        TrajectoryPoint pt;
+        TrajectoryPoint pt = {};
         pt.timeUs = currentTimeUs + elapsed;
         for (int i = 0; i < 4; i++) {
           pt.freq[i] = curFreq[i];
           pt.duty[i] = curDuty[i];
           pt.phase[i] = curPhase[i];
+          pt.carrierDuties[i] = curCarrier[i];
         }
         _trajectory.push_back(pt);
 
@@ -200,12 +218,13 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
         curFreq[i] = task.endFreq;
       currentTimeUs += task.durationUs;
 
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];
+        pt.carrierDuties[i] = curCarrier[i];
       }
       _trajectory.push_back(pt);
 
@@ -227,12 +246,13 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
                         t * (task.endPhases[i] - task.startPhases[i]);
         }
 
-        TrajectoryPoint pt;
+        TrajectoryPoint pt = {};
         pt.timeUs = currentTimeUs + elapsed;
         for (int i = 0; i < 4; i++) {
           pt.freq[i] = curFreq[i];
           pt.duty[i] = curDuty[i];
           pt.phase[i] = curPhase[i];
+          pt.carrierDuties[i] = curCarrier[i];
         }
         _trajectory.push_back(pt);
 
@@ -243,12 +263,13 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
         curPhase[i] = task.endPhases[i];
       currentTimeUs += task.durationUs;
 
-      TrajectoryPoint pt;
+      TrajectoryPoint pt = {};
       pt.timeUs = currentTimeUs;
       for (int i = 0; i < 4; i++) {
         pt.freq[i] = curFreq[i];
         pt.duty[i] = curDuty[i];
         pt.phase[i] = curPhase[i];
+        pt.carrierDuties[i] = curCarrier[i];
       }
       _trajectory.push_back(pt);
     }
@@ -289,7 +310,7 @@ void PhaseSequencer::run() {
 
     // Set carrier duty cycle if present
     for (int i = 0; i < 4; i++) {
-      if (pt.carrierDuties[i] > 0.0f || pt.carrierDuties[i] == 0.0f) // allow 0%
+      if (!isnan(pt.carrierDuties[i]))
         _phaseCtrl->setCarrierDutyCycle(i, pt.carrierDuties[i]);
     }
 

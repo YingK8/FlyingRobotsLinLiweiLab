@@ -43,13 +43,48 @@ void setup() {
   // 60000ms (60s)
 
   // Dry Takeoff Configuration
-  seq.addEaseRampTask(1.0f, 250.0f, 25000); // 1Hz to 250Hz over 25000ms
+  seq.addEaseRampTask(1.0f, 190.0f, 25000); // 1Hz to 250Hz over 25000ms
   seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq.start();
 }
 
+float carrier_duty_sweep = 100.0f;
+float d_duty = -0.005f; // Negative so we start by decreasing from 100
+int active_pair = 0;    // 0 for pair (0,3), 1 for pair (1,2)
+float lower_d = 5.0f;
+
 void loop() {
   controller.run(); // hardware timer drift compensation
   seq.run();        // state machine queue
+
+  // Adjust the sweeping duty cycle
+  carrier_duty_sweep += d_duty;
+
+  // Reverse direction at the 50 and 100 boundaries
+  if (carrier_duty_sweep <= lower_d) {
+    carrier_duty_sweep = lower_d; // Clamp to exact bottom
+    d_duty = -d_duty;           // Flip direction to positive (increase)
+  } else if (carrier_duty_sweep >= 100.0f) {
+    carrier_duty_sweep = 100.0f; // Clamp to exact top
+    d_duty = -d_duty;            // Flip direction to negative (decrease)
+    
+    // Once we return to 100%, switch whose turn it is
+    active_pair = (active_pair == 0) ? 1 : 0; 
+  }
+
+  // Apply the duty cycles based on whose turn it is
+  if (active_pair == 0) {
+    // Pair 0 & 3 is active, Pair 1 & 2 rests at 100%
+    controller.setCarrierDutyCycle(0, carrier_duty_sweep);
+    controller.setCarrierDutyCycle(3, carrier_duty_sweep);
+    controller.setCarrierDutyCycle(1, 100.0f);
+    controller.setCarrierDutyCycle(2, 100.0f);
+  } else {
+    // Pair 1 & 2 is active, Pair 0 & 3 rests at 100%
+    controller.setCarrierDutyCycle(0, 100.0f);
+    controller.setCarrierDutyCycle(3, 100.0f);
+    controller.setCarrierDutyCycle(1, carrier_duty_sweep);
+    controller.setCarrierDutyCycle(2, carrier_duty_sweep);
+  }
 }

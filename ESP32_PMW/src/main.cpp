@@ -1,25 +1,19 @@
+#include <Arduino.h>
 #include "PhaseController.h"
 #include "PhaseSequencer.h"
-#include <Arduino.h>
-#include <FS.h>
-#include <SPIFFS.h>
-
-#ifndef LEDC_APB_CLK_HZ
-#define LEDC_APB_CLK_HZ 80000000UL
-#endif
 
 // CONFIGURATION
 const int NUM_CHANNELS = 4;
 
-const gpio_num_t A_PWM_PIN = GPIO_NUM_23;
-const gpio_num_t B_PWM_PIN = GPIO_NUM_18;
-const gpio_num_t C_PWM_PIN = GPIO_NUM_21;
-const gpio_num_t D_PWM_PIN = GPIO_NUM_5;
+const gpio_num_t A_PWM_PIN = GPIO_NUM_32;
+const gpio_num_t B_PWM_PIN = GPIO_NUM_25;
+const gpio_num_t C_PWM_PIN = GPIO_NUM_27;
+const gpio_num_t D_PWM_PIN = GPIO_NUM_12;
 
-const gpio_num_t A_CARRIER_PIN = GPIO_NUM_22;
-const gpio_num_t B_CARRIER_PIN = GPIO_NUM_4;
-const gpio_num_t C_CARRIER_PIN = GPIO_NUM_19;
-const gpio_num_t D_CARRIER_PIN = GPIO_NUM_15;
+const gpio_num_t A_CARRIER_PIN = GPIO_NUM_33;
+const gpio_num_t B_CARRIER_PIN = GPIO_NUM_26;
+const gpio_num_t C_CARRIER_PIN = GPIO_NUM_14;
+const gpio_num_t D_CARRIER_PIN = GPIO_NUM_13;
 
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
@@ -41,30 +35,32 @@ const unsigned long ramp_duration_ms = 40000;
 const int LED_PIN = 2; // Common built-in LED pin for ESP32
 bool led_state = false; // Track the current state of the LED
 
-PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
-PhaseSequencer seq(&controller);
+PhaseController* controller;
+PhaseSequencer* seq;
 
 void setup() {
   Serial.begin(115200);
   Serial.setTimeout(20);
   delay(1000);
-  SPIFFS.begin(true);
+
+  controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+  seq = new PhaseSequencer(controller);
   
   // Set up the LED pin
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW); // Ensure it starts off
   
   // controller.enableSync(SYNC_PIN);
-  controller.begin();
+  controller->begin();
   
   // Initialize carrier PWM for each channel
-  controller.initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
+  controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
   // Dry Takeoff Configuration
-  seq.addEaseRampTask(start_freq, end_freq, ramp_duration_ms); // 1Hz to 200Hz over 40000ms
-  seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
+  seq->addEaseRampTask(start_freq, end_freq, ramp_duration_ms); // 1Hz to 200Hz over 40000ms
+  seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
-  seq.start();
+  seq->start();
 }
 
 // --- STATE MACHINE VARIABLES ---
@@ -79,15 +75,16 @@ unsigned long wait_start_time = 0;
 bool ramp_finished = false;
 
 void loop() {
-  controller.run(); // hardware timer drift compensation
-  seq.run();        // state machine queue
+  controller->run(); // hardware timer drift compensation
+  seq->run();        // state machine queue
 
   unsigned long current_millis = millis();
 
   // 1. Detect ramp completion cleanly
   // Using 199.5f accounts for floating point inaccuracy and hardware timer drift
-  if (!ramp_finished && controller.getFrequency() >= end_freq - 0.5f) {
+  if (!ramp_finished && controller->getFrequency() >= end_freq - 0.5f) {
     ramp_finished = true;
+    Serial.println("Ramp finished at frequency: " + String(controller->getFrequency()) + " Hz");
     wait_start_time = current_millis; // Start the timer ONCE when ramp finishes
   }
 
@@ -104,8 +101,8 @@ void loop() {
         carrier_duty_sweep = 0.0f;
       }
 
-      controller.setCarrierDutyCycle(1, carrier_duty_sweep);
-      controller.setCarrierDutyCycle(3, carrier_duty_sweep);
+      controller->setCarrierDutyCycle(1, carrier_duty_sweep);
+      controller->setCarrierDutyCycle(3, carrier_duty_sweep);
       
       // TOGGLE THE LED
       led_state = !led_state; // Flip the boolean state

@@ -1,5 +1,5 @@
-#include "JsonPhaseSequencer.h"
 #include "PhaseController.h"
+#include "PhaseSequencer.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <SPIFFS.h>
@@ -12,14 +12,14 @@
 const int NUM_CHANNELS = 4;
 
 const gpio_num_t A_PWM_PIN = GPIO_NUM_23;
-const gpio_num_t B_PWM_PIN = GPIO_NUM_5;
+const gpio_num_t B_PWM_PIN = GPIO_NUM_18;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_21;
-const gpio_num_t D_PWM_PIN = GPIO_NUM_18;
+const gpio_num_t D_PWM_PIN = GPIO_NUM_5;
 
 const gpio_num_t A_CARRIER_PIN = GPIO_NUM_22;
-const gpio_num_t B_CARRIER_PIN = GPIO_NUM_15;
+const gpio_num_t B_CARRIER_PIN = GPIO_NUM_4;
 const gpio_num_t C_CARRIER_PIN = GPIO_NUM_19;
-const gpio_num_t D_CARRIER_PIN = GPIO_NUM_4;
+const gpio_num_t D_CARRIER_PIN = GPIO_NUM_15;
 
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
@@ -35,7 +35,7 @@ const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_d
 
 const float start_freq = 1.0f;
 const float end_freq = 200.0f;
-const unsigned long ramp_duration_ms = 15000;
+const unsigned long ramp_duration_ms = 40000;
 
 // --- INDICATOR LED CONFIGURATION ---
 const int LED_PIN = 2; // Common built-in LED pin for ESP32
@@ -61,7 +61,7 @@ void setup() {
   controller.initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
   // Dry Takeoff Configuration
-  seq.addEaseRampTask(start_freq, end_freq, ramp_duration_ms); // 1Hz to 200Hz over 15000ms
+  seq.addEaseRampTask(start_freq, end_freq, ramp_duration_ms); // 1Hz to 200Hz over 40000ms
   seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq.start();
@@ -70,10 +70,9 @@ void setup() {
 // --- STATE MACHINE VARIABLES ---
 float carrier_duty_sweep = 100.0f;
 const float d_duty_step = 10.0f; 
-int active_pair = 0;            // 0 for pair (0,3), 1 for pair (1,2)
 
 // Timing variables for pausing
-const unsigned long wait_time_ms = 1500; // Time between steps (5 seconds)
+const unsigned long wait_time_ms = 1500; // Time between steps (1.5 seconds)
 unsigned long wait_start_time = 0;
 
 // NEW: Latch to track if the frequency ramp is completely done
@@ -105,7 +104,7 @@ void loop() {
         carrier_duty_sweep = 0.0f;
       }
 
-      controller.setCarrierDutyCycle(0, carrier_duty_sweep);
+      controller.setCarrierDutyCycle(1, carrier_duty_sweep);
       controller.setCarrierDutyCycle(3, carrier_duty_sweep);
       
       // TOGGLE THE LED

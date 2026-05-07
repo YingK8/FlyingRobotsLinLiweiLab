@@ -43,7 +43,8 @@ public:
    * @brief Initialize hardware and start PWM generation at the given frequency.
    * @param initialFreqHz Initial frequency in Hz.
    */
-  void begin(float initialFreqHz);
+  void begin(float initialFreqHz=0.0f);
+
   /**
    * @brief Main loop task for drift compensation. Call regularly in loop().
    */
@@ -76,11 +77,10 @@ public:
 
   // Getters
   /**
-   * @brief Get the frequency for a specific channel.
-   * @param channel Channel index.
+   * @brief Get the global frequency.
    * @return Frequency in Hz.
    */
-  float getFrequency(int channel) const;
+  float getFrequency() const;
   /**
    * @brief Get the phase for a specific channel.
    * @param channel Channel index.
@@ -144,8 +144,7 @@ private:
   float *_phaseOffsetsPct;
   float *_dutyCycles;
   PhaseParams *_params;
-  float *_freqsHz; // Retained for API compatibility, though mainly unused
-                   // logic-wise
+  float _globalFreqHz; // New global frequency variable
 
   // Sync State
   int64_t _lastSyncTimeUs;

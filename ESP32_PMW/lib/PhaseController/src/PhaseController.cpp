@@ -1,7 +1,7 @@
 #include "PhaseController.h"
 
-#ifndef LEDC_APB_CLK_HZ
-#define LEDC_APB_CLK_HZ 80000000UL
+#ifndef APB_CLK_FREQ
+#define APB_CLK_FREQ 80000000UL
 #endif
 
 namespace {
@@ -10,7 +10,7 @@ bool configureCarrierTimerForFreq(ledc_mode_t mode,
                                   uint32_t freqHz,
                                   uint8_t &selectedBits) {
     // Estimate the highest useful resolution for the requested frequency.
-    uint32_t ticksPerCycle = (freqHz > 0) ? (uint32_t)(LEDC_APB_CLK_HZ / freqHz) : 0;
+    uint32_t ticksPerCycle = (freqHz > 0) ? (uint32_t)(APB_CLK_FREQ / freqHz) : 0;
     uint8_t startBits = 1;
     while ((startBits < 15) && ((1UL << startBits) <= ticksPerCycle)) {
         startBits++;
@@ -51,7 +51,6 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _phaseOffsetsPct = new float[_numChannels];
     _dutyCycles = new float[_numChannels];
     _params = new PhaseParams[_numChannels];
-    _freqsHz = new float[_numChannels];
 
     _lastSyncTimeUs = 0;
     _averagedPeriodUs = 20000;
@@ -73,7 +72,6 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
         _pins[i] = pins[i];
         _phaseOffsetsPct[i] = constrain(phaseOffsetsDegrees[i], 0.0, 360.0) / 360.0;
         _dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
-        _freqsHz[i] = 50.0;
     }
 }
 
@@ -86,7 +84,6 @@ PhaseController::~PhaseController() {
     delete[] _phaseOffsetsPct; 
     delete[] _dutyCycles; 
     delete[] _params; 
-    delete[] _freqsHz;
     if (_carrierPinsArray) delete[] _carrierPinsArray;
     if (_carrierDutyCyclePct) delete[] _carrierDutyCyclePct;
 }
@@ -260,9 +257,10 @@ void PhaseController::setGlobalFrequency(float newHz) {
     #if USE_SYNC && !SYNC_AS_SERVER
         return; // Client ignores manual freq
     #endif
-
+    
     int64_t newPeriod = (int64_t)(1000000.0 / newHz);
     int64_t now = esp_timer_get_time();
+    _globalFreqHz = newHz;
     
     portENTER_CRITICAL(&_spinlock);
 
@@ -284,13 +282,6 @@ void PhaseController::setGlobalFrequency(float newHz) {
     for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
     
     portEXIT_CRITICAL(&_spinlock);
-}
-
-void PhaseController::setFrequency(int channel, float newHz) {
-    #if USE_SYNC && !SYNC_AS_SERVER
-        return;
-    #endif
-    _freqsHz[channel] = newHz;
 }
 
 void PhaseController::setDutyCycle(int channel, float dutyPercent) {
@@ -318,9 +309,10 @@ void PhaseController::setPhase(int channel, float degrees) {
     portEXIT_CRITICAL(&_spinlock);
 }
 
-float PhaseController::getFrequency(int channel) const { 
+float PhaseController::getFrequency() const { 
     return 1000000.0 / _averagedPeriodUs; 
 }
+
 float PhaseController::getPhase(int channel) const { 
     #if USE_SYNC && SYNC_AS_SERVER
         return 0.0;
@@ -328,6 +320,7 @@ float PhaseController::getPhase(int channel) const {
         return _phaseOffsetsPct[channel] * 360.0;
     #endif
 }
+
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
 void PhaseController::run() {

@@ -46,6 +46,7 @@ PhaseController* PhaseController::_isrInstance = nullptr;
 PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {
     _numChannels = numChannels;
     _periodicTimer = nullptr;
+    _syncPin = GPIO_NUM_NC;  // Initialize to safe value to prevent garbage GPIO access
 
     _pins = new gpio_num_t[_numChannels];
     _phaseOffsetsPct = new float[_numChannels];
@@ -90,6 +91,10 @@ PhaseController::~PhaseController() {
 
 void PhaseController::begin(float initialFreqHz) {
     for(int i = 0; i < _numChannels; i++) {
+        // Validate pin before attempting to use it
+        if (_pins[i] == GPIO_NUM_NC || _pins[i] > GPIO_NUM_39) {
+            continue; // Skip invalid pins
+        }
         gpio_reset_pin(_pins[i]);
         gpio_set_direction(_pins[i], GPIO_MODE_OUTPUT);
         gpio_set_level(_pins[i], 0);
@@ -166,6 +171,9 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
     #endif
 
     for (int i = 0; i < channelLimit; i++) {
+        // Skip invalid GPIO pins to prevent crashes
+        if (self->_pins[i] == GPIO_NUM_NC || self->_pins[i] > GPIO_NUM_39) continue;
+        
         // Local copies for speed
         unsigned long start = self->_params[i].startUs;
         unsigned long end = self->_params[i].endUs;
@@ -368,7 +376,7 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
         _carrierPinsArray[i] = pin;
         _carrierDutyCyclePct[i] = duty;
 
-        if (pin == GPIO_NUM_NC) continue;
+        if (pin == GPIO_NUM_NC || pin > GPIO_NUM_39) continue;  // Skip invalid pins
 
         if (duty >= 100.0f) {
             // 100% duty is treated as true DC high output.

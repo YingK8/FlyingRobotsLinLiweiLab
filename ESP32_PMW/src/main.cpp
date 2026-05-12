@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "PhaseController.h"
 #include "PhaseSequencer.h"
+#include <FS.h>
+#include <SPIFFS.h>
 
 // CONFIGURATION
 const int NUM_CHANNELS = 4;
@@ -30,7 +32,7 @@ const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_d
 
 const float start_freq = 1.0f;
 const float end_freq = 200.0f;
-const unsigned long ramp_duration_ms = 10000;
+const unsigned long ramp_duration_ms = 15000;
 
 // --- INDICATOR LED CONFIGURATION ---
 const int LED_PIN = 2; 
@@ -66,7 +68,7 @@ void setup() {
 float carrier_duty_sweep = 100.0f;
 const float d_duty_step = 10.0f; 
 
-const unsigned long wait_time_ms = 1000; 
+const unsigned long wait_time_ms = 1500; 
 unsigned long wait_start_time = 0;
 
 bool ramp_finished = false;
@@ -91,7 +93,7 @@ void loop() {
         carrier_duty_sweep = 0.0f;
       }
 
-      controller->setCarrierDutyCycle(0, carrier_duty_sweep);
+      // controller->setCarrierDutyCycle(0, carrier_duty_sweep);
       controller->setCarrierDutyCycle(3, carrier_duty_sweep);
       
       led_state = !led_state; 

@@ -50,10 +50,10 @@ void setup() {
   delay(1000);
   // SPIFFS.begin(true); 
   
-  // pinMode(LED_PIN, OUTPUT);
-  // digitalWrite(LED_PIN, LOW); 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW); 
 
-  pinMode(GPIO_NUM_32, INPUT);
+  // pinMode(GPIO_NUM_32, INPUT);
 
   // instantiate the objects dynamically NOW that the OS has booted
   controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
@@ -74,19 +74,19 @@ void loop() {
   controller->run(); 
   seq->run();  
 
-  Serial.print(digitalRead(GPIO_NUM_32));
+  // Serial.print(digitalRead(GPIO_NUM_32));
 
   // --- Blink LED and print frequency every 500 ms ---
-  // unsigned long now = millis();
-  // if (now - lastBlinkTime >= 500) {
-  //   lastBlinkTime = now;
-  //   led_state = !led_state;
-  //   digitalWrite(LED_PIN, led_state);
+  unsigned long now = millis();
+  if (now - lastBlinkTime >= 500) {
+    lastBlinkTime = now;
+    led_state = !led_state;
+    digitalWrite(LED_PIN, led_state);
 
     // Retrieve current ramp frequency (adjust method name if needed)
-    // float freq = controller->getFrequency();  
-    // Serial.print("Ramp Frequency: ");
-    // Serial.print(freq);
-    // Serial.println(" Hz");
-  // }
+    float freq = controller->getFrequency();  
+    Serial.print("Ramp Frequency: ");
+    Serial.print(freq);
+    Serial.println(" Hz");
+  }
 }

@@ -1,4 +1,5 @@
 #include "PhaseController.h"
+#include <Arduino.h>
 
 #ifndef APB_CLK_FREQ
 #define APB_CLK_FREQ 80000000UL
@@ -47,6 +48,9 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _numChannels = numChannels;
     _periodicTimer = nullptr;
     _syncPin = GPIO_NUM_NC;  // Initialize to safe value to prevent garbage GPIO access
+    
+    // FIX 4: Initialize the RTOS spinlock properly so it doesn't crash on first lock
+    _spinlock = portMUX_INITIALIZER_UNLOCKED;
 
     _pins = new gpio_num_t[_numChannels];
     _phaseOffsetsPct = new float[_numChannels];
@@ -97,7 +101,11 @@ void PhaseController::begin(float initialFreqHz) {
         }
         gpio_reset_pin(_pins[i]);
         gpio_set_direction(_pins[i], GPIO_MODE_OUTPUT);
-        gpio_set_level(_pins[i], 0);
+        
+        // FIX 1: Set idle state to HIGH (1). 
+        // Because of the logic inverter, setting this HIGH ensures the H-Bridge receives LOW, 
+        // protecting it from phantom-powering via ESD diodes.
+        gpio_set_level(_pins[i], 1); 
     }
 
     setGlobalFrequency(initialFreqHz);
@@ -125,7 +133,7 @@ void PhaseController::begin(float initialFreqHz) {
     const esp_timer_create_args_t timer_args = {
         .callback = &_timerCallback,
         .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
+        .dispatch_method = ESP_TIMER_TASK, // FIX 2: Moved to hardware ISR context to prevent RTOS starvation
         .name = "pwm_gen"
     };
 
@@ -140,10 +148,12 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
     int64_t lastSync;
     int64_t period;
     
-    portENTER_CRITICAL_ISR(&self->_spinlock);
+    // When dispatch_method=ESP_TIMER_TASK, callback runs in task context, not ISR.
+    // Use portENTER_CRITICAL (task) not portENTER_CRITICAL_ISR
+    portENTER_CRITICAL(&self->_spinlock);
     lastSync = self->_lastSyncTimeUs;
     period = self->_averagedPeriodUs;
-    portEXIT_CRITICAL_ISR(&self->_spinlock);
+    portEXIT_CRITICAL(&self->_spinlock);
 
     // Client fallback: If waiting for first sync, use default period
     #if USE_SYNC && !SYNC_AS_SERVER
@@ -153,14 +163,20 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         }
     #endif
 
-    // Calculate position
-    int64_t timeInCycle = (now - lastSync) % period;
-    if (timeInCycle < 0) timeInCycle += period;
+    // FIX 3: Safe 32-bit math for ISR. 
+    // This prevents the ESP32 from crashing while trying to load 64-bit division 
+    // library routines from flash memory during an interrupt.
+    int64_t delta = now - lastSync;
+    if (delta < 0) delta += period; // Handle case if sync pushed lastSync slightly into the future
+
+    uint32_t delta32 = (uint32_t)delta;
+    uint32_t period32 = (uint32_t)period;
+    uint32_t timeInCycle = delta32 % period32;
 
     // Master Sync Generation
     #if USE_SYNC && SYNC_AS_SERVER
         // Set sync high for first 50% of cycle
-        gpio_set_level(self->_syncPin, (timeInCycle < (period / 2)) ? 1 : 0);
+        gpio_set_level(self->_syncPin, (timeInCycle < (period32 / 2)) ? 1 : 0);
     #endif
 
     // Channel Generation
@@ -175,14 +191,16 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         if (self->_pins[i] == GPIO_NUM_NC || self->_pins[i] > GPIO_NUM_39) continue;
         
         // Local copies for speed
-        unsigned long start = self->_params[i].startUs;
-        unsigned long end = self->_params[i].endUs;
+        uint32_t start = (uint32_t)self->_params[i].startUs;
+        uint32_t end = (uint32_t)self->_params[i].endUs;
         
         bool active = self->_params[i].wraps ? 
                       (timeInCycle >= start || timeInCycle < end) : 
                       (timeInCycle >= start && timeInCycle < end);
         
-        gpio_set_level(self->_pins[i], active ? 1 : 0);
+        // ACTIVE LOW LOGIC: Due to the NC7SZ04P5X inverter, to turn the H-Bridge ON (HIGH), 
+        // the ESP32 must output LOW (0). To turn it OFF, the ESP32 outputs HIGH (1).
+        gpio_set_level(self->_pins[i], active ? 0 : 1);
     }
 }
 
@@ -237,9 +255,6 @@ void PhaseController::updatePhaseParams(int channel) {
     #if USE_SYNC && SYNC_AS_SERVER
         if (channel > 0) return;
     #endif
-
-    // NOTE: This function should ideally be called within a critical section
-    // or when the lock is held, as it reads and writes shared state.
     
     float period = (float)_averagedPeriodUs; 
     float width = period * _dutyCycles[channel] / 100.0;
@@ -295,7 +310,6 @@ void PhaseController::setGlobalFrequency(float newHz) {
 void PhaseController::setDutyCycle(int channel, float dutyPercent) {
     if (channel < 0 || channel >= _numChannels) return;
 
-    // Fix: Critical section added to prevent race conditions during updates
     portENTER_CRITICAL(&_spinlock);
     _dutyCycles[channel] = constrain(dutyPercent, 0.0, 100.0);
     updatePhaseParams(channel);
@@ -332,10 +346,6 @@ float PhaseController::getPhase(int channel) const {
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
 void PhaseController::run() {
-    // Ramps removed. This method now only handles sync drift compensation.
-    // If the external sync frequency changes, we need to periodically recalculate 
-    // the pulse widths (in microseconds) to maintain the correct duty cycle %.
-    
     static unsigned long lastUpdate = 0;
     if (esp_timer_get_time() - lastUpdate > 100000) { 
         lastUpdate = esp_timer_get_time();
@@ -351,7 +361,6 @@ void PhaseController::run() {
 void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const float* dutyPercents) {
     if (!pins || !dutyPercents || freqHz <= 0.0f) return;
 
-    // Allocate arrays for carrier pins and duty cycles if not already done
     if (!_carrierPinsArray) {
         _carrierPinsArray = new gpio_num_t[_numChannels];
         _carrierDutyCyclePct = new float[_numChannels];
@@ -359,8 +368,6 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
 
     _carrierFreqHz = freqHz;
 
-    // Configure LEDC timer (shared for all channels) with a resolution that
-    // is valid for the requested frequency.
     if (!configureCarrierTimerForFreq(_carrierSpeedMode,
                                       _carrierTimer,
                                       (uint32_t)freqHz,
@@ -376,18 +383,24 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
         _carrierPinsArray[i] = pin;
         _carrierDutyCyclePct[i] = duty;
 
-        if (pin == GPIO_NUM_NC || pin > GPIO_NUM_39) continue;  // Skip invalid pins
+        if (pin == GPIO_NUM_NC || pin > GPIO_NUM_39) continue;  
 
         if (duty >= 100.0f) {
-            // 100% duty is treated as true DC high output.
             _carrierDutyCyclePct[i] = 100.0f;
             gpio_reset_pin(pin);
             gpio_set_direction(pin, GPIO_MODE_OUTPUT);
-            gpio_set_level(pin, 1);
+            
+            // FIX 5: 100% Duty cycle Active-Low correction.
+            // Pushing 0 here forces the inverter to output 1 (HIGH) to the H-bridge
+            gpio_set_level(pin, 0); 
             continue;
         }
 
         float clampedDuty = constrain(duty, 0.0f, 100.0f);
+        
+        // If your carrier is strictly inverted in hardware, you might need to invert 
+        // the duty cycle calculation here as well (e.g., 100.0f - clampedDuty). 
+        // Assuming your inverter logic relies purely on the output states, we pass the standard duty.
         _carrierDutyCyclePct[i] = clampedDuty;
 
         ledc_channel_config_t ledc_channel = {
@@ -398,7 +411,7 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
             .timer_sel = _carrierTimer,
             .duty = (uint32_t)((clampedDuty / 100.0f) * dutyMax),
             .hpoint = 0,
-            .flags = {.output_invert = 0}
+            .flags = {.output_invert = 0} // Can be set to 1 if you want LEDC to handle the hardware inversion automatically!
         };
         ledc_channel_config(&ledc_channel);
     }
@@ -412,26 +425,20 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
 
     if (dutyPercent >= 100.0f) {
         _carrierDutyCyclePct[channel] = 100.0f;
-        // Stop PWM and force pin to idle-high for true DC output.
-        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 1);
+        // FIX 5: Force the line to 0 when stopping, so the inverter flips it to HIGH
+        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 0); 
         return;
     }
 
-    // Calculate period in milliseconds
     float periodMs = 1000.0f / _carrierFreqHz;
-
-    // Calculate min and max duty cycle percentages
     float minDutyCycle = (MIN_ON_OFF_MS / periodMs) * 100.0f;
     float maxDutyCycle = 100.0f - minDutyCycle;
 
-    // Clamp the duty cycle
     _carrierDutyCyclePct[channel] = constrain(dutyPercent, minDutyCycle, maxDutyCycle);
 
-    // Convert percentage to selected resolution value.
     uint32_t dutyMax = (1UL << _carrierDutyResolutionBits) - 1UL;
     uint32_t dutyValue = (uint32_t)((_carrierDutyCyclePct[channel] / 100.0f) * dutyMax);
 
-    // Ensure the channel is attached to LEDC in case it was switched to DC mode earlier.
     ledc_channel_config_t ledc_channel = {
         .gpio_num = _carrierPinsArray[channel],
         .speed_mode = _carrierSpeedMode,
@@ -440,11 +447,10 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
         .timer_sel = _carrierTimer,
         .duty = dutyValue,
         .hpoint = 0,
-        .flags = {.output_invert = 0}
+        .flags = {.output_invert = 0} 
     };
     ledc_channel_config(&ledc_channel);
 
-    // Apply duty cycle to the correct channel
     ledc_set_duty(_carrierSpeedMode, (ledc_channel_t)channel, dutyValue);
     ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
 }

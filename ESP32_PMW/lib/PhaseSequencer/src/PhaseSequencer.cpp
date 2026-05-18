@@ -113,6 +113,20 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
                              const float *initialPhase) {
   _trajectory.clear();
 
+  // Calculate exactly how many points we need before we allocate any memory
+  size_t totalPointsNeeded = 0;
+  for (const auto &task : _queue) {
+    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE || task.type == TASK_RAMP_PHASE) {
+      // duration / resolution + 1 extra point for the boundary finish
+      totalPointsNeeded += (task.durationUs / ((int64_t)resolutionMs * 1000LL)) + 2; 
+    } else {
+      totalPointsNeeded += 1;
+    }
+  }
+  
+  // Grab all the RAM we need in one single block. No more resizing!
+  _trajectory.reserve(totalPointsNeeded + 10); // +10 for safety buffer
+
   int64_t currentTimeUs = 0;
   float curFreq[4] = {initialFreq, initialFreq, initialFreq, initialFreq};
   float curDuty[4] = {initialDuty[0], initialDuty[1], initialDuty[2],

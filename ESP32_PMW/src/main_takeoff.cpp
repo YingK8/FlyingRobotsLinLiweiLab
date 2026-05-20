@@ -31,7 +31,7 @@ const float carrier_duty = 100.0;
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};
 
 const float start_freq = 1.0f;
-const float end_freq = 250.0f;
+const float end_freq = 190.0f;
 const unsigned long ramp_duration_ms = 40000;
 // const unsigned long second_ramp_duration_ms = 5000;
 
@@ -65,7 +65,7 @@ void setup() {
 
   seq->addEaseRampTask(start_freq, end_freq, ramp_duration_ms); 
   // seq->addLinearRampTask(start_freq, end_freq, ramp_duration_ms); 
-  seq->compile(100, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
+  seq->compile(25, 0.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();
 }

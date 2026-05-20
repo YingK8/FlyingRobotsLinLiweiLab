@@ -131,10 +131,20 @@ public:
 private:
   PhaseController *_phaseCtrl;
   std::vector<SequenceTask> _queue;
-  std::vector<TrajectoryPoint> _trajectory;
-
+  float _initialFreqHz;
+  float _initialDutyCycles[4];
+  float _initialPhaseDegrees[4];
+  float _currentFreqHz;
+  float _currentDutyCycles[4];
+  float _currentPhaseDegrees[4];
+  float _currentCarrierDutyCycles[4];
   size_t _currentFrameIdx;
   int64_t _taskStartTimeUs;
+  int64_t _taskFrameOffsetUs;
+  int64_t _taskStepUs;
+
+  void resetStreamingState();
+  void applyCurrentState();
 
   float easeInOut(float t);
 };

@@ -5,6 +5,17 @@ PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;
   _taskStartTimeUs = 0;
+  _taskFrameOffsetUs = 0;
+  _taskStepUs = 1000;
+  _initialFreqHz = 0.0f;
+  _currentFreqHz = 0.0f;
+  for (int i = 0; i < 4; i++) {
+    _initialDutyCycles[i] = 0.0f;
+    _initialPhaseDegrees[i] = 0.0f;
+    _currentDutyCycles[i] = 0.0f;
+    _currentPhaseDegrees[i] = 0.0f;
+    _currentCarrierDutyCycles[i] = NAN;
+  }
 }
 
 void PhaseSequencer::reserve(size_t size) { _queue.reserve(size); }
@@ -108,226 +119,199 @@ float PhaseSequencer::easeInOut(float t) {
   return t * t * (3.0f - 2.0f * t);
 }
 
+void PhaseSequencer::resetStreamingState() {
+  _currentFrameIdx = 0;
+  _taskStartTimeUs = 0;
+  _taskFrameOffsetUs = 0;
+  _currentFreqHz = _initialFreqHz;
+
+  for (int i = 0; i < 4; i++) {
+    _currentDutyCycles[i] = _initialDutyCycles[i];
+    _currentPhaseDegrees[i] = _initialPhaseDegrees[i];
+    _currentCarrierDutyCycles[i] = NAN;
+  }
+}
+
+void PhaseSequencer::applyCurrentState() {
+  if (!_phaseCtrl)
+    return;
+
+  _phaseCtrl->setGlobalFrequency(_currentFreqHz);
+
+  for (int i = 0; i < 4; i++) {
+    _phaseCtrl->setDutyCycle(i, _currentDutyCycles[i]);
+    _phaseCtrl->setPhase(i, _currentPhaseDegrees[i]);
+
+    if (!isnan(_currentCarrierDutyCycles[i])) {
+      _phaseCtrl->setCarrierDutyCycle(i, _currentCarrierDutyCycles[i]);
+    }
+  }
+}
+
 void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
                              const float *initialDuty,
                              const float *initialPhase) {
-  _trajectory.clear();
+  _initialFreqHz = initialFreq;
+  _taskStepUs = (int64_t)resolutionMs * 1000LL;
+  if (_taskStepUs <= 0)
+    _taskStepUs = 1000;
 
-  // Calculate exactly how many points we need before we allocate any memory
-  size_t totalPointsNeeded = 0;
-  for (const auto &task : _queue) {
-    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE || task.type == TASK_RAMP_PHASE) {
-      // duration / resolution + 1 extra point for the boundary finish
-      totalPointsNeeded += (task.durationUs / ((int64_t)resolutionMs * 1000LL)) + 2; 
-    } else {
-      totalPointsNeeded += 1;
-    }
+  for (int i = 0; i < 4; i++) {
+    _initialDutyCycles[i] = initialDuty ? initialDuty[i] : 0.0f;
+    _initialPhaseDegrees[i] = initialPhase ? initialPhase[i] : 0.0f;
   }
-  
-  // Grab all the RAM we need in one single block. No more resizing!
-  _trajectory.reserve(totalPointsNeeded + 10); // +10 for safety buffer
 
-  int64_t currentTimeUs = 0;
-  float curFreq[4] = {initialFreq, initialFreq, initialFreq, initialFreq};
-  float curDuty[4] = {initialDuty[0], initialDuty[1], initialDuty[2],
-                      initialDuty[3]};
-  float curPhase[4] = {initialPhase[0], initialPhase[1], initialPhase[2],
-                       initialPhase[3]};
-  float curCarrier[4] = {NAN, NAN, NAN, NAN};
-
-  for (const auto &task : _queue) {
-    if (task.type == TASK_TRAJECTORY_POINT) {
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        pt.freq[i] = task.startFreq;
-        pt.duty[i] = task.dutyCycles[i];
-        pt.phase[i] = task.startPhases[i];
-        pt.carrierDuties[i] = task.carrierDuties[i];
-        curCarrier[i] = task.carrierDuties[i];
-      }
-      _trajectory.push_back(pt);
-      // If durationUs is used as a delta, increment currentTimeUs
-      currentTimeUs += task.durationUs;
-      continue;
-    }
-    if (task.type == TASK_SET_DUTY_CYCLES) {
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        curDuty[i] = task.dutyCycles[i];
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-
-    } else if (task.type == TASK_SET_CARRIER_DUTY_CYCLES) {
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        curCarrier[i] = task.carrierDuties[i];
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-
-    } else if (task.type == TASK_SET_PHASES) {
-      for (int i = 0; i < 4; i++)
-        curPhase[i] = task.endPhases[i];
-
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-
-    } else if (task.type == TASK_WAIT) {
-      currentTimeUs += task.durationUs;
-
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-
-    } else if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE) {
-      int64_t stepUs = (int64_t)resolutionMs * 1000LL;
-      int64_t elapsed = 0;
-
-      while (elapsed <= task.durationUs) {
-        float t = (float)elapsed / task.durationUs;
-        if (task.type == TASK_RAMP_EASE)
-          t = easeInOut(t);
-
-        for (int i = 0; i < 4; i++) {
-          curFreq[i] = task.startFreq + t * (task.endFreq - task.startFreq);
-        }
-
-        TrajectoryPoint pt = {};
-        pt.timeUs = currentTimeUs + elapsed;
-        for (int i = 0; i < 4; i++) {
-          pt.freq[i] = curFreq[i];
-          pt.duty[i] = curDuty[i];
-          pt.phase[i] = curPhase[i];
-          pt.carrierDuties[i] = curCarrier[i];
-        }
-        _trajectory.push_back(pt);
-
-        elapsed += stepUs;
-      }
-
-      for (int i = 0; i < 4; i++)
-        curFreq[i] = task.endFreq;
-      currentTimeUs += task.durationUs;
-
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-
-    } else if (task.type == TASK_RAMP_PHASE) {
-      int64_t stepUs = (int64_t)resolutionMs * 1000LL;
-      int64_t elapsed = 0;
-
-      while (elapsed <= task.durationUs) {
-        float t = (float)elapsed / task.durationUs;
-
-        // We ease-in/ease-out the phase angle shift to prevent magnetic "jerks"
-        // when the field starts morphing from an ellipse to a circle.
-        t = easeInOut(t);
-
-        for (int i = 0; i < 4; i++) {
-          // Linear interpolation handles the 0->90 and 180->270 shifts
-          // perfectly.
-          curPhase[i] = task.startPhases[i] +
-                        t * (task.endPhases[i] - task.startPhases[i]);
-        }
-
-        TrajectoryPoint pt = {};
-        pt.timeUs = currentTimeUs + elapsed;
-        for (int i = 0; i < 4; i++) {
-          pt.freq[i] = curFreq[i];
-          pt.duty[i] = curDuty[i];
-          pt.phase[i] = curPhase[i];
-          pt.carrierDuties[i] = curCarrier[i];
-        }
-        _trajectory.push_back(pt);
-
-        elapsed += stepUs;
-      }
-
-      for (int i = 0; i < 4; i++)
-        curPhase[i] = task.endPhases[i];
-      currentTimeUs += task.durationUs;
-
-      TrajectoryPoint pt = {};
-      pt.timeUs = currentTimeUs;
-      for (int i = 0; i < 4; i++) {
-        pt.freq[i] = curFreq[i];
-        pt.duty[i] = curDuty[i];
-        pt.phase[i] = curPhase[i];
-        pt.carrierDuties[i] = curCarrier[i];
-      }
-      _trajectory.push_back(pt);
-    }
-  }
+  resetStreamingState();
 }
 
 void PhaseSequencer::start() {
-  if (_trajectory.empty())
-    return;
   _currentFrameIdx = 0;
   _taskStartTimeUs = esp_timer_get_time();
+  _taskFrameOffsetUs = 0;
+  _currentFreqHz = _initialFreqHz;
+
+  for (int i = 0; i < 4; i++) {
+    _currentDutyCycles[i] = _initialDutyCycles[i];
+    _currentPhaseDegrees[i] = _initialPhaseDegrees[i];
+    _currentCarrierDutyCycles[i] = NAN;
+  }
 }
 
 bool PhaseSequencer::isDone() const {
-  return _currentFrameIdx >= _trajectory.size();
+  return _currentFrameIdx >= _queue.size();
 }
 
 // =========================================================
 // HIGH-SPEED HOT LOOP: No math, just pointer lookups
 // =========================================================
 void PhaseSequencer::run() {
-  if (_trajectory.empty())
+  if (_queue.empty() || _currentFrameIdx >= _queue.size())
     return;
 
-  int64_t nowUs = esp_timer_get_time() - _taskStartTimeUs;
+  int64_t nowUs = esp_timer_get_time();
 
-  while (_currentFrameIdx < _trajectory.size() &&
-         nowUs >= _trajectory[_currentFrameIdx].timeUs) {
+  while (_currentFrameIdx < _queue.size()) {
+    SequenceTask &task = _queue[_currentFrameIdx];
+    int64_t elapsedUs = nowUs - _taskStartTimeUs;
+    if (elapsedUs < 0)
+      elapsedUs = 0;
 
-    TrajectoryPoint &pt = _trajectory[_currentFrameIdx];
-
-    _phaseCtrl->setGlobalFrequency(pt.freq[0]);
-
-    for (int i = 0; i < 4; i++) {
-      _phaseCtrl->setDutyCycle(i, pt.duty[i]);
-      _phaseCtrl->setPhase(i, pt.phase[i]);
+    if (task.type == TASK_WAIT) {
+      if (elapsedUs < task.durationUs)
+        return;
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
     }
 
-    // Set carrier duty cycle if present
-    for (int i = 0; i < 4; i++) {
-      if (!isnan(pt.carrierDuties[i]))
-        _phaseCtrl->setCarrierDutyCycle(i, pt.carrierDuties[i]);
+    if (task.type == TASK_SET_DUTY_CYCLES) {
+      for (int i = 0; i < 4; i++) {
+        _currentDutyCycles[i] = task.dutyCycles[i];
+      }
+      applyCurrentState();
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
+    }
+
+    if (task.type == TASK_SET_CARRIER_DUTY_CYCLES) {
+      for (int i = 0; i < 4; i++) {
+        _currentCarrierDutyCycles[i] = task.carrierDuties[i];
+      }
+      applyCurrentState();
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
+    }
+
+    if (task.type == TASK_SET_PHASES) {
+      for (int i = 0; i < 4; i++) {
+        _currentPhaseDegrees[i] = task.endPhases[i];
+      }
+      applyCurrentState();
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
+    }
+
+    if (task.type == TASK_TRAJECTORY_POINT) {
+      _currentFreqHz = task.startFreq;
+      for (int i = 0; i < 4; i++) {
+        _currentDutyCycles[i] = task.dutyCycles[i];
+        _currentPhaseDegrees[i] = task.startPhases[i];
+        _currentCarrierDutyCycles[i] = task.carrierDuties[i];
+      }
+      applyCurrentState();
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
+    }
+
+    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE ||
+        task.type == TASK_RAMP_PHASE) {
+      if (task.durationUs <= 0) {
+        if (task.type == TASK_RAMP_PHASE) {
+          for (int i = 0; i < 4; i++) {
+            _currentPhaseDegrees[i] = task.endPhases[i];
+          }
+        } else {
+          _currentFreqHz = task.endFreq;
+        }
+        applyCurrentState();
+        _currentFrameIdx++;
+        _taskStartTimeUs = nowUs;
+        _taskFrameOffsetUs = 0;
+        continue;
+      }
+
+      int64_t sampleOffsetUs = _taskFrameOffsetUs;
+      while (sampleOffsetUs <= elapsedUs && sampleOffsetUs <= task.durationUs) {
+        float t = (float)sampleOffsetUs / (float)task.durationUs;
+        if (task.type == TASK_RAMP_EASE || task.type == TASK_RAMP_PHASE)
+          t = easeInOut(t);
+
+        if (task.type == TASK_RAMP_PHASE) {
+          for (int i = 0; i < 4; i++) {
+            _currentPhaseDegrees[i] = task.startPhases[i] +
+                                       t * (task.endPhases[i] - task.startPhases[i]);
+          }
+        } else {
+          _currentFreqHz = task.startFreq + t * (task.endFreq - task.startFreq);
+        }
+
+        applyCurrentState();
+
+        if (sampleOffsetUs >= task.durationUs)
+          break;
+        sampleOffsetUs += _taskStepUs;
+        _taskFrameOffsetUs = sampleOffsetUs;
+      }
+
+      if (elapsedUs < task.durationUs)
+        return;
+
+      if (task.type == TASK_RAMP_PHASE) {
+        for (int i = 0; i < 4; i++) {
+          _currentPhaseDegrees[i] = task.endPhases[i];
+        }
+      } else {
+        _currentFreqHz = task.endFreq;
+      }
+      applyCurrentState();
+
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
     }
 
     _currentFrameIdx++;
+    _taskStartTimeUs = nowUs;
+    _taskFrameOffsetUs = 0;
   }
 }

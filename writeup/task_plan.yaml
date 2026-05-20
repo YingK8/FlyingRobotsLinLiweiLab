@@ -1,0 +1,166 @@
+---
+project: Flying Robot Orientation Analysis
+description: |
+  Real-time 3D orientation estimation of a tilted circular object from video frames
+  using PCA-based ellipse detection and projection geometry. Decompose tilt into
+  radial (distance from camera) and azimuthal (in-plane rotation) components.
+
+requirements:
+  software:
+    - python: "3.x"
+    - cv2: "4.x"
+    - numpy: "1.x"
+    - pandas: "1.x"
+    - matplotlib: "3.x"
+    - PIL: "8.x"
+  
+  input:
+    - video_file: "two_channel.mp4 (240 FPS)"
+    - format: "MP4 video format"
+    - content: "Flying robot with circular marker against variable background"
+  
+  output:
+    - csv_file: "double_results.csv"
+    - columns:
+        - frame: "Frame number"
+        - timestamp_sec: "Timestamp in seconds"
+        - detected: "Boolean detection success"
+        - radial_angle_deg: "Tilt from camera face-on (0°=facing, 90°=edge-on)"
+        - azimuthal_angle_deg: "In-plane rotation direction (-90° to +90°)"
+
+tasks:
+  - id: 1
+    title: "Code Review & Simplification"
+    status: completed
+    description: "Reduce overly conservative 5-point checks to 3-point minimums"
+    changes:
+      - file: "double.ipynb (Cell 4)"
+      - lines: [153-154, 157]
+      - rationale: "5-point guards were heuristic; 3 points sufficient for PCA"
+  
+  - id: 2
+    title: "Mathematical Documentation"
+    status: completed
+    description: "Document angle calculation using matrix notation"
+    deliverables:
+      - "Added V0 = [[1,0],[0,1],[0,0]] circle basis explanation"
+      - "Documented V = R_y(θ)@R_x(α)@V0 projection formula"
+      - "Derived plane normal: n = [-sin(α)·u_y, sin(α)·u_x, cos(α)]"
+    file: "double.ipynb (Cell 4, lines 161-185)"
+  
+  - id: 3
+    title: "Implement Angle Decomposition"
+    status: completed
+    description: "Split angle reporting into radial and azimuthal components"
+    specifications:
+      radial_angle:
+        range: "[0°, 90°]"
+        meaning: "Tilt from camera (0°=facing you, 90°=edge-on)"
+        formula: "arccos(minor_len / major_len)"
+      azimuthal_angle:
+        range: "[-90°, +90°]"
+        meaning: "In-plane rotation direction in image plane"
+        formula: "atan2(vy, vx) from PCA eigenvector"
+    csv_columns: ["radial_angle_deg", "azimuthal_angle_deg"]
+  
+  - id: 4
+    title: "Fix Minor-Axis Computation Bug"
+    status: completed
+    description: "Compute minor_len from actual fitted points, not full contour"
+    root_cause: |
+      minor_len was computed from ALL contour points:
+        minor_len = abs(2 * proj_minor.min())
+      But ellipse fit uses only TOP_PTS (top band of circle).
+      This created mismatch: axis_ratio not representative of fitted region.
+    solution: |
+      1. Compute minor_len_full from full contour (fallback)
+      2. When top_pts exist, recompute minor_len from top_pts only:
+         centered_top = top_pts - center
+         proj_minor_top = dot(centered_top, eigenvector[1])
+         minor_len = max(proj_minor_top) - min(proj_minor_top)
+    file: "double.ipynb (Cell 4, lines 253-275)"
+    impact: "Radial angles now align with actual projection geometry"
+  
+  - id: 5
+    title: "Update Visualization Pipeline"
+    status: completed
+    description: "Show both radial and azimuthal angles on overlay"
+    changes:
+      - "Changed text overlay from single angle to two-line display"
+      - "Blue text: Azimuthal angle"
+      - "Magenta text: Radial angle"
+    file: "double.ipynb (Cell 4, lines 320-321)"
+  
+  - id: 6
+    title: "Update Results Plotting"
+    status: completed
+    description: "Create dual-subplot visualization for angle decomposition"
+    deliverables:
+      - "Subplot 1: Radial angle timeline with brightness transition markers"
+      - "Subplot 2: Azimuthal angle timeline with segment means"
+      - "Segment statistics: per-brightness-event mean/std reporting"
+    file: "double.ipynb (Cell 5)"
+    notes: "Plots CSV columns radial_angle_deg and azimuthal_angle_deg"
+
+coordinate_system:
+  image_plane:
+    x: "Rightward"
+    y: "Downward"
+  three_dimensional:
+    x: "Image plane right"
+    y: "Image plane down"
+    z: "Camera depth (away from camera)"
+  pca_eigenvectors:
+    major_axis: "[vx, vy] in image coordinates"
+    minor_axis: "Perpendicular to major in image plane"
+
+key_formulas:
+  axis_ratio: "ry_pca / rx = (minor_len/2) / (major_len/2)"
+  alpha_radians: "acos(axis_ratio)"
+  radial_angle_deg: "degrees(alpha)"
+  azimuthal_angle_deg: "atan2(vy, vx)"
+  plane_normal_3d:
+    nx: "-sin(alpha) * u_y"
+    ny: "sin(alpha) * u_x"
+    nz: "cos(alpha)"
+  where:
+    u: "[vx, vy] / norm([vx, vy])"
+    alpha: "out-of-plane tilt angle"
+
+quality_checks:
+  - "axis_ratio clipped to [0, 1]"
+  - "radial_angle always in [0°, 90°]"
+  - "top_pts must have ≥3 points for valid fit"
+  - "Full contour must have ≥10 points for PCA"
+  - "Contour area must exceed 200 pixels"
+
+validation_tests:
+  - test_head_on:
+      scenario: "Circle facing camera directly"
+      expected_radial: "~0°"
+      expected_normal: "[~0, ~0, ~1]"
+      marker: "axis_ratio ≈ 1"
+  
+  - test_edge_on:
+      scenario: "Circle standing upright (perpendicular to image)"
+      expected_radial: "~90°"
+      expected_normal: "[~±1, ~0, ~0] (or similar sideways)"
+      marker: "axis_ratio ≈ 0"
+  
+  - test_intermediate:
+      scenario: "Circle tilted at ~45°"
+      expected_radial: "~45°"
+      expected_normal: "Mixed x,y,z components"
+      marker: "axis_ratio ≈ cos(45°) ≈ 0.707"
+
+output_files:
+  - double_results.csv: "Raw frame-by-frame detection results"
+  - matplotlib_plots: "Two-subplot angle visualization during Cell 5 execution"
+  - overlay_frames: "Per-frame visualization during Cell 4 processing"
+
+notes:
+  - "Video must be named 'two_channel.mp4' or update input_video_path in Cell 2"
+  - "Output CSV saved to double_results.csv or update output_csv_path in Cell 2"
+  - "Frame display occurs every 10 frames; adjust display_every_n_frames if needed"
+  - "Brightness detection uses bottom-right ROI; adjust roi_size (currently 50px)"
+  - "Crop window is 220×220 pixels centered near frame middle; adjust window_size"

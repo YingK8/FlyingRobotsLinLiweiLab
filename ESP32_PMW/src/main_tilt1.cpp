@@ -31,7 +31,7 @@ const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {100.0, 100.0, 100.0, 10
 
 const float start_freq = 1.0f;
 const float end_freq = 200.0f;
-const unsigned long ramp_duration_ms = 20000;
+const unsigned long ramp_duration_ms = 40000;
 
 // --- INDICATOR LED CONFIGURATION ---
 const int LED_PIN = 2;

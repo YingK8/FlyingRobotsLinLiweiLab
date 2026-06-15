@@ -91,6 +91,8 @@ PhaseController::~PhaseController() {
     delete[] _params; 
     if (_carrierPinsArray) delete[] _carrierPinsArray;
     if (_carrierDutyCyclePct) delete[] _carrierDutyCyclePct;
+    if (_carrierLedcConfigured) delete[] _carrierLedcConfigured;
+    if (_carrierLastDutyTicks) delete[] _carrierLastDutyTicks;
 }
 
 void PhaseController::begin(float initialFreqHz) {
@@ -364,6 +366,8 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
     if (!_carrierPinsArray) {
         _carrierPinsArray = new gpio_num_t[_numChannels];
         _carrierDutyCyclePct = new float[_numChannels];
+        _carrierLedcConfigured = new bool[_numChannels];
+        _carrierLastDutyTicks = new uint32_t[_numChannels];
     }
 
     _carrierFreqHz = freqHz;
@@ -382,25 +386,28 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
         float duty = dutyPercents[i];
         _carrierPinsArray[i] = pin;
         _carrierDutyCyclePct[i] = duty;
+        _carrierLedcConfigured[i] = false;
+        _carrierLastDutyTicks[i] = 0;
 
-        if (pin == GPIO_NUM_NC || pin > GPIO_NUM_39) continue;  
+        if (pin == GPIO_NUM_NC || pin > GPIO_NUM_39) continue;
 
         if (duty >= 100.0f) {
             _carrierDutyCyclePct[i] = 100.0f;
             gpio_reset_pin(pin);
             gpio_set_direction(pin, GPIO_MODE_OUTPUT);
             
-            // FIX 5: 100% Duty cycle Active-Low correction.
-            // Pushing 0 here forces the inverter to output 1 (HIGH) to the H-bridge
-            gpio_set_level(pin, 0); 
+            // 100% duty = carrier permanently ON. The carrier wires DIRECTLY into
+            // the VNH5019 PWM pin (no inverter on this line), so full-on means
+            // driving the pin HIGH.
+            gpio_set_level(pin, 1);
             continue;
         }
 
         float clampedDuty = constrain(duty, 0.0f, 100.0f);
-        
-        // If your carrier is strictly inverted in hardware, you might need to invert 
-        // the duty cycle calculation here as well (e.g., 100.0f - clampedDuty). 
-        // Assuming your inverter logic relies purely on the output states, we pass the standard duty.
+
+        // Active-high carrier: the pin drives the VNH5019 PWM input directly (no
+        // inverter), so duty% = fraction of time the bridge is ON. output_invert=0
+        // and standard duty are correct; do NOT invert here.
         _carrierDutyCyclePct[i] = clampedDuty;
 
         ledc_channel_config_t ledc_channel = {
@@ -414,6 +421,8 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
             .flags = {.output_invert = 0} // Can be set to 1 if you want LEDC to handle the hardware inversion automatically!
         };
         ledc_channel_config(&ledc_channel);
+        _carrierLedcConfigured[i] = true;
+        _carrierLastDutyTicks[i] = (uint32_t)((clampedDuty / 100.0f) * dutyMax);
     }
 }
 
@@ -424,9 +433,14 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
     if (_carrierFreqHz <= 0.0f) return;
 
     if (dutyPercent >= 100.0f) {
+        if (_carrierDutyCyclePct[channel] >= 100.0f && !_carrierLedcConfigured[channel]) {
+            return; // already stopped, nothing to do
+        }
         _carrierDutyCyclePct[channel] = 100.0f;
-        // FIX 5: Force the line to 0 when stopping, so the inverter flips it to HIGH
-        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 0); 
+        // 100% duty = carrier permanently ON. No inverter on the carrier line, so
+        // stop LEDC and park the pin HIGH (idle_level = 1) = full drive to the bridge.
+        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 1);
+        _carrierLedcConfigured[channel] = false; // pin must be re-attached on next PWM duty
         return;
     }
 
@@ -439,18 +453,41 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
     uint32_t dutyMax = (1UL << _carrierDutyResolutionBits) - 1UL;
     uint32_t dutyValue = (uint32_t)((_carrierDutyCyclePct[channel] / 100.0f) * dutyMax);
 
-    ledc_channel_config_t ledc_channel = {
-        .gpio_num = _carrierPinsArray[channel],
-        .speed_mode = _carrierSpeedMode,
-        .channel = (ledc_channel_t)channel,
-        .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = _carrierTimer,
-        .duty = dutyValue,
-        .hpoint = 0,
-        .flags = {.output_invert = 0} 
-    };
-    ledc_channel_config(&ledc_channel);
+    if (!_carrierLedcConfigured[channel]) {
+        // (Re)attach the pin to LEDC. This is the only place the full channel
+        // config runs; it resets hpoint and restarts the output, so doing it on
+        // every duty update causes mid-cycle glitches on the carrier line.
+        ledc_channel_config_t ledc_channel = {
+            .gpio_num = _carrierPinsArray[channel],
+            .speed_mode = _carrierSpeedMode,
+            .channel = (ledc_channel_t)channel,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = _carrierTimer,
+            .duty = dutyValue,
+            .hpoint = 0,
+            .flags = {.output_invert = 0}
+        };
+        esp_err_t err = ledc_channel_config(&ledc_channel);
+        if (err != ESP_OK) {
+            Serial.printf("[PhaseController] ledc_channel_config ch%d pin%d failed: %d\n",
+                          channel, (int)_carrierPinsArray[channel], (int)err);
+            return; // stay unconfigured so the next call retries
+        }
+        // Explicit update: after ledc_stop() some IDF versions don't restart
+        // the output from ledc_channel_config() alone.
+        ledc_set_duty(_carrierSpeedMode, (ledc_channel_t)channel, dutyValue);
+        ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
+        _carrierLedcConfigured[channel] = true;
+        _carrierLastDutyTicks[channel] = dutyValue;
+        return;
+    }
 
+    // Skip writes that don't change the duty at hardware resolution. This also
+    // rate-limits ramps that call this function every loop() iteration.
+    if (dutyValue == _carrierLastDutyTicks[channel]) return;
+
+    // Glitch-free update: latched by hardware at the next PWM period boundary.
     ledc_set_duty(_carrierSpeedMode, (ledc_channel_t)channel, dutyValue);
     ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
+    _carrierLastDutyTicks[channel] = dutyValue;
 }

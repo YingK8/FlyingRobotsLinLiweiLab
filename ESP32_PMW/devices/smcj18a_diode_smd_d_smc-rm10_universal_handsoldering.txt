@@ -1,0 +1,11 @@
+PACKAGE 'd_smc-rm10_universal_handsoldering'
+CLASS IC
+PINCOUNT 2
+PINORDER MAIN ,
+	K__1,
+	A__2
+FUNCTION MAIN MAIN ,
+	1,
+	2
+PACKAGEPROP VALUE SMCJ18A
+END

@@ -8,14 +8,14 @@
 const int NUM_CHANNELS = 4;
 
 const gpio_num_t A_PWM_PIN = GPIO_NUM_32;
-const gpio_num_t B_PWM_PIN = GPIO_NUM_25;
+const gpio_num_t B_PWM_PIN = GPIO_NUM_23;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_27;
-const gpio_num_t D_PWM_PIN = GPIO_NUM_23;
+const gpio_num_t D_PWM_PIN = GPIO_NUM_25;
 
 const gpio_num_t A_CARRIER_PIN = GPIO_NUM_33;
-const gpio_num_t B_CARRIER_PIN = GPIO_NUM_26;
-const gpio_num_t C_CARRIER_PIN = GPIO_NUM_14;
-const gpio_num_t D_CARRIER_PIN = GPIO_NUM_13;
+const gpio_num_t B_CARRIER_PIN = GPIO_NUM_13; 
+const gpio_num_t C_CARRIER_PIN = GPIO_NUM_14; 
+const gpio_num_t D_CARRIER_PIN = GPIO_NUM_26; 
 
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
@@ -49,6 +49,13 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
+  // sync frames
+  for (int i = 0; i < 4; i++) {
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
+  }
+
   controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
   seq = new PhaseSequencer(controller);
 
@@ -61,9 +68,9 @@ void setup() {
   seq->start();
 }
 
-// --- STATE MACHINE: sweep A (ch0) and C (ch2) from 50% down to 0% ---
-// Start at 60 so first decrement lands on 50%; B and D stay at 100%.
-float carrier_duty_sweep = 60.0f;
+// --- STATE MACHINE: sweep A (ch0) and C (ch2) from 100% down to 0% after ramp ---
+// Hold 100% through spin-up, then step down; B and D stay at 100%.
+float carrier_duty_sweep = 100.0f;
 const float d_duty_step = 10.0f;
 
 const unsigned long wait_time_ms = 3000;
@@ -82,7 +89,12 @@ void loop() {
     wait_start_time = current_millis;
   }
 
-  // Sweep A and C from 50% down to 0%; B and D remain at 100%
+  // NOTE: do NOT drop A/C carrier during the frequency ramp. The disk must spin
+  // up at full power on all four channels, or the field is asymmetric (A/C weaker
+  // than B/D) and destabilises before reaching 200 Hz. The tilt happens only after
+  // spin-up, via the stepped sweep below.
+
+  // Sweep A and C from 100% down to 0% (after spin-up); B and D remain at 100%
   if (ramp_finished && carrier_duty_sweep > 0.0f) {
 
     if (current_millis - wait_start_time >= wait_time_ms) {

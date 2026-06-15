@@ -136,6 +136,8 @@ private:
   gpio_num_t *_carrierPinsArray = nullptr;
   float _carrierFreqHz;
   float *_carrierDutyCyclePct = nullptr;
+  bool *_carrierLedcConfigured = nullptr;   // LEDC channel attached to the pin?
+  uint32_t *_carrierLastDutyTicks = nullptr; // last duty written, in timer ticks
   ledc_mode_t _carrierSpeedMode = LEDC_LOW_SPEED_MODE;
   ledc_timer_t _carrierTimer = LEDC_TIMER_0;
   uint8_t _carrierDutyResolutionBits = 10;

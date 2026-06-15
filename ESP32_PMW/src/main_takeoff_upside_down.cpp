@@ -21,8 +21,8 @@ const gpio_num_t D_CARRIER_PIN = GPIO_NUM_26;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
 
-// rotation is counter-clockwise: A -> C -> B -> D
-const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
+// rotation is clockwise: D -> B -> C -> A
+const float INITIAL_PHASES[NUM_CHANNELS] = {270.0, 90.0, 180.0, 0.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
@@ -60,10 +60,10 @@ void setup() {
 
   // create sequencer with valid controller pointer
   seq = new PhaseSequencer(controller);
-  // controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
+  controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
   seq->addEaseRampTask(start_freq, end_freq, ramp_duration_ms); 
-  seq->addLinearRampTask(start_freq, end_freq, ramp_duration_ms); 
+  // seq->addLinearRampTask(start_freq, end_freq, ramp_duration_ms); 
   seq->compile(25, 0.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();

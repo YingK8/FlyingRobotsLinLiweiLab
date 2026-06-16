@@ -24,7 +24,9 @@ const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
 
 // rotation is counter-clockwise: A -> C -> B -> D
-const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
+// const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
+// rotation is clockwise: D -> B -> C -> A
+const float INITIAL_PHASES[NUM_CHANNELS] = {270.0, 90.0, 180.0, 0.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
@@ -82,10 +84,10 @@ const unsigned long hold_time_ms = 2500;        // hold at each duty level
 const unsigned long transition_time_ms = 500;   // cubic ramp between levels (3s total per step)
 unsigned long state_start_time = 0;
 
-// only channels 0 and 3 sweep down; 1 and 2 stay at 100%
+// only channels 0(A) and 2(C) sweep down; 1(B) and 3(D) stay at 100%
 void setSweepCarrierDuty(float duty) {
-  controller->setCarrierDutyCycle(0, duty);
-  controller->setCarrierDutyCycle(3, duty);
+  controller->setCarrierDutyCycle(1, duty);
+  controller->setCarrierDutyCycle(2, duty);
 }
 
 void loop() {

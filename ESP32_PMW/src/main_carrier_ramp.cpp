@@ -27,7 +27,7 @@ const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
 const int PWM_FREQ = 15000; 
-const float carrier_duty = 100.0;
+const float carrier_duty = 0.0;
 const unsigned long ramp_duration_ms = 10000;
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};
 
@@ -61,7 +61,7 @@ void setup() {
   seq = new PhaseSequencer(controller);
   controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
-  // seq->addCarrierRampTask(carrier_duty, 100.0f, ramp_duration_ms, TASK_RAMP_LINEAR);
+  seq->addCarrierRampTask(carrier_duty, 100.0f, ramp_duration_ms, TASK_RAMP_LINEAR);
   seq->compile(25, start_freq, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();

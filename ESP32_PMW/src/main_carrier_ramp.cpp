@@ -21,18 +21,17 @@ const gpio_num_t D_CARRIER_PIN = GPIO_NUM_26;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
 
-// rotation is clockwise: D -> B -> C -> A
-const float INITIAL_PHASES[NUM_CHANNELS] = {270.0, 90.0, 180.0, 0.0};
+// rotation is counter-clockwise: A -> C -> B -> D
+const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
 const int PWM_FREQ = 15000; 
 const float carrier_duty = 100.0;
+const unsigned long ramp_duration_ms = 10000;
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};
 
-const float start_freq = 1.0f;
-const float end_freq = 190.0f;
-const unsigned long ramp_duration_ms = 40000;
+const float start_freq = 190.0f;
 
 // --- INDICATOR LED CONFIGURATION ---
 const int LED_PIN = 2; 
@@ -62,9 +61,8 @@ void setup() {
   seq = new PhaseSequencer(controller);
   controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
-  seq->addPWMRampTask(start_freq, end_freq, ramp_duration_ms, TASK_RAMP_EASE);
-  // seq->addPWMRampTask(start_freq, end_freq, ramp_duration_ms, TASK_RAMP_LINEAR);
-  seq->compile(25, 0.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
+  // seq->addCarrierRampTask(carrier_duty, 100.0f, ramp_duration_ms, TASK_RAMP_LINEAR);
+  seq->compile(25, start_freq, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();
 }

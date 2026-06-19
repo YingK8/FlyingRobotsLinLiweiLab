@@ -66,7 +66,7 @@ void setup() {
   controller->begin();
   controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
-  seq->addEaseRampTask(start_freq, end_freq, ramp_duration_ms); 
+  seq->addPWMRampTask(start_freq, end_freq, ramp_duration_ms, TASK_RAMP_EASE);
   seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();

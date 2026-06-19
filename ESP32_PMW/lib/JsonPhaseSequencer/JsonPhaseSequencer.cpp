@@ -55,10 +55,16 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename,
       addWaitTask(durationMs);
       called = true;
     } else if (method == "addLinearRampTask") {
-      addLinearRampTask(from, to, durationMs);
+      addPWMRampTask(from, to, durationMs, TASK_RAMP_LINEAR);
       called = true;
     } else if (method == "addEaseRampTask") {
-      addEaseRampTask(from, to, durationMs);
+      addPWMRampTask(from, to, durationMs, TASK_RAMP_EASE);
+      called = true;
+    } else if (method == "addCarrierRampTask") {
+      addCarrierRampTask(from, to, durationMs, TASK_RAMP_LINEAR);
+      called = true;
+    } else if (method == "addCarrierEaseRampTask") {
+      addCarrierRampTask(from, to, durationMs, TASK_RAMP_EASE);
       called = true;
     } else if (method == "addPhaseRampTask" && hasValidChannel()) {
       float startPhases[4] = {0, 0, 0, 0};

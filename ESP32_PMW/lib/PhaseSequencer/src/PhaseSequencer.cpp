@@ -72,27 +72,39 @@ void PhaseSequencer::addWaitTask(uint32_t durationMs) {
   _queue.push_back(task);
 }
 
-void PhaseSequencer::addLinearRampTask(float startHz, float endHz,
-                                       uint32_t durationMs) {
+void PhaseSequencer::addPWMRampTask(float startHz, float endHz,
+                                 uint32_t durationMs, TaskType type) {
   if (durationMs == 0)
     durationMs = 1;
   SequenceTask task = {};
-  task.type = TASK_RAMP_LINEAR;
+  task.type = type;
+  task.cls = RAMP_PWM;
   task.durationUs = (int64_t)durationMs * 1000LL;
   task.startFreq = startHz;
   task.endFreq = endHz;
   _queue.push_back(task);
 }
 
-void PhaseSequencer::addEaseRampTask(float startHz, float endHz,
-                                     uint32_t durationMs) {
+void PhaseSequencer::addCarrierRampTask(float startDuty, float endDuty,
+                                        uint32_t durationMs, TaskType type) {
   if (durationMs == 0)
     durationMs = 1;
+  if (startDuty < 0.0f)
+    startDuty = 0.0f;
+  if (startDuty > 100.0f)
+    startDuty = 100.0f;
+  if (endDuty < 0.0f)
+    endDuty = 0.0f;
+  if (endDuty > 100.0f)
+    endDuty = 100.0f;
   SequenceTask task = {};
-  task.type = TASK_RAMP_EASE;
+  task.type = type;
+  task.cls = RAMP_CARRIER;
   task.durationUs = (int64_t)durationMs * 1000LL;
-  task.startFreq = startHz;
-  task.endFreq = endHz;
+  for (int i = 0; i < 4; i++) {
+    task.startCarriers[i] = startDuty;
+    task.endCarriers[i] = endDuty;
+  }
   _queue.push_back(task);
 }
 
@@ -102,7 +114,8 @@ void PhaseSequencer::addPhaseRampTask(const float *startPhases,
   if (durationMs == 0)
     durationMs = 1;
   SequenceTask task = {};
-  task.type = TASK_RAMP_PHASE;
+  task.type = TASK_RAMP_EASE;
+  task.cls = RAMP_PHASE;
   task.durationUs = (int64_t)durationMs * 1000LL;
   for (int i = 0; i < 4; i++) {
     task.startPhases[i] = startPhases[i];
@@ -175,6 +188,10 @@ void PhaseSequencer::start() {
     _currentPhaseDegrees[i] = _initialPhaseDegrees[i];
     _currentCarrierDutyCycles[i] = NAN;
   }
+
+  // Push the initial state to the hardware immediately, so the configured
+  // frequency/duty/phase are driven even before (or without) any queued task.
+  applyCurrentState();
 }
 
 bool PhaseSequencer::isDone() const {
@@ -252,16 +269,31 @@ void PhaseSequencer::run() {
       continue;
     }
 
-    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE ||
-        task.type == TASK_RAMP_PHASE) {
-      if (task.durationUs <= 0) {
-        if (task.type == TASK_RAMP_PHASE) {
-          for (int i = 0; i < 4; i++) {
-            _currentPhaseDegrees[i] = task.endPhases[i];
-          }
-        } else {
-          _currentFreqHz = task.endFreq;
+    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE) {
+      // Interpolate the target quantity (selected by task.cls) at fraction t.
+      auto applyRampAt = [&](float t) {
+        switch (task.cls) {
+        case RAMP_CARRIER:
+          for (int i = 0; i < 4; i++)
+            _currentCarrierDutyCycles[i] =
+                task.startCarriers[i] +
+                t * (task.endCarriers[i] - task.startCarriers[i]);
+          break;
+        case RAMP_PHASE:
+          for (int i = 0; i < 4; i++)
+            _currentPhaseDegrees[i] =
+                task.startPhases[i] +
+                t * (task.endPhases[i] - task.startPhases[i]);
+          break;
+        case RAMP_PWM:
+        default:
+          _currentFreqHz = task.startFreq + t * (task.endFreq - task.startFreq);
+          break;
         }
+      };
+
+      if (task.durationUs <= 0) {
+        applyRampAt(1.0f);
         applyCurrentState();
         _currentFrameIdx++;
         _taskStartTimeUs = nowUs;
@@ -272,18 +304,10 @@ void PhaseSequencer::run() {
       int64_t sampleOffsetUs = _taskFrameOffsetUs;
       while (sampleOffsetUs <= elapsedUs && sampleOffsetUs <= task.durationUs) {
         float t = (float)sampleOffsetUs / (float)task.durationUs;
-        if (task.type == TASK_RAMP_EASE || task.type == TASK_RAMP_PHASE)
+        if (task.type == TASK_RAMP_EASE)
           t = easeInOut(t);
 
-        if (task.type == TASK_RAMP_PHASE) {
-          for (int i = 0; i < 4; i++) {
-            _currentPhaseDegrees[i] = task.startPhases[i] +
-                                       t * (task.endPhases[i] - task.startPhases[i]);
-          }
-        } else {
-          _currentFreqHz = task.startFreq + t * (task.endFreq - task.startFreq);
-        }
-
+        applyRampAt(t);
         applyCurrentState();
 
         if (sampleOffsetUs >= task.durationUs)
@@ -295,13 +319,7 @@ void PhaseSequencer::run() {
       if (elapsedUs < task.durationUs)
         return;
 
-      if (task.type == TASK_RAMP_PHASE) {
-        for (int i = 0; i < 4; i++) {
-          _currentPhaseDegrees[i] = task.endPhases[i];
-        }
-      } else {
-        _currentFreqHz = task.endFreq;
-      }
+      applyRampAt(1.0f);
       applyCurrentState();
 
       _currentFrameIdx++;

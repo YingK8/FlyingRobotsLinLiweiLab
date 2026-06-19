@@ -10,18 +10,28 @@ enum TaskType {
   TASK_SET_CARRIER_DUTY_CYCLES,
   TASK_SET_PHASES, // NEW: Instant phase snap
   TASK_WAIT,
-  TASK_RAMP_LINEAR,
-  TASK_RAMP_EASE,
-  TASK_RAMP_PHASE,      // NEW: Phase interpolation
+  TASK_RAMP_LINEAR,     // Ramp with linear interpolation
+  TASK_RAMP_EASE,       // Ramp with cubic ease-in/out interpolation
   TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON
                         // import)
 };
 
+// For ramp tasks, which quantity is being interpolated. (`class` is a reserved
+// keyword in C++, so the SequenceTask field is named `cls`.)
+enum RampTarget {
+  RAMP_PWM,     // global PWM frequency (Hz)
+  RAMP_CARRIER, // carrier duty cycle (%) on all channels
+  RAMP_PHASE,   // per-channel phase (degrees)
+};
+
 struct SequenceTask {
   TaskType type;
+  RampTarget cls; // for TASK_RAMP_* tasks: what is being ramped
   int64_t durationUs;
   float startFreq;
   float endFreq;
+  float startCarriers[4];
+  float endCarriers[4];
   float dutyCycles[4];
   float carrierDuties[4];
   float startPhases[4];
@@ -80,21 +90,27 @@ public:
    */
   void addWaitTask(uint32_t durationMs);
   /**
-   * @brief Add a linear frequency ramp task.
+   * @brief Add a PWM frequency ramp task.
    * @param startHz Start frequency in Hz.
    * @param endHz End frequency in Hz.
    * @param durationMs Duration in milliseconds.
+   * @param type Ramp interpolation type: TASK_RAMP_LINEAR (default) or
+   *             TASK_RAMP_EASE.
    */
-  void addLinearRampTask(float startHz, float endHz, uint32_t durationMs);
+  void addPWMRampTask(float startHz, float endHz, uint32_t durationMs,
+                   TaskType type = TASK_RAMP_LINEAR);
   /**
-   * @brief Add an ease (cubic) frequency ramp task.
-   * @param startHz Start frequency in Hz.
-   * @param endHz End frequency in Hz.
+   * @brief Add a carrier duty cycle ramp task (applied to all channels).
+   * @param startDuty Start carrier duty cycle (0-100%).
+   * @param endDuty End carrier duty cycle (0-100%).
    * @param durationMs Duration in milliseconds.
+   * @param type Ramp interpolation type: TASK_RAMP_LINEAR (default) or
+   *             TASK_RAMP_EASE.
    */
-  void addEaseRampTask(float startHz, float endHz, uint32_t durationMs);
+  void addCarrierRampTask(float startDuty, float endDuty, uint32_t durationMs,
+                          TaskType type = TASK_RAMP_LINEAR);
   /**
-   * @brief Add a phase ramp task for all channels.
+   * @brief Add a phase ramp task for all channels (cubic ease).
    * @param startPhases Array of start phases (degrees).
    * @param endPhases Array of end phases (degrees).
    * @param durationMs Duration in milliseconds.

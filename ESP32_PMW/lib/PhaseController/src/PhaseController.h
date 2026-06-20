@@ -117,6 +117,11 @@ public:
    */
   void setCarrierDutyCycle(int channel, float dutyPercent);
 
+  // Diagnostics: per-channel delivered duty, measured from the ISR (% active
+  // since the last reset). Lets you see the firmware's real per-channel output.
+  float getMeasuredDuty(int channel);
+  void resetMeasuredCounts();
+
 private:
   // Minimum on/off period constraint: 0.0 ms
   const float MIN_ON_OFF_MS = 0.0f;
@@ -156,6 +161,10 @@ private:
   static PhaseController *_isrInstance;
   int64_t _lastIsrTimeUs;
   bool _firstSyncReceived;
+
+  // Diagnostics (written in _timerCallback, read from loop)
+  volatile uint32_t *_isrActiveCount = nullptr;
+  volatile uint32_t _isrSampleCount = 0;
 
   // Concurrency
   portMUX_TYPE _spinlock = portMUX_INITIALIZER_UNLOCKED;

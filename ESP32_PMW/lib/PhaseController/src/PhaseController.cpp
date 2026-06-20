@@ -57,6 +57,10 @@ PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffse
     _dutyCycles = new float[_numChannels];
     _params = new PhaseParams[_numChannels];
 
+    _isrActiveCount = new uint32_t[_numChannels];
+    for (int i = 0; i < _numChannels; i++) _isrActiveCount[i] = 0;
+    _isrSampleCount = 0;
+
     _lastSyncTimeUs = 0;
     _averagedPeriodUs = 20000;
     _lastIsrTimeUs = 0;
@@ -88,7 +92,8 @@ PhaseController::~PhaseController() {
     delete[] _pins; 
     delete[] _phaseOffsetsPct; 
     delete[] _dutyCycles; 
-    delete[] _params; 
+    delete[] _params;
+    delete[] (uint32_t*)_isrActiveCount;
     if (_carrierPinsArray) delete[] _carrierPinsArray;
     if (_carrierDutyCyclePct) delete[] _carrierDutyCyclePct;
 }
@@ -201,7 +206,11 @@ void IRAM_ATTR PhaseController::_timerCallback(void* arg) {
         // ACTIVE LOW LOGIC: Due to the NC7SZ04P5X inverter, to turn the H-Bridge ON (HIGH), 
         // the ESP32 must output LOW (0). To turn it OFF, the ESP32 outputs HIGH (1).
         gpio_set_level(self->_pins[i], active ? 0 : 1);
+
+        // Diagnostic: count how often each channel is actually driven active.
+        if (active) self->_isrActiveCount[i]++;
     }
+    self->_isrSampleCount++;
 }
 
 void IRAM_ATTR PhaseController::_onSyncInterrupt() {
@@ -345,6 +354,20 @@ float PhaseController::getPhase(int channel) const {
 
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
+float PhaseController::getMeasuredDuty(int channel) {
+    if (channel < 0 || channel >= _numChannels) return 0.0f;
+    uint32_t s = _isrSampleCount;
+    if (s == 0) return 0.0f;
+    return 100.0f * (float)_isrActiveCount[channel] / (float)s;
+}
+
+void PhaseController::resetMeasuredCounts() {
+    portENTER_CRITICAL(&_spinlock);
+    for (int i = 0; i < _numChannels; i++) _isrActiveCount[i] = 0;
+    _isrSampleCount = 0;
+    portEXIT_CRITICAL(&_spinlock);
+}
+
 void PhaseController::run() {
     static unsigned long lastUpdate = 0;
     if (esp_timer_get_time() - lastUpdate > 100000) { 
@@ -390,9 +413,8 @@ void PhaseController::initCarrierPWM(const gpio_num_t* pins, float freqHz, const
             gpio_reset_pin(pin);
             gpio_set_direction(pin, GPIO_MODE_OUTPUT);
             
-            // FIX 5: 100% Duty cycle Active-Low correction.
-            // Pushing 0 here forces the inverter to output 1 (HIGH) to the H-bridge
-            gpio_set_level(pin, 0); 
+            // Carrier pins are driven DIRECTLY (no inverter): 100% = constant HIGH = full on.
+            gpio_set_level(pin, 1);
             continue;
         }
 
@@ -425,8 +447,8 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
 
     if (dutyPercent >= 100.0f) {
         _carrierDutyCyclePct[channel] = 100.0f;
-        // FIX 5: Force the line to 0 when stopping, so the inverter flips it to HIGH
-        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 0); 
+        // Carrier pins are direct (no inverter): idle HIGH at 100% = constant on.
+        ledc_stop(_carrierSpeedMode, (ledc_channel_t)channel, 1);
         return;
     }
 

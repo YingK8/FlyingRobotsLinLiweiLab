@@ -1,10 +1,12 @@
-"""Vision front-end: camera frame -> marker height (mm) with a Kalman estimate.
+"""Vision front-end: camera frame -> robot height (mm) with a Kalman estimate.
 
-Pipeline: capture -> HSV threshold a bright LED/reflective marker -> largest
-contour centroid (u, v) -> convert vertical pixel to millimetres -> Kalman filter
-(constant-acceleration z model) for a smoothed, latency-predictable (z, z_dot).
+Pipeline: capture -> MOG2 background subtraction (the robot is the moving
+foreground against the static rig) -> largest contour centroid (u, v) -> convert
+vertical pixel to millimetres -> Kalman filter (constant-acceleration z model) for
+a smoothed, latency-predictable (z, z_dot).
 
-Single front camera => only the vertical (height) axis is observed here.
+The `BlobDetector` here is shared with the lateral (downward-camera) tracker in
+lateral.py. Single front camera => only the vertical (height) axis is observed.
 """
 import time
 
@@ -14,6 +16,7 @@ import numpy as np
 from config import (
     CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, FPS,
     HSV_LOWER, HSV_UPPER, MIN_BLOB_AREA_PX,
+    BG_HISTORY, BG_VAR_THRESHOLD, MORPH_KERNEL,
     PX_PER_MM, Z_REF_PX, DEFAULT_KALMAN, KalmanParams,
 )
 
@@ -100,6 +103,50 @@ def find_marker(frame, hsv_lower=HSV_LOWER, hsv_upper=HSV_UPPER,
     return u, v, area
 
 
+class BlobDetector:
+    """MOG2 background-subtraction blob detector.
+
+    Returns (u, v, area) of the largest moving foreground blob, or None. Keep ONE
+    instance per camera -- it carries the learned background model, so it needs a
+    few frames of a still background to settle before the robot is reliable.
+    """
+
+    def __init__(self, history=BG_HISTORY, var_threshold=BG_VAR_THRESHOLD,
+                 min_area=MIN_BLOB_AREA_PX, morph=MORPH_KERNEL, roi=None):
+        self.bg = cv2.createBackgroundSubtractorMOG2(
+            history=history, varThreshold=var_threshold, detectShadows=False)
+        self.min_area = min_area
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph, morph))
+        self.roi = roi  # (x0, y0, x1, y1) to limit the search, or None for full frame
+
+    def detect(self, frame):
+        x0 = y0 = 0
+        view = frame
+        if self.roi is not None:
+            x0, y0, x1, y1 = self.roi
+            view = frame[y0:y1, x0:x1]
+        mask = self.bg.apply(view)
+        # Hard-threshold (drops any residual MOG2 shadow grey), then despeckle.
+        _, mask = cv2.threshold(mask, 200, 255, cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        c = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(c)
+        if area < self.min_area:
+            return None
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            return None
+        # Add the ROI origin back so coordinates are in full-frame pixels.
+        u = M["m10"] / M["m00"] + x0
+        v = M["m01"] / M["m00"] + y0
+        return u, v, area
+
+
 def pixel_v_to_mm(v: float, z_ref_px: float = Z_REF_PX,
                   px_per_mm: float = PX_PER_MM) -> float:
     """Vertical pixel -> height in mm. Image v grows downward, so negate."""
@@ -110,10 +157,11 @@ class HeightTracker:
     """Glue: pull a frame, detect marker, return filtered height (mm)."""
 
     def __init__(self, cap: cv2.VideoCapture, kalman: KalmanZ = None,
-                 draw: bool = False):
+                 draw: bool = False, detector: "BlobDetector" = None):
         self.cap = cap
         self.kf = kalman or KalmanZ()
         self.draw = draw
+        self.detector = detector or BlobDetector()
         self._last_t = time.monotonic()
 
     def step(self):
@@ -126,7 +174,7 @@ class HeightTracker:
         dt = now - self._last_t
         self._last_t = now
 
-        det = find_marker(frame)
+        det = self.detector.detect(frame)
         z_meas = None
         if det is not None:
             u, v, _area = det

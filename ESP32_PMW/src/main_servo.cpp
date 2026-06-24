@@ -21,7 +21,9 @@
 //  Safety: commanded frequency is clamped to [F_MIN, F_MAX] and slew-limited.
 //  If no F/S/P command arrives for CMD_TIMEOUT_MS, the controller ramps the
 //  frequency down to F_LAND (controlled descent) -- it never hard-cuts, which
-//  would drop the craft.
+//  would drop the craft. On that timeout (and on 'S') it ALSO levels all carrier
+//  duties back to nominal, so a host crash mid-attitude-correction drops the craft
+//  straight down instead of tipping it over.
 // ============================================================================
 
 // CONFIGURATION
@@ -87,6 +89,17 @@ static inline float clampf(float v, float lo, float hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
+// Latched so we level the carriers exactly once per loss-of-comms episode and
+// don't fight live A<ch,duty> commands while the host is alive.
+bool carriers_leveled = false;
+
+// Reset every carrier to the nominal full-on duty -> symmetric field -> no tilt.
+void levelCarriers() {
+  for (int ch = 0; ch < NUM_CHANNELS; ch++) {
+    controller->setCarrierDutyCycle(ch, carrier_duty);
+  }
+}
+
 void sendTelemetry() {
   Serial.printf("T,%lu,%.2f,%.1f,%.1f,%.1f,%.1f\n",
                 millis(), applied_freq,
@@ -121,6 +134,7 @@ void handleCommand(const char* s) {
     }
     case 'S': case 's': {
       target_freq = F_LAND;            // controlled descent
+      levelCarriers();                 // and drop straight down (no residual tilt)
       last_cmd_ms = millis();
       break;
     }
@@ -194,9 +208,16 @@ void loop() {
   // ----- COMMAND MODE -----
   pollSerial();
 
-  // Watchdog: stale comms -> controlled descent (never a hard cut).
+  // Watchdog: stale comms -> controlled descent (never a hard cut) AND level the
+  // carriers once, so a host crash mid-tilt drops straight down, not sideways.
   if (now - last_cmd_ms > CMD_TIMEOUT_MS) {
     target_freq = F_LAND;
+    if (!carriers_leveled) {
+      levelCarriers();
+      carriers_leveled = true;
+    }
+  } else {
+    carriers_leveled = false;  // comms alive again -> A<ch,duty> back in control
   }
 
   // Slew-limit the applied frequency toward the target.

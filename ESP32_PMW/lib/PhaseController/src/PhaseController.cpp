@@ -44,11 +44,12 @@ bool configureCarrierTimerForFreq(ledc_mode_t mode,
 
 PhaseController* PhaseController::_isrInstance = nullptr;
 
-PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels) {
+PhaseController::PhaseController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const float* dutyCycles, int numChannels, int enablePin) {
     _numChannels = numChannels;
     _periodicTimer = nullptr;
     _syncPin = GPIO_NUM_NC;  // Initialize to safe value to prevent garbage GPIO access
-    
+    _enablePin = (gpio_num_t)enablePin;   // VNH5019 EN pin (GPIO_NUM_NC if none)
+
     // FIX 4: Initialize the RTOS spinlock properly so it doesn't crash on first lock
     _spinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -110,7 +111,15 @@ void PhaseController::begin(float initialFreqHz) {
         // FIX 1: Set idle state to HIGH (1). 
         // Because of the logic inverter, setting this HIGH ensures the H-Bridge receives LOW, 
         // protecting it from phantom-powering via ESD diodes.
-        gpio_set_level(_pins[i], 1); 
+        gpio_set_level(_pins[i], 1);
+    }
+
+    // Arm the VNH5019 EN pin (active HIGH = enabled) if one was configured. PWM
+    // duty starts idle, so enabling here is safe; disableOutputs() pulls it low.
+    if (_enablePin != GPIO_NUM_NC) {
+        gpio_reset_pin(_enablePin);
+        gpio_set_direction(_enablePin, GPIO_MODE_OUTPUT);
+        gpio_set_level(_enablePin, 1);
     }
 
     setGlobalFrequency(initialFreqHz);
@@ -475,4 +484,25 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
 
     ledc_set_duty(_carrierSpeedMode, (ledc_channel_t)channel, dutyValue);
     ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
+}
+
+// SAFETY: disable the VNH5019. Coast every channel (PWM duty 0 + carrier 0) so
+// no switching is left running, then -- if an EN pin is wired -- drive it LOW for
+// a gate-level high-Z disable that survives any PWM glitch.
+void PhaseController::disableOutputs() {
+    for (int i = 0; i < _numChannels; i++) {
+        setDutyCycle(i, 0.0f);
+        setCarrierDutyCycle(i, 0.0f);
+    }
+    if (_enablePin != GPIO_NUM_NC) {
+        gpio_set_level(_enablePin, 0);  // VNH5019 EN low => bridge outputs disabled
+    }
+}
+
+// Re-arm the bridge: drive EN high (no-op if no EN pin). Duties are restored via
+// the normal setDutyCycle()/sequencer path.
+void PhaseController::enableOutputs() {
+    if (_enablePin != GPIO_NUM_NC) {
+        gpio_set_level(_enablePin, 1);
+    }
 }

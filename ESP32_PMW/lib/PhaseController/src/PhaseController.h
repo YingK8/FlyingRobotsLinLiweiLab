@@ -34,9 +34,12 @@ public:
    * @param phaseOffsetsDegrees Array of initial phase offsets (degrees).
    * @param dutyCycles Array of initial duty cycles (%).
    * @param numChannels Number of PWM channels.
+   * @param enablePin VNH5019 EN pin for a hardware (high-Z) disable, or
+   *                  GPIO_NUM_NC (default) for coast-only. Active HIGH = enabled.
    */
   PhaseController(const gpio_num_t *pins, const float *phaseOffsetsDegrees,
-                  const float *dutyCycles, int numChannels);
+                  const float *dutyCycles, int numChannels,
+                  int enablePin = GPIO_NUM_NC);
   ~PhaseController();
 
   /**
@@ -117,6 +120,24 @@ public:
    */
   void setCarrierDutyCycle(int channel, float dutyPercent);
 
+  // --- SAFETY: VNH5019 disable / enable -------------------------------------
+  /**
+   * @brief Disable the H-bridge. ALWAYS coasts: every channel's PWM duty -> 0
+   *        (VNH5019 PWM input low => OUTA/OUTB high-Z / freewheel) and every
+   *        carrier duty -> 0, so no switching is left running. If an enablePin
+   *        was given to the constructor, it is ALSO driven LOW for a gate-level
+   *        hardware disable that survives any PWM glitch. Run before cutting power.
+   */
+  void disableOutputs();
+  /**
+   * @brief Re-arm the bridge after disableOutputs(): drive the enablePin HIGH (a
+   *        no-op if no enablePin was configured). Duty cycles are restored by the
+   *        normal setDutyCycle()/sequencer path, not here.
+   */
+  void enableOutputs();
+  /** @brief The configured VNH5019 EN pin (GPIO_NUM_NC if none). */
+  gpio_num_t getEnablePin() const { return _enablePin; }
+
   // Diagnostics: per-channel delivered duty, measured from the ISR (% active
   // since the last reset). Lets you see the firmware's real per-channel output.
   float getMeasuredDuty(int channel);
@@ -136,6 +157,7 @@ private:
   gpio_num_t *_pins;
   esp_timer_handle_t _periodicTimer;
   gpio_num_t _syncPin;
+  gpio_num_t _enablePin;
 
   // Carrier PWM (multi-channel)
   gpio_num_t *_carrierPinsArray = nullptr;

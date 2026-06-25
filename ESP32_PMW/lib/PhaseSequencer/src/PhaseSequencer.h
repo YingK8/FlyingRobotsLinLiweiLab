@@ -13,8 +13,9 @@ enum TaskType {
   TASK_RAMP_LINEAR,
   TASK_RAMP_EASE,
   TASK_RAMP_PHASE,      // NEW: Phase interpolation
-  TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON
+  TASK_TRAJECTORY_POINT, // NEW: Directly set a trajectory point (for CSV/JSON
                         // import)
+  TASK_DISABLE_OUTPUTS  // SAFETY: coast the VNH5019 (PWM in = 0, carriers = 0)
 };
 
 struct SequenceTask {
@@ -101,6 +102,28 @@ public:
    */
   void addPhaseRampTask(const float *startPhases, const float *endPhases,
                         uint32_t durationMs);
+  /**
+   * @brief Queue a SAFETY task that disables the VNH5019 H-bridge (delegates to
+   *        PhaseController::disableOutputs).
+   *
+   *        Always COASTS: every channel's PWM duty -> 0 (VNH5019 PWM input low =>
+   *        OUTA/OUTB high-impedance / freewheel) and every carrier duty -> 0, so
+   *        no switching is left running and the coil energy freewheels gently
+   *        through the body diodes into the bulk cap. If the PhaseController was
+   *        constructed with an enablePin, that EN pin is ALSO driven LOW for a
+   *        gate-level high-Z disable. Run this before removing supply power; the
+   *        coast state persists for the rest of the sequence.
+   */
+  void addDisableTask();
+
+  /**
+   * @brief Immediately disable the bridge (same effect as TASK_DISABLE_OUTPUTS).
+   *        Safe to call from a watchdog/fault path outside the sequence; it pins
+   *        the streaming state to 0 so later frames keep the outputs idle until
+   *        the sequence is restarted, then calls PhaseController::disableOutputs
+   *        (coast + hardware EN-pin disable if one was configured).
+   */
+  void disableOutputs();
 
   // Compiler
   /**

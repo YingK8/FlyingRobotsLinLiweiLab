@@ -111,6 +111,26 @@ void PhaseSequencer::addPhaseRampTask(const float *startPhases,
   _queue.push_back(task);
 }
 
+void PhaseSequencer::addDisableTask() {
+  SequenceTask task = {};
+  task.type = TASK_DISABLE_OUTPUTS;
+  _queue.push_back(task);
+}
+
+// SAFETY: disable the VNH5019. Pin the streaming state to 0 so any later
+// applyCurrentState() keeps the bridge idle instead of re-driving it, then defer
+// to PhaseController::disableOutputs() for the actual coast (PWM 0 + carrier 0)
+// and the gate-level EN-pin disable (if an enablePin was configured there).
+void PhaseSequencer::disableOutputs() {
+  if (!_phaseCtrl)
+    return;
+  for (int i = 0; i < 4; i++) {
+    _currentDutyCycles[i] = 0.0f;
+    _currentCarrierDutyCycles[i] = 0.0f;
+  }
+  _phaseCtrl->disableOutputs();
+}
+
 float PhaseSequencer::easeInOut(float t) {
   if (t < 0.0f)
     t = 0.0f;
@@ -232,6 +252,14 @@ void PhaseSequencer::run() {
         _currentPhaseDegrees[i] = task.endPhases[i];
       }
       applyCurrentState();
+      _currentFrameIdx++;
+      _taskStartTimeUs = nowUs;
+      _taskFrameOffsetUs = 0;
+      continue;
+    }
+
+    if (task.type == TASK_DISABLE_OUTPUTS) {
+      disableOutputs();  // coast (+ EN-pin disable if configured on controller)
       _currentFrameIdx++;
       _taskStartTimeUs = nowUs;
       _taskFrameOffsetUs = 0;

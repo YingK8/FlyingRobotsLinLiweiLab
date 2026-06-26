@@ -30,12 +30,20 @@ const float INITIAL_PHASES[NUM_CHANNELS] = {270.0, 90.0, 180.0, 0.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
-const int PWM_FREQ = 15000; 
+const int PWM_FREQ = 15000;
 const float carrier_duty = 100.0;
+// Per-channel carrier-duty trim to balance coil current at the 190 Hz operating
+// point (CS measurement 2026-06-21: A & D run hot, B weakest). Assumes current
+// scales linearly with carrier duty; each channel scaled down to the weakest (B)
+// so all four match at full drive. First-pass values — refine against CS.
+// const float CARRIER_TRIM[NUM_CHANNELS] = {66.0, 100.0, 90.0, 56.0}; // % (A,B,C,D)
+// const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {
+//     CARRIER_TRIM[0], CARRIER_TRIM[1], CARRIER_TRIM[2], CARRIER_TRIM[3]};
+
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};
 
 const float start_freq = 1.0f;
-const float end_freq = 190.0f;
+const float end_freq = 210.0f;
 const unsigned long ramp_duration_ms = 30000;
 
 // --- INDICATOR LED CONFIGURATION ---
@@ -84,10 +92,12 @@ const unsigned long hold_time_ms = 2500;        // hold at each duty level
 const unsigned long transition_time_ms = 500;   // cubic ramp between levels (3s total per step)
 unsigned long state_start_time = 0;
 
-// only channels 0(A) and 2(C) sweep down; 1(B) and 3(D) stay at 100%
-void setSweepCarrierDuty(float duty) {
-  controller->setCarrierDutyCycle(1, duty);
-  controller->setCarrierDutyCycle(2, duty);
+// only channels 1(B) and 2(C) sweep down; 0(A) and 3(D) stay at their trim.
+// `pct` is the sweep level (0-100%); it scales each channel's trimmed base so the
+// per-channel current balance is preserved throughout the sweep.
+void setSweepCarrierDuty(float pct) {
+  controller->setCarrierDutyCycle(1, pct);
+  controller->setCarrierDutyCycle(2, pct);
 }
 
 void loop() {

@@ -26,13 +26,12 @@ const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
-const int CARRIER_FREQ = 15000; 
+const int PWM_FREQ = 15000; 
 const float carrier_duty = 100.0;
+const unsigned long ramp_duration_ms = 10000;
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};
 
-const float start_freq = 1.0f;
-const float end_freq = 500.0f;
-const unsigned long ramp_duration_ms =400000;
+const float start_freq = 0.0f;
 
 // --- INDICATOR LED CONFIGURATION ---
 const int LED_PIN = 2; 
@@ -59,33 +58,18 @@ void setup() {
   controller->begin();
 
   // create sequencer with valid controller pointer
-  seq = new PhaseSequencer(controller);
-  controller->initCarrierPWM(CARRIER_PINS, CARRIER_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
+  // seq = new PhaseSequencer(controller);
+  controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
-  seq->addPWMRampTask(start_freq, end_freq, ramp_duration_ms, TASK_RAMP_EASE);
-  seq->addPWMRampTask(start_freq, end_freq, ramp_duration_ms, TASK_RAMP_LINEAR);
-  seq->compile(25, 0.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
+  // seq->addCarrierRampTask(carrier_duty, 100.0f, ramp_duration_ms, TASK_RAMP_LINEAR);
+  // seq->compile(25, start_freq, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
-  seq->start();
+  // seq->start();
 }
 
 void loop() {
   controller->run(); 
-  seq->run();  
+  // seq->run();  
 
   // Serial.print(digitalRead(GPIO_NUM_32));
-
-  // --- Blink LED and print frequency every 500 ms ---
-  unsigned long now = millis();
-  if (now - lastBlinkTime >= 500) {
-    lastBlinkTime = now;
-    led_state = !led_state;
-    digitalWrite(LED_PIN, led_state);
-
-    // Retrieve current ramp frequency (adjust method name if needed)
-    float freq = controller->getFrequency();  
-    Serial.print("Ramp Frequency: ");
-    Serial.print(freq);
-    Serial.println(" Hz");
-  }
 }

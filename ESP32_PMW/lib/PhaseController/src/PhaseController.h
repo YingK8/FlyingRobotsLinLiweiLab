@@ -117,6 +117,14 @@ public:
    */
   void setCarrierDutyCycle(int channel, float dutyPercent);
 
+  /**
+   * @brief Gracefully de-energize all coils: ramp every carrier duty down to 0
+   *        over rampMs, then stop the periodic phase timer so all output halts.
+   *        The controller/timer remain allocated (unlike the destructor).
+   * @param rampMs Duration of the linear ramp-down in milliseconds.
+   */
+  void shutdown(unsigned long rampMs = 2000);
+
 private:
   // Minimum on/off period constraint: 0.0 ms
   const float MIN_ON_OFF_MS = 0.0f;

@@ -491,3 +491,30 @@ void PhaseController::setCarrierDutyCycle(int channel, float dutyPercent) {
     ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
     _carrierLastDutyTicks[channel] = dutyValue;
 }
+
+void PhaseController::shutdown(unsigned long rampMs) {
+    // Snapshot the current carrier duty of every channel so each ramps from
+    // wherever it is now (handles channels parked at 100%, which re-attach LEDC
+    // automatically on the first sub-100% write).
+    float startDuty[16];
+    int n = _numChannels < 16 ? _numChannels : 16;
+    for (int i = 0; i < n; i++)
+        startDuty[i] = _carrierDutyCyclePct ? _carrierDutyCyclePct[i] : 0.0f;
+
+    const int steps = 50;
+    unsigned long stepMs = rampMs / steps;
+    if (stepMs < 1) stepMs = 1;
+    for (int s = 1; s <= steps; s++) {
+        float frac = (float)s / (float)steps;          // 0 -> 1
+        for (int i = 0; i < n; i++)
+            setCarrierDutyCycle(i, startDuty[i] * (1.0f - frac));
+        delay(stepMs);
+    }
+
+    // Force fully off (LEDC output held LOW = bridge disabled), then freeze the
+    // phase GPIOs by stopping the periodic timer. Object/timer stay allocated.
+    for (int i = 0; i < n; i++)
+        setCarrierDutyCycle(i, 0.0f);
+    if (_periodicTimer)
+        esp_timer_stop(_periodicTimer);
+}

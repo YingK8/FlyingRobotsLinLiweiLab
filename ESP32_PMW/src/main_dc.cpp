@@ -35,9 +35,7 @@ const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_d
 // const float end_freq = 190.0f;
 // const unsigned long ramp_duration_ms = 40000;
 
-const float start_freq = 1.0f;
-const float end_freq = 500.0f;
-const unsigned long ramp_duration_ms = 8000;
+const float start_freq = 0.0f;
 // const unsigned long second_ramp_duration_ms = 5000;
 
 // --- INDICATOR LED CONFIGURATION ---
@@ -50,48 +48,15 @@ PhaseController* controller;
 PhaseSequencer* seq;
 
 void setup() {
-  Serial.begin(115200);
-  Serial.setTimeout(20);
-  delay(1000);
-  // SPIFFS.begin(true); 
-  
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW); 
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    pinMode(PWM_PINS[i], OUTPUT);
+    pinMode(CARRIER_PINS[i], OUTPUT);
 
-  // pinMode(GPIO_NUM_32, INPUT);
-
-  // instantiate the objects dynamically NOW that the OS has booted
-  controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
-  controller->begin();
-
-  // create sequencer with valid controller pointer
-  seq = new PhaseSequencer(controller);
-  controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
-
-  seq->addEaseRampTask(start_freq, end_freq, ramp_duration_ms); 
-  // seq->addLinearRampTask(start_freq, end_freq, ramp_duration_ms); 
-  seq->compile(25, 0.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
-
-  seq->start();
+    digitalWrite(PWM_PINS[i], HIGH);
+    digitalWrite(CARRIER_PINS[i], HIGH);
+  }
 }
 
 void loop() {
-  controller->run(); 
-  seq->run();  
-
-  // Serial.print(digitalRead(GPIO_NUM_32));
-
-  // --- Blink LED and print frequency every 500 ms ---
-  unsigned long now = millis();
-  if (now - lastBlinkTime >= 500) {
-    lastBlinkTime = now;
-    led_state = !led_state;
-    digitalWrite(LED_PIN, led_state);
-
-    // Retrieve current ramp frequency (adjust method name if needed)
-    float freq = controller->getFrequency();  
-    Serial.print("Ramp Frequency: ");
-    Serial.print(freq);
-    Serial.println(" Hz");
-  }
+  // controller->run();  
 }

@@ -22,7 +22,7 @@ float interpolateValue(float startValue, float endValue, float alpha,
 SequenceTask makeTaskFromPoint(const TrajectoryPoint &point, int numChannels,
                                int64_t durationUs) {
   SequenceTask task = {};
-  task.type = TASK_TRAJECTORY_POINT;
+  task.type = TaskType::TRAJECTORY_POINT;
   task.durationUs = durationUs;
   task.startFreq = point.freq[0];
   task.endFreq = point.freq[0];

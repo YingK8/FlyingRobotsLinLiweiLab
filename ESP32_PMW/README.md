@@ -78,13 +78,23 @@ Queues time-based tasks (ramps, waits, phase snaps) and executes them against a 
 
 PhaseSequencer* seq = new PhaseSequencer(controller);
 
-seq->addEaseRampTask(1.0f, 200.0f, 15000);              // cubic ease ramp, 1→200 Hz over 15 s
-seq->addLinearRampTask(1.0f, 200.0f, 15000);            // linear ramp
+// One addRampTask for every quantity; TaskType picks it, TaskMode the curve
+seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::EASE);   // 1→200 Hz ease
+seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::LINEAR); // linear
 seq->addWaitTask(3000);                                  // pause 3 s
-seq->addDutyCycleTask(dutyCycles, NUM_CHANNELS);         // snap duty cycles
-seq->addPhaseTask(phases, NUM_CHANNELS);                 // snap phases
-seq->addCarrierDutyCycleTask(carriers, NUM_CHANNELS);   // snap carrier duties
-seq->addPhaseRampTask(startPhases, endPhases, durationMs);
+// Per-channel ramp: NAN entries leave that channel unchanged
+seq->addRampTask(startPhases, endPhases, NUM_CHANNELS, durationMs, TaskType::PWM_PHASE);
+
+// Instant full-state set: build a TRAJECTORY_POINT task by hand and push it
+SequenceTask snap = {};
+snap.type = TaskType::TRAJECTORY_POINT;
+snap.startFreq = snap.endFreq = 200.0f;
+for (int i = 0; i < NUM_CHANNELS; i++) {
+  snap.dutyCycles[i] = dutyCycles[i];
+  snap.startPhases[i] = phases[i];
+  snap.carrierDuties[i] = carriers[i];
+}
+seq->addSequenceTask(snap);
 
 seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES); // 25 ms resolution
 seq->start();
@@ -94,7 +104,7 @@ seq->run();
 bool done = seq->isDone();
 ```
 
-`compile()` must be called before `start()`. `resolutionMs` (first arg) is the trajectory timestep — 25 ms is typical.
+`compile()` must be called before `start()`. `resolutionMs` (first arg) is the trajectory timestep, 25 ms is typical.
 
 ---
 
@@ -117,11 +127,10 @@ Build the sequence in `setup()`, then execute it in `loop()`:
 
 ```cpp
 // Ramp to speed, hold, reduce carrier, then stop
-seq->addEaseRampTask(1.0f, 200.0f, 15000);   // 1→200 Hz, 15 s ease ramp
+seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::EASE); // 1→200 Hz ease
 seq->addWaitTask(5000);                        // hold 5 s
 
-float carriers[4] = {50.0, 50.0, 50.0, 50.0};
-seq->addCarrierDutyCycleTask(carriers, 4);     // snap all carriers to 50%
+seq->addRampTask(100.0f, 50.0f, 2000, TaskType::CARRIER_DUTY); // ramp all carriers to 50%
 
 seq->addWaitTask(3000);
 seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
@@ -141,18 +150,24 @@ void loop() {
 
 ### JSON file (JsonPhaseSequencer)
 
-Upload a `.json` file to SPIFFS, then load it at startup. Each entry fires at `time_ms`:
+Upload a `.json` file to SPIFFS, then load it at startup. It's an array of
+entries, each naming a `PhaseSequencer` method and its arguments, applied in
+array order (not by a timestamp field):
 
 ```json
 [
-  { "time_ms": 0,    "command": "set",      "channel": 0, "parameter": "frequency", "value": 100.0 },
-  { "time_ms": 100,  "command": "ramp",     "channel": 0, "parameter": "duty",      "from": 50.0, "to": 80.0, "duration_ms": 500 },
-  { "time_ms": 700,  "command": "easeRamp", "channel": 1, "parameter": "phase",     "from": 0.0,  "to": 90.0, "duration_ms": 300 }
+  { "method": "addDutyCycleTask",       "channel": 0, "value": 60.0 },
+  { "method": "addPhaseRampTask",       "channel": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
+  { "method": "addCarrierDutyCycleTask","channel": 0, "value": 75.0 },
+  { "method": "addWaitTask",            "duration_ms": 3000 }
 ]
 ```
 
-Commands: `set` (instant), `ramp` (linear), `easeRamp` (cubic ease-in-out).  
-Parameters: `frequency`, `duty`, `phase`, `carrier_duty`.
+`method` is one of: `addDutyCycleTask` / `addPhaseTask` / `addCarrierDutyCycleTask`
+(instant, per-channel set), `addWaitTask`, `addLinearRampTask` / `addEaseRampTask`
+(global frequency ramp), `addCarrierRampTask` / `addCarrierEaseRampTask` (all
+channels), or `addPhaseRampTask` (per-channel). Unrecognized methods are
+skipped and logged to serial.
 
 ```cpp
 #include "JsonPhaseSequencer.h"

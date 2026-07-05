@@ -10,7 +10,8 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 
 **Key Features:**
 - Sequence ramp-up, ramp-down, and hold behaviors
-- Supports linear and eased ramps for frequency, phase, and duty cycle
+- One `addRampTask` for every quantity (frequency, duty, carrier duty, phase), linear or eased
+- Full (all channels) **and** per-channel control on every builder
 - Integrates directly with PhaseController
 - Designed for PlatformIO and ESP-IDF/Arduino environments
 
@@ -43,7 +44,8 @@ PhaseSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
-    seq.addEaseRampTask(1.0f, 100.0f, 10000); // Ramp from 1Hz to 100Hz over 10s
+    // Ramp frequency 1Hz -> 100Hz over 10s with an eased curve
+    seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
     seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
     seq.start();
 }
@@ -63,17 +65,36 @@ void loop() {
 
 ## 3. How-to Guides
 
-### How to Sequence a Frequency Ramp
-- Use `addLinearRampTask(startHz, endHz, durationMs)` or `addEaseRampTask(...)` to add a ramp.
-- Call `compile(...)` to generate the trajectory.
-- Call `start()` to begin the sequence.
+### How to Sequence a Ramp (any quantity)
+- Use the single `addRampTask(...)`. Pick the quantity with `TaskType`
+  (`PWM_FREQ`, `PWM_DUTY`, `CARRIER_DUTY`, `PWM_PHASE`) and the curve with
+  `TaskMode` (`LINEAR` or `EASE`):
+  ```cpp
+  seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
+  seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
+  ```
+- Call `compile(...)` then `start()`.
 
 ### How to Add Waits and Holds
 - Use `addWaitTask(durationMs)` to insert a pause in the sequence.
 
-### How to Change Duty Cycle or Phase Over Time
-- Use `addDutyCycleTask(dutyCycles, numChannels)` or `addPhaseTask(phases, numChannels)`.
-- For smooth transitions, use `addPhaseRampTask(startPhases, endPhases, durationMs)`.
+### How to Control One Channel vs All Channels
+- **Full** (all channels): pass a scalar, e.g.
+  `addRampTask(0, 100, 2000, TaskType::PWM_PHASE)`.
+- **Per-channel**: pass a `float[4]`; a channel whose value is `NAN` is left
+  unchanged, so you can drive any single channel while the rest hold:
+  ```cpp
+  float starts[4] = {NAN, 0.0f, NAN, 0.0f};   // only ch1 & ch3
+  float ends[4]   = {NAN, 90.0f, NAN, 90.0f};
+  seq.addRampTask(starts, ends, 4, 2000, TaskType::PWM_PHASE, TaskMode::LINEAR);
+  ```
+
+### How to Instantly Set the Full State
+- Build a `SequenceTask{type = TaskType::TRAJECTORY_POINT, ...}` by hand
+  (fill `startFreq`/`endFreq`, `dutyCycles`, `startPhases`, `carrierDuties` for
+  all 4 channels) and push it with `addSequenceTask(task)`. One task, one
+  hardware sync: this is what CSV/JSON import use. Unlike a ramp, a
+  trajectory point has no NAN-skip. Every channel must be given explicitly.
 
 ### How to Integrate with PhaseController
 - Pass a pointer to your PhaseController instance when constructing PhaseSequencer.
@@ -92,20 +113,38 @@ PhaseSequencer(PhaseController* phaseCtrl);
 - `phaseCtrl`: Pointer to an initialized PhaseController
 
 #### Methods
-- `void reserve(size_t size);` // Reserve space for tasks
-- `void addDutyCycleTask(const float* dutyCycles, int numChannels);`
-- `void addPhaseTask(const float* phases, int numChannels);`
-- `void addWaitTask(uint32_t durationMs);`
-- `void addLinearRampTask(float startHz, float endHz, uint32_t durationMs);`
-- `void addEaseRampTask(float startHz, float endHz, uint32_t durationMs);`
-- `void addPhaseRampTask(const float* startPhases, const float* endPhases, uint32_t durationMs);`
-- `void compile(uint32_t resolutionMs, float initialFreq, const float* initialDuty, const float* initialPhase);`
-- `void start();`
-- `void run();`
-- `bool isDone() const;`
+Every ramp builder has a **full** (scalar → all channels) and a
+**per-channel** (`float[4]`, `NAN` = leave channel unchanged) form.
+```cpp
+void reserve(size_t size);
+void addSequenceTask(SequenceTask task); // generic; used for TRAJECTORY_POINT
 
-#### Task Types
-- Set duty cycles, set phases, wait, linear ramp, ease ramp, phase ramp
+void addWaitTask(uint32_t durationMs);
+
+// Ramps: one builder for freq / duty / carrier / phase
+void addRampTask(float start, float end, uint32_t durationMs,
+                 TaskType type = TaskType::PWM_FREQ,
+                 TaskMode ramp_mode = TaskMode::LINEAR);           // full
+void addRampTask(const float* starts, const float* ends, int numChannels,
+                 uint32_t durationMs, TaskType type = TaskType::PWM_FREQ,
+                 TaskMode ramp_mode = TaskMode::LINEAR);           // per-channel
+
+void compile(uint32_t resolutionMs, float initialFreq,
+             const float* initialDuty, const float* initialPhase);
+void start();
+void run();
+bool isDone() const;
+```
+
+#### Enums
+- `TaskType`: `PWM_DUTY`, `PWM_FREQ`, `PWM_PHASE`, `CARRIER_DUTY`, `WAIT`,
+  `RAMP_EASE`, `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
+  per-sketch constants like `const int PWM_FREQ = 15000`, so always qualify:
+  `TaskType::PWM_FREQ`.
+- `TaskMode`: `LINEAR`, `EASE`, the interpolation curve for a ramp.
+
+Note: `PWM_FREQ` is a single global frequency; per-channel ramps ignore all but
+channel 0 for it. Duty/carrier tasks are clamped to 0–100%.
 
 ---
 

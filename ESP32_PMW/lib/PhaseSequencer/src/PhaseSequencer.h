@@ -4,38 +4,43 @@
 #include <Arduino.h>
 #include <vector>
 
-// Define the types of commands our queue can execute
-enum TaskType {
-  TASK_SET_DUTY_CYCLES,
-  TASK_SET_CARRIER_DUTY_CYCLES,
-  TASK_SET_PHASES, // NEW: Instant phase snap
-  TASK_WAIT,
-  TASK_RAMP_LINEAR,     // Ramp with linear interpolation
-  TASK_RAMP_EASE,       // Ramp with cubic ease-in/out interpolation
-  TASK_TRAJECTORY_POINT // NEW: Directly set a trajectory point (for CSV/JSON
-                        // import)
+// What a task acts on. PWM_DUTY / PWM_FREQ / PWM_PHASE / CARRIER_DUTY are all
+// ramps of the named quantity; a zero-duration ramp is an instant "set".
+// TRAJECTORY_POINT instead sets the full per-channel state (freq/duty/phase/
+// carrier) in one shot, built by hand via addSequenceTask (see CSV/JSON
+// import). `enum class` is required: names like PWM_FREQ collide with the
+// per-sketch `const int PWM_FREQ = 15000` carrier-frequency constants.
+enum class TaskType {
+  PWM_DUTY,
+  PWM_FREQ,
+  PWM_PHASE,
+  CARRIER_DUTY,
+  WAIT,
+  RAMP_EASE,       // Ramp with cubic ease-in/out interpolation
+  TRAJECTORY_POINT // Instant full-state set (addSequenceTask, CSV/JSON import)
 };
 
-// For ramp tasks, which quantity is being interpolated. (`class` is a reserved
-// keyword in C++, so the SequenceTask field is named `cls`.)
-enum RampTarget {
-  RAMP_PWM,     // global PWM frequency (Hz)
-  RAMP_CARRIER, // carrier duty cycle (%) on all channels
-  RAMP_PHASE,   // per-channel phase (degrees)
+// Interpolation curve used by a ramp task. 
+// (The SequenceTask field is named ramp_mode)
+enum class TaskMode {
+  LINEAR,
+  EASE
 };
 
 struct SequenceTask {
   TaskType type;
-  RampTarget cls; // for TASK_RAMP_* tasks: what is being ramped
+  TaskMode mode; // ramp curve: LINEAR or EASE
   int64_t durationUs;
   float startFreq;
   float endFreq;
   float startCarriers[4];
   float endCarriers[4];
-  float dutyCycles[4];
-  float carrierDuties[4];
+  float startDuties[4];
+  float endDuties[4];
   float startPhases[4];
   float endPhases[4];
+  float dutyCycles[4];    // TRAJECTORY_POINT only: explicit duty state
+  float carrierDuties[4]; // TRAJECTORY_POINT only: explicit carrier state
 };
 
 // Stores the explicit state of all channels at a given microsecond in time
@@ -49,99 +54,56 @@ struct TrajectoryPoint {
 
 class PhaseSequencer {
 public:
-  /**
-   * @brief Construct a PhaseSequencer for high-level PWM sequencing.
-   * @param phaseCtrl Pointer to an initialized PhaseController.
-   */
   PhaseSequencer(PhaseController *phaseCtrl);
 
   // Queue Builders
-  /**
-   * @brief Reserve space for a number of tasks in the queue.
-   * @param size Number of tasks to reserve.
-   */
+  /** @brief Reserve queue capacity for `size` tasks. */
   void reserve(size_t size);
   /**
-   * @brief Add a generic sequence task to the queue.
-   * @param pt The SequenceTask to add.
+   * @brief Push a task built by hand, e.g. a TRAJECTORY_POINT: fill
+   * startFreq, dutyCycles, startPhases, carrierDuties for all 4 channels
+   * (see CsvPhaseSequencer.cpp's makeTaskFromPoint for the pattern).
    */
   void addSequenceTask(SequenceTask task);
-  /**
-   * @brief Add a duty cycle set task for all channels.
-   * @param dutyCycles Array of duty cycles.
-   * @param numChannels Number of channels.
-   */
-  void addDutyCycleTask(const float *dutyCycles, int numChannels);
-  /**
-   * @brief Add a carrier duty cycle set task for all channels.
-   * @param carrierDutyCycles Array of carrier duty cycles (0-100%).
-   * @param numChannels Number of channels.
-   */
-  void addCarrierDutyCycleTask(const float *carrierDutyCycles, int numChannels);
-  /**
-   * @brief Add a phase set task for all channels.
-   * @param phases Array of phases (degrees).
-   * @param numChannels Number of channels.
-   */
-  void addPhaseTask(const float *phases, int numChannels);
-  /**
-   * @brief Add a wait task (pause) in the sequence.
-   * @param durationMs Duration in milliseconds.
-   */
+
+  /** @brief Insert a pause of `durationMs` in the sequence. */
   void addWaitTask(uint32_t durationMs);
+
   /**
-   * @brief Add a PWM frequency ramp task.
-   * @param startHz Start frequency in Hz.
-   * @param endHz End frequency in Hz.
-   * @param durationMs Duration in milliseconds.
-   * @param type Ramp interpolation type: TASK_RAMP_LINEAR (default) or
-   *             TASK_RAMP_EASE.
+   * @brief Ramp one quantity, all channels identically, start -> end over
+   * durationMs (0 = instant set to end).
+   *
+   * @param start Hz for PWM_FREQ, else % or degrees.
+   * @param end Same units as start.
+   * @param type PWM_FREQ (default), PWM_DUTY, CARRIER_DUTY or PWM_PHASE.
+   *   Duty/carrier are clamped to 0-100%; PWM_FREQ ignores all but channel 0.
+   * @param ramp_mode LINEAR (default) or EASE.
    */
-  void addPWMRampTask(float startHz, float endHz, uint32_t durationMs,
-                   TaskType type = TASK_RAMP_LINEAR);
+  void addRampTask(float start, float end, uint32_t durationMs,
+                   TaskType type = TaskType::PWM_FREQ,
+                   TaskMode ramp_mode = TaskMode::LINEAR);
+
   /**
-   * @brief Add a carrier duty cycle ramp task (applied to all channels).
-   * @param startDuty Start carrier duty cycle (0-100%).
-   * @param endDuty End carrier duty cycle (0-100%).
-   * @param durationMs Duration in milliseconds.
-   * @param type Ramp interpolation type: TASK_RAMP_LINEAR (default) or
-   *             TASK_RAMP_EASE.
+   * @brief Per-channel ramp: starts[i] -> ends[i] over durationMs (0 =
+   * instant set to end). NAN in starts[i] leaves that channel unchanged.
+   * @param numChannels Entries supplied in starts/ends; the rest are skipped.
    */
-  void addCarrierRampTask(float startDuty, float endDuty, uint32_t durationMs,
-                          TaskType type = TASK_RAMP_LINEAR);
-  /**
-   * @brief Add a phase ramp task for all channels (cubic ease).
-   * @param startPhases Array of start phases (degrees).
-   * @param endPhases Array of end phases (degrees).
-   * @param durationMs Duration in milliseconds.
-   */
-  void addPhaseRampTask(const float *startPhases, const float *endPhases,
-                        uint32_t durationMs);
+  void addRampTask(const float *starts, const float *ends, int numChannels,
+                   uint32_t durationMs, TaskType type = TaskType::PWM_FREQ,
+                   TaskMode ramp_mode = TaskMode::LINEAR);
 
   // Compiler
   /**
-   * @brief Compile the queued tasks into a trajectory.
-   * @param resolutionMs Time resolution in milliseconds.
-   * @param initialFreq Initial frequency in Hz.
-   * @param initialDuty Array of initial duty cycles.
-   * @param initialPhase Array of initial phases.
+   * @brief Compile the queue into a trajectory; call before start().
+   * @param resolutionMs Trajectory timestep in ms.
    */
   void compile(uint32_t resolutionMs, float initialFreq,
                const float *initialDuty, const float *initialPhase);
 
   // Control
-  /**
-   * @brief Start executing the compiled sequence.
-   */
   void start();
-  /**
-   * @brief Run the sequencer. Call regularly in loop().
-   */
+  /** @brief Advance the running sequence. Call every loop() iteration. */
   void run();
-  /**
-   * @brief Check if the sequence is done.
-   * @return True if done, false otherwise.
-   */
   bool isDone() const;
 
 private:

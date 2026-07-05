@@ -61,7 +61,7 @@ void setup() {
   seq = new PhaseSequencer(controller);
   controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
-  seq->addCarrierRampTask(carrier_duty, 100.0f, ramp_duration_ms, TASK_RAMP_LINEAR);
+  seq->addRampTask(carrier_duty, 100.0f, ramp_duration_ms, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
   seq->compile(25, start_freq, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
 
   seq->start();

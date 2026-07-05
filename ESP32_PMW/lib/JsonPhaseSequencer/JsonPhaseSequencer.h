@@ -8,29 +8,25 @@ class JsonVariant;
 
 class JsonPhaseSequencer : public PhaseSequencer {
 public:
-  /**
-   * @brief Construct a JsonPhaseSequencer for JSON-based scheduling.
-   * @param phaseCtrl Pointer to an initialized PhaseController.
-   */
   JsonPhaseSequencer(PhaseController *phaseCtrl);
+
   /**
-   * @brief Load a schedule from a JSON file and compile the sequence.
-   * @param filename Path to the JSON file.
-   * @param resolutionMs Time resolution in milliseconds.
-   * @param initialFreq Initial frequency in Hz.
-   * @param initialDuty Array of initial duty cycles.
-   * @param initialPhase Array of initial phases.
-   * @return True if loaded and compiled successfully, false otherwise.
+   * @brief Load a schedule from a JSON file (SPIFFS) and compile it.
+   *
+   * The file is a JSON array of entries: { "method": ..., "channel": ...,
+   * "value"/"from"/"to": ..., "duration_ms": ... }, e.g.
+   *   { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 75.0 }
+   * `method` is one of addDutyCycleTask / addPhaseTask / addCarrierDutyCycleTask
+   * (instant, per-channel set) or addWaitTask / addLinearRampTask /
+   * addEaseRampTask / addCarrierRampTask / addCarrierEaseRampTask /
+   * addPhaseRampTask (see loadFromJsonFile in the .cpp for the full mapping).
+   *
+   * @param initialDuty float[4] duty (0-100%); defaults to {50,50,50,50}.
+   * @param initialPhase float[4] phase (degrees); defaults to {0,90,180,270}.
+   * @return False if the file can't be opened or fails to parse.
    */
-  // Load schedule from JSON file (on SD or SPIFFS)
   bool loadFromJsonFile(const char *filename, uint32_t resolutionMs = 25,
                         float initialFreq = 300.0f,
                         const float *initialDuty = nullptr,
                         const float *initialPhase = nullptr);
-
-  /**
-   * @brief Schedule a carrier duty cycle change using a JSON method entry.
-   * Example: { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 75.0
-   * }
-   */
 };

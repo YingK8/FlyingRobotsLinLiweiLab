@@ -26,7 +26,7 @@ const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 const gpio_num_t SYNC_PIN = GPIO_NUM_8;
 
-const int PWM_FREQ = 15000; 
+ 
 const float carrier_duty = 0.0;
 const unsigned long ramp_duration_ms = 10000;
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {carrier_duty, carrier_duty, carrier_duty, carrier_duty};

@@ -1,0 +1,24 @@
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+stop: ramping down (fast)
+coils off

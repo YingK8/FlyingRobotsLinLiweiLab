@@ -17,18 +17,11 @@
 
 #include <Arduino.h>
 #include "PhaseController.h"
+#include "constants.h"
 
-const int NUM_CHANNELS = 4;
-
-// ---- drive pins (unchanged from the rest of the project) ----
-const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_32, GPIO_NUM_23,
-                                           GPIO_NUM_27, GPIO_NUM_25};
-const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {GPIO_NUM_33, GPIO_NUM_13,
-                                               GPIO_NUM_14, GPIO_NUM_26};
 const float INITIAL_PHASES[NUM_CHANNELS] = {270.0, 90.0, 180.0, 0.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 
-const int PWM_FREQ = 15000;       // carrier (Hz)
 const float DRIVE_FREQ = 190.0f;  // coil drive / rotating-field rate (Hz)
 
 // ---- current sense: ADC pin + calibration per coil (index 0..3 = A,B,C,D) ----
@@ -47,8 +40,6 @@ const float I_MAX_A    = 12.0f;   // hard per-channel safety cap (A)
 const float ADC_ALPHA  = 0.02f;   // CS smoothing (EMA of raw mV)
 const unsigned long LOOP_MS = 20; // control update period (50 Hz)
 const float START_DUTY = 70.0f;   // initial guess before the loop converges
-
-const int LED_PIN = 2;
 
 PhaseController *controller;
 float cs_mv[NUM_CHANNELS] = {0, 0, 0, 0};     // smoothed CS (mV)

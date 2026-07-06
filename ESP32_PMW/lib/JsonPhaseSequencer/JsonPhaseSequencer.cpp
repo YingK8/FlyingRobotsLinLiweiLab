@@ -2,23 +2,7 @@
 #include <ArduinoJson.h>
 #include <FS.h>
 #include <SPIFFS.h>
-
-namespace {
-// Full-state instant set: one TRAJECTORY_POINT task, one hardware sync.
-SequenceTask makeTrajectoryTask(float freq, const float *duty,
-                                const float *phase, const float *carrier) {
-  SequenceTask task = {};
-  task.type = TaskType::TRAJECTORY_POINT;
-  task.startFreq = freq;
-  task.endFreq = freq;
-  for (int i = 0; i < 4; i++) {
-    task.dutyCycles[i] = duty[i];
-    task.startPhases[i] = phase[i];
-    task.carrierDuties[i] = carrier[i];
-  }
-  return task;
-}
-} // namespace
+#include <math.h>
 
 JsonPhaseSequencer::JsonPhaseSequencer(PhaseController *phaseCtrl)
     : PhaseSequencer(phaseCtrl) {}
@@ -53,10 +37,11 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename,
   float curFreq = initialFreq;
   float curDuty[4];
   float curPhase[4];
-  float curCarrier[4] = {100, 100, 100, 100};
+  float curCarrier[4]; // NAN = untouched; applyCurrentState() skips those channels
   for (int i = 0; i < 4; i++) {
     curDuty[i] = initialDuty[i];
     curPhase[i] = initialPhase[i];
+    curCarrier[i] = NAN;
   }
 
   std::vector<String> unknownMethods;
@@ -107,7 +92,7 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename,
       starts[channel] = from;
       ends[channel] = to;
       addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
-                  TaskMode::LINEAR);
+                  TaskMode::EASE);
       curPhase[channel] = to;
       called = true;
     } else if (method == "addCarrierDutyCycleTask" && hasValidChannel()) {

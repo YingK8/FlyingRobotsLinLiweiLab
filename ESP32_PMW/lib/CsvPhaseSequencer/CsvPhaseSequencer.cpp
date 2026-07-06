@@ -21,18 +21,8 @@ float interpolateValue(float startValue, float endValue, float alpha,
 
 SequenceTask makeTaskFromPoint(const TrajectoryPoint &point, int numChannels,
                                int64_t durationUs) {
-  SequenceTask task = {};
-  task.type = TaskType::TRAJECTORY_POINT;
-  task.durationUs = durationUs;
-  task.startFreq = point.freq[0];
-  task.endFreq = point.freq[0];
-  for (int channel = 0; channel < numChannels; ++channel) {
-    task.dutyCycles[channel] = point.duty[channel];
-    task.carrierDuties[channel] = point.carrierDuties[channel];
-    task.startPhases[channel] = point.phase[channel];
-    task.endPhases[channel] = point.phase[channel];
-  }
-  return task;
+  return makeTrajectoryTask(point.freq[0], point.duty, point.phase,
+                            point.carrierDuties, numChannels, durationUs);
 }
 
 } // namespace

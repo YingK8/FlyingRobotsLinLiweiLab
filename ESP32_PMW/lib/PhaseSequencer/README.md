@@ -138,7 +138,7 @@ bool isDone() const;
 
 #### Enums
 - `TaskType`: `PWM_DUTY`, `PWM_FREQ`, `PWM_PHASE`, `CARRIER_DUTY`, `WAIT`,
-  `RAMP_EASE`, `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
+  `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
   per-sketch constants like `const int PWM_FREQ = 15000`, so always qualify:
   `TaskType::PWM_FREQ`.
 - `TaskMode`: `LINEAR`, `EASE`, the interpolation curve for a ramp.

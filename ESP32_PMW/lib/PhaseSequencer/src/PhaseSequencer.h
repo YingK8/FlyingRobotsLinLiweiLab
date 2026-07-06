@@ -4,24 +4,16 @@
 #include <Arduino.h>
 #include <vector>
 
-// What a task acts on. PWM_DUTY / PWM_FREQ / PWM_PHASE / CARRIER_DUTY are all
-// ramps of the named quantity; a zero-duration ramp is an instant "set".
-// TRAJECTORY_POINT instead sets the full per-channel state (freq/duty/phase/
-// carrier) in one shot, built by hand via addSequenceTask (see CSV/JSON
-// import). `enum class` is required: names like PWM_FREQ collide with the
-// per-sketch `const int PWM_FREQ = 15000` carrier-frequency constants.
 enum class TaskType {
   PWM_DUTY,
   PWM_FREQ,
   PWM_PHASE,
   CARRIER_DUTY,
   WAIT,
-  RAMP_EASE,       // Ramp with cubic ease-in/out interpolation
-  TRAJECTORY_POINT // Instant full-state set (addSequenceTask, CSV/JSON import)
+  TRAJECTORY_POINT
 };
 
-// Interpolation curve used by a ramp task. 
-// (The SequenceTask field is named ramp_mode)
+// Add to this for a sub-specification for TaskType:
 enum class TaskMode {
   LINEAR,
   EASE
@@ -29,7 +21,7 @@ enum class TaskMode {
 
 struct SequenceTask {
   TaskType type;
-  TaskMode mode; // ramp curve: LINEAR or EASE
+  TaskMode mode;
   int64_t durationUs;
   float startFreq;
   float endFreq;
@@ -39,8 +31,8 @@ struct SequenceTask {
   float endDuties[4];
   float startPhases[4];
   float endPhases[4];
-  float dutyCycles[4];    // TRAJECTORY_POINT only: explicit duty state
-  float carrierDuties[4]; // TRAJECTORY_POINT only: explicit carrier state
+  float dutyCycles[4];    
+  float carrierDuties[4]; 
 };
 
 // Stores the explicit state of all channels at a given microsecond in time
@@ -52,6 +44,12 @@ struct TrajectoryPoint {
   float carrierDuties[4];
 };
 
+// Shared TRAJECTORY_POINT builder: used by CSV/JSON import (see
+// CsvPhaseSequencer.cpp / JsonPhaseSequencer.cpp).
+SequenceTask makeTrajectoryTask(float freq, const float *duty,
+                                const float *phase, const float *carrier,
+                                int numChannels = 4, int64_t durationUs = 0);
+
 class PhaseSequencer {
 public:
   PhaseSequencer(PhaseController *phaseCtrl);
@@ -60,9 +58,8 @@ public:
   /** @brief Reserve queue capacity for `size` tasks. */
   void reserve(size_t size);
   /**
-   * @brief Push a task built by hand, e.g. a TRAJECTORY_POINT: fill
-   * startFreq, dutyCycles, startPhases, carrierDuties for all 4 channels
-   * (see CsvPhaseSequencer.cpp's makeTaskFromPoint for the pattern).
+   * @brief Push a task built by hand, e.g. a TRAJECTORY_POINT built via
+   * makeTrajectoryTask().
    */
   void addSequenceTask(SequenceTask task);
 

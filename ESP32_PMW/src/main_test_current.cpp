@@ -43,7 +43,7 @@ const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN, C_C
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 180.0, 90.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 
-const int PWM_FREQ = 15000;       // carrier frequency (Hz)
+       // carrier frequency (Hz)
 const float DRIVE_FREQ = 190.0f;  // coil drive (commutation) frequency (Hz)
 const float INITIAL_CARRIER_DUTY_CYCLES[NUM_CHANNELS] = {0, 0, 0, 0};
 

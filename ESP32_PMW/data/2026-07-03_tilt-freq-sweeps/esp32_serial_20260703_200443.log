@@ -1,0 +1,28 @@
+state=0 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=0 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=0 freq=0.0 target=100.0 ledc0=0 ledc3=0
+started
+state=1 freq=1.0 target=100.0 ledc0=0 ledc3=0
+state=1 freq=1.8 target=100.0 ledc0=0 ledc3=0
+state=1 freq=3.9 target=100.0 ledc0=0 ledc3=0
+state=1 freq=7.2 target=100.0 ledc0=0 ledc3=0
+state=1 freq=11.6 target=100.0 ledc0=0 ledc3=0
+ramping down
+state=4 freq=17.1 target=100.0 ledc0=2207 ledc3=2207
+done
+state=5 freq=23.4 target=100.0 ledc0=0 ledc3=0
+state=5 freq=30.6 target=100.0 ledc0=0 ledc3=0
+state=5 freq=38.5 target=100.0 ledc0=0 ledc3=0
+state=5 freq=47.0 target=100.0 ledc0=0 ledc3=0
+state=5 freq=56.1 target=100.0 ledc0=0 ledc3=0
+state=5 freq=65.7 target=100.0 ledc0=0 ledc3=0
+state=5 freq=75.6 target=100.0 ledc0=0 ledc3=0
+state=5 freq=85.8 target=100.0 ledc0=0 ledc3=0
+state=5 freq=96.1 target=100.0 ledc0=0 ledc3=0
+state=5 freq=106.6 target=100.0 ledc0=0 ledc3=0
+state=5 freq=117.0 target=100.0 ledc0=0 ledc3=0
+state=5 freq=127.3 target=100.0 ledc0=0 ledc3=0
+state=5 freq=137.4 target=100.0 ledc0=0 ledc3=0
+state=5 freq=147.3 target=100.0 ledc0=0 ledc3=0
+state=5 freq=156.8 target=100.0 ledc0=0 ledc3=0
+state=5 freq=165.8 target=100.0 ledc0=0 ledc3=0

@@ -518,3 +518,18 @@ void PhaseController::shutdown(unsigned long rampMs) {
     if (_periodicTimer)
         esp_timer_stop(_periodicTimer);
 }
+
+bool PhaseController::rampDownStep(float stepPct) {
+    if (!_carrierDutyCyclePct) return true;
+    if (stepPct <= 0.0f) stepPct = 0.1f;   // guard: must make progress
+    bool allZero = true;
+    for (int i = 0; i < _numChannels; i++) {
+        float cur = _carrierDutyCyclePct[i];
+        if (cur <= 0.0f) continue;         // already down
+        float next = cur - stepPct;        // subtract from the LIVE value
+        if (next < 0.0f) next = 0.0f;
+        setCarrierDutyCycle(i, next);      // next < cur always -> monotonic
+        if (next > 0.0f) allZero = false;
+    }
+    return allZero;
+}

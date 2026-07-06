@@ -1,0 +1,71 @@
+running main tilt
+armed: b=begin  s=stop(e-stop)  e=end(ramp down)
+begin: started
+state=1 freq=1.0 target=100.0 ledc0=3067 ledc3=3063
+state=1 freq=1.6 target=100.0 ledc0=3070 ledc3=3063
+state=1 freq=3.6 target=100.0 ledc0=3080 ledc3=3063
+state=1 freq=6.8 target=100.0 ledc0=3095 ledc3=3063
+state=1 freq=11.0 target=100.0 ledc0=3116 ledc3=3063
+state=1 freq=16.3 target=100.0 ledc0=3141 ledc3=3063
+state=1 freq=22.6 target=100.0 ledc0=3172 ledc3=3063
+state=1 freq=29.6 target=100.0 ledc0=3206 ledc3=3064
+state=1 freq=37.5 target=100.0 ledc0=3245 ledc3=3064
+state=1 freq=45.9 target=100.0 ledc0=3286 ledc3=3064
+state=1 freq=55.0 target=100.0 ledc0=3330 ledc3=3065
+state=1 freq=64.4 target=100.0 ledc0=3377 ledc3=3065
+state=1 freq=74.3 target=100.0 ledc0=3425 ledc3=3065
+state=1 freq=84.5 target=100.0 ledc0=3475 ledc3=3066
+state=1 freq=94.8 target=100.0 ledc0=3526 ledc3=3066
+state=1 freq=105.2 target=100.0 ledc0=3577 ledc3=3067
+state=1 freq=115.7 target=100.0 ledc0=3628 ledc3=3067
+state=1 freq=126.0 target=100.0 ledc0=3679 ledc3=3067
+state=1 freq=136.2 target=100.0 ledc0=3729 ledc3=3068
+state=1 freq=146.1 target=100.0 ledc0=3778 ledc3=3068
+state=1 freq=155.6 target=100.0 ledc0=3825 ledc3=3069
+state=1 freq=164.7 target=100.0 ledc0=3869 ledc3=3069
+state=1 freq=173.2 target=100.0 ledc0=3911 ledc3=3069
+state=1 freq=181.0 target=100.0 ledc0=3950 ledc3=3070
+state=1 freq=188.1 target=100.0 ledc0=3985 ledc3=3070
+state=1 freq=194.4 target=100.0 ledc0=4016 ledc3=3070
+state=1 freq=199.8 target=100.0 ledc0=4043 ledc3=3070
+state=1 freq=204.1 target=100.0 ledc0=4064 ledc3=3071
+state=1 freq=207.3 target=100.0 ledc0=4081 ledc3=3071
+state=1 freq=209.3 target=100.0 ledc0=4091 ledc3=3071
+state=2 freq=210.0 target=100.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=100.0 ledc0=4092 ledc3=3071
+state=3 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+state=3 freq=210.0 target=80.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=80.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=80.0 ledc0=4092 ledc3=3071
+state=3 freq=210.0 target=70.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=70.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=70.0 ledc0=4092 ledc3=3071
+state=3 freq=210.0 target=60.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=60.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=60.0 ledc0=4092 ledc3=3071
+state=3 freq=210.0 target=50.0 ledc0=4092 ledc3=3071
+end: ramping down
+state=5 freq=210.0 target=50.0 ledc0=2129 ledc3=1105
+coils off
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=50.0 ledc0=0 ledc3=0
+stop: ramping down (fast)
+coils off

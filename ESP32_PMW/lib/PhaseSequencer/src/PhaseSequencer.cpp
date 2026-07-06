@@ -9,6 +9,23 @@ static float clampDuty(float v) {
   return v;
 }
 
+SequenceTask makeTrajectoryTask(float freq, const float *duty,
+                                const float *phase, const float *carrier,
+                                int numChannels, int64_t durationUs) {
+  SequenceTask task = {};
+  task.type = TaskType::TRAJECTORY_POINT;
+  task.durationUs = durationUs;
+  task.startFreq = freq;
+  task.endFreq = freq;
+  for (int i = 0; i < numChannels; i++) {
+    task.dutyCycles[i] = duty[i];
+    task.startPhases[i] = phase[i];
+    task.endPhases[i] = phase[i];
+    task.carrierDuties[i] = carrier[i];
+  }
+  return task;
+}
+
 PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;
@@ -44,16 +61,6 @@ void PhaseSequencer::addRampTask(float start, float end, uint32_t durationMs,
                                  TaskType type, TaskMode ramp_mode) {
   const float starts[4] = {start, start, start, start};
   const float ends[4] = {end, end, end, end};
-  if (type == TaskType::PWM_FREQ) {
-    SequenceTask task = {};
-    task.type = type;
-    task.mode = ramp_mode;
-    task.durationUs = (int64_t)durationMs * 1000LL;
-    task.startFreq = start;
-    task.endFreq = end;
-    _queue.push_back(task);
-    return;
-  }
   addRampTask(starts, ends, 4, durationMs, type, ramp_mode);
 }
 

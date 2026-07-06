@@ -1,0 +1,186 @@
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+state=6 freq=0.0 target=100.0 ledc0=0 ledc3=0
+begin: started
+state=1 freq=1.4 target=100.0 ledc0=3069 ledc3=3063
+state=1 freq=3.0 target=100.0 ledc0=3077 ledc3=3063
+state=1 freq=5.9 target=100.0 ledc0=3091 ledc3=3063
+state=1 freq=9.9 target=100.0 ledc0=3110 ledc3=3063
+state=1 freq=14.9 target=100.0 ledc0=3135 ledc3=3063
+state=1 freq=20.9 target=100.0 ledc0=3165 ledc3=3063
+field trim: a=1.00 b=0.98 c=1.00 d=1.00
+field trim: a=1.00 b=0.98 c=0.98 d=1.00
+state=1 freq=27.8 target=100.0 ledc0=3198 ledc3=3064
+field trim: a=1.00 b=0.96 c=0.98 d=1.00
+field trim: a=1.00 b=0.96 c=0.96 d=1.00
+state=1 freq=35.4 target=100.0 ledc0=3236 ledc3=3064
+field trim: a=1.00 b=0.94 c=0.96 d=1.00
+field trim: a=1.00 b=0.94 c=0.94 d=1.00
+state=1 freq=43.8 target=100.0 ledc0=3277 ledc3=3064
+field trim: a=1.00 b=0.92 c=0.94 d=1.00
+field trim: a=1.00 b=0.92 c=0.92 d=1.00
+field trim: a=1.00 b=0.90 c=0.92 d=1.00
+field trim: a=1.00 b=0.90 c=0.90 d=1.00
+field trim: a=1.00 b=0.88 c=0.90 d=1.00
+field trim: a=1.00 b=0.88 c=0.88 d=1.00
+state=1 freq=52.7 target=100.0 ledc0=3320 ledc3=3065
+field trim: a=1.00 b=0.86 c=0.88 d=1.00
+field trim: a=1.00 b=0.86 c=0.86 d=1.00
+field trim: a=1.00 b=0.88 c=0.86 d=1.00
+field trim: a=1.00 b=0.88 c=0.88 d=1.00
+state=1 freq=62.0 target=100.0 ledc0=3366 ledc3=3065
+field trim: a=1.00 b=0.90 c=0.88 d=1.00
+field trim: a=1.00 b=0.90 c=0.90 d=1.00
+field trim: a=1.00 b=0.92 c=0.90 d=1.00
+field trim: a=1.00 b=0.92 c=0.92 d=1.00
+field trim: a=1.00 b=0.94 c=0.92 d=1.00
+field trim: a=1.00 b=0.94 c=0.94 d=1.00
+field trim: a=1.00 b=0.96 c=0.94 d=1.00
+field trim: a=1.00 b=0.96 c=0.96 d=1.00
+field trim: a=1.00 b=0.98 c=0.96 d=1.00
+field trim: a=1.00 b=0.98 c=0.98 d=1.00
+field trim: a=1.00 b=1.00 c=0.98 d=1.00
+field trim: a=1.00 b=1.00 c=1.00 d=1.00
+field trim: a=1.00 b=1.02 c=1.00 d=1.00
+field trim: a=1.00 b=1.02 c=1.02 d=1.00
+state=1 freq=71.8 target=100.0 ledc0=3414 ledc3=3065
+field trim: a=1.00 b=1.04 c=1.02 d=1.00
+field trim: a=1.00 b=1.04 c=1.04 d=1.00
+state=1 freq=81.9 target=100.0 ledc0=3464 ledc3=3066
+field trim: a=1.00 b=1.06 c=1.04 d=1.00
+field trim: a=1.00 b=1.06 c=1.06 d=1.00
+field trim: a=1.00 b=1.08 c=1.06 d=1.00
+field trim: a=1.00 b=1.08 c=1.08 d=1.00
+state=1 freq=92.2 target=100.0 ledc0=3514 ledc3=3066
+field trim: a=1.00 b=1.10 c=1.08 d=1.00
+field trim: a=1.00 b=1.10 c=1.10 d=1.00
+state=1 freq=102.6 target=100.0 ledc0=3566 ledc3=3067
+field trim: a=1.00 b=1.12 c=1.10 d=1.00
+field trim: a=1.00 b=1.12 c=1.12 d=1.00
+field trim: a=1.00 b=1.14 c=1.12 d=1.00
+field trim: a=1.00 b=1.14 c=1.14 d=1.00
+state=1 freq=113.1 target=100.0 ledc0=3617 ledc3=3067
+field trim: a=1.00 b=1.16 c=1.14 d=1.00
+field trim: a=1.00 b=1.16 c=1.16 d=1.00
+field trim: a=1.00 b=1.18 c=1.16 d=1.00
+field trim: a=1.00 b=1.18 c=1.18 d=1.00
+field trim: a=1.00 b=1.20 c=1.18 d=1.00
+field trim: a=1.00 b=1.20 c=1.20 d=1.00
+field trim: a=1.00 b=1.22 c=1.20 d=1.00
+field trim: a=1.00 b=1.22 c=1.22 d=1.00
+field trim: a=1.00 b=1.24 c=1.22 d=1.00
+field trim: a=1.00 b=1.24 c=1.24 d=1.00
+state=1 freq=123.5 target=100.0 ledc0=3668 ledc3=3067
+field trim: a=1.00 b=1.26 c=1.24 d=1.00
+field trim: a=1.00 b=1.26 c=1.26 d=1.00
+state=1 freq=133.7 target=100.0 ledc0=3718 ledc3=3068
+field trim: a=1.00 b=1.28 c=1.26 d=1.00
+field trim: a=1.00 b=1.28 c=1.28 d=1.00
+state=1 freq=143.6 target=100.0 ledc0=3767 ledc3=3068
+field trim: a=1.00 b=1.30 c=1.28 d=1.00
+field trim: a=1.00 b=1.30 c=1.30 d=1.00
+field trim: a=1.00 b=1.32 c=1.30 d=1.00
+field trim: a=1.00 b=1.32 c=1.32 d=1.00
+field trim: a=1.00 b=1.34 c=1.32 d=1.00
+field trim: a=1.00 b=1.34 c=1.34 d=1.00
+state=1 freq=153.3 target=100.0 ledc0=3815 ledc3=3069
+field trim: a=1.00 b=1.36 c=1.34 d=1.00
+field trim: a=1.00 b=1.36 c=1.36 d=1.00
+field trim: a=1.00 b=1.38 c=1.36 d=1.00
+field trim: a=1.00 b=1.38 c=1.38 d=1.00
+field trim: a=1.00 b=1.40 c=1.38 d=1.00
+field trim: a=1.00 b=1.40 c=1.40 d=1.00
+state=1 freq=162.4 target=100.0 ledc0=3860 ledc3=3069
+field trim: a=1.00 b=1.42 c=1.40 d=1.00
+field trim: a=1.00 b=1.42 c=1.42 d=1.00
+field trim: a=1.00 b=1.44 c=1.42 d=1.00
+field trim: a=1.00 b=1.44 c=1.44 d=1.00
+state=1 freq=171.1 target=100.0 ledc0=3902 ledc3=3069
+field trim: a=1.00 b=1.46 c=1.44 d=1.00
+field trim: a=1.00 b=1.46 c=1.46 d=1.00
+field trim: a=1.00 b=1.48 c=1.46 d=1.00
+field trim: a=1.00 b=1.48 c=1.48 d=1.00
+field trim: a=1.00 b=1.50 c=1.48 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=179.1 target=100.0 ledc0=3942 ledc3=3070
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=186.4 target=100.0 ledc0=3978 ledc3=3070
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=192.9 target=100.0 ledc0=4010 ledc3=3070
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=198.5 target=100.0 ledc0=4037 ledc3=3070
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=203.1 target=100.0 ledc0=4060 ledc3=3070
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=206.6 target=100.0 ledc0=4077 ledc3=3071
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=1 freq=208.9 target=100.0 ledc0=4089 ledc3=3071
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=2 freq=210.0 target=100.0 ledc0=4092 ledc3=3071
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=2 freq=210.0 target=100.0 ledc0=4092 ledc3=3071
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+field trim: a=1.00 b=1.50 c=1.50 d=1.00
+state=3 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+state=2 freq=210.0 target=90.0 ledc0=4092 ledc3=3071
+end: ramping down
+state=5 freq=210.0 target=90.0 ledc0=1146 ledc3=122
+coils off
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+state=6 freq=210.0 target=90.0 ledc0=0 ledc3=0
+stop: ramping down (fast)
+coils off

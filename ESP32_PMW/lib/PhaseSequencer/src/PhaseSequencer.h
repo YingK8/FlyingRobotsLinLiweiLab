@@ -102,6 +102,10 @@ public:
   /** @brief Advance the running sequence. Call every loop() iteration. */
   void run();
   bool isDone() const;
+  /** @brief Index of the queue entry currently running (== queue size once
+   *  isDone()). Used by callers (e.g. JsonPhaseSequencer::labelForStep) that
+   *  track auxiliary per-step data in parallel with the queue. */
+  size_t currentIndex() const { return _currentFrameIdx; }
 
 private:
   PhaseController *_phaseCtrl;

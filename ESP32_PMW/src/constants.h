@@ -27,3 +27,4 @@ const gpio_num_t D_ADC_PIN = GPIO_NUM_35;
 
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
+const gpio_num_t ADC_PINS[NUM_CHANNELS] =     {A_ADC_PIN,     B_ADC_PIN,      C_ADC_PIN,      D_ADC_PIN};

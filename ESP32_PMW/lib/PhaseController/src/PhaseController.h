@@ -105,6 +105,14 @@ public:
   void setCarrierDutyCycle(int channel, float dutyPercent);
 
   /**
+   * @brief Get the carrier PWM duty cycle for a specific channel.
+   * @param channel Channel index.
+   * @return Carrier duty cycle percentage (0-100), or 0 if carrier PWM
+   *         hasn't been initialized yet / channel is out of range.
+   */
+  float getCarrierDutyCycle(int channel) const;
+
+  /**
    * @brief Gracefully de-energize all coils: ramp every carrier duty down to 0
    *        over rampMs, then stop the periodic phase timer so all output halts.
    *        The controller/timer remain allocated (unlike the destructor).

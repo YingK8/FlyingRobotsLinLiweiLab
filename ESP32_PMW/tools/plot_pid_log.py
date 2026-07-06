@@ -8,14 +8,21 @@ Log with tools/trigger_reset_log.py, e.g.:
   uv run python tools/trigger_reset_log.py --log-seconds 65 --out current_pid_run.log
   uv run python tools/plot_pid_log.py current_pid_run.log
 
+Also prints a machine-parsable "METRICS ..." summary line (see
+tools/pid_metrics.py) that tools/pid_autotune.py scores across trials.
+
 Usage: uv run python tools/plot_pid_log.py LOG
 """
 import argparse
-import re
-import numpy as np
+import os
+import sys
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pid_metrics import STATES, HOLD_PHASE, compute_metrics, format_metrics_line, parse_log
 
 ap = argparse.ArgumentParser()
 ap.add_argument("log")
@@ -23,40 +30,15 @@ ap.add_argument("--spread-limit", type=float, default=0.1,
                  help="validation bar in amps (default 0.1)")
 args = ap.parse_args()
 
-STATES = {0: "ARMING", 1: "RAMP_UP", 2: "HOLD", 3: "ENDING", 4: "STOPPED"}
-HOLD_PHASE = 2
+data = parse_log(args.log)
+t, state, freq = data["t"], data["state"], data["freq"]
+i_a, i_b, i_c, i_d = data["i_a"], data["i_b"], data["i_c"], data["i_d"]
+d_a, d_b, d_c, d_d = data["d_a"], data["d_b"], data["d_c"], data["d_d"]
+spread = data["spread"]
 
-pat = re.compile(
-    r"phase=(\d+)\s+freq=([\d.]+)\s+\|\s+"
-    r"I\[A\]:\s+A=([\-\d.]+)\s+B=([\-\d.]+)\s+C=([\-\d.]+)\s+D=([\-\d.]+)\s+\|\s+"
-    r"duty\[%\]:\s+A=([\-\d.]+)\s+B=([\-\d.]+)\s+C=([\-\d.]+)\s+D=([\-\d.]+)\s+\|\s+"
-    r"spread=([\d.]+)"
-)
-
-rows = []
-t_rel = []
-for line in open(args.log):
-    m = pat.search(line)
-    if not m:
-        continue
-    tm = re.match(r"\s*([\d.]+)s\s", line)  # trigger_reset_log.py's timestamp prefix
-    t_rel.append(float(tm[1]) if tm else len(rows))
-    rows.append(tuple(m.groups()))
-
-if not rows:
-    raise SystemExit("no main_current_pid.cpp telemetry lines found "
-                      "(expected 'phase=.. freq=.. | I[A]: ... | duty[%]: ... | spread=..')")
-
-state = np.array([int(r[0]) for r in rows])
-freq = np.array([float(r[1]) for r in rows])
-i_a, i_b, i_c, i_d = (np.array([float(r[k]) for r in rows]) for k in (2, 3, 4, 5))
-d_a, d_b, d_c, d_d = (np.array([float(r[k]) for r in rows]) for k in (6, 7, 8, 9))
-spread = np.array([float(r[10]) for r in rows])
-t = np.array(t_rel)
-
-print(f"{args.log}: {len(rows)} telemetry samples over {t[-1]:.1f}s")
+print(f"{args.log}: {len(t)} telemetry samples over {t[-1]:.1f}s")
 for s in sorted(set(state)):
-    print(f"  phase {s} {STATES.get(s, '?'):<8} {np.sum(state == s):>4} samples")
+    print(f"  phase {s} {STATES.get(s, '?'):<8} {sum(state == s):>4} samples")
 
 hold_mask = state == HOLD_PHASE
 if hold_mask.any():
@@ -78,6 +60,9 @@ if hold_mask.any():
               f"excludes the post-ramp settling transient)")
 else:
     print("  no HOLD samples captured -- log too short or run didn't reach HOLD")
+
+metrics = compute_metrics(data, spread_limit=args.spread_limit)
+print(format_metrics_line(metrics))
 
 fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 11), sharex=True)
 

@@ -347,6 +347,11 @@ float PhaseController::getPhase(int channel) const {
 
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
+float PhaseController::getCarrierDutyCycle(int channel) const {
+    if (!_carrierDutyCyclePct || channel < 0 || channel >= _numChannels) return 0.0f;
+    return _carrierDutyCyclePct[channel];
+}
+
 void PhaseController::run() {
     static unsigned long lastUpdate = 0;
     if (esp_timer_get_time() - lastUpdate > 100000) { 

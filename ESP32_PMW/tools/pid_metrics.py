@@ -26,8 +26,17 @@ _CORE = re.compile(
     r"duty\[%\]:\s+A=([\-\d.]+)\s+B=([\-\d.]+)\s+C=([\-\d.]+)\s+D=([\-\d.]+)\s+\|\s+"
     r"spread=([\d.]+)"
 )
-_TRAILER = re.compile(r"dir=(\d+)\s+kp=([\-\d.]+)\s+ki=([\-\d.]+)\s+kd=([\-\d.]+)")
+_TRAILER = re.compile(
+    r"dir=(\d+)\s+kp=([\-\d.]+)\s+ki=([\-\d.]+)\s+kd=([\-\d.]+)"
+    r"(?:\s+ramp=([\-\d.]+))?"  # optional -- older logs predate ramp=
+)
 _TIME_PREFIX = re.compile(r"\s*([\d.]+)s\s")  # trigger_reset_log.py's timestamp prefix
+
+_EXP_CORE = re.compile(
+    r"t=(\d+)\s+label=(\S+)\s+\|\s+"
+    r"I\[A\]:\s+A=([\-\d.]+)\s+B=([\-\d.]+)\s+C=([\-\d.]+)\s+D=([\-\d.]+)\s+\|\s+"
+    r"duty\[%\]:\s+A=([\-\d.]+)\s+B=([\-\d.]+)\s+C=([\-\d.]+)\s+D=([\-\d.]+)"
+)
 
 _METRICS_LINE = re.compile(
     r"METRICS\s+hold_spread=([\w.\-]+)\s+ss_err=([\w.\-]+)\s+"
@@ -77,7 +86,41 @@ def parse_log(path: str) -> dict:
         data["kp"] = np.array([float(r[1]) for r in trailer_rows])
         data["ki"] = np.array([float(r[2]) for r in trailer_rows])
         data["kd"] = np.array([float(r[3]) for r in trailer_rows])
+        if all(r[4] is not None for r in trailer_rows):
+            data["ramp"] = np.array([float(r[4]) for r in trailer_rows])
     return data
+
+
+def parse_experiment_log(path: str) -> dict:
+    """Parse a main_experiment.cpp serial log ("t=.. label=.. | I[A]: ... |
+    duty[%]: ...", both the on-label-change print and the periodic print) into
+    a dict of numpy arrays (t, label [object array of str], i_a..i_d, d_a..d_d).
+    Raises SystemExit if no telemetry found."""
+    rows = []
+    for line in open(path):
+        m = _EXP_CORE.search(line)
+        if not m:
+            continue
+        rows.append(m.groups())
+
+    if not rows:
+        raise SystemExit(
+            f"no main_experiment.cpp telemetry lines found in {path} "
+            "(expected 't=.. label=.. | I[A]: ... | duty[%]: ...')"
+        )
+
+    return {
+        "t": np.array([int(r[0]) for r in rows]),
+        "label": np.array([r[1] for r in rows], dtype=object),
+        "i_a": np.array([float(r[2]) for r in rows]),
+        "i_b": np.array([float(r[3]) for r in rows]),
+        "i_c": np.array([float(r[4]) for r in rows]),
+        "i_d": np.array([float(r[5]) for r in rows]),
+        "d_a": np.array([float(r[6]) for r in rows]),
+        "d_b": np.array([float(r[7]) for r in rows]),
+        "d_c": np.array([float(r[8]) for r in rows]),
+        "d_d": np.array([float(r[9]) for r in rows]),
+    }
 
 
 def _first_settle_time(hold_t, below, settle_hold_s: float):
@@ -110,12 +153,16 @@ def compute_metrics(data: dict, spread_limit: float = 0.1,
     resonance_peak  max spread during RAMP_UP in the 90-190Hz L/R-corner
                     band, the historically hardest failure mode a HOLD-only
                     metric would miss
+    resonance_peak_freq_hz  the drive frequency at which resonance_peak
+                    occurred -- used by validate_resonance_model.py to check
+                    the fitted RLC model's predicted resonance location
+                    against where the real controller actually struggled
     """
     t, state, freq, spread = data["t"], data["state"], data["freq"], data["spread"]
     currents = np.stack([data["i_a"], data["i_b"], data["i_c"], data["i_d"]], axis=1)
 
     metrics = {"hold_spread": None, "ss_err": None, "settle_s": None,
-               "resonance_peak": None}
+               "resonance_peak": None, "resonance_peak_freq_hz": None}
 
     hold_mask = state == HOLD_PHASE
     if hold_mask.any():
@@ -137,7 +184,9 @@ def compute_metrics(data: dict, spread_limit: float = 0.1,
     lo, hi = RESONANCE_BAND_HZ
     ramp_mask = (state == RAMP_UP_PHASE) & (freq >= lo) & (freq <= hi)
     if ramp_mask.any():
-        metrics["resonance_peak"] = float(spread[ramp_mask].max())
+        ramp_spread = spread[ramp_mask]
+        metrics["resonance_peak"] = float(ramp_spread.max())
+        metrics["resonance_peak_freq_hz"] = float(freq[ramp_mask][np.argmax(ramp_spread)])
 
     return metrics
 

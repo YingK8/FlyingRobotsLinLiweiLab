@@ -79,7 +79,8 @@ const float MIN_SWITCH_MARGIN_A = 0.3f;
 // before the argmin re-evaluation above has a chance to reassign idx_min to
 // a genuinely different weakest channel. Ramping instead gives that
 // reassignment time to happen mid-ramp.
-const float MIN_RAMP_PCT_PER_MS = 0.05f;  // duty %/ms at NOMINAL_TICK_MS rate -- untuned placeholder
+float MIN_RAMP_PCT_PER_MS = 0.05f;  // duty %/ms at NOMINAL_TICK_MS rate -- untuned
+                                     // placeholder, runtime-tunable via ramp=
 
 float integrator[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
 float duty_out[NUM_CHANNELS]   = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
@@ -185,7 +186,7 @@ void reinitController(bool ccw) {
 }
 
 void printGains() {
-  Serial.printf("KP=%.3f KI=%.3f KD=%.3f\n", KP, KI, KD);
+  Serial.printf("KP=%.3f KI=%.3f KD=%.3f RAMP=%.4f\n", KP, KI, KD, MIN_RAMP_PCT_PER_MS);
 }
 
 void dispatchCommand(const String &raw) {
@@ -224,8 +225,12 @@ void dispatchCommand(const String &raw) {
     if (running) { Serial.println("ignored: running (stop first)"); return; }
     KD = cmd.substring(3).toFloat();
     printGains();
+  } else if (cmd.startsWith("ramp=")) {
+    if (running) { Serial.println("ignored: running (stop first)"); return; }
+    MIN_RAMP_PCT_PER_MS = cmd.substring(5).toFloat();
+    printGains();
   } else {
-    Serial.printf("unknown cmd '%s' (dir=cw/ccw  kp=/ki=/kd=<val>  gains?)\n",
+    Serial.printf("unknown cmd '%s' (dir=cw/ccw  kp=/ki=/kd=/ramp=<val>  gains?)\n",
                   cmd.c_str());
   }
 }
@@ -250,7 +255,7 @@ void setup() {
   phase = ARMING;
   phase_start = millis();
   Serial.println("current_pid: arming 3s, then autonomous 1->210Hz ramp + PI, bounded run");
-  Serial.println("commands: dir=cw|ccw  kp=/ki=/kd=<val>  gains?");
+  Serial.println("commands: dir=cw|ccw  kp=/ki=/kd=/ramp=<val>  gains?");
 }
 
 void loop() {
@@ -347,7 +352,7 @@ void loop() {
     }
     Serial.printf("t=%lu phase=%d freq=%.1f | ", now, (int)phase, controller->getFrequency());
     printCurrentAndDuty(i_meas, duty_out);
-    Serial.printf(" | spread=%.3f dir=%d kp=%.2f ki=%.2f kd=%.2f\n",
-                  i_max - i_min, directionIsCcw ? 1 : 0, KP, KI, KD);
+    Serial.printf(" | spread=%.3f dir=%d kp=%.2f ki=%.2f kd=%.2f ramp=%.4f\n",
+                  i_max - i_min, directionIsCcw ? 1 : 0, KP, KI, KD, MIN_RAMP_PCT_PER_MS);
   }
 }

@@ -34,6 +34,14 @@ const char *EXPERIMENT_FILE = "/experiment.json";
 // cross-check against the PicoScope capture, not used for control here.
 const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
 
+// Hard overcurrent trip -- unlike main_current_pid.cpp this firmware is
+// fully open-loop (JsonPhaseSequencer just plays back a schedule) with no
+// other protection. Needed for system-ID sweeps that deliberately hunt for
+// an a-priori-unknown resonance peak (see tools/gen_solo_sweep_experiment.py)
+// where current could spike well past the ~2A RMS coil rating (PCB doc) if
+// left unwatched.
+const float I_SAFETY_MAX_A = 8.0f;
+
 PhaseController *controller;
 JsonPhaseSequencer *seq;
 CurrentSense currentSense(SENS);
@@ -116,6 +124,18 @@ void loop() {
 
   case RUNNING: {
     seq->run();
+
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+      if (currentSense.i_meas[i] > I_SAFETY_MAX_A) {
+        allCoilsOff();
+        phase = DONE;
+        Serial.printf("SAFETY: channel %d overcurrent (%.2fA) -- latching off\n",
+                      i, currentSense.i_meas[i]);
+        break;
+      }
+    }
+    if (phase != RUNNING) break;
+
     String label = seq->labelForStep(seq->currentIndex());
     if (label != lastLabel) {
       lastLabel = label;
@@ -126,6 +146,24 @@ void loop() {
       printCurrentAndDuty(currentSense.i_meas, dutyPct);
       Serial.println();
     }
+
+    // Periodic telemetry (in addition to the on-label-change print above):
+    // system-ID sweeps need the SETTLED current at each frequency, but the
+    // on-change print fires at the *start* of a dwell, before the current has
+    // settled. This samples throughout each dwell so a fit script can average
+    // the tail of it.
+    static unsigned long last_periodic_ms = 0;
+    const unsigned long PERIODIC_TELEMETRY_MS = 200;
+    if (now - last_periodic_ms >= PERIODIC_TELEMETRY_MS) {
+      last_periodic_ms = now;
+      float dutyPct[NUM_CHANNELS];
+      for (int i = 0; i < NUM_CHANNELS; i++)
+        dutyPct[i] = controller->getCarrierDutyCycle(i);
+      Serial.printf("t=%lu label=%s | ", now, lastLabel.c_str());
+      printCurrentAndDuty(currentSense.i_meas, dutyPct);
+      Serial.println();
+    }
+
     if (seq->isDone()) {
       allCoilsOff();
       phase = DONE;

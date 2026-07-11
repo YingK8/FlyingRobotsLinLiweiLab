@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -34,7 +35,7 @@ ARMED_BANNER_TIMEOUT_S = 6.0
 POLL_S = 0.02
 
 
-def run_trial(port, kp, ki, kd, run_seconds, out_path):
+def run_trial(port, kp, ki, kd, ramp, run_seconds, out_path):
     """Reset the board, set gains, let one bounded run complete, log
     telemetry to out_path. Returns True if the ARMED banner was seen (gains
     believed applied in time), False otherwise (results still logged, but
@@ -64,7 +65,7 @@ def run_trial(port, kp, ki, kd, run_seconds, out_path):
                 print(f"  WARNING: no boot banner within {BOOT_BANNER_TIMEOUT_S}s "
                       "-- sending gains anyway, best-effort")
 
-            for cmd in (f"kp={kp}", f"ki={ki}", f"kd={kd}"):
+            for cmd in (f"kp={kp}", f"ki={ki}", f"kd={kd}", f"ramp={ramp}"):
                 log(comm.handle_serial_comm(cmd))
                 time.sleep(0.15)
 
@@ -121,6 +122,12 @@ def main() -> None:
     ap.add_argument("--kp0", type=float, default=2.2)
     ap.add_argument("--ki0", type=float, default=0.10)
     ap.add_argument("--kd0", type=float, default=0.15)
+    ap.add_argument("--ramp0", type=float, default=0.05,
+                     help="seed for MIN_RAMP_PCT_PER_MS (default: %(default)s)")
+    ap.add_argument("--gains-file", default=None,
+                     help="tools/model_gains.json from tools/compute_model_gains.py -- "
+                          "if given, its 'recommended' block overrides --kp0/--ki0/--kd0 "
+                          "with model-informed seeds instead of the arbitrary defaults")
     ap.add_argument("--rounds", type=int, default=2,
                      help="coordinate-descent rounds over {KP,KI,KD} (default: %(default)s)")
     ap.add_argument("--run-seconds", type=float, default=45.0,
@@ -130,30 +137,38 @@ def main() -> None:
                      default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune_runs"))
     args = ap.parse_args()
 
+    if args.gains_file:
+        with open(args.gains_file) as f:
+            rec = json.load(f)["recommended"]
+        args.kp0, args.ki0, args.kd0 = rec["KP"], rec["KI"], rec["KD"]
+        print(f"seeding from {args.gains_file}: kp0={args.kp0:.3f} "
+              f"ki0={args.ki0:.4f} kd0={args.kd0:.4f}")
+
     os.makedirs(args.out_dir, exist_ok=True)
     results_path = os.path.join(args.out_dir, "results.csv")
 
-    gains = {"kp": args.kp0, "ki": args.ki0, "kd": args.kd0}
+    gains = {"kp": args.kp0, "ki": args.ki0, "kd": args.kd0, "ramp": args.ramp0}
     state = {"trial_n": 0, "best_score": None}
 
     with open(results_path, "w") as rf:
-        rf.write("trial,kp,ki,kd,gains_applied,hold_spread,ss_err,settle_s,resonance_peak,score\n")
+        rf.write("trial,kp,ki,kd,ramp,gains_applied,hold_spread,ss_err,settle_s,resonance_peak,score\n")
 
         def try_gains(candidate: dict) -> float:
             state["trial_n"] += 1
             n = state["trial_n"]
             out_path = os.path.join(args.out_dir, f"trial_{n:03d}.log")
             print(f"[{n}] kp={candidate['kp']:.3f} ki={candidate['ki']:.3f} "
-                  f"kd={candidate['kd']:.3f}")
+                  f"kd={candidate['kd']:.3f} ramp={candidate['ramp']:.4f}")
             applied = run_trial(args.port, candidate["kp"], candidate["ki"],
-                                 candidate["kd"], args.run_seconds, out_path)
+                                 candidate["kd"], candidate["ramp"], args.run_seconds, out_path)
             data = parse_log(out_path)
             metrics = compute_metrics(data)
             s = score(metrics)
             is_best = state["best_score"] is None or s < state["best_score"]
             rf.write(f"{n},{candidate['kp']},{candidate['ki']},{candidate['kd']},"
-                      f"{applied},{metrics['hold_spread']},{metrics['ss_err']},"
-                      f"{metrics['settle_s']},{metrics['resonance_peak']},{s}\n")
+                      f"{candidate['ramp']},{applied},{metrics['hold_spread']},"
+                      f"{metrics['ss_err']},{metrics['settle_s']},"
+                      f"{metrics['resonance_peak']},{s}\n")
             rf.flush()
             print(f"  {format_metrics_line(metrics)} -> score={s:.4f}"
                   f"{'  ** new best **' if is_best else ''}")
@@ -163,7 +178,7 @@ def main() -> None:
         print(f"baseline score={state['best_score']:.4f}")
 
         for _ in range(args.rounds):
-            for key in ("kp", "ki", "kd"):
+            for key in ("kp", "ki", "kd", "ramp"):
                 base = gains[key]
                 for factor in (0.7, 1.0, 1.3):
                     candidate = dict(gains)

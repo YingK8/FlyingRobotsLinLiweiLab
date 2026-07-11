@@ -64,8 +64,22 @@ Serial logs contain the `field trim:` value lines from each session.
 Not yet successful; open thread: geometric field asymmetry (B/C vs A/D),
 suspect coil mounting height/tilt — calipers check pending.
 
+## 2026-07-05_current-pid-manual-tuning/
+Manual gain-tuning session for `main_current_pid.cpp`'s global min/max PI
+(`current_pid_iter1`–`iter16`, EN-reset + `kp=/ki=/kd=/ramp=` between runs,
+captured via `tools/trigger_reset_log.py`; telemetry PNGs from
+`tools/plot_pid_log.py` for iter5, 7–14, 16). Converged to the gains recorded
+in project memory (KP=2.2, KI=0.10, KD=0.15). Moved here (2026-07-11 cleanup)
+from the repo root, where they'd accumulated as loose files.
+
 ## Removed as garbage (2026-07-05 cleanup)
 - `tilt_ccw_verify.*` — capture recorded against the wrong firmware after a
   failed flash (PhaseSequencer mid-refactor); serial log was empty.
 - `comp_ff_iter1_rms.png` — auto-generated overview that was provably inverted
   (see workflow memory note; regenerate any overview with `tools/plot_rms.py`).
+
+## Removed as garbage (2026-07-11 cleanup)
+- `current_pid_iter15.log` — aborted trial: HOLD ended abruptly (skipped the
+  ENDING ramp-down phase entirely) and the STOPPED-phase current reads spiked
+  to implausible values (-12.75A/-12.58A, spread=12.752), consistent with an
+  e-stop/ADC glitch rather than a valid data point.

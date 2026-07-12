@@ -1,7 +1,7 @@
 # SerialComm
 
 Non-blocking, newline-framed serial send/receive for ESP32 sketches. Call
-`handleSerialComm()` once per `loop()` iteration; it never blocks and never
+`step()` once per `loop()` iteration; it never blocks and never
 depends on a whole line arriving inside one call.
 
 Generalizes the reader that `main_tilt.cpp` had built inline. Framing is
@@ -21,13 +21,13 @@ void setup() {
 }
 
 void loop() {
-  String line = comm.handleSerialComm(); // nothing to send this tick
+  String line = comm.step(); // nothing to send this tick
   if (line.length()) {
     Serial.printf("got: %s\n", line.c_str());
   }
 
   // ...or send something while checking for incoming:
-  // String line = comm.handleSerialComm("state=1 freq=7.2");
+  // String line = comm.step("state=1 freq=7.2");
 }
 ```
 
@@ -35,10 +35,10 @@ void loop() {
 
 ```cpp
 SerialComm(Stream &port = Serial);
-String handleSerialComm(const String &outgoing = String());
+String step(const String &outgoing = String());
 ```
 
-`handleSerialComm` writes `outgoing` (if non-empty) plus a trailing `\n`,
+`step` writes `outgoing` (if non-empty) plus a trailing `\n`,
 drains whatever bytes are currently available, and returns the first
 complete line that finished this call, or `""` if none did. If multiple
 lines are waiting, only one is returned per call -- the rest stay buffered

@@ -11,11 +11,11 @@
 // sustained through HOLD.
 
 #include <Arduino.h>
-#include "PhaseController.h"
-#include "PhaseSequencer.h"
+#include "PWMController.h"
+#include "PWMSequencer.h"
 #include "SerialComm.h"
 #include "constants.h"
-#include "current_sense.h"
+#include "CurrentSense.h"
 #include "safety_startup.h"
 #include "telemetry.h"
 
@@ -42,7 +42,7 @@ const unsigned long ramp_duration_ms = 20000;
 // ============================== CURRENT SENSE ==============================
 // VNH5019 CS gain, A per V -- per-board calibration.
 const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
-CurrentSense currentSense(SENS); // TAU_FILTER_MS=50 default -- see current_sense.h
+CurrentSense currentSense(ADC_PINS, SENS, NUM_CHANNELS); // TAU_FILTER_MS=50 default -- see CurrentSense.h
 
 // ============================== PI CONTROLLER ==============================
 // Runtime-tunable via kp=/ki=/kd= (see dispatchCommand). Converged values
@@ -87,8 +87,8 @@ float duty_out[NUM_CHANNELS]   = {START_DUTY, START_DUTY, START_DUTY, START_DUTY
 float last_err[NUM_CHANNELS] = {0, 0, 0, 0};
 int idx_min = 0;  // latched -- persists across ticks, see MIN_SWITCH_MARGIN_A
 
-PhaseController *controller;
-PhaseSequencer *seq;
+PWMController *controller;
+PWMSequencer *seq;
 SerialComm comm;
 bool directionIsCcw = true; // default direction, matches this file's history
 
@@ -172,7 +172,7 @@ void reinitController(bool ccw) {
   directionIsCcw = ccw;
 
   if (controller) delete controller;
-  controller = new PhaseController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+  controller = new PWMController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
   // Explicit non-zero starting frequency -- begin(0.0f) divides by zero
   // inside setGlobalFrequency() and permanently corrupts commutation timing.
   controller->begin(start_freq);
@@ -180,7 +180,7 @@ void reinitController(bool ccw) {
   allCoilsOff();
 
   if (seq) delete seq;
-  seq = new PhaseSequencer(controller);
+  seq = new PWMSequencer(controller);
   seq->addRampTask(start_freq, end_freq, ramp_duration_ms, TaskType::PWM_FREQ, TaskMode::EASE);
   seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, phases);
 }
@@ -261,11 +261,11 @@ void setup() {
 void loop() {
   unsigned long now = millis();  // state-machine timing (seconds-scale, ms is plenty)
 
-  String line = comm.handleSerialComm();
+  String line = comm.step();
   if (line.length()) dispatchCommand(line);
 
   // ADC sampling is rate-limited -- NOT a software throttle, a real ESP32
-  // ADC hardware constraint (see current_sense.cpp). Control computation
+  // ADC hardware constraint (see CurrentSense.cpp). Control computation
   // still runs every loop() iteration (unthrottled) against whatever the
   // latest valid sample is -- these are two different rates, tracked
   // separately.
@@ -285,8 +285,8 @@ void loop() {
   if (control_dt_ms <= 0.0f) control_dt_ms = 0.001f;  // guard div-by-zero only
   last_control_us = now_us;
 
-  controller->run();
-  if (phase == RAMP_UP || phase == HOLD) seq->run();
+  controller->step();
+  if (phase == RAMP_UP || phase == HOLD) seq->step();
 
   switch (phase) {
     case ARMING:

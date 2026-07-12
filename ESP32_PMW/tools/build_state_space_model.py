@@ -26,7 +26,7 @@ with tools/validate_state_space_model.py before trusting it on hardware.
 
 The discretization below (Ad = expm(A*Ts), Bd = A^-1(Ad-I)B) discretizes the
 4-state RLC+M model directly. It does NOT separately model the current-sense
-50ms EMA filter (current_sense.h) as an extra state -- Ts should be chosen
+50ms EMA filter (CurrentSense.h) as an extra state -- Ts should be chosen
 >= tau_filter_ms as a conservative approximation (the filter's own lag is
 treated as already "inside" the achievable control period, not as a distinct
 pole to observe around). See the plan's caveats section.
@@ -113,7 +113,7 @@ def main() -> None:
     ap.add_argument("--channels", nargs="+", default=list("ABCD"), choices=list("ABCD"))
     ap.add_argument("--ts", type=float, default=0.05,
                      help="discretization sample time, seconds -- keep >= the current-sense "
-                          "filter's tau (50ms default in current_sense.h) (default: %(default)s)")
+                          "filter's tau (50ms default in CurrentSense.h) (default: %(default)s)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "state_space_model.json"))
     ap.add_argument("--header", default=os.path.join(os.path.dirname(__file__), "..", "src", "plant_model.h"))
     args = ap.parse_args()

@@ -42,19 +42,19 @@ Rotation order (CCW): A → C → B → D
 
 ---
 
-## PhaseController
+## PWMController
 
 Controls PWM frequency, duty cycle, phase, and carrier duty per channel.
 
 ```cpp
-#include "PhaseController.h"
+#include "PWMController.h"
 
-PhaseController* controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+PWMController* controller = new PWMController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
 controller->begin();
 controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
 // In loop():
-controller->run();
+controller->step();
 ```
 
 Key methods:
@@ -69,14 +69,14 @@ controller->getFrequency();                         // returns current freq (Hz)
 
 ---
 
-## PhaseSequencer
+## PWMSequencer
 
-Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PhaseController.
+Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PWMController.
 
 ```cpp
-#include "PhaseSequencer.h"
+#include "PWMSequencer.h"
 
-PhaseSequencer* seq = new PhaseSequencer(controller);
+PWMSequencer* seq = new PWMSequencer(controller);
 
 // One addRampTask for every quantity; TaskType picks it, TaskMode the curve
 seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::EASE);   // 1→200 Hz ease
@@ -100,7 +100,7 @@ seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES); // 25 ms resolution
 seq->start();
 
 // In loop():
-seq->run();
+seq->step();
 bool done = seq->isDone();
 ```
 
@@ -121,7 +121,7 @@ LED on GPIO 2 blinks each step. Run **tilt2 first** (lower power, safer).
 
 ## Scheduling Tasks
 
-### Code-based (PhaseSequencer)
+### Code-based (PWMSequencer)
 
 Build the sequence in `setup()`, then execute it in `loop()`:
 
@@ -140,18 +140,18 @@ seq->start();
 Check completion and react:
 ```cpp
 void loop() {
-  controller->run();
-  seq->run();
+  controller->step();
+  seq->step();
   if (seq->isDone()) { /* sequence finished */ }
 }
 ```
 
 ---
 
-### JSON file (JsonPhaseSequencer)
+### JSON file (JsonPWMSequencer)
 
 Upload a `.json` file to SPIFFS, then load it at startup. It's an array of
-entries, each naming a `PhaseSequencer` method and its arguments, applied in
+entries, each naming a `PWMSequencer` method and its arguments, applied in
 array order (not by a timestamp field):
 
 ```json
@@ -170,16 +170,16 @@ channels), or `addPhaseRampTask` (per-channel). Unrecognized methods are
 skipped and logged to serial.
 
 ```cpp
-#include "JsonPhaseSequencer.h"
-JsonPhaseSequencer* seq = new JsonPhaseSequencer(controller);
+#include "JsonPWMSequencer.h"
+JsonPWMSequencer* seq = new JsonPWMSequencer(controller);
 seq->loadFromJsonFile("/schedule.json");
 seq->start();
-// call seq->run() in loop()
+// call seq->step() in loop()
 ```
 
 ---
 
-### CSV waypoints (CsvPhaseSequencer)
+### CSV waypoints (CsvPWMSequencer)
 
 Define channel states at each timestamp; the sequencer interpolates between them:
 
@@ -201,11 +201,11 @@ time,channel,duty,carrier_duty,frequency,phase
 Interpolation modes: `linear`, `hermite` / `ease` (smoothstep).
 
 ```cpp
-#include "CsvPhaseSequencer.h"
-CsvPhaseSequencer* seq = new CsvPhaseSequencer(controller);
+#include "CsvPWMSequencer.h"
+CsvPWMSequencer* seq = new CsvPWMSequencer(controller);
 seq->loadFromCSVFile("/profile.csv");
 seq->start();
-// call seq->run() in loop()
+// call seq->step() in loop()
 ```
 
 Upload the data file to SPIFFS with: `pio run -e <env> --target uploadfs`
@@ -215,4 +215,4 @@ Upload the data file to SPIFFS with: `pio run -e <env> --target uploadfs`
 ## Further Reading
 
 - Full API docs: [`DOCS.md`](DOCS.md)
-- Library details: [`lib/PhaseController/README.md`](lib/PhaseController/README.md), [`lib/PhaseSequencer/README.md`](lib/PhaseSequencer/README.md)
+- Library details: [`lib/PWMController/README.md`](lib/PWMController/README.md), [`lib/PWMSequencer/README.md`](lib/PWMSequencer/README.md)

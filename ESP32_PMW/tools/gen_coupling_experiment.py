@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Generate the CW/CCW coil-coupling characterization JSON experiments.
 
-Emits spiffs_data/coupling_cw.json and spiffs_data/coupling_ccw.json: for each
+Emits task_sequences/coupling_cw.json and task_sequences/coupling_ccw.json: for each
 direction, sweep every solo/pairwise/all-4 activation combo (the 11 segments
 main_coupling_test.cpp used to hardcode) at several carrier-duty ("current")
 levels, so tools/coupling_matrix.py --segments-log can extract a coupling
 matrix per level from the resulting capture. Only emits objects the on-device
-JsonPhaseSequencer parser already understands (setDirection / activateChannels
+JsonPWMSequencer parser already understands (setDirection / activateChannels
 / label / addWaitTask); this script's only job is unrolling the combinatorics
 (repeats aren't a queue primitive), not adding capability the firmware lacks.
 
@@ -67,7 +67,7 @@ def main() -> None:
     ap.add_argument("--gap-ms", type=int, default=DEFAULT_GAP_MS,
                      help="off-gap between segments, ms (default: %(default)s)")
     ap.add_argument("--out-dir",
-                     default=os.path.join(os.path.dirname(__file__), "..", "spiffs_data"),
+                     default=os.path.join(os.path.dirname(__file__), "..", "task_sequences"),
                      help="directory to write coupling_cw.json/coupling_ccw.json into")
     args = ap.parse_args()
 

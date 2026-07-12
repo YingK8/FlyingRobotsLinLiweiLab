@@ -5,8 +5,8 @@ tools/fit_rlc_model.py and the plan's dynamic-model section).
 
 For each channel: drive it alone (activateChannels, others at 0%) at a fixed
 duty, and step the GLOBAL commutation frequency through a discrete grid (no
-chirp primitive exists on-device -- JsonPhaseSequencer only supports
-piecewise linear/ease ramps and instant sets, see lib/JsonPhaseSequencer).
+chirp primitive exists on-device -- JsonPWMSequencer only supports
+piecewise linear/ease ramps and instant sets, see lib/JsonPWMSequencer).
 Each frequency point is reached via a short addLinearRampTask and held via
 addWaitTask, long enough for the CurrentSense 50ms EMA filter (and any
 resonant ringing, unknown a priori -- start generous) to settle before
@@ -16,7 +16,7 @@ settled current per (channel, frequency) point.
 
 Usage:
   uv run python tools/gen_solo_sweep_experiment.py --duty 30 \
-      --dwell-ms 2500 --initial-freq 190 --direction cw --out-dir spiffs_data
+      --dwell-ms 2500 --initial-freq 190 --direction cw --out-dir task_sequences
 """
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def main() -> None:
                           "copy/rename to experiment.json before uploadfs to make "
                           "it the active experiment")
     ap.add_argument("--out-dir",
-                     default=os.path.join(os.path.dirname(__file__), "..", "spiffs_data"))
+                     default=os.path.join(os.path.dirname(__file__), "..", "task_sequences"))
     args = ap.parse_args()
 
     total_ms = total_duration_ms(args.channels, args.freqs, args.dwell_ms,

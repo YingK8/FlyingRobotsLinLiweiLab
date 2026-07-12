@@ -33,7 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # firmware drive phases (INITIAL_PHASES {A,B,C,D}) per rotation direction --
-# matches JsonPhaseSequencer's setDirection / main_current_pid.cpp's
+# matches JsonPWMSequencer's setDirection / main_current_pid.cpp's
 # PHASES_CW/PHASES_CCW conventions.
 PHASES = {
     "cw": {"A": 270.0, "B": 90.0, "C": 180.0, "D": 0.0},

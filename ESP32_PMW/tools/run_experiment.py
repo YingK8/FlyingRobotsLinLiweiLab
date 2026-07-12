@@ -15,7 +15,7 @@ the firmware's real state machine, not by sending stop commands it doesn't
 have.
 
 Usage:
-  uv run python tools/run_experiment.py --json spiffs_data/solo_sweep.json \
+  uv run python tools/run_experiment.py --json task_sequences/solo_sweep.json \
       --timeout-s 300 --log solo_sweep_run.log
   uv run python tools/run_experiment.py --skip-build --log rerun.log   # already flashed
 """
@@ -42,7 +42,7 @@ DONE_MARKERS = ("experiment complete", "failed to load")
 
 
 def stage_json(json_path: str) -> None:
-    dest = os.path.join(REPO_ROOT, "spiffs_data", "experiment.json")
+    dest = os.path.join(REPO_ROOT, "task_sequences", "experiment.json")
     shutil.copyfile(json_path, dest)
     print(f"[pc] staged {json_path} -> {dest}")
 
@@ -92,7 +92,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json",
-                     help="experiment JSON to stage as spiffs_data/experiment.json "
+                     help="experiment JSON to stage as task_sequences/experiment.json "
                           "before building (omit with --skip-build to just capture "
                           "an already-flashed run)")
     ap.add_argument("--port", help="ESP32 serial port (default: first ttyUSB/ttyACM)")

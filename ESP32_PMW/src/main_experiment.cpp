@@ -1,5 +1,5 @@
 // Generic JSON-driven experiment firmware: loads /experiment.json (SPIFFS,
-// see spiffs_data/) and runs it autonomously, replacing the old per-
+// see task_sequences/) and runs it autonomously, replacing the old per-
 // experiment main_*.cpp files. ARMING (3s, coils forced off, self-calibrate
 // ADC zero) -> RUNNING (execute /experiment.json, printing "t=.. label=.."
 // on every step-label change for scope-capture correlation, see
@@ -11,10 +11,10 @@
 #include <FS.h>
 #include <SPIFFS.h>
 
-#include "JsonPhaseSequencer.h"
-#include "PhaseController.h"
+#include "JsonPWMSequencer.h"
+#include "PWMController.h"
 #include "constants.h"
-#include "current_sense.h"
+#include "CurrentSense.h"
 #include "safety_startup.h"
 #include "telemetry.h"
 
@@ -35,16 +35,16 @@ const char *EXPERIMENT_FILE = "/experiment.json";
 const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
 
 // Hard overcurrent trip -- unlike main_current_pid.cpp this firmware is
-// fully open-loop (JsonPhaseSequencer just plays back a schedule) with no
+// fully open-loop (JsonPWMSequencer just plays back a schedule) with no
 // other protection. Needed for system-ID sweeps that deliberately hunt for
 // an a-priori-unknown resonance peak (see tools/gen_solo_sweep_experiment.py)
 // where current could spike well past the ~2A RMS coil rating (PCB doc) if
 // left unwatched.
 const float I_SAFETY_MAX_A = 8.0f;
 
-PhaseController *controller;
-JsonPhaseSequencer *seq;
-CurrentSense currentSense(SENS);
+PWMController *controller;
+JsonPWMSequencer *seq;
+CurrentSense currentSense(ADC_PINS, SENS, NUM_CHANNELS);
 
 enum ExpPhase { ARMING, RUNNING, DONE };
 ExpPhase phase = ARMING;
@@ -67,9 +67,9 @@ void setup() {
 
   currentSense.seed();
 
-  controller = new PhaseController(PWM_PINS, INITIAL_PHASES,
+  controller = new PWMController(PWM_PINS, INITIAL_PHASES,
                                     INITIAL_DUTY_CYCLES, NUM_CHANNELS);
-  seq = new JsonPhaseSequencer(controller);
+  seq = new JsonPWMSequencer(controller);
 
   // Explicit non-zero starting frequency -- begin(0.0f) (the default) divides
   // by zero inside setGlobalFrequency() and permanently corrupts the
@@ -87,11 +87,11 @@ void setup() {
 }
 
 void loop() {
-  controller->run();
+  controller->step();
   unsigned long now = millis();
 
   // ADC sampling paced separately from everything else -- see
-  // current_sense.cpp for why (ESP32 ADC mux/S&H settling requirement).
+  // CurrentSense.cpp for why (ESP32 ADC mux/S&H settling requirement).
   static unsigned long last_adc_us = micros();
   unsigned long now_us = micros();
   const float ADC_SAMPLE_MS = 1.0f;
@@ -123,7 +123,7 @@ void loop() {
     break;
 
   case RUNNING: {
-    seq->run();
+    seq->step();
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
       if (currentSense.i_meas[i] > I_SAFETY_MAX_A) {

@@ -20,7 +20,7 @@ will flag it.
 
 Usage:
   uv run python tools/gen_step_response_experiment.py --baseline-duty 30 \
-      --step-delta 15 --hold-ms 3000 --direction cw --out-dir spiffs_data
+      --step-delta 15 --hold-ms 3000 --direction cw --out-dir task_sequences
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def main() -> None:
                           "copy/rename to experiment.json before uploadfs to make "
                           "it the active experiment")
     ap.add_argument("--out-dir",
-                     default=os.path.join(os.path.dirname(__file__), "..", "spiffs_data"))
+                     default=os.path.join(os.path.dirname(__file__), "..", "task_sequences"))
     args = ap.parse_args()
 
     total_ms = len(args.channels) * (args.baseline_hold_ms + args.step_hold_ms + args.gap_ms)

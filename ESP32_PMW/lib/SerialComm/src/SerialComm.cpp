@@ -1,6 +1,6 @@
 #include "SerialComm.h"
 
-String SerialComm::handleSerialComm(const String &outgoing) {
+String SerialComm::step(const String &outgoing) {
   if (outgoing.length()) {
     _port.print(outgoing);
     _port.print('\n');

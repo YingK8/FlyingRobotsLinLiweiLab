@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Orchestrate a full CW+CCW coil-coupling characterization sweep. For each
-direction: copy the matching spiffs_data/coupling_<dir>.json onto the ESP32's
+direction: copy the matching task_sequences/coupling_<dir>.json onto the ESP32's
 SPIFFS image (main_experiment.cpp always loads /experiment.json, see
-spiffs_data/README.md) and flash it, then record a PicoScope capture in sync
+task_sequences/README.md) and flash it, then record a PicoScope capture in sync
 with a fresh boot-relative run: start picoscope_record.py first, then
 tools/trigger_reset_log.py's EN-pulse reset + labeled-telemetry log a few
 seconds later. Reuses the existing reset/record primitives as-is; the JSON
@@ -27,7 +27,7 @@ import sys
 import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SPIFFS_DATA = os.path.join(REPO_ROOT, "spiffs_data")
+task_sequences = os.path.join(REPO_ROOT, "task_sequences")
 ARM_MS = 3000       # main_experiment.cpp's fixed ARMING duration
 MARGIN_S = 10.0     # extra recording time beyond the computed experiment length
 
@@ -49,8 +49,8 @@ def run(cmd: list[str], **kw) -> None:
 
 
 def flash_experiment(pio: str, direction: str) -> None:
-    src = os.path.join(SPIFFS_DATA, f"coupling_{direction}.json")
-    dst = os.path.join(SPIFFS_DATA, "experiment.json")
+    src = os.path.join(task_sequences, f"coupling_{direction}.json")
+    dst = os.path.join(task_sequences, "experiment.json")
     if not os.path.exists(src):
         raise SystemExit(f"missing {src} -- run tools/gen_coupling_experiment.py first")
     shutil.copyfile(src, dst)
@@ -106,7 +106,7 @@ def main() -> None:
 
     results = []
     for direction in args.direction:
-        json_path = os.path.join(SPIFFS_DATA, f"coupling_{direction}.json")
+        json_path = os.path.join(task_sequences, f"coupling_{direction}.json")
         total_s = compute_total_s(json_path)
         print(f"== {direction.upper()}: experiment ~{total_s:.1f}s, "
               f"recording {total_s + MARGIN_S:.1f}s ==")

@@ -4,12 +4,12 @@ replacing hand-picked KP/KI/KD seeds with a model-derived starting point.
 
 Plant model: the loop-relevant signal is ENVELOPE current vs. duty, not
 instantaneous coil current -- the CS reading passes through the 50ms EMA
-filter (current_sense.h) before the PID ever sees it, comparable to or
+filter (CurrentSense.h) before the PID ever sees it, comparable to or
 slower than the coil's own electrical time constant. Modeled as a 2nd-order
 lag and tuned via standard IMC-PID (Rivera/Morari):
 
   K(omega)   = (4/pi)*V_supply / (100*|Z_i(omega)|)      [A per duty-%]
-  tau_filter = 0.050s (TAU_FILTER_MS in current_sense.h)
+  tau_filter = 0.050s (TAU_FILTER_MS in CurrentSense.h)
   tau_elec   = 2*L/R                                      [envelope decay time]
   Kc = (tau_filter+tau_elec) / (K*lambda)
   Ti = tau_filter+tau_elec
@@ -66,7 +66,7 @@ def main() -> None:
                      help="IMC robustness knob, as a fraction of tau_filter -- "
                           "smaller = more aggressive (default: %(default)s)")
     ap.add_argument("--tau-filter-ms", type=float, default=50.0,
-                     help="MUST match current_sense.h's TAU_FILTER_MS default (default: %(default)s)")
+                     help="MUST match CurrentSense.h's TAU_FILTER_MS default (default: %(default)s)")
     ap.add_argument("--nominal-tick-ms", type=float, default=2.0,
                      help="MUST match main_current_pid.cpp's NOMINAL_TICK_MS (default: %(default)s)")
     ap.add_argument("--freqs", type=float, nargs="+",

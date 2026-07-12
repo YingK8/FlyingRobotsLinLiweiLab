@@ -21,11 +21,11 @@
 // correction, until regenerated for real).
 
 #include <Arduino.h>
-#include "PhaseController.h"
-#include "PhaseSequencer.h"
+#include "PWMController.h"
+#include "PWMSequencer.h"
 #include "SerialComm.h"
 #include "constants.h"
-#include "current_sense.h"
+#include "CurrentSense.h"
 #include "safety_startup.h"
 #include "telemetry.h"
 #include "plant_model.h"
@@ -48,7 +48,7 @@ const unsigned long ramp_duration_ms = 20000;
 
 // ============================== CURRENT SENSE ==============================
 const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
-CurrentSense currentSense(SENS); // TAU_FILTER_MS=50 default
+CurrentSense currentSense(ADC_PINS, SENS, NUM_CHANNELS); // TAU_FILTER_MS=50 default
 
 // ============================== LQR CONTROLLER ==============================
 const float DUTY_MIN = 5.0f;
@@ -67,8 +67,8 @@ const float NOMINAL_TICK_MS = 2.0f; // dt normalization for R_RAMP_A_PER_MS, mat
 
 float duty_out[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
 
-PhaseController *controller;
-PhaseSequencer *seq;
+PWMController *controller;
+PWMSequencer *seq;
 SerialComm comm;
 bool directionIsCcw = true;
 
@@ -128,13 +128,13 @@ void reinitController(bool ccw) {
   directionIsCcw = ccw;
 
   if (controller) delete controller;
-  controller = new PhaseController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+  controller = new PWMController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
   controller->begin(start_freq);
   controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
   allCoilsOff();
 
   if (seq) delete seq;
-  seq = new PhaseSequencer(controller);
+  seq = new PWMSequencer(controller);
   seq->addRampTask(start_freq, end_freq, ramp_duration_ms, TaskType::PWM_FREQ, TaskMode::EASE);
   seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, phases);
 }
@@ -204,7 +204,7 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  String line = comm.handleSerialComm();
+  String line = comm.step();
   if (line.length()) dispatchCommand(line);
 
   const unsigned long ADC_SAMPLE_MS = 1;
@@ -216,8 +216,8 @@ void loop() {
     last_adc_us = now_us;
   }
 
-  controller->run();
-  if (phase == RAMP_UP || phase == HOLD) seq->run();
+  controller->step();
+  if (phase == RAMP_UP || phase == HOLD) seq->step();
 
   switch (phase) {
     case ARMING:

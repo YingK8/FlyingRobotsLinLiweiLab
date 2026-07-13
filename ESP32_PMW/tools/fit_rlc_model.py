@@ -33,6 +33,17 @@ from pid_metrics import RESONANCE_BAND_HZ, parse_experiment_log
 
 _LABEL_RE = re.compile(r"SWEEP_([ABCD])_F([\d.]+)")
 
+# CurrentSense.h's EMA time constant (default tauFilterMs=50.0) -- the solo
+# sweep's commutation frequency (1-210Hz) is in-band with this filter's own
+# ~3.2Hz cutoff, so i_meas at sweep frequencies above a few Hz is the TRUE
+# coil current attenuated by this filter, not the coil current alone. Fitting
+# z_model against raw i_meas without this term silently absorbs the filter's
+# rolloff into R/L/C, producing self-consistent but physically wrong values
+# (confirmed against hardware: uncorrected fit gave L/C ~20x/~12x off known
+# nominal component values; correcting for this filter brought both within
+# ~2x). This is NOT a fitted parameter -- it's a known firmware constant.
+CS_FILTER_TAU_S = 0.050
+
 
 def extract_sweep_points(data: dict, channel: str, settle_frac: float = 0.5):
     """For labels 'SWEEP_{channel}_F{freq}', keep the LAST settle_frac of each
@@ -67,9 +78,16 @@ def z_model(omega, R, L, C):
     return np.sqrt(R ** 2 + (omega * L - 1.0 / (omega * C)) ** 2)
 
 
+def _cs_filter_gain(omega):
+    """Magnitude response of CurrentSense's single-pole EMA at CS_FILTER_TAU_S,
+    the sensor-side attenuation that i_meas has already been through."""
+    return 1.0 / np.sqrt(1.0 + (omega * CS_FILTER_TAU_S) ** 2)
+
+
 def _i_model(xdata, R, L, C):
     omega, v_fund = xdata
-    return v_fund / z_model(omega, R, L, C)
+    i_true = v_fund / z_model(omega, R, L, C)
+    return i_true * _cs_filter_gain(omega)
 
 
 def fit_channel(freqs_hz, i_meas_a, duty_pct, v_supply,
@@ -103,7 +121,10 @@ def _plot_channel(ch, freqs, i_meas, duty, v_supply, fit, out_path):
 
     omega = 2 * np.pi * freqs
     v_fund = (4.0 / np.pi) * (duty / 100.0) * v_supply
-    z_meas = v_fund / np.maximum(i_meas, 1e-3)
+    # i_meas has already been through the CS EMA filter -- divide its gain
+    # back out so this plotted "measured |Z|" is comparable to the pure-coil
+    # z_model curve (see CS_FILTER_TAU_S note above _i_model).
+    z_meas = v_fund / np.maximum(i_meas, 1e-3) * _cs_filter_gain(omega)
     omega_fine = 2 * np.pi * np.linspace(freqs.min(), freqs.max(), 400)
     z_fit = z_model(omega_fine, fit["R"], fit["L"], fit["C"])
 

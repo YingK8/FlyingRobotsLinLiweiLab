@@ -1,0 +1,26 @@
+{
+  "directions": {
+    "cw": {
+      "direction": "cw",
+      "best": {
+        "q_spread": 50.0,
+        "r_duty": 0.1
+      },
+      "best_cost": 1000000.0,
+      "baseline_cost": 1000000.0,
+      "improved": false,
+      "best_run_max_spread": null
+    },
+    "ccw": {
+      "direction": "ccw",
+      "best": {
+        "q_spread": 50.0,
+        "r_duty": 0.1
+      },
+      "best_cost": 1000000.0,
+      "baseline_cost": 1000000.0,
+      "improved": false,
+      "best_run_max_spread": null
+    }
+  }
+}

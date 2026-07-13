@@ -1,0 +1,162 @@
+[
+  {
+    "method": "setDirection",
+    "value": 0
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 0,
+    "value": 30.0
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 1,
+    "value": 30.0
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 2,
+    "value": 30.0
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 3,
+    "value": 30.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_A_BASELINE"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 0,
+    "value": 45.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_A_STEPPED"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 0,
+    "value": 30.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_A_RECOVER"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 1000
+  },
+  {
+    "method": "label",
+    "value": "STEP_B_BASELINE"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 1,
+    "value": 45.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_B_STEPPED"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 1,
+    "value": 30.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_B_RECOVER"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 1000
+  },
+  {
+    "method": "label",
+    "value": "STEP_C_BASELINE"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 2,
+    "value": 45.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_C_STEPPED"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 2,
+    "value": 30.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_C_RECOVER"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 1000
+  },
+  {
+    "method": "label",
+    "value": "STEP_D_BASELINE"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 3,
+    "value": 45.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_D_STEPPED"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": 3,
+    "value": 30.0
+  },
+  {
+    "method": "label",
+    "value": "STEP_D_RECOVER"
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 1000
+  }
+]

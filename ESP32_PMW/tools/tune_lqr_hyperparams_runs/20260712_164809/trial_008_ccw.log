@@ -1,0 +1,81 @@
+   0.00s  ets Jul 29 2019 12:21:46
+   0.01s  
+   0.01s  rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+   0.01s  configsip: 0, SPIWP:0xee
+   0.01s  clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+   0.02s  mode:DIO, clock div:2
+   0.02s  load:0x3fff0030,len:1184
+   0.02s  load:0x40078000,len:13232
+   0.03s  load:0x40080400,len:3028
+   0.03s  entry 0x400805e4
+   1.03s  state_space: arming 3s, then autonomous 1->210Hz ramp + LQR, bounded run
+   1.20s  commands: dir=cw|ccw  rmax=/rrate=<val>  gains?
+   1.21s  direction=CCW
+   1.21s  t=1031 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=8.000 rrate=0.00030
+   1.22s  R_MAX=2.000 R_RAMP=0.00030
+   1.22s  t=1531 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   1.71s  t=2032 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   2.21s  t=2532 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   2.71s  t=3032 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   3.21s  t=3532 phase=0 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.0 B=50.0 C=50.0 D=50.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   3.71s  ARMED -> ramping
+   4.20s  t=4032 phase=1 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 dir=1 r=0.000 rmax=2.000 rrate=0.00030
+   4.21s  t=4532 phase=1 freq=1.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=5.0 B=5.0 C=5.0 D=5.0 | spread=0.000 dir=1 r=0.150 rmax=2.000 rrate=0.00030
+   4.71s  t=5032 phase=1 freq=2.5 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=5.0 B=5.0 C=5.0 D=5.0 | spread=0.000 dir=1 r=0.285 rmax=2.000 rrate=0.00030
+   5.21s  t=5532 phase=1 freq=4.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=5.0 B=5.0 C=5.0 D=5.0 | spread=0.000 dir=1 r=0.435 rmax=2.000 rrate=0.00030
+   5.71s  t=6033 phase=1 freq=6.9 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=5.0 B=5.0 C=7.2 D=5.0 | spread=0.002 dir=1 r=0.585 rmax=2.000 rrate=0.00030
+   6.21s  t=6534 phase=1 freq=10.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=5.8 B=5.5 C=11.1 D=5.0 | spread=0.000 dir=1 r=0.735 rmax=2.000 rrate=0.00030
+   6.72s  t=7034 phase=1 freq=13.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=8.1 B=7.7 C=15.8 D=5.0 | spread=0.000 dir=1 r=0.885 rmax=2.000 rrate=0.00030
+   7.22s  t=7534 phase=1 freq=18.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=10.8 B=9.7 C=21.5 D=6.4 | spread=0.002 dir=1 r=1.035 rmax=2.000 rrate=0.00030
+   7.72s  t=8035 phase=1 freq=22.7 | I[A]: A=0.00 B=0.00 C=0.02 D=0.00 | duty[%]: A=13.9 B=12.7 C=27.7 D=8.0 | spread=0.020 dir=1 r=1.185 rmax=2.000 rrate=0.00030
+   8.22s  t=8535 phase=1 freq=28.0 | I[A]: A=0.00 B=0.00 C=0.06 D=0.00 | duty[%]: A=17.8 B=16.4 C=34.3 D=10.0 | spread=0.062 dir=1 r=1.335 rmax=2.000 rrate=0.00030
+   8.72s  t=9036 phase=1 freq=33.7 | I[A]: A=0.00 B=0.00 C=0.10 D=0.00 | duty[%]: A=22.7 B=21.3 C=40.8 D=12.4 | spread=0.105 dir=1 r=1.485 rmax=2.000 rrate=0.00030
+   9.22s  t=9537 phase=1 freq=39.7 | I[A]: A=0.03 B=0.03 C=0.25 D=0.00 | duty[%]: A=28.9 B=27.6 C=46.8 D=15.5 | spread=0.248 dir=1 r=1.635 rmax=2.000 rrate=0.00030
+   9.72s  t=10037 phase=1 freq=46.1 | I[A]: A=0.14 B=0.12 C=0.34 D=0.00 | duty[%]: A=36.3 B=35.2 C=51.9 D=20.2 | spread=0.345 dir=1 r=1.785 rmax=2.000 rrate=0.00030
+  10.22s  t=10538 phase=1 freq=52.9 | I[A]: A=0.21 B=0.27 C=0.38 D=0.02 | duty[%]: A=43.2 B=42.5 C=57.5 D=26.4 | spread=0.359 dir=1 r=1.935 rmax=2.000 rrate=0.00030
+  10.72s  t=11039 phase=1 freq=59.9 | I[A]: A=0.39 B=0.39 C=0.46 D=0.14 | duty[%]: A=49.2 B=48.6 C=64.0 D=33.6 | spread=0.318 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  11.22s  t=11540 phase=1 freq=67.1 | I[A]: A=0.47 B=0.46 C=0.58 D=0.24 | duty[%]: A=53.8 B=53.5 C=70.8 D=40.3 | spread=0.339 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  11.72s  t=12041 phase=1 freq=74.6 | I[A]: A=0.62 B=0.65 C=0.76 D=0.43 | duty[%]: A=58.9 B=58.1 C=76.2 D=46.7 | spread=0.323 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  12.22s  t=12542 phase=1 freq=82.2 | I[A]: A=0.78 B=0.76 C=0.79 D=0.55 | duty[%]: A=63.9 B=62.5 C=81.0 D=52.4 | spread=0.239 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  12.73s  t=13042 phase=1 freq=89.9 | I[A]: A=0.88 B=0.92 C=1.00 D=0.72 | duty[%]: A=68.7 B=67.2 C=84.7 D=57.7 | spread=0.280 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  13.22s  t=13543 phase=1 freq=97.7 | I[A]: A=1.01 B=1.05 C=1.10 D=0.91 | duty[%]: A=73.5 B=71.6 C=87.8 D=60.8 | spread=0.197 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  13.73s  t=14044 phase=1 freq=105.5 | I[A]: A=1.21 B=1.25 C=1.36 D=1.24 | duty[%]: A=78.1 B=75.5 C=89.8 D=63.8 | spread=0.155 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  14.23s  t=14545 phase=1 freq=113.3 | I[A]: A=1.51 B=1.55 C=1.43 D=1.45 | duty[%]: A=81.6 B=78.8 C=91.2 D=65.0 | spread=0.114 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  14.73s  t=15046 phase=1 freq=121.1 | I[A]: A=1.69 B=1.74 C=1.77 D=1.82 | duty[%]: A=81.5 B=78.2 C=94.3 D=65.2 | spread=0.128 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  15.23s  t=15547 phase=1 freq=128.8 | I[A]: A=1.94 B=1.97 C=1.96 D=2.09 | duty[%]: A=82.1 B=76.9 C=95.9 D=64.1 | spread=0.151 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  15.73s  t=16048 phase=1 freq=136.4 | I[A]: A=2.14 B=2.21 C=2.11 D=2.30 | duty[%]: A=81.5 B=77.0 C=96.1 D=60.3 | spread=0.196 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  16.23s  t=16549 phase=1 freq=143.9 | I[A]: A=2.38 B=2.36 C=2.18 D=2.45 | duty[%]: A=80.4 B=76.2 C=96.0 D=55.9 | spread=0.272 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  16.73s  t=17049 phase=1 freq=151.1 | I[A]: A=2.27 B=2.29 C=2.38 D=2.51 | duty[%]: A=76.9 B=72.1 C=97.5 D=53.1 | spread=0.247 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  17.23s  t=17550 phase=1 freq=158.1 | I[A]: A=2.34 B=2.33 C=2.32 D=2.44 | duty[%]: A=76.3 B=71.1 C=96.4 D=50.0 | spread=0.114 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  17.73s  t=18051 phase=1 freq=164.9 | I[A]: A=2.20 B=2.02 C=2.28 D=2.69 | duty[%]: A=75.0 B=69.1 C=95.8 D=47.8 | spread=0.668 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  18.24s  t=18552 phase=1 freq=171.3 | I[A]: A=2.35 B=2.26 C=2.13 D=2.24 | duty[%]: A=72.1 B=67.9 C=96.1 D=45.4 | spread=0.219 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  18.74s  t=19053 phase=1 freq=177.4 | I[A]: A=2.13 B=2.16 C=2.13 D=2.07 | duty[%]: A=71.1 B=67.3 C=95.8 D=44.6 | spread=0.091 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  19.24s  t=19554 phase=1 freq=183.0 | I[A]: A=2.09 B=2.09 C=2.05 D=2.04 | duty[%]: A=70.5 B=66.9 C=95.4 D=45.0 | spread=0.045 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  19.74s  t=20055 phase=1 freq=188.3 | I[A]: A=1.98 B=1.98 C=1.93 D=1.90 | duty[%]: A=70.2 B=66.7 C=95.2 D=45.8 | spread=0.073 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  20.24s  t=20555 phase=1 freq=193.1 | I[A]: A=1.94 B=1.89 C=1.94 D=1.90 | duty[%]: A=70.7 B=66.7 C=95.5 D=46.8 | spread=0.052 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  20.74s  t=21056 phase=1 freq=197.3 | I[A]: A=1.94 B=1.85 C=1.86 D=1.73 | duty[%]: A=70.7 B=67.9 C=95.8 D=47.5 | spread=0.218 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  21.24s  t=21557 phase=1 freq=201.0 | I[A]: A=1.79 B=1.77 C=1.88 D=1.72 | duty[%]: A=71.1 B=68.3 C=96.3 D=49.0 | spread=0.165 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  21.74s  t=22058 phase=1 freq=204.3 | I[A]: A=1.77 B=1.82 C=1.80 D=1.75 | duty[%]: A=71.8 B=68.5 C=97.1 D=50.3 | spread=0.071 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  22.24s  t=22559 phase=1 freq=206.8 | I[A]: A=1.76 B=1.82 C=1.79 D=1.70 | duty[%]: A=72.2 B=69.5 C=97.9 D=51.0 | spread=0.121 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  22.74s  t=23060 phase=1 freq=208.6 | I[A]: A=1.80 B=1.80 C=1.73 D=1.69 | duty[%]: A=73.0 B=69.7 C=99.1 D=51.6 | spread=0.111 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  23.25s  t=23561 phase=2 freq=209.7 | I[A]: A=1.74 B=1.79 C=1.72 D=1.72 | duty[%]: A=73.5 B=70.9 C=100.0 D=52.0 | spread=0.071 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  23.75s  t=24061 phase=2 freq=210.0 | I[A]: A=1.73 B=1.76 C=1.76 D=1.75 | duty[%]: A=73.5 B=70.7 C=100.0 D=52.1 | spread=0.027 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  24.25s  t=24562 phase=2 freq=210.0 | I[A]: A=1.68 B=1.74 C=1.69 D=1.68 | duty[%]: A=73.5 B=70.9 C=100.0 D=52.0 | spread=0.059 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  24.75s  t=25062 phase=2 freq=210.0 | I[A]: A=1.76 B=1.77 C=1.71 D=1.68 | duty[%]: A=73.5 B=70.9 C=100.0 D=52.1 | spread=0.084 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  25.25s  t=25562 phase=2 freq=210.0 | I[A]: A=1.77 B=1.84 C=1.79 D=1.72 | duty[%]: A=73.5 B=71.5 C=100.0 D=51.8 | spread=0.123 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  25.75s  t=26063 phase=2 freq=210.0 | I[A]: A=1.77 B=1.74 C=1.74 D=1.71 | duty[%]: A=73.4 B=71.6 C=100.0 D=51.9 | spread=0.066 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  26.25s  t=26563 phase=2 freq=210.0 | I[A]: A=1.75 B=1.76 C=1.73 D=1.66 | duty[%]: A=73.6 B=71.6 C=100.0 D=52.0 | spread=0.105 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  26.75s  t=27064 phase=2 freq=210.0 | I[A]: A=1.75 B=1.79 C=1.71 D=1.66 | duty[%]: A=73.7 B=71.5 C=100.0 D=52.0 | spread=0.130 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  27.25s  t=27564 phase=2 freq=210.0 | I[A]: A=1.74 B=1.84 C=1.75 D=1.76 | duty[%]: A=73.8 B=72.8 C=100.0 D=51.2 | spread=0.099 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  27.75s  t=28065 phase=2 freq=210.0 | I[A]: A=1.78 B=1.83 C=1.71 D=1.73 | duty[%]: A=73.8 B=72.8 C=100.0 D=51.3 | spread=0.123 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  28.25s  t=28565 phase=3 freq=210.0 | I[A]: A=1.57 B=1.61 C=1.62 D=1.42 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.193 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  28.75s  t=29066 phase=3 freq=210.0 | I[A]: A=0.03 B=0.03 C=0.33 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.329 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  29.25s  coils off
+  29.68s  t=29566 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  29.75s  t=30066 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  30.25s  t=30567 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  30.75s  t=31068 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  31.25s  t=31568 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  31.75s  t=32068 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  32.25s  t=32569 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030
+  32.76s  t=33070 phase=4 freq=210.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=73.8 B=72.7 C=100.0 D=51.3 | spread=0.000 dir=1 r=2.000 rmax=2.000 rrate=0.00030

@@ -1,0 +1,2 @@
+aborted_unsafe,cost,direction,feasible,note,overcurrent_frac,q_spread,r_duty,run_max_spread,sat_frac,trial
+True,1000000.0,cw,True,live spread 2.01A > 2.00A,None,50.0,0.1,None,None,1

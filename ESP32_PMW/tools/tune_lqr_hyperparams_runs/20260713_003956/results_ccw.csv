@@ -1,0 +1,10 @@
+aborted_unsafe,cost,direction,feasible,note,overcurrent_frac,q_spread,r_duty,run_max_spread,sat_frac,trial
+False,2.344,ccw,True,,0.0,50.0,0.1,2.219,0.25,1
+False,2.315,ccw,True,,0.0,75.0,0.1,2.19,0.25,2
+False,1000000.0,ccw,False,q_spread out of bounds,None,112.5,0.1,None,None,3
+False,2.619285714285714,ccw,True,,0.14285714285714285,75.0,0.15000000000000002,1.78,0.25,4
+False,2.347,ccw,True,,0.0,75.0,0.06666666666666667,2.222,0.25,5
+False,3.053285714285714,ccw,True,,0.14285714285714285,75.0,0.125,2.214,0.25,6
+False,2.204,ccw,True,,0.0,75.0,0.08000000000000002,2.079,0.25,7
+False,2.306,ccw,True,,0.0,75.0,0.06400000000000002,2.181,0.25,8
+False,2.572,ccw,True,,0.0,75.0,0.08000000000000002,2.447,0.25,9

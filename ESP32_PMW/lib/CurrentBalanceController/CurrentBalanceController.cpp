@@ -19,9 +19,8 @@ void CurrentBalanceController::reset(float startDuty) {
   }
 }
 
-void CurrentBalanceController::computeTick(const float *iMeas, float dtMs,
-                                           const float *ceiling,
-                                           float *dutyOut) {
+void CurrentBalanceController::step(const float *iMeas, float dtMs,
+                                    const float *ceiling, float *dutyOut) {
   const float rateScale = dtMs / _cfg.nominalTickMs;
 
   // A channel is "active" only if the schedule commands a (non-NAN) carrier

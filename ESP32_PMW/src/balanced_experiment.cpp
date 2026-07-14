@@ -158,8 +158,7 @@ void experimentLoop() {
       ceiling[i] = g_seq->getCommandedCarrier(i);
 
     if (g_cfg.piEnabled) {
-      g_balance.computeTick(g_currentSense.i_meas, controlDtMs, ceiling,
-                            g_dutyOut);
+      g_balance.step(g_currentSense.i_meas, controlDtMs, ceiling, g_dutyOut);
       for (int i = 0; i < NUM_CHANNELS; i++)
         g_controller->setCarrierDutyCycle(i, g_dutyOut[i]);
     } else {

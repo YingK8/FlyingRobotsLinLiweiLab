@@ -66,7 +66,7 @@ bool directionIsCcw = true; // default direction, matches this file's history
 // Balance tick: the shared controller with a flat 100% ceiling (see above).
 // duty_out is kept for the debug telemetry print below.
 void runControlTick(float dt_ms) {
-  balance.computeTick(currentSense.i_meas, dt_ms, CEILING_100, duty_out);
+  balance.step(currentSense.i_meas, dt_ms, CEILING_100, duty_out);
   for (int i = 0; i < NUM_CHANNELS; i++)
     controller->setCarrierDutyCycle(i, duty_out[i]);
 }

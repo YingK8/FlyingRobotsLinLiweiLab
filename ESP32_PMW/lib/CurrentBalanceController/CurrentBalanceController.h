@@ -54,13 +54,13 @@ public:
   // duty every channel begins equal at (e.g. 50%).
   void reset(float startDuty);
 
-  // One control tick. iMeas[N] = filtered per-channel current (A); dtMs = real
+  // One control step. iMeas[N] = filtered per-channel current (A); dtMs = real
   // interval since the previous call; ceiling[N] = per-channel max duty (%) the
   // schedule currently commands (NAN => channel parked off). Writes the new
   // per-channel carrier duty into dutyOut[N]. The caller applies dutyOut to the
   // hardware (this class does no I/O).
-  void computeTick(const float *iMeas, float dtMs, const float *ceiling,
-                   float *dutyOut);
+  void step(const float *iMeas, float dtMs, const float *ceiling,
+            float *dutyOut);
 
   // Runtime tuning (serial kp=/ki=/kd=/ramp=).
   void setGains(float kp, float ki, float kd) {

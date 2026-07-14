@@ -6,15 +6,20 @@
 // from the inline runControlTick() that lived in src/main_current_pid.cpp so
 // every experiment firmware can share one tuned balance loop.
 //
-// Policy (global, no board grouping): each tick, the LOWEST-current channel is
-// ramped toward its CEILING duty (push the bottleneck as hard as allowed);
-// every other channel is driven by PI(+D) toward that lowest current, so the
-// four channels converge. The ceiling is per-channel and supplied by the
-// caller every tick: in main_current_pid.cpp it is a flat 100% (push to max),
-// and under a JSON-driven experiment it is whatever carrier level the schedule
-// currently commands (see PhaseSequencer::getCommandedCarrier) -- so a tilt
-// step-down lowers the ceiling and the loop keeps the channels balanced beneath
-// it instead of hand-tuning per-channel trims.
+// Policy (global, no board grouping): each tick, per-channel RATIOS are derived
+// from the commanded carrier relative to the largest commanded carrier
+// (ratio[i] = ceiling[i] / max_j ceiling[j]). The ratio-normalized LOWEST
+// channel (argmin iMeas[i]/ratio[i]) is ramped toward its ceiling duty (push
+// the bottleneck as hard as allowed); every other channel is driven by PI(+D)
+// toward magnitude * ratio[i], so the four channel currents converge to that
+// ratio. The ceiling is per-channel and supplied every tick (see
+// PhaseSequencer::getCommandedCarrier).
+//   - UNIFORM commanded carrier => all ratios == 1 => pure equal-balance, exactly
+//     the original controller (main_current_pid.cpp: flat 100% => push to max and
+//     equalize). A uniform carrier below 100% still equalizes, capped at that duty.
+//   - DIFFERENTIAL carrier (e.g. tilt: coils 0 & 3 stepped below 100%) makes those
+//     channels track a proportionally lower current -- a closed-loop tilt with
+//     thrust still regulated -- instead of hand-tuning per-channel trims.
 //
 // A NAN ceiling entry means "this channel isn't commanded on" -> it is parked
 // off (duty 0) and excluded from the argmin, matching how the JSON sequencer
@@ -42,6 +47,13 @@ struct BalanceConfig {
   // (duty %/ms at nominalTickMs). Ramping (not snapping) gives the argmin
   // re-evaluation time to reassign the min to a genuinely weaker channel.
   float minRampPctPerMs = 0.05f;
+
+  // A channel whose commanded carrier is within this many percent of the top
+  // commanded carrier counts as a "reference" (held) channel and is eligible to
+  // be the anchor; anything stepped further down (a tilt follower) is not. Only
+  // reference channels set the balance magnitude, so tilt followers can drop to
+  // magnitude*ratio without dragging the held channels down with them.
+  float refBandPct = 0.5f;
 };
 
 class CurrentBalanceController {
@@ -71,6 +83,8 @@ public:
   void setRamp(float pctPerMs) { _cfg.minRampPctPerMs = pctPerMs; }
   const BalanceConfig &config() const { return _cfg; }
   int latchedMinIndex() const { return _idxMin; }
+  bool holdFrozen() const { return _holdFrozen; }
+  float holdTarget() const { return _holdTarget; }
 
 private:
   BalanceConfig _cfg;
@@ -78,4 +92,9 @@ private:
   float _dutyOut[N];
   float _lastErr[N];
   int _idxMin; // latched -- persists across ticks, see minSwitchMarginA
+  // Freeze-at-end-of-spin-up hold target: latched true the first tick a follower
+  // (ratio < 1, i.e. a tilt step) appears; _holdTarget is the balanced current
+  // level captured at that instant, held constant thereafter.
+  bool _holdFrozen;
+  float _holdTarget;
 };

@@ -1,50 +1,59 @@
 [
   { "method": "setDirection", "value": 1 },
 
-  { "method": "label", "value": "TILT_RAMP_1_210HZ" },
-  { "method": "addEaseRampTask", "from": 1.0, "to": 210.0, "duration_ms": 30000 },
-
-  { "method": "label", "value": "TILT_HOLD_100PCT" },
+  { "method": "label", "value": "TILT_SPINUP_1_200HZ_100PCT" },
   { "method": "activateChannels", "mask": 15, "value": 100.0 },
+  { "method": "addEaseRampTask", "from": 1.0, "to": 200.0, "duration_ms": 30000 },
+
+  { "method": "label", "value": "TILT_HOLD_LEVEL" },
+  { "method": "addWaitTask", "duration_ms": 3000 },
+
+  { "method": "label", "value": "TILT_0_3_AT_90" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 90.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 90.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_90PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 90.0 },
+  { "method": "label", "value": "TILT_0_3_AT_80" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 80.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 80.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_80PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 80.0 },
+  { "method": "label", "value": "TILT_0_3_AT_70" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 70.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 70.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_70PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 70.0 },
+  { "method": "label", "value": "TILT_0_3_AT_60" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 60.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 60.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_60PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 60.0 },
+  { "method": "label", "value": "TILT_0_3_AT_50" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 50.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 50.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_50PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 50.0 },
+  { "method": "label", "value": "TILT_0_3_AT_40" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 40.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 40.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_40PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 40.0 },
+  { "method": "label", "value": "TILT_0_3_AT_30" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 30.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 30.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_30PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 30.0 },
+  { "method": "label", "value": "TILT_0_3_AT_20" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 20.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 20.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_20PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 20.0 },
+  { "method": "label", "value": "TILT_0_3_AT_10" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 10.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 10.0 },
   { "method": "addWaitTask", "duration_ms": 2500 },
 
-  { "method": "label", "value": "TILT_HOLD_10PCT" },
-  { "method": "activateChannels", "mask": 15, "value": 10.0 },
-  { "method": "addWaitTask", "duration_ms": 2500 },
-
-  { "method": "label", "value": "TILT_HOLD_0PCT" },
+  { "method": "label", "value": "TILT_OFF" },
   { "method": "activateChannels", "mask": 15, "value": 0.0 },
-  { "method": "addWaitTask", "duration_ms": 2500 }
+  { "method": "addWaitTask", "duration_ms": 500 }
 ]

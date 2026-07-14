@@ -35,6 +35,14 @@ struct ExperimentConfig {
                    float iSafe = 10.0f, bool pi = true)
       : jsonFile(json), ccwDefault(ccw), driveFreq(freq), iSafetyMax(iSafe),
         piEnabled(pi) {}
+
+  // Default constructor: the framework keeps a file-scope ExperimentConfig
+  // g_cfg that experimentSetup() overwrites with the real config, so it must be
+  // default-constructible. Safe placeholder values (null schedule, PI on, 10A
+  // trip) that are never used before g_cfg = cfg runs.
+  ExperimentConfig()
+      : jsonFile(nullptr), ccwDefault(true), driveFreq(190.0f),
+        iSafetyMax(10.0f), piEnabled(true) {}
 };
 
 // Call once from setup() and every loop() respectively.

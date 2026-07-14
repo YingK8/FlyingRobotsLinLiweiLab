@@ -64,7 +64,9 @@ void emitTelemetry(unsigned long now) {
   Serial.printf("t=%lu phase=%d freq=%.1f | ", now, (int)g_phase,
                 g_controller->getFrequency());
   printCurrentAndDuty(iMeas, g_dutyOut);
-  Serial.printf(" | spread=%.3f pi=%d\n", iMax - iMin, g_cfg.piEnabled ? 1 : 0);
+  Serial.printf(" | spread=%.3f pi=%d hold=%d ihold=%.2f\n", iMax - iMin,
+                g_cfg.piEnabled ? 1 : 0, g_balance.holdFrozen() ? 1 : 0,
+                g_balance.holdTarget());
 }
 
 } // namespace

@@ -140,7 +140,7 @@ def _first_settle_time(hold_t, below, settle_hold_s: float):
     return None
 
 
-def compute_metrics(data: dict, spread_limit: float = 0.1,
+def compute_metrics(data: dict, spread_limit: float = 0.4,
                      settle_hold_s: float = 2.0) -> dict:
     """Tuning metrics from parsed telemetry; any that can't be computed (e.g.
     no HOLD samples) is None.

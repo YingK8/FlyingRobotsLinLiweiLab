@@ -26,8 +26,9 @@ from pid_metrics import STATES, HOLD_PHASE, compute_metrics, format_metrics_line
 
 ap = argparse.ArgumentParser()
 ap.add_argument("log")
-ap.add_argument("--spread-limit", type=float, default=0.1,
-                 help="validation bar in amps (default 0.1)")
+ap.add_argument("--spread-limit", type=float, default=0.4,
+                 help="validation bar in amps (default 0.4: the balance goal is "
+                      "the four channel currents within 0.4A for any schedule)")
 args = ap.parse_args()
 
 data = parse_log(args.log)

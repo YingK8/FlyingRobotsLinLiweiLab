@@ -1,0 +1,119 @@
+   0.31s  ets Jul 29 2019 12:21:46
+   0.37s  rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+   0.40s  configsip: 0, SPIWP:0xee
+   0.43s  clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+   0.46s  mode:DIO, clock div:2
+   0.49s  load:0x3fff0030,len:1184
+   0.52s  load:0x40078000,len:13232
+   0.55s  load:0x40080400,len:3028
+   0.58s  entry 0x400805e4
+   1.35s  loaded /pid_profile.json -- PI compensation available (send 'pi=on' to engage)
+   1.38s  main_experiment: arming 3000ms, then waiting for a start command (s=e-stop, r/run/start/go=begin loading /experiment.json)
+   4.37s  ARMED -> waiting for start (s=e-stop, r=start)
+   4.40s  PI compensation ON -- carrier duty now closed-loop (ratio-tracking around the JSON schedule's reference)
+  51.51s  ����������������������������������������������������������������1258 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=80.0 D=100.0
+  51.54s  t=51258 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=80.0 D=100.0
+  51.65s  t=51458 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  51.86s  t=51658 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.01 D=0.01 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  52.05s  t=51858 label=TILT_RAMP_1_210HZ | I[A]: A=0.02 B=0.02 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  52.26s  t=52058 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.03 D=0.03 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  52.33s  ignored: not waiting to start
+  52.45s  t=52258 label=TILT_RAMP_1_210HZ | I[A]: A=0.02 B=0.02 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  52.66s  t=52458 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.01 D=0.01 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  52.88s  t=52659 label=TILT_RAMP_1_210HZ | I[A]: A=0.00 B=0.00 C=0.03 D=0.03 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  53.05s  t=52859 label=TILT_RAMP_1_210HZ | I[A]: A=0.01 B=0.01 C=0.05 D=0.05 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  53.27s  t=53059 label=TILT_RAMP_1_210HZ | I[A]: A=0.01 B=0.01 C=0.04 D=0.04 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  53.45s  t=53259 label=TILT_RAMP_1_210HZ | I[A]: A=0.09 B=0.09 C=0.02 D=0.02 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  53.67s  t=53460 label=TILT_RAMP_1_210HZ | I[A]: A=0.03 B=0.03 C=0.10 D=0.10 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  53.88s  t=53660 label=TILT_RAMP_1_210HZ | I[A]: A=0.07 B=0.06 C=0.02 D=0.02 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.05s  t=53860 label=TILT_RAMP_1_210HZ | I[A]: A=0.08 B=0.08 C=0.03 D=0.03 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.27s  t=54060 label=TILT_RAMP_1_210HZ | I[A]: A=0.06 B=0.07 C=0.16 D=0.15 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.45s  t=54260 label=TILT_RAMP_1_210HZ | I[A]: A=0.17 B=0.17 C=0.08 D=0.08 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.67s  t=54460 label=TILT_RAMP_1_210HZ | I[A]: A=0.06 B=0.06 C=0.12 D=0.12 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.85s  t=54660 label=TILT_RAMP_1_210HZ | I[A]: A=0.06 B=0.06 C=0.11 D=0.11 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  54.86s  ignored: not waiting to start
+  55.07s  t=54860 label=TILT_RAMP_1_210HZ | I[A]: A=0.13 B=0.14 C=0.08 D=0.07 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  55.25s  t=55060 label=TILT_RAMP_1_210HZ | I[A]: A=0.17 B=0.19 C=0.12 D=0.11 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  55.47s  t=55260 label=TILT_RAMP_1_210HZ | I[A]: A=0.17 B=0.19 C=0.11 D=0.11 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  55.65s  t=55460 label=TILT_RAMP_1_210HZ | I[A]: A=0.12 B=0.12 C=0.18 D=0.18 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  55.66s  ignored: not waiting to start
+  55.87s  t=55660 label=TILT_RAMP_1_210HZ | I[A]: A=0.14 B=0.14 C=0.21 D=0.21 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  56.05s  t=55860 label=TILT_RAMP_1_210HZ | I[A]: A=0.26 B=0.26 C=0.18 D=0.16 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  56.15s  ignored: not waiting to start
+  56.18s  ignored: not waiting to start
+  56.21s  ignored: not waiting to start
+  56.24s  ignored: not waiting to start
+  56.26s  t=56060 label=TILT_RAMP_1_210HZ | I[A]: A=0.16 B=0.17 C=0.23 D=0.22 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  56.29s  ignored: not waiting to start
+  56.30s  ignored: not waiting to start
+  56.33s  ignored: not waiting to start
+  56.36s  ignored: not waiting to start
+  56.39s  ignored: not waiting to start
+  56.42s  ignored: not waiting to start
+  56.46s  t=56260 label=TILT_RAMP_1_210HZ | I[A]: A=0.26 B=0.30 C=0.22 D=0.20 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  56.48s  ignored: not waiting to start
+  56.51s  ignored: not waiting to start
+  56.54s  ignored: not waiting to start
+  56.57s  ignored: not waiting to start
+  56.60s  ignored: not waiting to start
+  56.63s  ignored: not waiting to start
+  56.66s  ignored: not waiting to start
+  56.69s  t=56460 label=TILT_RAMP_1_210HZ | I[A]: A=0.21 B=0.23 C=0.28 D=0.28 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  56.85s  t=56660 label=TILT_RAMP_1_210HZ | I[A]: A=0.21 B=0.20 C=0.27 D=0.28 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  57.07s  t=56860 label=TILT_RAMP_1_210HZ | I[A]: A=0.28 B=0.27 C=0.22 D=0.22 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  57.25s  t=57060 label=TILT_RAMP_1_210HZ | I[A]: A=0.28 B=0.28 C=0.36 D=0.35 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  57.26s  ignored: not waiting to start
+  57.48s  t=57260 label=TILT_RAMP_1_210HZ | I[A]: A=0.33 B=0.36 C=0.29 D=0.27 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  57.65s  t=57460 label=TILT_RAMP_1_210HZ | I[A]: A=0.31 B=0.33 C=0.27 D=0.24 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  57.87s  t=57660 label=TILT_RAMP_1_210HZ | I[A]: A=0.40 B=0.39 C=0.35 D=0.30 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.06s  t=57860 label=TILT_RAMP_1_210HZ | I[A]: A=0.38 B=0.38 C=0.32 D=0.29 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.27s  t=58060 label=TILT_RAMP_1_210HZ | I[A]: A=0.41 B=0.43 C=0.36 D=0.35 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.45s  t=58260 label=TILT_RAMP_1_210HZ | I[A]: A=0.37 B=0.37 C=0.44 D=0.47 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.46s  ignored: not waiting to start
+  58.67s  t=58460 label=TILT_RAMP_1_210HZ | I[A]: A=0.39 B=0.41 C=0.45 D=0.54 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.85s  t=58660 label=TILT_RAMP_1_210HZ | I[A]: A=0.48 B=0.50 C=0.38 D=0.46 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  58.86s  ignored: not waiting to start
+  59.07s  t=58860 label=TILT_RAMP_1_210HZ | I[A]: A=0.47 B=0.47 C=0.47 D=0.63 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  59.14s  ignored: not waiting to start
+  59.25s  t=59060 label=TILT_RAMP_1_210HZ | I[A]: A=0.52 B=0.52 C=0.41 D=0.54 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  59.38s  ignored: not waiting to start
+  59.47s  t=59260 label=TILT_RAMP_1_210HZ | I[A]: A=0.46 B=0.52 C=0.47 D=0.58 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  59.60s  ignored: not waiting to start
+  59.66s  t=59460 label=TILT_RAMP_1_210HZ | I[A]: A=0.59 B=0.61 C=0.49 D=0.58 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  59.79s  ignored: not waiting to start
+  59.85s  t=59660 label=TILT_RAMP_1_210HZ | I[A]: A=0.51 B=0.55 C=0.56 D=0.59 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  59.99s  ignored: not waiting to start
+  60.08s  t=59860 label=TILT_RAMP_1_210HZ | I[A]: A=0.59 B=0.60 C=0.60 D=0.59 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  60.17s  ignored: not waiting to start
+  60.26s  t=60060 label=TILT_RAMP_1_210HZ | I[A]: A=0.61 B=0.61 C=0.71 D=0.64 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  60.38s  ignored: not waiting to start
+  60.47s  t=60260 label=TILT_RAMP_1_210HZ | I[A]: A=0.66 B=0.67 C=0.74 D=0.59 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  60.54s  ignored: not waiting to start
+  60.65s  t=60460 label=TILT_RAMP_1_210HZ | I[A]: A=0.69 B=0.70 C=0.80 D=0.58 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  60.72s  ignored: not waiting to start
+  60.87s  t=60660 label=TILT_RAMP_1_210HZ | I[A]: A=0.76 B=0.76 C=0.79 D=0.54 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  60.94s  ignored: not waiting to start
+  61.05s  t=60860 label=TILT_RAMP_1_210HZ | I[A]: A=0.75 B=0.77 C=0.89 D=0.57 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  61.27s  t=61060 label=TILT_RAMP_1_210HZ | I[A]: A=0.67 B=0.73 C=1.02 D=0.61 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  61.48s  t=61260 label=TILT_RAMP_1_210HZ | I[A]: A=0.76 B=0.73 C=1.08 D=0.61 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  61.65s  t=61460 label=TILT_RAMP_1_210HZ | I[A]: A=0.73 B=0.76 C=1.12 D=0.63 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  61.87s  t=61660 label=TILT_RAMP_1_210HZ | I[A]: A=0.76 B=0.78 C=1.11 D=0.64 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  62.08s  t=61860 label=TILT_RAMP_1_210HZ | I[A]: A=0.78 B=0.81 C=1.01 D=0.59 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  62.25s  t=62060 label=TILT_RAMP_1_210HZ | I[A]: A=0.77 B=0.77 C=1.05 D=0.63 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0
+  62.26s  ESTOP -> coils latched OFF
+ 344.08s  ����������������������������������������������������������������ignored: not waiting to start
+ 344.99s  ignored: not waiting to start
+ 348.38s  ignored: not waiting to start
+ 349.18s  ignored: not waiting to start
+ 349.50s  ignored: not waiting to start
+ 349.77s  ignored: not waiting to start
+ 350.04s  ignored: not waiting to start
+ 350.34s  ignored: not waiting to start
+ 350.56s  ignored: not waiting to start
+ 350.81s  ignored: not waiting to start
+ 351.05s  ignored: not waiting to start
+ 351.30s  ignored: not waiting to start
+ 351.51s  ignored: not waiting to start
+ 351.76s  ignored: not waiting to start
+ 351.97s  ignored: not waiting to start
+ 352.22s  ignored: not waiting to start

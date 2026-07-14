@@ -26,6 +26,20 @@ SequenceTask makeTrajectoryTask(float freq, const float *duty,
   return task;
 }
 
+bool setChannelValues(float *field, int numChannels, const int *channels,
+                      int count, float value) {
+  if (count <= 0)
+    return false;
+  for (int i = 0; i < count; i++) {
+    if (channels[i] < 0 || channels[i] >= numChannels)
+      return false;
+  }
+  for (int i = 0; i < count; i++) {
+    field[channels[i]] = value;
+  }
+  return true;
+}
+
 PWMSequencer::PWMSequencer(PWMController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;

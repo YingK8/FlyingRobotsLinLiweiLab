@@ -16,6 +16,17 @@
 ]
 ```
 
+## Example 2b: Set Several Channels At Once
+```json
+[
+  { "method": "addCarrierDutyCycleTask", "channel": [0, 2, 3], "value": 50.0 },
+  { "method": "addWaitTask", "duration_ms": 500 },
+  { "method": "addCarrierDutyCycleTask", "channel": [0, 1, 2, 3], "value": 0.0 }
+]
+```
+`"channel"` accepts a list as well as a single int -- one task applies
+`value` to every listed channel, instead of one task per channel.
+
 ## Example 3: Mix with Other PWM Tasks
 ```json
 [

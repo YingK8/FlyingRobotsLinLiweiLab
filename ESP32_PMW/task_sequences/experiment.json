@@ -1,22 +1,126 @@
 [
   {
     "method": "setDirection",
-    "value": 0
+    "value": 1
   },
   {
-    "method": "activateChannels",
-    "mask": 1,
+    "method": "label",
+    "value": "TILT_RAMP_1_210HZ"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 1, 2, 3],
+    "value": 100.0
+  },
+  {
+    "method": "addEaseRampTask",
+    "from": 1.0,
+    "to": 210.0,
+    "duration_ms": 30000
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_100PCT"
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_90PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 90.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_80PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 80.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_70PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 70.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_60PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 60.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_50PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_40PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 40.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2500
+  },
+  {
+    "method": "label",
+    "value": "TILT_HOLD_30PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
     "value": 30.0
   },
   {
-    "method": "label",
-    "value": "SWEEP_A_F1"
+    "method": "addWaitTask",
+    "duration_ms": 2500
   },
   {
-    "method": "addLinearRampTask",
-    "from": 190.0,
-    "to": 1,
-    "duration_ms": 300
+    "method": "label",
+    "value": "TILT_HOLD_20PCT"
+  },
+  {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 20.0
   },
   {
     "method": "addWaitTask",
@@ -24,27 +128,12 @@
   },
   {
     "method": "label",
-    "value": "SWEEP_A_F5"
+    "value": "TILT_HOLD_10PCT"
   },
   {
-    "method": "addLinearRampTask",
-    "from": 1,
-    "to": 5,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F10"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 5,
-    "to": 10,
-    "duration_ms": 300
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
+    "value": 10.0
   },
   {
     "method": "addWaitTask",
@@ -52,1315 +141,11 @@
   },
   {
     "method": "label",
-    "value": "SWEEP_A_F20"
+    "value": "TILT_HOLD_0PCT"
   },
   {
-    "method": "addLinearRampTask",
-    "from": 10,
-    "to": 20,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F30"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 20,
-    "to": 30,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F40"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 30,
-    "to": 40,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F50"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 40,
-    "to": 50,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F60"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 50,
-    "to": 60,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F70"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 60,
-    "to": 70,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F80"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 70,
-    "to": 80,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F90"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 80,
-    "to": 90,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F100"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 90,
-    "to": 100,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F110"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 100,
-    "to": 110,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F120"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 110,
-    "to": 120,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F130"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 120,
-    "to": 130,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F140"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 130,
-    "to": 140,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F150"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 140,
-    "to": 150,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F160"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 150,
-    "to": 160,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F170"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 160,
-    "to": 170,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F180"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 170,
-    "to": 180,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F190"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 180,
-    "to": 190,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F200"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 190,
-    "to": 200,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_F210"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 200,
-    "to": 210,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "activateChannels",
-    "mask": 0,
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 3],
     "value": 0.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_A_OFF"
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 3000
-  },
-  {
-    "method": "activateChannels",
-    "mask": 2,
-    "value": 30.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F1"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 210,
-    "to": 1,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F5"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 1,
-    "to": 5,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F10"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 5,
-    "to": 10,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F20"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 10,
-    "to": 20,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F30"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 20,
-    "to": 30,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F40"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 30,
-    "to": 40,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F50"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 40,
-    "to": 50,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F60"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 50,
-    "to": 60,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F70"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 60,
-    "to": 70,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F80"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 70,
-    "to": 80,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F90"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 80,
-    "to": 90,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F100"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 90,
-    "to": 100,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F110"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 100,
-    "to": 110,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F120"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 110,
-    "to": 120,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F130"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 120,
-    "to": 130,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F140"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 130,
-    "to": 140,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F150"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 140,
-    "to": 150,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F160"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 150,
-    "to": 160,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F170"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 160,
-    "to": 170,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F180"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 170,
-    "to": 180,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F190"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 180,
-    "to": 190,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F200"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 190,
-    "to": 200,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_F210"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 200,
-    "to": 210,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "activateChannels",
-    "mask": 0,
-    "value": 0.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_B_OFF"
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 3000
-  },
-  {
-    "method": "activateChannels",
-    "mask": 4,
-    "value": 30.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F1"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 210,
-    "to": 1,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F5"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 1,
-    "to": 5,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F10"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 5,
-    "to": 10,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F20"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 10,
-    "to": 20,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F30"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 20,
-    "to": 30,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F40"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 30,
-    "to": 40,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F50"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 40,
-    "to": 50,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F60"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 50,
-    "to": 60,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F70"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 60,
-    "to": 70,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F80"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 70,
-    "to": 80,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F90"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 80,
-    "to": 90,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F100"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 90,
-    "to": 100,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F110"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 100,
-    "to": 110,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F120"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 110,
-    "to": 120,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F130"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 120,
-    "to": 130,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F140"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 130,
-    "to": 140,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F150"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 140,
-    "to": 150,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F160"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 150,
-    "to": 160,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F170"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 160,
-    "to": 170,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F180"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 170,
-    "to": 180,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F190"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 180,
-    "to": 190,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F200"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 190,
-    "to": 200,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_F210"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 200,
-    "to": 210,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "activateChannels",
-    "mask": 0,
-    "value": 0.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_C_OFF"
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 3000
-  },
-  {
-    "method": "activateChannels",
-    "mask": 8,
-    "value": 30.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F1"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 210,
-    "to": 1,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F5"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 1,
-    "to": 5,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F10"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 5,
-    "to": 10,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F20"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 10,
-    "to": 20,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F30"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 20,
-    "to": 30,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F40"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 30,
-    "to": 40,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F50"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 40,
-    "to": 50,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F60"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 50,
-    "to": 60,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F70"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 60,
-    "to": 70,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F80"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 70,
-    "to": 80,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F90"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 80,
-    "to": 90,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F100"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 90,
-    "to": 100,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F110"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 100,
-    "to": 110,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F120"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 110,
-    "to": 120,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F130"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 120,
-    "to": 130,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F140"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 130,
-    "to": 140,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F150"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 140,
-    "to": 150,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F160"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 150,
-    "to": 160,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F170"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 160,
-    "to": 170,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F180"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 170,
-    "to": 180,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F190"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 180,
-    "to": 190,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F200"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 190,
-    "to": 200,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_F210"
-  },
-  {
-    "method": "addLinearRampTask",
-    "from": 200,
-    "to": 210,
-    "duration_ms": 300
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
-    "method": "activateChannels",
-    "mask": 0,
-    "value": 0.0
-  },
-  {
-    "method": "label",
-    "value": "SWEEP_D_OFF"
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 3000
   }
 ]

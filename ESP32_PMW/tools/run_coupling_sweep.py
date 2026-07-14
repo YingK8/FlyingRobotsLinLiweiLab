@@ -3,13 +3,13 @@
 direction: copy the matching task_sequences/coupling_<dir>.json onto the ESP32's
 SPIFFS image (main_experiment.cpp always loads /experiment.json, see
 task_sequences/README.md) and flash it, then record a PicoScope capture in sync
-with a fresh boot-relative run: start picoscope_record.py first, then
-tools/trigger_reset_log.py's EN-pulse reset + labeled-telemetry log a few
-seconds later. Reuses the existing reset/record primitives as-is; the JSON
-experiment needs no commands sent once armed, so trigger_reset_log.py's plain
-reset+log mode is enough (unlike tools/pid_autotune.py, which does send
-commands). Regenerate the JSON files first with tools/gen_coupling_experiment.py
-for different current levels/timing.
+with a fresh boot-relative run: start picoscope_record.py first, then (4s later,
+matching the old trigger_reset_log.py --delay 4 timing) tools/run_experiment.py
+--fw experiment --auto-start --no-tui EN-pulse resets and captures serial,
+auto-sending the start command the instant the firmware reaches WAITING (this
+sweep runs unattended, so there's no human at a TUI to press it). Regenerate
+the JSON files first with tools/gen_coupling_experiment.py for different
+current levels/timing.
 
 Usage:
   uv run python tools/run_coupling_sweep.py [--port /dev/ttyUSB0]
@@ -62,21 +62,30 @@ def flash_experiment(pio: str, direction: str) -> None:
 def record_direction(direction: str, total_s: float, port, out_dir: str):
     ts = time.strftime("%H%M%S")
     csv_path = os.path.join(out_dir, f"coupling_{direction}_{ts}.csv")
-    log_path = os.path.join(out_dir, f"coupling_{direction}_{ts}_serial.log")
+    trial_dir = os.path.join(out_dir, f"coupling_{direction}_{ts}")
     record_s = total_s + MARGIN_S
 
-    scope_cmd = [sys.executable, os.path.join(REPO_ROOT, "tools", "picoscope_record.py"),
+    scope_cmd = [sys.executable, os.path.join(REPO_ROOT, "tools", "picoscope", "picoscope_record.py"),
                  "--seconds", str(record_s), "--out", csv_path]
     print("+", " ".join(scope_cmd), "(background)")
     scope_proc = subprocess.Popen(scope_cmd)
 
-    trigger_cmd = [sys.executable, os.path.join(REPO_ROOT, "tools", "trigger_reset_log.py"),
-                   "--delay", "4", "--log-seconds", str(record_s), "--out", log_path]
+    # Same boot-relative sync trigger_reset_log.py's --delay 4 used to give:
+    # let the PicoScope capture a few seconds of settled background before
+    # the EN-pulse reset that starts the actual experiment.
+    time.sleep(4)
+
+    # firmware is already flashed+staged by flash_experiment() above, and
+    # this sweep runs unattended -- no human at a TUI to press start.
+    run_cmd = [sys.executable, os.path.join(REPO_ROOT, "tools", "run_experiment.py"),
+               "--fw", "experiment", "--skip-build", "--auto-start", "--no-tui",
+               "--out-dir", trial_dir]
     if port:
-        trigger_cmd += ["--port", port]
-    run(trigger_cmd)
+        run_cmd += ["--port", port]
+    run(run_cmd, timeout=record_s + 30)
 
     scope_proc.wait()
+    log_path = os.path.join(trial_dir, "serial.log")
     print(f"[{direction}] saved {csv_path} and {log_path}")
     return csv_path, log_path
 

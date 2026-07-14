@@ -14,7 +14,7 @@ Each channel is drawn as a translucent raw trace (the actual noisy CS/scope
 voltage) with a solid rolling-RMS envelope on top.
 
 Usage:
-  uv run python tools/plot_coil_current_profiles.py
+  uv run python tools/plot/plot_coil_current_profiles.py
 """
 import os
 
@@ -25,10 +25,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.join(HERE, "..")
+REPO_ROOT = os.path.join(HERE, "..", "..")
 CSV = os.path.join(REPO_ROOT, "data", "2026-07-04a_coupling-matrix",
                     "coupling_pairwise_20260704_143320.csv")
-OUT = os.path.join(REPO_ROOT, "results", "single_vs_multi_coil",
+OUT = os.path.join(REPO_ROOT, "data", "results", "single_vs_multi_coil",
                     "coil_current_profile_matrix.png")
 
 # fixed 4-slot categorical order (blue/aqua/yellow/red) -- dataviz skill palette

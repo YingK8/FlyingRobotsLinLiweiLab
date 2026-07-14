@@ -1,16 +1,18 @@
 // Onboard current-balance PI controller. Policy (global, no board grouping):
 // each tick, the LOWEST-current channel's target becomes the current MAX
 // (push up); every other channel's target becomes the current MIN (pull
-// down) via PI(+D). Bounded/autonomous per run: arms (3s, self-calibrate ADC
-// zero) -> ramps drive frequency 1->210Hz over ramp_duration_ms -> holds at
-// 210Hz for HOLD_MS -> ramps duty down -> latches off. Rotation direction
-// and gains are runtime-adjustable (dir=/kp=/ki=/kd=/gains? over SerialComm)
-// so tuning trials don't need a reflash; capture telemetry with
-// tools/trigger_reset_log.py or tools/pid_autotune.py, plot with
-// tools/plot_pid_log.py. Validation bar: max(i_meas)-min(i_meas) < 0.1A,
-// sustained through HOLD.
+// down) via PI(+D). Arms (3s, self-calibrate ADC zero) -> waits for an
+// explicit start command (never auto-starts, see lib/ExperimentPhase) ->
+// ramps drive frequency 1->210Hz over ramp_duration_ms -> holds at 210Hz
+// for HOLD_MS -> ramps duty down -> latches off. Rotation direction and
+// gains are runtime-adjustable at any time (s=estop r=start dir=/kp=/ki=/
+// kd=/gains? over SerialComm) so tuning trials don't need a reflash;
+// capture telemetry with tools/run_experiment.py --fw current_pid or
+// tools/pid_autotune.py, plot with tools/plot/plot_pid_log.py. Validation
+// bar: max(i_meas)-min(i_meas) < 0.1A, sustained through HOLD.
 
 #include <Arduino.h>
+#include "ExperimentPhase.h"
 #include "PWMController.h"
 #include "PWMSequencer.h"
 #include "SerialComm.h"
@@ -40,8 +42,7 @@ const float end_freq = 210.0f;
 const unsigned long ramp_duration_ms = 20000;
 
 // ============================== CURRENT SENSE ==============================
-// VNH5019 CS gain, A per V -- per-board calibration.
-const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
+// SENS[] comes from constants.h (VNH5019 CS gain, per-board calibration).
 CurrentSense currentSense(ADC_PINS, SENS, NUM_CHANNELS); // TAU_FILTER_MS=50 default -- see CurrentSense.h
 
 // ============================== PI CONTROLLER ==============================
@@ -150,11 +151,11 @@ void runControlTick(float dt_ms) {
 }
 
 // ============================== STATE MACHINE ==============================
-enum Phase { ARMING, RAMP_UP, HOLD, ENDING, STOPPED };
+enum Phase { ARMING, WAITING, RAMP_UP, HOLD, ENDING, STOPPED };
 Phase phase = ARMING;
 unsigned long phase_start = 0;
 
-const unsigned long ARM_MS = 3000;
+// ARM_MS comes from constants.h (guaranteed coils-OFF period after boot).
 const unsigned long HOLD_MS = 5000;
 const unsigned long ramp_tick_ms = 20;
 const float end_step_pct = 2.0f;
@@ -194,12 +195,32 @@ void dispatchCommand(const String &raw) {
   cmd.trim();
   cmd.toLowerCase();
 
-  bool running = (phase == RAMP_UP || phase == HOLD);
+  // E-stop first, unconditionally -- works in every phase, unlike the
+  // tuning/start commands below which are only valid while parked.
+  if (ExperimentPhase::isStopCommand(cmd)) {
+    allCoilsOff();
+    phase = STOPPED;
+    Serial.println("ESTOP -> coils latched OFF");
+    return;
+  }
+
+  if (phase == WAITING && ExperimentPhase::isStartCommand(cmd)) {
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+      integrator[i] = START_DUTY;
+      controller->setCarrierDutyCycle(i, START_DUTY);
+    }
+    idx_min = 0;
+    seq->start();
+    phase = RAMP_UP;
+    phase_start = millis();
+    Serial.println("START -> ramping");
+    return;
+  }
 
   if (cmd == "gains?" || cmd == "gains") {
     printGains();
   } else if (cmd.startsWith("dir=")) {
-    if (phase != ARMING && phase != STOPPED) {
+    if (phase != ARMING && phase != WAITING && phase != STOPPED) {
       Serial.println("ignored: running (stop first)");
       return;
     }
@@ -214,23 +235,21 @@ void dispatchCommand(const String &raw) {
       Serial.println("unknown dir (use dir=cw or dir=ccw)");
     }
   } else if (cmd.startsWith("kp=")) {
-    if (running) { Serial.println("ignored: running (stop first)"); return; }
+    // PI controller always active: gains apply live, in any phase -- no
+    // more racing the old ARMING window before RAMP_UP locked them out.
     KP = cmd.substring(3).toFloat();
     printGains();
   } else if (cmd.startsWith("ki=")) {
-    if (running) { Serial.println("ignored: running (stop first)"); return; }
     KI = cmd.substring(3).toFloat();
     printGains();
   } else if (cmd.startsWith("kd=")) {
-    if (running) { Serial.println("ignored: running (stop first)"); return; }
     KD = cmd.substring(3).toFloat();
     printGains();
   } else if (cmd.startsWith("ramp=")) {
-    if (running) { Serial.println("ignored: running (stop first)"); return; }
     MIN_RAMP_PCT_PER_MS = cmd.substring(5).toFloat();
     printGains();
   } else {
-    Serial.printf("unknown cmd '%s' (dir=cw/ccw  kp=/ki=/kd=/ramp=<val>  gains?)\n",
+    Serial.printf("unknown cmd '%s' (s=estop  r=start  dir=cw/ccw  kp=/ki=/kd=/ramp=<val>  gains?)\n",
                   cmd.c_str());
   }
 }
@@ -254,8 +273,9 @@ void setup() {
 
   phase = ARMING;
   phase_start = millis();
-  Serial.println("current_pid: arming 3s, then autonomous 1->210Hz ramp + PI, bounded run");
-  Serial.println("commands: dir=cw|ccw  kp=/ki=/kd=/ramp=<val>  gains?");
+  Serial.println("current_pid: arming 3s, then waiting for a start command before "
+                 "the 1->210Hz ramp + PI run");
+  Serial.println("commands: s=estop  r=start  dir=cw|ccw  kp=/ki=/kd=/ramp=<val>  gains?");
 }
 
 void loop() {
@@ -290,20 +310,16 @@ void loop() {
 
   switch (phase) {
     case ARMING:
-      allCoilsOff();
-      digitalWrite(LED_PIN, (now / 150) & 1);  // fast blink = arming
-      currentSense.recalibrateZero();  // coils confirmed off here
-      if (now - phase_start >= ARM_MS) {
-        for (int i = 0; i < NUM_CHANNELS; i++) {
-          integrator[i] = START_DUTY;
-          controller->setCarrierDutyCycle(i, START_DUTY);
-        }
-        idx_min = 0;
-        seq->start();
-        phase = RAMP_UP;
+      if (ExperimentPhase::armingTick(now, phase_start, ARM_MS, controller,
+                                       NUM_CHANNELS, currentSense, LED_PIN)) {
+        phase = WAITING;
         phase_start = now;
-        Serial.println("ARMED -> ramping");
+        Serial.println("ARMED -> waiting for start (s=estop, r=start)");
       }
+      break;
+
+    case WAITING:
+      ExperimentPhase::latchedOffTick(now, controller, NUM_CHANNELS, LED_PIN);
       break;
 
     case RAMP_UP: {
@@ -336,8 +352,7 @@ void loop() {
       break;
 
     case STOPPED:
-      allCoilsOff();
-      digitalWrite(LED_PIN, (now / 1000) & 1);  // slow heartbeat = latched off
+      ExperimentPhase::latchedOffTick(now, controller, NUM_CHANNELS, LED_PIN);
       break;
   }
 

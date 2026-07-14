@@ -15,11 +15,11 @@ sec.6 for the J10/J5/etc. connector map), not the CS shunt.
 Procedure: drive channel `--driven` solo at `--freq-hz`/`--duty` (reuse
 tools/gen_solo_sweep_experiment.py with a single frequency and a long dwell,
 e.g. --freqs 150 --dwell-ms 8000); probe `--probed`'s coil terminals with the
-PicoScope and capture with tools/picoscope_capture.py; then run this script.
-The driven channel's true coil current is computed from tools/rlc_fit.json
-(no re-measurement needed): I_driven = V_fund / |Z_driven(omega)|. The
-probed voltage's fundamental gives V_induced via FFT (reusing
-tools/picoscope_capture.py's compute_fft/measure_fundamental). Then:
+PicoScope and capture with tools/picoscope/picoscope_capture.py; then run
+this script. The driven channel's true coil current is computed from
+tools/rlc_fit.json (no re-measurement needed): I_driven = V_fund /
+|Z_driven(omega)|. The probed voltage's fundamental gives V_induced via FFT
+(reusing tools/picoscope/picoscope_capture.py's compute_fft/measure_fundamental). Then:
 
   M_ij = |V_induced,j| / (omega * I_driven,i)
 
@@ -38,7 +38,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "picoscope"))
 from picoscope_capture import compute_fft, measure_fundamental
 
 

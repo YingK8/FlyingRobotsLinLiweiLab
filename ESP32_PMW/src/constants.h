@@ -28,3 +28,9 @@ const gpio_num_t D_ADC_PIN = GPIO_NUM_35;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] =     {A_PWM_PIN,     B_PWM_PIN,      C_PWM_PIN,      D_PWM_PIN};
 const gpio_num_t CARRIER_PINS[NUM_CHANNELS] = {A_CARRIER_PIN, B_CARRIER_PIN,  C_CARRIER_PIN,  D_CARRIER_PIN};
 const gpio_num_t ADC_PINS[NUM_CHANNELS] =     {A_ADC_PIN,     B_ADC_PIN,      C_ADC_PIN,      D_ADC_PIN};
+
+// VNH5019 CS gain, A per V -- per-board calibration (see main_current_pid.cpp
+// tuning history); measured current is reported in telemetry as a redundant
+// cross-check against the PicoScope capture, not used for control here.
+const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
+const unsigned long ARM_MS = 3000; // guaranteed coils-OFF period after boot

@@ -63,7 +63,7 @@ Default — capture just the bridge output (the node you're probing). Replace th
 `SCALE` with your differential-probe attenuation (e.g. `20` for ÷20):
 
 ```bash
-python ESP32_PMW/tools/picoscope_capture.py --preset envelope \
+python ESP32_PMW/tools/picoscope/picoscope_capture.py --preset envelope \
     --ch A:5v:DC:20:V:bridge_out
 ```
 
@@ -71,7 +71,7 @@ python ESP32_PMW/tools/picoscope_capture.py --preset envelope \
 `10` for a 0.1 Ω sense) and ask for the V–I phase:
 
 ```bash
-python ESP32_PMW/tools/picoscope_capture.py --preset envelope \
+python ESP32_PMW/tools/picoscope/picoscope_capture.py --preset envelope \
     --ch A:5v:DC:20:V:bridge_out \
     --ch B:500mv:DC:10:A:coil_current \
     --vi bridge_out,coil_current
@@ -80,7 +80,7 @@ python ESP32_PMW/tools/picoscope_capture.py --preset envelope \
 Inspect the 15 kHz carrier instead of the 190 Hz envelope:
 
 ```bash
-python ESP32_PMW/tools/picoscope_capture.py --preset carrier --ch A:5v:DC:20:V:bridge_out
+python ESP32_PMW/tools/picoscope/picoscope_capture.py --preset carrier --ch A:5v:DC:20:V:bridge_out
 ```
 
 `--ch` format: `CHANNEL:RANGE:COUPLING:SCALE:UNIT:LABEL` (only `CHANNEL:RANGE`
@@ -136,6 +136,75 @@ You are probing the BRIDGE OUTPUT (OUTA/OUTB).
 4. **DUT (differential probe)** — capture the bridge output (expect clean 190 Hz
    SQUARE → firmware drive is fine), then add the sense-resistor current channel
    (expect SINE) and walk the decision tree with the printed verdicts and V–I phase.
+
+---
+
+## Running experiments (`run_experiment.py`)
+
+`run_experiment.py` is the single build+flash+run driver for all three firmware
+variants, selected by `--fw`:
+
+```bash
+# JSON-driven sweeps/experiments (main_experiment.cpp) -- any task_sequences/*.json,
+# including tilt.json, runs here with no per-experiment script needed:
+uv run python tools/run_experiment.py --fw experiment --json task_sequences/tilt.json
+
+# Same, but with closed-loop PI compensation layered on top of the JSON
+# schedule's carrier-duty commands (see "PI compensation" below):
+uv run python tools/run_experiment.py --fw experiment --json task_sequences/tilt.json \
+    --pi-compensate --pi-profile task_sequences/pi_profile_tilt.json
+
+# RatioCurrentController profile (main_pi_profile.cpp):
+uv run python tools/run_experiment.py --fw pi_profile \
+    --profile task_sequences/pi_profile_tilt.json
+
+# Onboard current-balance PI controller (main_current_pid.cpp), gains live-tunable:
+uv run python tools/run_experiment.py --fw current_pid --dir cw
+```
+
+### PI compensation on `--fw experiment` (opt-in)
+
+`main_experiment.cpp` is normally fully open-loop -- the JSON schedule's commanded
+carrier duty goes straight to the hardware. `--pi-compensate --pi-profile <file>`
+(the same ratio/gains schema as `--fw pi_profile`'s `--profile`, e.g.
+`task_sequences/pi_profile_tilt.json`) engages `RatioCurrentController` on top of
+it instead: each tick, channel A's JSON-commanded carrier duty becomes the shared
+reference, every channel's target is `ratio[channel] * reference` (same convention
+as the profile's `ratios` field, where A=1.0 is the reference channel), and the PI
+loop's output *replaces* the schedule's raw commanded duty as the actual actuator
+value. The schedule still drives everything else (frequency ramp, timing, labels,
+direction) -- only carrier duty is closed-loop when this is on. Toggle it live from
+the TUI's `:` command line with `pi=on` / `pi=off` at any point in the run.
+
+All three firmwares share the same manual-start contract (`lib/ExperimentPhase`):
+ARMING (3s, self-calibrates ADC zero) -> WAITING (coils latched off, waiting for an
+explicit start command) -> the run -> STOPPED/DONE. Nothing auto-starts off a timer,
+and `s` (e-stop) works from every phase.
+
+By default, `run_experiment.py` opens a curses TUI (`experiment_tui.py`) once serial
+is open: a scrolling telemetry stream on the left, an ASCII current-matrix on the
+right (same channel/quadrant layout and current->mV conversion as
+`coil_current_matrix.py`, just drawn with terminal colors instead of a matplotlib
+window), and a status bar with REC/RUN indicator dots.
+
+- `r` -- run/stop toggle (sends the start command while WAITING; sends e-stop while running)
+- `s` -- immediate e-stop, any state
+- `w` -- toggle recording the telemetry stream to `recording_<n>.csv`
+- `:` -- command-line mode, for typing `kp=2.5`/`dir=cw`/etc. (`current_pid`/`pi_profile` live tuning)
+- `q` -- quit (sends e-stop first)
+
+Pass `--auto-start` for scripted/unattended callers (used internally by
+`run_coupling_sweep.py` and `pid_autotune.py`): it sends the start command itself
+the instant WAITING is seen, skipping the TUI's human gate. `--no-tui` runs a plain
+`print()`-based capture loop instead (requires `--auto-start`, since there's no
+other way to send the start command without the TUI).
+
+`coil_current_matrix.py`'s own CLI (`--port` / `--log-file`) is still available for
+standalone/offline use, e.g. replaying an already-saved log:
+
+```bash
+uv run python tools/coil_current_matrix.py --log-file state_space_cw_2A.log
+```
 
 ---
 

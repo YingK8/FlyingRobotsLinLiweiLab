@@ -8,17 +8,31 @@ collision this rename avoids: `platformio.ini` points `[env:experiment]` at
 `task_sequences/` via `board_build.filesystem_dir`.
 
 `main_experiment.cpp` always loads `/experiment.json` from SPIFFS — there is
-only one active payload per flash. To run a specific experiment, copy the
-one you want over `experiment.json` before uploading the filesystem image:
+only one active payload per flash. To run a specific experiment, use
+`tools/run_experiment.py --fw experiment --json <file>` — it copies the file
+over `experiment.json`, builds+flashes, and captures the run, all in one
+step; no per-experiment script is needed for **any** file in this directory
+(including `tilt.json`):
 
 ```
-cp task_sequences/coupling_cw.json task_sequences/experiment.json
-~/.platformio/penv/bin/pio run -e experiment -t uploadfs
-~/.platformio/penv/bin/pio run -e experiment -t upload
+uv run python tools/run_experiment.py --fw experiment --json task_sequences/tilt.json
 ```
 
-(`tools/run_coupling_sweep.py` does this copy + `uploadfs` step for you per
-direction.)
+`main_experiment.cpp` arms (fixed delay, self-calibrates ADC zero) then
+autonomously starts running -- no serial command needed to begin. `s` still
+e-stops it at any time. `run_experiment.py` opens a curses TUI by default
+purely for live telemetry/recording (see `tools/README.md`); it's not
+required to begin the run.
+
+Under the hood this is just: copy the file over `experiment.json`, then
+`pio run -e experiment -t uploadfs` + `-t upload`
+(`tools/run_coupling_sweep.py` does the same copy + `uploadfs` step, plus
+`--auto-start`, for each direction of a coupling sweep).
+
+Note: `pi_profile*.json` files in this directory (e.g. `pi_profile_tilt.json`)
+are a **separate** system — `main_pi_profile.cpp`'s SPIFFS profile file, run via
+`tools/run_experiment.py --fw pi_profile --profile <file>`, unrelated to the
+JSON task-queue files below despite the similar-looking name.
 
 ## Files
 
@@ -58,16 +72,18 @@ direction.)
 - `tilt.json` — a best-effort, simplified stand-in for `main_tilt.cpp`
   (itself already marked "OUTDATED, use tilt1+tilt2" in the old
   `platformio.ini`): a 1→210Hz ramp followed by a discrete 100%→0% duty
-  sweep in 10% steps (2.5s holds), CCW. **Known gaps, not reproduced**: the
-  live serial field-trim nudging (`a+`/`b-`/...) — that's interactive/
-  closed-loop-adjacent and doesn't fit a pre-declared JSON queue — and the
-  continuous frequency-blended trim schedule (`scheduledDutyPct`), which
-  isn't expressible in the current JSON schema (no "value = f(live
-  frequency)" construct). Also: the original file's checked-in state paired
-  CCW phases with a CW-calibrated trim set (a mismatch, most likely leftover
-  from editing); this JSON uses the correctly-paired CCW trim set
-  (`comp_ccw_iter2`, {63.0, 100.0, 73.8, 63.7}) instead of reproducing that
-  mismatch.
+  sweep in 10% steps (2.5s holds), CCW, **all four channels commanded
+  identically at every step** -- deliberately no static per-channel trim
+  baked into the file itself. Per-channel imbalance compensation is a
+  closed-loop concern: run with `run_experiment.py --fw experiment --json
+  tilt.json --pi-compensate --pi-profile pi_profile_tilt.json` to layer
+  `RatioCurrentController` on top of this schedule's carrier-duty commands
+  (see `tools/README.md`'s "PI compensation" section) instead of baking any
+  trim into the JSON. **Known gaps, not reproduced**: the live serial
+  field-trim nudging (`a+`/`b-`/...) and the continuous frequency-blended
+  trim schedule (`scheduledDutyPct`) that `main_tilt.cpp` had -- both are
+  closed-loop-adjacent and don't fit a pre-declared JSON queue regardless of
+  the PI-compensation option above.
 - **Not replaced**: `main_field_balance.cpp` (superseded — `main_current_pid.cpp`
   is its confirmed, more advanced successor for the same CS→ADC current-
   balance goal, not a "scripted experiment" to translate) and

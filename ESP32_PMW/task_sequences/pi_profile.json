@@ -1,0 +1,13 @@
+{
+  "name": "tilt_demo",
+  "mode": "independent",
+  "ratios": {"A": 1.0, "B": 0.5, "C": 0.3, "D": 0.8},
+  "gains": {"kp": 2.2, "ki": 0.10, "kd": 0.15},
+  "ramp_pct_per_ms": 0.05,
+  "duty_min": 5.0,
+  "duty_max": 100.0,
+  "i_max_a": 12.0,
+  "overcurrent_backoff_pct": 5.0,
+  "nominal_tick_ms": 2.0,
+  "magnitude_settle_tol_a": 0.2
+}

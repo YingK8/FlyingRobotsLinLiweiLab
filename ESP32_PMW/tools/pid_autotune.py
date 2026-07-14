@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Automated PID-gain tuning driver for main_current_pid.cpp. Runs
-coordinate-descent trials over {KP, KI, KD}: EN-pulse reset the board, set
-gains via dir=/kp=/ki=/kd= over tools/serial_comm.py's SerialComm (must land
-during the ~3s ARMING window before RAMP_UP locks gain changes out, see
-main_current_pid.cpp's dispatchCommand; used directly rather than shelling
-out to trigger_reset_log.py, since a trial needs several sequenced commands
-plus draining telemetry for the run's duration), let the bounded run
-complete, parse the log via tools/pid_metrics.py, and score it. Repeats a
-few rounds, one gain at a time, keeping whatever scored best. SAFETY: every
-trial's serial session sends 's' (e-stop) in a finally block on every exit
-path, independently re-implementing trigger_reset_log.py's invariant since
-this script doesn't call that one.
+coordinate-descent trials over {KP, KI, KD}: each trial shells out to
+`tools/run_experiment.py --fw current_pid --auto-start --no-tui` with the
+candidate gains, which resets the board, sends the gains once WAITING is
+seen, sends start, lets the bounded run complete, and e-stops on the way
+out (run_experiment.py owns all of that plumbing and its safety invariant
+now -- this script no longer talks to the serial port directly). Gains
+apply live in any phase now (see lib/ExperimentPhase's manual-start design),
+so there's no more racing the old ~3s ARMING window before RAMP_UP locked
+them out. Parses the resulting log via tools/pid_metrics.py and scores it.
+Repeats a few rounds, one gain at a time, keeping whatever scored best.
 
 Usage:
   uv run python tools/pid_autotune.py [--port /dev/ttyUSB0] [--rounds 2]
@@ -21,86 +20,29 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
-import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from serial_comm import SerialComm
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 from pid_metrics import compute_metrics, format_metrics_line, parse_log
 
-# Must land within the ~3s ARMING window before RAMP_UP locks gains out --
-# main_current_pid.cpp: Serial.begin()+delay(1000), then ARM_MS=3000ms.
-BOOT_BANNER_TIMEOUT_S = 6.0
-ARMED_BANNER_TIMEOUT_S = 6.0
-POLL_S = 0.02
 
-
-def run_trial(port, kp, ki, kd, ramp, run_seconds, out_path):
-    """Reset the board, set gains, let one bounded run complete, log
-    telemetry to out_path. Returns True if the ARMED banner was seen (gains
-    believed applied in time), False otherwise (results still logged, but
-    the caller should treat the trial as suspect)."""
-    comm = SerialComm(port=port)
-    gains_applied = False
-    try:
-        comm.reset_device()
-        t0 = time.time()
-        with open(out_path, "w") as f:
-            def log(line):
-                if line:
-                    f.write(f"{time.time() - t0:7.2f}s  {line}\n")
-
-            saw_boot = False
-            deadline = time.time() + BOOT_BANNER_TIMEOUT_S
-            while time.time() < deadline:
-                line = comm.handle_serial_comm()
-                if line is None:
-                    time.sleep(POLL_S)
-                    continue
-                log(line)
-                if "arming" in line.lower():
-                    saw_boot = True
-                    break
-            if not saw_boot:
-                print(f"  WARNING: no boot banner within {BOOT_BANNER_TIMEOUT_S}s "
-                      "-- sending gains anyway, best-effort")
-
-            for cmd in (f"kp={kp}", f"ki={ki}", f"kd={kd}", f"ramp={ramp}"):
-                log(comm.handle_serial_comm(cmd))
-                time.sleep(0.15)
-
-            deadline = time.time() + ARMED_BANNER_TIMEOUT_S
-            while time.time() < deadline:
-                line = comm.handle_serial_comm()
-                if line is None:
-                    time.sleep(POLL_S)
-                    continue
-                log(line)
-                if "armed" in line.lower():
-                    gains_applied = True
-                    break
-            if not gains_applied:
-                print("  WARNING: no ARMED banner seen -- gains may not have "
-                      "landed before RAMP_UP; treat this trial as suspect")
-
-            while time.time() - t0 < run_seconds:
-                line = comm.handle_serial_comm()
-                if line is None:
-                    time.sleep(POLL_S)
-                    continue
-                log(line)
-    finally:
-        # SAFETY: always e-stop before exiting -- mirrors trigger_reset_log.py's
-        # mandatory invariant (independently re-implemented here since this
-        # script drives the serial port directly rather than calling that one).
-        try:
-            comm.handle_serial_comm("s")
-            time.sleep(0.3)
-        except Exception as e:
-            print(f"  WARNING: failed to send e-stop ({e}) -- verify coils "
-                  "are off by hand")
-        comm.close()
-    return gains_applied
+def run_trial(port, kp, ki, kd, ramp, run_seconds, trial_dir) -> str:
+    """Run one bounded trial via run_experiment.py, logging into trial_dir.
+    Returns the serial log path to parse."""
+    os.makedirs(trial_dir, exist_ok=True)
+    cmd = [sys.executable, os.path.join(HERE, "run_experiment.py"),
+           "--fw", "current_pid", "--skip-build", "--auto-start", "--no-tui",
+           "--kp", str(kp), "--ki", str(ki), "--kd", str(kd), "--ramp", str(ramp),
+           "--out-dir", trial_dir]
+    if port:
+        cmd += ["--port", port]
+    result = subprocess.run(cmd, timeout=run_seconds + 30)
+    if result.returncode != 0:
+        print(f"  WARNING: run_experiment.py exited {result.returncode} -- "
+              "trial may be incomplete, treat this trial as suspect")
+    return os.path.join(trial_dir, "serial.log")
 
 
 def score(metrics: dict) -> float:
@@ -151,22 +93,22 @@ def main() -> None:
     state = {"trial_n": 0, "best_score": None}
 
     with open(results_path, "w") as rf:
-        rf.write("trial,kp,ki,kd,ramp,gains_applied,hold_spread,ss_err,settle_s,resonance_peak,score\n")
+        rf.write("trial,kp,ki,kd,ramp,hold_spread,ss_err,settle_s,resonance_peak,score\n")
 
         def try_gains(candidate: dict) -> float:
             state["trial_n"] += 1
             n = state["trial_n"]
-            out_path = os.path.join(args.out_dir, f"trial_{n:03d}.log")
+            trial_dir = os.path.join(args.out_dir, f"trial_{n:03d}")
             print(f"[{n}] kp={candidate['kp']:.3f} ki={candidate['ki']:.3f} "
                   f"kd={candidate['kd']:.3f} ramp={candidate['ramp']:.4f}")
-            applied = run_trial(args.port, candidate["kp"], candidate["ki"],
-                                 candidate["kd"], candidate["ramp"], args.run_seconds, out_path)
-            data = parse_log(out_path)
+            log_path = run_trial(args.port, candidate["kp"], candidate["ki"],
+                                  candidate["kd"], candidate["ramp"], args.run_seconds, trial_dir)
+            data = parse_log(log_path)
             metrics = compute_metrics(data)
             s = score(metrics)
             is_best = state["best_score"] is None or s < state["best_score"]
             rf.write(f"{n},{candidate['kp']},{candidate['ki']},{candidate['kd']},"
-                      f"{candidate['ramp']},{applied},{metrics['hold_spread']},"
+                      f"{candidate['ramp']},{metrics['hold_spread']},"
                       f"{metrics['ss_err']},{metrics['settle_s']},"
                       f"{metrics['resonance_peak']},{s}\n")
             rf.flush()

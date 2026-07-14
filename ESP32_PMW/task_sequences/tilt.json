@@ -8,6 +8,11 @@
     "value": "TILT_RAMP_1_210HZ"
   },
   {
+    "method": "addCarrierDutyCycleTask",
+    "channel": [0, 1, 2, 3],
+    "value": 100.0
+  },
+  {
     "method": "addEaseRampTask",
     "from": 1.0,
     "to": 210.0,
@@ -18,52 +23,13 @@
     "value": "TILT_HOLD_100PCT"
   },
   {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 63.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
-    "value": 100.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 73.8
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 63.7
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
-  },
-  {
     "method": "label",
     "value": "TILT_HOLD_90PCT"
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 56.7
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 90.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 66.42
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 57.33
   },
   {
     "method": "addWaitTask",
@@ -75,23 +41,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 50.4
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 80.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 59.04
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 50.96
   },
   {
     "method": "addWaitTask",
@@ -103,23 +54,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 44.1
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 70.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 51.66
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 44.59
   },
   {
     "method": "addWaitTask",
@@ -131,23 +67,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 37.8
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 60.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 44.28
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 38.22
   },
   {
     "method": "addWaitTask",
@@ -159,23 +80,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 31.5
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 50.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 36.9
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 31.85
   },
   {
     "method": "addWaitTask",
@@ -187,23 +93,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 25.2
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 40.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 29.52
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 25.48
   },
   {
     "method": "addWaitTask",
@@ -215,23 +106,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 18.9
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 30.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 22.14
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 19.11
   },
   {
     "method": "addWaitTask",
@@ -243,23 +119,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 12.6
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 20.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 14.76
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 12.74
   },
   {
     "method": "addWaitTask",
@@ -271,23 +132,8 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
-    "value": 6.3
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
+    "channel": [0, 3],
     "value": 10.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 7.38
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 6.37
   },
   {
     "method": "addWaitTask",
@@ -299,26 +145,7 @@
   },
   {
     "method": "addCarrierDutyCycleTask",
-    "channel": 0,
+    "channel": [0, 3],
     "value": 0.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 1,
-    "value": 0.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 2,
-    "value": 0.0
-  },
-  {
-    "method": "addCarrierDutyCycleTask",
-    "channel": 3,
-    "value": 0.0
-  },
-  {
-    "method": "addWaitTask",
-    "duration_ms": 2500
   }
 ]

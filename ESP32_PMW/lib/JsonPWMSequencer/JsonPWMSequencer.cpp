@@ -9,6 +9,26 @@ namespace {
 // coil order is A,B,C,D.
 const float PHASES_CW[4] = {270.0f, 90.0f, 180.0f, 0.0f};
 const float PHASES_CCW[4] = {90.0f, 270.0f, 180.0f, 0.0f};
+
+// "channel" accepts either a single int or a JSON array of ints; both forms
+// land here as a small fixed list. Missing field -> count 0 (matches the old
+// scalar default of -1, i.e. "no channel"). Extra entries beyond maxOut are
+// dropped -- callers pass maxOut=4, this project's fixed channel count.
+int parseChannelList(JsonVariant v, int *out, int maxOut) {
+  if (v.isNull())
+    return 0;
+  if (v.is<JsonArray>()) {
+    int n = 0;
+    for (JsonVariant item : v.as<JsonArray>()) {
+      if (n >= maxOut)
+        break;
+      out[n++] = item.as<int>();
+    }
+    return n;
+  }
+  out[0] = v.as<int>();
+  return 1;
+}
 } // namespace
 
 JsonPWMSequencer::JsonPWMSequencer(PWMController *phaseCtrl)
@@ -75,7 +95,8 @@ bool JsonPWMSequencer::loadFromJsonFile(const char *filename,
   for (JsonObject obj : arr) {
     const char *methodCStr = obj["method"] | "";
     String method(methodCStr);
-    int channel = obj["channel"] | -1;
+    int channels[4];
+    int channelCount = parseChannelList(obj["channel"], channels, 4);
     int mask = obj["mask"] | 0;
     float value = obj["value"] | 0.0f;
     float from = obj["from"] | 0.0f;
@@ -83,18 +104,20 @@ bool JsonPWMSequencer::loadFromJsonFile(const char *filename,
     uint32_t durationMs = obj["duration_ms"] | 0;
     bool called = false;
     bool pushedTask = false;
-    auto hasValidChannel = [&]() { return channel >= 0 && channel < 4; };
 
-    if (method == "addDutyCycleTask" && hasValidChannel()) {
-      curDuty[channel] = constrain(value, 0.0f, 100.0f);
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
-      called = true;
-      pushedTask = true;
-    } else if (method == "addPhaseTask" && hasValidChannel()) {
-      curPhase[channel] = value;
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
-      called = true;
-      pushedTask = true;
+    if (method == "addDutyCycleTask" && channelCount > 0) {
+      if (setChannelValues(curDuty, 4, channels, channelCount,
+                           constrain(value, 0.0f, 100.0f))) {
+        addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+        called = true;
+        pushedTask = true;
+      }
+    } else if (method == "addPhaseTask" && channelCount > 0) {
+      if (setChannelValues(curPhase, 4, channels, channelCount, value)) {
+        addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+        called = true;
+        pushedTask = true;
+      }
     } else if (method == "addWaitTask") {
       addWaitTask(durationMs);
       called = true;
@@ -121,22 +144,25 @@ bool JsonPWMSequencer::loadFromJsonFile(const char *filename,
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
-    } else if (method == "addPhaseRampTask" && hasValidChannel()) {
-      // Ramp only the named channel; NAN leaves the others alone.
+    } else if (method == "addPhaseRampTask" && channelCount > 0) {
+      // Ramp only the named channel(s); NAN leaves the others alone.
       float starts[4] = {NAN, NAN, NAN, NAN};
       float ends[4] = {NAN, NAN, NAN, NAN};
-      starts[channel] = from;
-      ends[channel] = to;
-      addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
-                  TaskMode::EASE);
-      curPhase[channel] = to;
-      called = true;
-      pushedTask = true;
-    } else if (method == "addCarrierDutyCycleTask" && hasValidChannel()) {
-      curCarrier[channel] = constrain(value, 0.0f, 100.0f);
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
-      called = true;
-      pushedTask = true;
+      if (setChannelValues(starts, 4, channels, channelCount, from) &&
+          setChannelValues(ends, 4, channels, channelCount, to)) {
+        addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
+                    TaskMode::EASE);
+        setChannelValues(curPhase, 4, channels, channelCount, to);
+        called = true;
+        pushedTask = true;
+      }
+    } else if (method == "addCarrierDutyCycleTask" && channelCount > 0) {
+      if (setChannelValues(curCarrier, 4, channels, channelCount,
+                           constrain(value, 0.0f, 100.0f))) {
+        addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+        called = true;
+        pushedTask = true;
+      }
     } else if (method == "setDirection") {
       // value != 0 => CCW, else CW (see PHASES_CW/PHASES_CCW above).
       const float *phases = (value != 0.0f) ? PHASES_CCW : PHASES_CW;

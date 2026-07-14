@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Shared telemetry parsing + tuning-metric computations for
-main_current_pid.cpp serial logs, used by both tools/plot_pid_log.py
+main_current_pid.cpp serial logs, used by both tools/plot/plot_pid_log.py
 (plotting + report) and tools/pid_autotune.py (machine-parsable METRICS line,
 scored across trials) so there's one parser/metrics implementation, not two.
 Telemetry line format (~2 Hz): "t=12345 phase=3 freq=142.1 | I[A]: A=4.98
@@ -42,6 +42,7 @@ _METRICS_LINE = re.compile(
     r"METRICS\s+hold_spread=([\w.\-]+)\s+ss_err=([\w.\-]+)\s+"
     r"settle_s=([\w.\-]+)\s+resonance_peak=([\w.\-]+)"
 )
+_RUN_MAX_SPREAD = re.compile(r"run_max_spread=([\w.\-]+)")
 
 
 def parse_log(path: str) -> dict:
@@ -157,12 +158,21 @@ def compute_metrics(data: dict, spread_limit: float = 0.1,
                     occurred -- used by validate_resonance_model.py to check
                     the fitted RLC model's predicted resonance location
                     against where the real controller actually struggled
+    run_max_spread  max spread across the ENTIRE log, all phases and
+                    frequencies, unmasked -- neither hold_spread (HOLD-only)
+                    nor resonance_peak (RAMP_UP, 90-190Hz only) captures the
+                    true worst case; spikes as low as 60Hz and as high as
+                    ~200Hz have been observed outside resonance_peak's band
+                    (see progress.md Section 5). This is the metric an
+                    automated tuner should actually gate on for a "max
+                    spread across the whole sequence" target.
     """
     t, state, freq, spread = data["t"], data["state"], data["freq"], data["spread"]
     currents = np.stack([data["i_a"], data["i_b"], data["i_c"], data["i_d"]], axis=1)
 
     metrics = {"hold_spread": None, "ss_err": None, "settle_s": None,
-               "resonance_peak": None, "resonance_peak_freq_hz": None}
+               "resonance_peak": None, "resonance_peak_freq_hz": None,
+               "run_max_spread": float(spread.max()) if len(spread) else None}
 
     hold_mask = state == HOLD_PHASE
     if hold_mask.any():
@@ -193,27 +203,34 @@ def compute_metrics(data: dict, spread_limit: float = 0.1,
 
 def format_metrics_line(metrics: dict) -> str:
     """Machine-parsable one-line summary, e.g.:
-      METRICS hold_spread=0.090 ss_err=0.042 settle_s=12.3 resonance_peak=0.310
-    Missing metrics print as 'nan' (parse_metrics_line round-trips them)."""
+      METRICS hold_spread=0.090 ss_err=0.042 settle_s=12.3 resonance_peak=0.310 run_max_spread=0.310
+    Missing metrics print as 'nan' (parse_metrics_line round-trips them).
+    run_max_spread is appended, not inserted, so any older tooling matching
+    only the first four fields keeps working unchanged."""
     def fmt(v, prec):
         return f"{v:.{prec}f}" if v is not None else "nan"
 
     return (f"METRICS hold_spread={fmt(metrics['hold_spread'], 3)} "
             f"ss_err={fmt(metrics['ss_err'], 3)} "
             f"settle_s={fmt(metrics['settle_s'], 1)} "
-            f"resonance_peak={fmt(metrics['resonance_peak'], 3)}")
+            f"resonance_peak={fmt(metrics['resonance_peak'], 3)} "
+            f"run_max_spread={fmt(metrics.get('run_max_spread'), 3)}")
 
 
 def parse_metrics_line(text: str) -> dict | None:
     """Inverse of format_metrics_line -- parses a METRICS line (or any text
     containing one) back into a dict of floats (nan for missing), or None
-    if no METRICS line is present."""
+    if no METRICS line is present. run_max_spread is optional in the input
+    text (nan if absent) so older logs still parse."""
     m = _METRICS_LINE.search(text)
     if not m:
         return None
-    return {
+    result = {
         "hold_spread": float(m.group(1)),
         "ss_err": float(m.group(2)),
         "settle_s": float(m.group(3)),
         "resonance_peak": float(m.group(4)),
     }
+    m2 = _RUN_MAX_SPREAD.search(text)
+    result["run_max_spread"] = float(m2.group(1)) if m2 else float("nan")
+    return result

@@ -136,12 +136,12 @@ bool CsvPWMSequencer::loadFromCSVFile(const char *filename,
       hasCurrentPoint = true;
     }
 
-    if (channel >= 0 && channel < numChannels) {
-      currentPoint.duty[channel] = valDuty;
-      currentPoint.carrierDuties[channel] = valCarrier;
-      currentPoint.freq[channel] = valFreq;
-      currentPoint.phase[channel] = valPhase;
-    }
+    // Shared bounds-check-then-apply helper (also used by JsonPWMSequencer)
+    // instead of reimplementing the channel-range check here.
+    setChannelValues(currentPoint.duty, numChannels, &channel, 1, valDuty);
+    setChannelValues(currentPoint.carrierDuties, numChannels, &channel, 1, valCarrier);
+    setChannelValues(currentPoint.freq, numChannels, &channel, 1, valFreq);
+    setChannelValues(currentPoint.phase, numChannels, &channel, 1, valPhase);
   }
 
   if (hasCurrentPoint) {

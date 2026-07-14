@@ -4,14 +4,14 @@
 Lines look like (emitted at ~2 Hz):
   t=12345 phase=3 freq=142.1 | I[A]: A=4.98 B=4.91 C=5.03 D=5.10 | duty[%]: A=55.0 B=52.0 C=54.0 D=50.0 | spread=0.190
 
-Log with tools/trigger_reset_log.py, e.g.:
-  uv run python tools/trigger_reset_log.py --log-seconds 65 --out current_pid_run.log
-  uv run python tools/plot_pid_log.py current_pid_run.log
+Log with tools/run_experiment.py, e.g.:
+  uv run python tools/run_experiment.py --fw current_pid --skip-build --out-dir current_pid_run
+  uv run python tools/plot/plot_pid_log.py current_pid_run/serial.log
 
 Also prints a machine-parsable "METRICS ..." summary line (see
 tools/pid_metrics.py) that tools/pid_autotune.py scores across trials.
 
-Usage: uv run python tools/plot_pid_log.py LOG
+Usage: uv run python tools/plot/plot_pid_log.py LOG
 """
 import argparse
 import os
@@ -21,7 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pid_metrics import STATES, HOLD_PHASE, compute_metrics, format_metrics_line, parse_log
 
 ap = argparse.ArgumentParser()

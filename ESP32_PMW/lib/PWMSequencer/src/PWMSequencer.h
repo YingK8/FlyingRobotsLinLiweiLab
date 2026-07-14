@@ -50,6 +50,17 @@ SequenceTask makeTrajectoryTask(float freq, const float *duty,
                                 const float *phase, const float *carrier,
                                 int numChannels = 4, int64_t durationUs = 0);
 
+// Writes `value` into field[ch] for every channel in channels[0..count) --
+// one task may target a single channel or several at once. Validates every
+// channel is within [0, numChannels) first; if count == 0 or any channel is
+// out of range, does nothing and returns false (caller should treat that as
+// an invalid/unrecognized task, matching this project's parse convention).
+// Shared by CsvPWMSequencer (one channel per row) and JsonPWMSequencer (a
+// task's "channel" field, scalar or list) so neither reimplements this
+// validate-then-apply logic independently.
+bool setChannelValues(float *field, int numChannels, const int *channels,
+                      int count, float value);
+
 class PWMSequencer {
 public:
   PWMSequencer(PWMController *phaseCtrl);
@@ -90,6 +101,23 @@ public:
   // Used by callers (e.g. JsonPWMSequencer::labelForStep) that track
   // auxiliary per-step data in parallel with the queue.
   size_t currentIndex() const { return _currentFrameIdx; }
+
+  // The schedule's OWN intended carrier duty for `channel` -- NOT the same
+  // as PWMController::getCarrierDutyCycle(), which reads back whatever was
+  // last physically written to that channel's PWM register. Callers that
+  // both read back a "current commanded duty" AND write their own duty to
+  // the same PWMController (e.g. a PI compensator using the schedule's duty
+  // as a reference, then overwriting the actuator with its own output) MUST
+  // use this accessor instead: reading the PWMController's own register in
+  // that situation reads back your OWN previous output, not the schedule's
+  // value, creating a self-referential feedback loop (confirmed on hardware
+  // -- duty snapped to dutyMax within one tick instead of tracking the
+  // schedule). Returns NAN if the current task doesn't drive carrier duty
+  // (e.g. mid a frequency-only ramp) -- callers should treat that as "no
+  // scheduled value yet," not silently substitute 0.
+  float scheduledCarrierDutyCycle(int channel) const {
+    return _currentCarrierDutyCycles[channel];
+  }
 
 private:
   PWMController *_phaseCtrl;

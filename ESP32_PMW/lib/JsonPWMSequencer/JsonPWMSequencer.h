@@ -3,9 +3,6 @@
 #include <Arduino.h>
 #include <vector>
 
-// Forward declaration for ArduinoJson
-class JsonVariant;
-
 class JsonPWMSequencer : public PWMSequencer {
 public:
   JsonPWMSequencer(PWMController *phaseCtrl);
@@ -13,7 +10,9 @@ public:
   // Load a schedule from a JSON file (SPIFFS) and compile it. File is a flat
   // JSON array of {method, channel, mask, value/from/to, duration_ms}
   // entries, no loop/repeat primitive (repeats are unrolled by whoever
-  // generates the file). Full method list and schema: README.md.
+  // generates the file). "channel" accepts either a single int (e.g. 2) or
+  // a list (e.g. [0, 2, 3]) -- a list applies the same value to every listed
+  // channel in one task. Full method list and schema: README.md.
   // initialDuty: float[4] duty (0-100%), defaults to {50,50,50,50}.
   // initialPhase: float[4] phase (degrees), defaults to {0,90,180,270}.
   // Returns false if the file can't be opened or fails to parse.

@@ -107,6 +107,17 @@ public:
    *  track auxiliary per-step data in parallel with the queue. */
   size_t currentIndex() const { return _currentFrameIdx; }
 
+  /** @brief The carrier duty (%) the schedule most recently COMMANDED for
+   *  channel `i`, or NAN if no carrier command has run yet. This is the
+   *  sequencer's *intent*, tracked independently of what anything else may
+   *  have written to the PhaseController -- a closed-loop overlay (e.g. a
+   *  current-balance PI that owns the actual carrier register) reads this as
+   *  the per-channel amplitude ceiling to regulate beneath. Held steady
+   *  across WAIT steps (run() returns early without re-asserting). */
+  float getCommandedCarrier(int i) const {
+    return (i >= 0 && i < 4) ? _currentCarrierDutyCycles[i] : NAN;
+  }
+
 private:
   PhaseController *_phaseCtrl;
   std::vector<SequenceTask> _queue;

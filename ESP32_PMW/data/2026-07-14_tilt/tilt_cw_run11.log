@@ -1,0 +1,87 @@
+   0.00s  ets Jul 29 2019 12:21:46
+   0.00s  
+   0.00s  rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+   0.00s  configsip: 0, SPIWP:0xee
+   0.00s  clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+   0.00s  mode:DIO, clock div:2
+   0.00s  load:0x3fff0030,len:1184
+   0.00s  load:0x40078000,len:13232
+   0.00s  load:0x40080400,len:3028
+   0.00s  entry 0x400805e4
+   1.29s  balanced_experiment: arming 3000ms, then loading /tilt.json (pi=1)
+   1.30s  t=1153 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   1.80s  t=1653 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   2.30s  t=2154 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   2.81s  t=2654 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   3.30s  t=3155 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   3.80s  t=3655 phase=0 freq=190.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   4.30s  ARMED -> running experiment
+   4.32s  t=4166 phase=1 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.7 B=50.0 C=50.0 D=50.0 | spread=0.000 pi=1 hold=0 ihold=0.00
+   4.81s  t=4666 phase=1 freq=1.1 | I[A]: A=0.04 B=0.01 C=0.00 D=0.00 | duty[%]: A=75.7 B=50.2 C=50.0 D=50.0 | spread=0.035 pi=1 hold=0 ihold=0.00
+   5.32s  t=5166 phase=1 freq=1.6 | I[A]: A=0.01 B=0.00 C=0.09 D=0.11 | duty[%]: A=100.0 B=50.4 C=49.9 D=49.9 | spread=0.107 pi=1 hold=0 ihold=0.00
+   5.82s  t=5667 phase=1 freq=2.4 | I[A]: A=0.01 B=0.01 C=0.10 D=0.10 | duty[%]: A=100.0 B=50.7 C=50.1 D=50.2 | spread=0.093 pi=1 hold=0 ihold=0.00
+   6.31s  t=6167 phase=1 freq=3.5 | I[A]: A=0.05 B=0.03 C=0.01 D=0.01 | duty[%]: A=100.0 B=51.4 C=50.8 D=50.9 | spread=0.042 pi=1 hold=0 ihold=0.00
+   6.82s  t=6667 phase=1 freq=4.9 | I[A]: A=0.05 B=0.02 C=0.09 D=0.07 | duty[%]: A=100.0 B=52.2 C=51.5 D=51.6 | spread=0.069 pi=1 hold=0 ihold=0.00
+   7.32s  t=7168 phase=1 freq=6.6 | I[A]: A=0.10 B=0.08 C=0.02 D=0.03 | duty[%]: A=100.0 B=53.1 C=52.7 D=52.8 | spread=0.077 pi=1 hold=0 ihold=0.00
+   7.82s  t=7668 phase=1 freq=8.5 | I[A]: A=0.07 B=0.06 C=0.09 D=0.06 | duty[%]: A=100.0 B=53.8 C=53.1 D=53.5 | spread=0.033 pi=1 hold=0 ihold=0.00
+   8.31s  t=8169 phase=1 freq=10.7 | I[A]: A=0.21 B=0.11 C=0.06 D=0.05 | duty[%]: A=100.0 B=54.9 C=54.9 D=55.2 | spread=0.159 pi=1 hold=0 ihold=0.00
+   8.82s  t=8670 phase=1 freq=13.1 | I[A]: A=0.26 B=0.14 C=0.09 D=0.10 | duty[%]: A=100.0 B=56.3 C=56.3 D=57.2 | spread=0.168 pi=1 hold=0 ihold=0.00
+   9.32s  t=9170 phase=1 freq=15.7 | I[A]: A=0.24 B=0.12 C=0.10 D=0.08 | duty[%]: A=100.0 B=58.3 C=58.4 D=59.6 | spread=0.162 pi=1 hold=0 ihold=0.00
+   9.82s  t=9671 phase=1 freq=18.6 | I[A]: A=0.27 B=0.15 C=0.13 D=0.16 | duty[%]: A=100.0 B=59.7 C=60.4 D=61.6 | spread=0.142 pi=1 hold=0 ihold=0.00
+  10.32s  t=10171 phase=1 freq=21.7 | I[A]: A=0.25 B=0.22 C=0.35 D=0.20 | duty[%]: A=95.4 B=57.8 C=85.4 D=62.2 | spread=0.145 pi=1 hold=0 ihold=0.00
+  10.82s  t=10672 phase=1 freq=25.0 | I[A]: A=0.29 B=0.20 C=0.33 D=0.21 | duty[%]: A=95.4 B=59.8 C=100.0 D=64.8 | spread=0.127 pi=1 hold=0 ihold=0.00
+  11.33s  t=11173 phase=1 freq=28.4 | I[A]: A=0.36 B=0.28 C=0.45 D=0.28 | duty[%]: A=96.5 B=63.4 C=100.0 D=68.4 | spread=0.168 pi=1 hold=0 ihold=0.00
+  11.83s  t=11673 phase=1 freq=32.1 | I[A]: A=0.41 B=0.32 C=0.48 D=0.24 | duty[%]: A=94.6 B=83.4 C=96.0 D=69.5 | spread=0.236 pi=1 hold=0 ihold=0.00
+  12.32s  t=12174 phase=1 freq=35.9 | I[A]: A=0.44 B=0.38 C=0.58 D=0.48 | duty[%]: A=92.6 B=85.6 C=92.7 D=92.0 | spread=0.200 pi=1 hold=0 ihold=0.00
+  12.83s  t=12674 phase=1 freq=39.9 | I[A]: A=0.50 B=0.44 C=0.57 D=0.56 | duty[%]: A=93.7 B=86.5 C=92.3 D=100.0 | spread=0.132 pi=1 hold=0 ihold=0.00
+  13.32s  t=13174 phase=1 freq=44.0 | I[A]: A=0.51 B=0.63 C=0.57 D=0.63 | duty[%]: A=95.0 B=92.4 C=92.6 D=99.3 | spread=0.116 pi=1 hold=0 ihold=0.00
+  13.82s  t=13674 phase=1 freq=48.2 | I[A]: A=0.66 B=0.77 C=0.54 D=0.96 | duty[%]: A=96.2 B=99.2 C=95.0 D=96.4 | spread=0.420 pi=1 hold=0 ihold=0.00
+  14.33s  t=14174 phase=1 freq=52.6 | I[A]: A=0.44 B=0.74 C=0.45 D=0.89 | duty[%]: A=94.6 B=94.2 C=100.0 D=89.2 | spread=0.453 pi=1 hold=0 ihold=0.00
+  14.83s  t=14674 phase=1 freq=57.1 | I[A]: A=0.72 B=0.73 C=0.67 D=0.83 | duty[%]: A=93.6 B=92.4 C=100.0 D=84.4 | spread=0.162 pi=1 hold=0 ihold=0.00
+  15.33s  t=15174 phase=1 freq=61.6 | I[A]: A=0.64 B=0.67 C=0.62 D=0.71 | duty[%]: A=89.8 B=88.0 C=100.0 D=81.2 | spread=0.082 pi=1 hold=0 ihold=0.00
+  15.83s  t=15674 phase=1 freq=66.3 | I[A]: A=0.77 B=0.68 C=0.63 D=0.73 | duty[%]: A=99.4 B=88.4 C=100.0 D=77.9 | spread=0.141 pi=1 hold=0 ihold=0.00
+  16.33s  t=16174 phase=1 freq=71.1 | I[A]: A=0.79 B=0.86 C=0.64 D=0.65 | duty[%]: A=97.9 B=96.4 C=100.0 D=76.8 | spread=0.221 pi=1 hold=0 ihold=0.00
+  16.82s  t=16675 phase=1 freq=75.9 | I[A]: A=0.73 B=0.82 C=0.73 D=0.71 | duty[%]: A=93.7 B=91.8 C=100.0 D=76.9 | spread=0.117 pi=1 hold=0 ihold=0.00
+  17.32s  t=17175 phase=1 freq=80.7 | I[A]: A=0.94 B=0.93 C=0.87 D=0.76 | duty[%]: A=92.8 B=90.0 C=100.0 D=78.1 | spread=0.179 pi=1 hold=0 ihold=0.00
+  17.82s  t=17675 phase=1 freq=85.6 | I[A]: A=0.90 B=0.85 C=0.82 D=0.76 | duty[%]: A=92.5 B=89.4 C=100.0 D=79.9 | spread=0.149 pi=1 hold=0 ihold=0.00
+  18.33s  t=18176 phase=1 freq=90.6 | I[A]: A=1.06 B=1.09 C=1.00 D=0.92 | duty[%]: A=92.8 B=95.1 C=100.0 D=80.0 | spread=0.170 pi=1 hold=0 ihold=0.00
+  18.83s  t=18676 phase=1 freq=95.5 | I[A]: A=1.10 B=1.22 C=1.25 D=1.09 | duty[%]: A=94.7 B=94.3 C=100.0 D=83.6 | spread=0.153 pi=1 hold=0 ihold=0.00
+  19.32s  t=19176 phase=1 freq=100.5 | I[A]: A=1.39 B=1.41 C=1.43 D=1.15 | duty[%]: A=96.5 B=92.0 C=99.3 D=88.4 | spread=0.283 pi=1 hold=0 ihold=0.00
+  19.83s  t=19676 phase=1 freq=105.5 | I[A]: A=1.50 B=1.53 C=1.53 D=1.37 | duty[%]: A=95.3 B=89.4 C=95.0 D=100.0 | spread=0.167 pi=1 hold=0 ihold=0.00
+  20.33s  t=20177 phase=1 freq=110.4 | I[A]: A=1.63 B=1.70 C=1.83 D=1.67 | duty[%]: A=95.3 B=86.4 C=91.1 D=100.0 | spread=0.203 pi=1 hold=0 ihold=0.00
+  20.83s  t=20677 phase=1 freq=115.4 | I[A]: A=1.88 B=1.98 C=1.92 D=1.74 | duty[%]: A=94.0 B=91.7 C=86.4 D=100.0 | spread=0.233 pi=1 hold=0 ihold=0.00
+  21.32s  t=21178 phase=1 freq=120.3 | I[A]: A=1.89 B=1.93 C=2.25 D=2.05 | duty[%]: A=92.6 B=87.2 C=81.3 D=100.0 | spread=0.353 pi=1 hold=0 ihold=0.00
+  21.82s  t=21678 phase=1 freq=125.2 | I[A]: A=2.23 B=2.50 C=2.23 D=1.97 | duty[%]: A=90.0 B=88.0 C=72.9 D=100.0 | spread=0.530 pi=1 hold=0 ihold=0.00
+  22.32s  t=22178 phase=1 freq=130.0 | I[A]: A=2.72 B=2.15 C=2.47 D=2.26 | duty[%]: A=86.3 B=87.3 C=75.9 D=99.0 | spread=0.576 pi=1 hold=0 ihold=0.00
+  22.83s  t=22678 phase=1 freq=134.7 | I[A]: A=2.50 B=2.65 C=2.64 D=2.33 | duty[%]: A=89.1 B=83.3 C=66.5 D=100.0 | spread=0.326 pi=1 hold=0 ihold=0.00
+  23.33s  t=23178 phase=1 freq=139.4 | I[A]: A=2.51 B=2.60 C=2.67 D=2.46 | duty[%]: A=85.7 B=79.2 C=60.7 D=100.0 | spread=0.203 pi=1 hold=0 ihold=0.00
+  23.83s  t=23678 phase=1 freq=143.9 | I[A]: A=2.73 B=2.79 C=2.76 D=2.66 | duty[%]: A=82.5 B=79.0 C=55.5 D=100.0 | spread=0.127 pi=1 hold=0 ihold=0.00
+  24.33s  t=24178 phase=1 freq=148.4 | I[A]: A=2.85 B=2.72 C=3.02 D=2.67 | duty[%]: A=82.1 B=75.7 C=54.4 D=100.0 | spread=0.359 pi=1 hold=0 ihold=0.00
+  24.83s  t=24678 phase=1 freq=152.8 | I[A]: A=2.88 B=3.00 C=2.69 D=2.71 | duty[%]: A=77.3 B=74.6 C=49.0 D=100.0 | spread=0.308 pi=1 hold=0 ihold=0.00
+  25.33s  t=25179 phase=1 freq=157.0 | I[A]: A=3.13 B=2.99 C=3.08 D=2.76 | duty[%]: A=82.8 B=75.7 C=50.5 D=100.0 | spread=0.375 pi=1 hold=0 ihold=0.00
+  25.83s  t=25679 phase=1 freq=161.1 | I[A]: A=2.90 B=2.95 C=2.81 D=2.79 | duty[%]: A=76.7 B=73.0 C=46.0 D=100.0 | spread=0.158 pi=1 hold=0 ihold=0.00
+  26.33s  t=26180 phase=1 freq=165.1 | I[A]: A=2.71 B=2.80 C=2.67 D=2.65 | duty[%]: A=74.0 B=71.0 C=43.9 D=100.0 | spread=0.149 pi=1 hold=0 ihold=0.00
+  26.83s  t=26680 phase=1 freq=168.9 | I[A]: A=2.88 B=2.89 C=2.94 D=2.63 | duty[%]: A=77.0 B=73.4 C=46.5 D=100.0 | spread=0.317 pi=1 hold=0 ihold=0.00
+  27.34s  t=27181 phase=1 freq=172.6 | I[A]: A=2.72 B=2.65 C=2.82 D=2.70 | duty[%]: A=74.3 B=70.1 C=46.8 D=100.0 | spread=0.163 pi=1 hold=0 ihold=0.00
+  27.83s  t=27682 phase=1 freq=176.0 | I[A]: A=2.63 B=2.77 C=2.68 D=2.62 | duty[%]: A=72.0 B=69.1 C=44.2 D=100.0 | spread=0.148 pi=1 hold=0 ihold=0.00
+  28.33s  t=28183 phase=1 freq=179.3 | I[A]: A=2.85 B=2.70 C=2.82 D=2.51 | duty[%]: A=76.2 B=71.5 C=45.4 D=100.0 | spread=0.332 pi=1 hold=0 ihold=0.00
+  28.83s  t=28683 phase=1 freq=182.4 | I[A]: A=2.67 B=2.63 C=2.68 D=2.61 | duty[%]: A=72.9 B=68.1 C=46.5 D=100.0 | spread=0.070 pi=1 hold=0 ihold=0.00
+  29.34s  t=29184 phase=1 freq=185.3 | I[A]: A=2.45 B=2.59 C=2.65 D=2.40 | duty[%]: A=71.8 B=70.8 C=47.1 D=100.0 | spread=0.252 pi=1 hold=0 ihold=0.00
+  29.84s  t=29685 phase=1 freq=187.9 | I[A]: A=2.46 B=2.46 C=2.47 D=2.43 | duty[%]: A=71.2 B=68.1 C=45.9 D=100.0 | spread=0.041 pi=1 hold=0 ihold=0.00
+  30.34s  t=30186 phase=1 freq=190.3 | I[A]: A=2.50 B=2.42 C=2.37 D=2.45 | duty[%]: A=70.6 B=67.9 C=46.1 D=100.0 | spread=0.125 pi=1 hold=0 ihold=0.00
+  30.84s  t=30687 phase=1 freq=192.5 | I[A]: A=2.69 B=2.53 C=2.41 D=2.30 | duty[%]: A=76.2 B=70.1 C=48.2 D=100.0 | spread=0.392 pi=1 hold=0 ihold=0.00
+  31.33s  t=31187 phase=1 freq=194.4 | I[A]: A=2.36 B=2.29 C=2.26 D=2.26 | duty[%]: A=72.3 B=67.9 C=49.3 D=100.0 | spread=0.100 pi=1 hold=0 ihold=0.00
+  31.84s  t=31687 phase=1 freq=196.1 | I[A]: A=2.33 B=2.20 C=2.22 D=2.29 | duty[%]: A=71.3 B=68.2 C=48.2 D=100.0 | spread=0.125 pi=1 hold=0 ihold=0.00
+  32.34s  t=32188 phase=1 freq=197.5 | I[A]: A=2.30 B=2.23 C=2.20 D=2.32 | duty[%]: A=71.3 B=67.6 C=48.6 D=100.0 | spread=0.119 pi=1 hold=0 ihold=0.00
+  32.84s  t=32689 phase=1 freq=198.6 | I[A]: A=2.17 B=2.21 C=2.19 D=2.17 | duty[%]: A=70.7 B=67.9 C=49.1 D=100.0 | spread=0.042 pi=1 hold=0 ihold=0.00
+  33.34s  t=33189 phase=1 freq=199.4 | I[A]: A=2.17 B=2.32 C=2.63 D=2.12 | duty[%]: A=72.7 B=73.9 C=51.8 D=98.7 | spread=0.513 pi=1 hold=0 ihold=0.00
+  33.84s  t=33690 phase=1 freq=199.8 | I[A]: A=2.33 B=2.21 C=2.18 D=2.22 | duty[%]: A=71.9 B=68.8 C=48.7 D=100.0 | spread=0.152 pi=1 hold=0 ihold=0.00
+  34.34s  t=34190 phase=1 freq=200.0 | I[A]: A=2.17 B=2.16 C=2.58 D=2.10 | duty[%]: A=71.0 B=73.3 C=52.6 D=99.9 | spread=0.472 pi=1 hold=0 ihold=0.00
+  34.84s  t=34691 phase=1 freq=200.0 | I[A]: A=2.10 B=2.22 C=2.16 D=2.11 | duty[%]: A=70.8 B=69.0 C=48.6 D=100.0 | spread=0.123 pi=1 hold=0 ihold=0.00
+  35.34s  t=35191 phase=1 freq=200.0 | I[A]: A=2.26 B=2.41 C=2.37 D=2.04 | duty[%]: A=74.7 B=73.8 C=50.2 D=100.0 | spread=0.365 pi=1 hold=0 ihold=0.00
+  35.84s  t=35691 phase=1 freq=200.0 | I[A]: A=2.15 B=2.30 C=2.28 D=2.17 | duty[%]: A=72.4 B=69.3 C=51.3 D=100.0 | spread=0.141 pi=1 hold=0 ihold=0.00
+  36.34s  t=36192 phase=1 freq=200.0 | I[A]: A=2.23 B=2.46 C=2.37 D=2.16 | duty[%]: A=71.5 B=71.8 C=50.2 D=100.0 | spread=0.301 pi=1 hold=0 ihold=0.00
+  36.84s  t=36693 phase=1 freq=200.0 | I[A]: A=2.14 B=2.20 C=2.21 D=2.13 | duty[%]: A=70.4 B=69.3 C=48.1 D=100.0 | spread=0.085 pi=1 hold=0 ihold=0.00
+  37.35s  t=37194 phase=1 freq=200.0 | I[A]: A=2.13 B=2.21 C=2.13 D=2.06 | duty[%]: A=69.3 B=67.7 C=48.1 D=90.0 | spread=0.151 pi=1 hold=1 ihold=2.08
+  37.85s  t=37694 phase=1 freq=200.0 | I[A]: A=1.98 B=2.08 C=2.09 D=1.79 | duty[%]: A=66.0 B=67.8 C=47.6 D=90.0 | spread=0.295 pi=1 hold=1 ihold=2.08
+  38.35s  t=38194 phase=1 freq=200.0 | I[A]: A=1.85 B=2.16 C=1.97 D=1.78 | duty[%]: A=65.3 B=67.5 C=47.7 D=90.0 | spread=0.377 pi=1 hold=1 ihold=2.08

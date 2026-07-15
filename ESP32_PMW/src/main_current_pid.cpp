@@ -11,6 +11,7 @@
 // sustained through HOLD.
 
 #include <Arduino.h>
+#include "CurrentBalanceController.h"
 #include "PhaseController.h"
 #include "PhaseSequencer.h"
 #include "SerialComm.h"
@@ -18,10 +19,6 @@
 #include "current_sense.h"
 #include "safety_startup.h"
 #include "telemetry.h"
-
-static inline float clampf(float v, float lo, float hi) {
-  return v < lo ? lo : (v > hi ? hi : v);
-}
 
 // ============================== DRIVE ==============================
 // Rotation direction is runtime-selectable (see dir=cw/dir=ccw in
@@ -45,108 +42,33 @@ const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
 CurrentSense currentSense(SENS); // TAU_FILTER_MS=50 default -- see current_sense.h
 
 // ============================== PI CONTROLLER ==============================
-// Runtime-tunable via kp=/ki=/kd= (see dispatchCommand). Converged values
-// (see project memory): KP=2.2, KI=0.10, KD=0.15.
-float KP = 2.2f;                    // duty % per A of error
-float KI = 0.10f;                   // duty % per A of error, per tick
+// The balance law now lives in the shared CurrentBalanceController library
+// (extracted verbatim from this file's former inline runControlTick). Here it
+// runs with a flat 100% ceiling on every channel -- "push each channel to its
+// max" -- so behavior is identical to the original. This file stays the
+// reference tuning rig: KP/KI/KD/ramp remain runtime-tunable mirrors (kp=/ki=/
+// kd=/ramp= over serial) that are pushed into the controller on change.
+// Converged values: KP=2.2, KI=0.10, KD=0.15.
+float KP = 2.2f;
+float KI = 0.10f;
 float KD = 0.15f;
-const float OVERCURRENT_BACKOFF_PCT = 5.0f;
-const float DUTY_MIN = 5.0f;
-const float DUTY_MAX = 100.0f;
-const float I_MAX_A  = 12.0f;             // hard per-channel safety cap
+float MIN_RAMP_PCT_PER_MS = 0.05f;
 
-// Runs every loop() iteration now (no fixed tick gate -- loop() is fast and
-// there's no reason to throttle it). KP/KI/KD were tuned assuming a fixed
-// 2ms step, so KI/derivative are scaled by (actual dt / NOMINAL_TICK_MS)
-// to keep the gains' real-world meaning rate-independent instead of
-// silently integrating/differentiating faster just because loop() sped up.
-const float NOMINAL_TICK_MS = 2.0f;
-
-// Hysteresis on WHICH channel is currently forced to 100%: without this, as
-// the group converges (the actual goal), channels' readings get close
-// together and measurement noise causes the identity of "the minimum" to
-// flap between channels tick to tick -- every flap resets a channel to a
-// fresh 100%-duty episode, undoing nearly-converged progress right when it's
-// closest to succeeding (confirmed in testing: convergence to ~0.32A spread
-// during RAMP_UP was wiped out by a flap right as HOLD began). Only switch
-// which channel is latched as the forced-100% one if a DIFFERENT channel
-// reads at least this much lower than the currently latched one.
-const float MIN_SWITCH_MARGIN_A = 0.3f;
-
-// Rate limit on how fast the latched-minimum channel ramps toward 100% duty.
-// Snapping straight to 100% (previous behavior) can overshoot the group --
-// see lesson: forcing a channel to 100% can make IT become the new leader
-// before the argmin re-evaluation above has a chance to reassign idx_min to
-// a genuinely different weakest channel. Ramping instead gives that
-// reassignment time to happen mid-ramp.
-float MIN_RAMP_PCT_PER_MS = 0.05f;  // duty %/ms at NOMINAL_TICK_MS rate -- untuned
-                                     // placeholder, runtime-tunable via ramp=
-
-float integrator[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
-float duty_out[NUM_CHANNELS]   = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
-float last_err[NUM_CHANNELS] = {0, 0, 0, 0};
-int idx_min = 0;  // latched -- persists across ticks, see MIN_SWITCH_MARGIN_A
+CurrentBalanceController balance;
+const float CEILING_100[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
+float duty_out[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
 
 PhaseController *controller;
 PhaseSequencer *seq;
 SerialComm comm;
 bool directionIsCcw = true; // default direction, matches this file's history
 
-// Global min/max policy (literal, no board grouping) + plain PI, every channel,
-// every tick. See the plan's "control policy" section for the full derivation.
+// Balance tick: the shared controller with a flat 100% ceiling (see above).
+// duty_out is kept for the debug telemetry print below.
 void runControlTick(float dt_ms) {
-  float rate_scale = dt_ms / NOMINAL_TICK_MS;
-  float *i_meas = currentSense.i_meas;
-  int true_idx_min = 0;
-  for (int i = 1; i < NUM_CHANNELS; i++)
-    if (i_meas[i] < i_meas[true_idx_min]) true_idx_min = i;
-  if (i_meas[true_idx_min] < i_meas[idx_min] - MIN_SWITCH_MARGIN_A)
-    idx_min = true_idx_min;
-  float i_min = i_meas[idx_min];  // the anchor level every other channel targets
-
-  for (int i = 0; i < NUM_CHANNELS; i++) {
-    float duty;
-    if (i_meas[i] > I_MAX_A) {
-      integrator[i] -= OVERCURRENT_BACKOFF_PCT;
-      duty = clampf(integrator[i], DUTY_MIN, DUTY_MAX);
-    } else if (i == idx_min) {
-      // Anchor the group by driving the minimum-current channel toward
-      // 100% duty -- this is what maximizes achievable current, since
-      // pushing the bottleneck channel as hard as possible is the only way
-      // to raise the floor everyone else tracks. Ramped, not snapped: a
-      // bounded rate gives the argmin re-evaluation above time to reassign
-      // idx_min to a genuinely different, still-weaker channel before this
-      // one overshoots the group.
-      duty = clampf(duty_out[i] + MIN_RAMP_PCT_PER_MS * dt_ms, DUTY_MIN, DUTY_MAX);
-      integrator[i] = duty;  // continuity for when this channel later falls
-                              // back under normal PI control (target=i_min)
-      last_err[i] = 0.0f;    // i_meas[idx_min] == i_min while forced -- keep
-                              // the derivative term fresh for when it exits
-    } else {
-      // Anti-windup: freeze the integrator ONLY when the error is pushing
-      // FURTHER into saturation (candidate beyond the clamp AND err has the
-      // same sign as that direction). Freezing merely because the raw
-      // candidate exceeds the clamp -- regardless of err's sign -- traps any
-      // channel whose integrator started high (e.g. just finished being the
-      // forced-100% min channel) permanently AT the clamp: a negative err
-      // trying to pull it back down would never actually update the
-      // integrator, since candidate stays above the clamp for many ticks in
-      // a row while KP*err alone is too small to cross it in one step.
-      float err = i_min - i_meas[i];
-      // Rate-independent derivative: normalize the raw per-call delta back
-      // to "per NOMINAL_TICK_MS" terms so KD's meaning doesn't change when
-      // dt_ms varies (this now runs every loop() iteration, not a fixed tick).
-      float derivative = (rate_scale > 0.0f) ? (err - last_err[i]) / rate_scale : 0.0f;
-      last_err[i] = err;
-      float candidate = integrator[i] + KP * err + KD * derivative;
-      duty = clampf(candidate, DUTY_MIN, DUTY_MAX);
-      bool pushingIntoHighSat = (candidate > DUTY_MAX) && (err > 0.0f);
-      bool pushingIntoLowSat  = (candidate < DUTY_MIN) && (err < 0.0f);
-      if (!pushingIntoHighSat && !pushingIntoLowSat) integrator[i] += KI * err * rate_scale;
-    }
-    controller->setCarrierDutyCycle(i, duty);
-    duty_out[i] = duty;
-  }
+  balance.step(currentSense.i_meas, dt_ms, CEILING_100, duty_out);
+  for (int i = 0; i < NUM_CHANNELS; i++)
+    controller->setCarrierDutyCycle(i, duty_out[i]);
 }
 
 // ============================== STATE MACHINE ==============================
@@ -216,18 +138,22 @@ void dispatchCommand(const String &raw) {
   } else if (cmd.startsWith("kp=")) {
     if (running) { Serial.println("ignored: running (stop first)"); return; }
     KP = cmd.substring(3).toFloat();
+    balance.setGains(KP, KI, KD);
     printGains();
   } else if (cmd.startsWith("ki=")) {
     if (running) { Serial.println("ignored: running (stop first)"); return; }
     KI = cmd.substring(3).toFloat();
+    balance.setGains(KP, KI, KD);
     printGains();
   } else if (cmd.startsWith("kd=")) {
     if (running) { Serial.println("ignored: running (stop first)"); return; }
     KD = cmd.substring(3).toFloat();
+    balance.setGains(KP, KI, KD);
     printGains();
   } else if (cmd.startsWith("ramp=")) {
     if (running) { Serial.println("ignored: running (stop first)"); return; }
     MIN_RAMP_PCT_PER_MS = cmd.substring(5).toFloat();
+    balance.setRamp(MIN_RAMP_PCT_PER_MS);
     printGains();
   } else {
     Serial.printf("unknown cmd '%s' (dir=cw/ccw  kp=/ki=/kd=/ramp=<val>  gains?)\n",
@@ -251,6 +177,12 @@ void setup() {
   controller = nullptr;
   seq = nullptr;
   reinitController(directionIsCcw); // default direction
+
+  // Seed the shared balance controller from the runtime-tunable mirrors (the
+  // defaults already match, but keep this explicit so kp=/ramp= edits and the
+  // controller never drift apart).
+  balance.setGains(KP, KI, KD);
+  balance.setRamp(MIN_RAMP_PCT_PER_MS);
 
   phase = ARMING;
   phase_start = millis();
@@ -294,11 +226,9 @@ void loop() {
       digitalWrite(LED_PIN, (now / 150) & 1);  // fast blink = arming
       currentSense.recalibrateZero();  // coils confirmed off here
       if (now - phase_start >= ARM_MS) {
-        for (int i = 0; i < NUM_CHANNELS; i++) {
-          integrator[i] = START_DUTY;
+        balance.reset(START_DUTY);
+        for (int i = 0; i < NUM_CHANNELS; i++)
           controller->setCarrierDutyCycle(i, START_DUTY);
-        }
-        idx_min = 0;
         seq->start();
         phase = RAMP_UP;
         phase_start = now;

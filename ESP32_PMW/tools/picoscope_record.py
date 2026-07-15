@@ -33,6 +33,7 @@ are common and earth-referenced — use a differential probe on any floating nod
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -174,6 +175,40 @@ def run_streaming(chandle, specs, max_adc, raw_interval_us, duration_s,
 # CSV export — pipeline format (Time, Channel A..D, units row, blank line)
 # --------------------------------------------------------------------------- #
 
+def save_overview_plot(time_s, data, csv_path, win_s=0.5):
+    """Best-effort rolling-RMS overview PNG saved next to the CSV, one per run.
+
+    The current sense is AC, so its RMS is the physical current magnitude; a
+    running RMS (sqrt of a moving-average of x^2) turns each channel into a clean
+    envelope over the whole capture. Failures never abort a recording.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as e:                       # matplotlib optional
+        print(f"(plot skipped: {e})")
+        return None
+    time_s = np.asarray(time_s, float)
+    if time_s.size < 2:
+        return None
+    dt = float(np.median(np.diff(time_s))) or 1.0
+    win = max(1, int(round(win_s / dt)))
+    kern = np.ones(win) / win
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for label, v in data.items():
+        v = np.asarray(v, float); vv = v - v.mean()
+        rms = np.sqrt(np.convolve(vv * vv, kern, mode="same")) * 1000.0
+        ax.plot(time_s, rms, lw=1.0, label=label)
+    ax.set_title(f"Rolling-RMS envelope ({win_s*1000:.0f} ms) — {os.path.basename(csv_path)}")
+    ax.set_xlabel("time (s)"); ax.set_ylabel("RMS current sense (mV)")
+    ax.set_xlim(0, time_s[-1]); ax.grid(alpha=0.3)
+    ax.legend(ncol=max(1, len(data)), fontsize=8)
+    out = csv_path.rsplit(".", 1)[0] + "_rms.png"
+    fig.tight_layout(); fig.savefig(out, dpi=110); plt.close(fig)
+    return out
+
+
 def export_pipeline_csv(time_s, data, path):
     labels = list(data.keys())
     with open(path, "w", newline="") as f:
@@ -257,6 +292,8 @@ def main(argv=None):
                    help="validate CSV format only, no scope")
     p.add_argument("--dry-run", action="store_true",
                    help="print config and exit (no acquisition)")
+    p.add_argument("--no-plot", action="store_true",
+                   help="skip the auto rolling-RMS overview PNG saved per run")
     args = p.parse_args(argv)
 
     if args.self_test:
@@ -290,6 +327,10 @@ def main(argv=None):
         close_scope(chandle)
 
     print("CSV ->", export_pipeline_csv(time_s, data, out))
+    if not args.no_plot:
+        png = save_overview_plot(time_s, data, out)
+        if png:
+            print("plot ->", png)
     return 0
 
 

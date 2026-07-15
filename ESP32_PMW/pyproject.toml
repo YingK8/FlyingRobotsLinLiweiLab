@@ -1,0 +1,17 @@
+[project]
+name = "esp32-pmw-tools"
+version = "0.1.0"
+description = "Python tooling for ESP32_PMW (PicoScope capture/record, analysis)"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.0",
+    "scipy>=1.13",
+    "matplotlib>=3.8",
+    "picosdk>=1.1",
+    "pyserial>=3.5",
+]
+
+# No Python package to build — this project is just scripts under tools/.
+[tool.uv]
+package = false

@@ -14,17 +14,17 @@ public:
   CsvPhaseSequencer(PhaseController *phaseCtrl);
 
   /**
-   * @brief Load a schedule from a CSV file and compile the sequence.
-   * @param filename Path to the CSV file.
-   * @param resolutionMs Time resolution in milliseconds.
-   * @return True if loaded and compiled successfully, false otherwise.
+   * @brief Load waypoints from a CSV file (SPIFFS) and compile the sequence.
+   *
+   * Header row is `time,channel,duty,carrier_duty,frequency,phase`; optional
+   * `# channels,N` / `# step_size_ms,N` / `# interpolation,linear|hermite`
+   * directives precede it. Rows sharing a `time` form one full-state point;
+   * points are resampled every `resolutionMs` and interpolated between (the
+   * `# interpolation` directive picks linear vs. hermite/ease).
+   *
+   * @return False if the file can't be opened, has no rows, or its first
+   *   block doesn't start at time 0.
    */
   bool loadFromCSVFile(const char *filename,
                        uint32_t resolutionMs = STEP_SIZE_MS);
-
-  // Existing JSON loader
-  bool loadFromJsonFile(const char *filename, uint32_t resolutionMs = 25,
-                        float initialFreq = 300.0f,
-                        const float *initialDuty = nullptr,
-                        const float *initialPhase = nullptr);
 };

@@ -5,20 +5,7 @@
 #include "esp_timer.h"
 #include <Arduino.h>
 
-// Configuration Defines
-// (Ensure these match your project settings or are defined here)
-// #ifndef USE_SYNC
-// #define USE_SYNC 1
-// #endif
-
-// Set to 1 for Master (Output Sync), 0 for Client (Input Sync)
-// #ifndef SYNC_AS_SERVER
-// #define SYNC_AS_SERVER 0
-// #endif
-
 #define FREQ_FILTER_SIZE 5
-
-// #define SYNC_LATENCY_US 50 // Tuning value for latency compensation
 
 struct PhaseParams {
   unsigned long startUs;
@@ -118,12 +105,33 @@ public:
   void setCarrierDutyCycle(int channel, float dutyPercent);
 
   /**
+   * @brief Get the carrier PWM duty cycle for a specific channel.
+   * @param channel Channel index.
+   * @return Carrier duty cycle percentage (0-100), or 0 if carrier PWM
+   *         hasn't been initialized yet / channel is out of range.
+   */
+  float getCarrierDutyCycle(int channel) const;
+
+  /**
    * @brief Gracefully de-energize all coils: ramp every carrier duty down to 0
    *        over rampMs, then stop the periodic phase timer so all output halts.
    *        The controller/timer remain allocated (unlike the destructor).
+   *        BLOCKING (uses delay()); for a non-blocking ramp use rampDownStep().
    * @param rampMs Duration of the linear ramp-down in milliseconds.
    */
   void shutdown(unsigned long rampMs = 2000);
+
+  /**
+   * @brief One monotonic ramp-down step for a non-blocking safety ramp. Reads
+   *        each channel's CURRENT carrier duty and subtracts stepPct (clamped at
+   *        0), then applies it. Because it subtracts from the live value instead
+   *        of interpolating toward a pre-set target, the commanded duty can only
+   *        ever decrease — no configuration can momentarily drive it upward.
+   *        Call once per control tick until it returns true.
+   * @param stepPct Percentage points to drop each call (must be > 0).
+   * @return true once every channel has reached 0.
+   */
+  bool rampDownStep(float stepPct);
 
 private:
   // Minimum on/off period constraint: 0.0 ms

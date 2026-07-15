@@ -43,7 +43,7 @@ PhaseSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
-    seq.addEaseRampTask(1.0f, 100.0f, 10000); // Ramp from 1Hz to 100Hz over 10s
+    seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE); // 1→100 Hz over 10s
     seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
     seq.start();
 }
@@ -80,7 +80,8 @@ void loop() {
 - Use `setDutyCycle(channel, value)` and `setPhase(channel, degrees)` on your PhaseController instance.
 
 ### How to Schedule a Carrier PWM Change
-- Use `addCarrierDutyCycleTask(carrierDutyCycles, numChannels)` in PhaseSequencer, or the corresponding method in your JSON schedule.
+- Use `addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY)`, or an
+  `addCarrierDutyCycleTask` / `addCarrierRampTask` entry in your JSON schedule.
 
 ### How to Load and Run a JSON Schedule
 - Use `JsonPhaseSequencer::loadFromJsonFile("/path/to/file.json")` and call `run()` in your main loop.
@@ -95,7 +96,7 @@ void loop() {
 
 ### PhaseSequencer
 - See header file for full docstrings.
-- Key methods: `addDutyCycleTask`, `addCarrierDutyCycleTask`, `addPhaseTask`, `addWaitTask`, `addLinearRampTask`, `addEaseRampTask`, `addPhaseRampTask`, `compile`, `start`, `run`, `isDone`.
+- Key methods: `addWaitTask`, `addRampTask` (full and per-channel forms), `addSequenceTask` (push a hand-built task, e.g. a full-state `TRAJECTORY_POINT`), `compile`, `start`, `run`, `isDone`. `addRampTask` takes either a scalar (all channels) or a `float[4]` (per-channel; `NAN` = leave unchanged).
 
 ### JsonPhaseSequencer
 - See header file for full docstrings.

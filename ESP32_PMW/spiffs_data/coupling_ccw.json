@@ -1,0 +1,974 @@
+[
+  {
+    "method": "setDirection",
+    "value": 1
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_SOLO_A"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 1,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_SOLO_B"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 2,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_SOLO_C"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 4,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_SOLO_D"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 8,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_AB"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 3,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_AC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 5,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_AD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 9,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_BC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 6,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_BD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 10,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_PAIR_CD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 12,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I25_ALL"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 15,
+    "value": 25.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_SOLO_A"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 1,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_SOLO_B"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 2,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_SOLO_C"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 4,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_SOLO_D"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 8,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_AB"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 3,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_AC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 5,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_AD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 9,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_BC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 6,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_BD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 10,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_PAIR_CD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 12,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I50_ALL"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 15,
+    "value": 50.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_SOLO_A"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 1,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_SOLO_B"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 2,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_SOLO_C"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 4,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_SOLO_D"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 8,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_AB"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 3,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_AC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 5,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_AD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 9,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_BC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 6,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_BD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 10,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_PAIR_CD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 12,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I75_ALL"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 15,
+    "value": 75.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_SOLO_A"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 1,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_SOLO_B"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 2,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_SOLO_C"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 4,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_SOLO_D"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 8,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_AB"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 3,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_AC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 5,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_AD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 9,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_BC"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 6,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_BD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 10,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_PAIR_CD"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 12,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  },
+  {
+    "method": "label",
+    "value": "CCW_I100_ALL"
+  },
+  {
+    "method": "activateChannels",
+    "mask": 15,
+    "value": 100.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 3000
+  },
+  {
+    "method": "activateChannels",
+    "mask": 0,
+    "value": 0.0
+  },
+  {
+    "method": "addWaitTask",
+    "duration_ms": 2000
+  }
+]

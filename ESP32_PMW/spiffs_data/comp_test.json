@@ -1,0 +1,18 @@
+[
+  { "method": "setDirection", "value": 1 },
+  { "method": "label", "value": "COMP_BASELINE_EQUAL_DUTY" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 50.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 50.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 50.0 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 50.0 },
+  { "method": "addWaitTask", "duration_ms": 10000 },
+  { "method": "label", "value": "COMP_GAP" },
+  { "method": "activateChannels", "mask": 0, "value": 0.0 },
+  { "method": "addWaitTask", "duration_ms": 2000 },
+  { "method": "label", "value": "COMP_TRIMMED" },
+  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 41.95 },
+  { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 66.55 },
+  { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 49.1 },
+  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 42.4 },
+  { "method": "addWaitTask", "duration_ms": 10000 }
+]

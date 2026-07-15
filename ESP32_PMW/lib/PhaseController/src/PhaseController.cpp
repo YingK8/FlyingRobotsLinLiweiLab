@@ -347,6 +347,11 @@ float PhaseController::getPhase(int channel) const {
 
 float PhaseController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
+float PhaseController::getCarrierDutyCycle(int channel) const {
+    if (!_carrierDutyCyclePct || channel < 0 || channel >= _numChannels) return 0.0f;
+    return _carrierDutyCyclePct[channel];
+}
+
 void PhaseController::run() {
     static unsigned long lastUpdate = 0;
     if (esp_timer_get_time() - lastUpdate > 100000) { 
@@ -517,4 +522,19 @@ void PhaseController::shutdown(unsigned long rampMs) {
         setCarrierDutyCycle(i, 0.0f);
     if (_periodicTimer)
         esp_timer_stop(_periodicTimer);
+}
+
+bool PhaseController::rampDownStep(float stepPct) {
+    if (!_carrierDutyCyclePct) return true;
+    if (stepPct <= 0.0f) stepPct = 0.1f;   // guard: must make progress
+    bool allZero = true;
+    for (int i = 0; i < _numChannels; i++) {
+        float cur = _carrierDutyCyclePct[i];
+        if (cur <= 0.0f) continue;         // already down
+        float next = cur - stepPct;        // subtract from the LIVE value
+        if (next < 0.0f) next = 0.0f;
+        setCarrierDutyCycle(i, next);      // next < cur always -> monotonic
+        if (next > 0.0f) allZero = false;
+    }
+    return allZero;
 }

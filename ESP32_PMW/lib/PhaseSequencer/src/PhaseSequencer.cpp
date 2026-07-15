@@ -1,6 +1,31 @@
 #include "PhaseSequencer.h"
 #include <math.h>
 
+static float clampDuty(float v) {
+  if (v < 0.0f)
+    return 0.0f;
+  if (v > 100.0f)
+    return 100.0f;
+  return v;
+}
+
+SequenceTask makeTrajectoryTask(float freq, const float *duty,
+                                const float *phase, const float *carrier,
+                                int numChannels, int64_t durationUs) {
+  SequenceTask task = {};
+  task.type = TaskType::TRAJECTORY_POINT;
+  task.durationUs = durationUs;
+  task.startFreq = freq;
+  task.endFreq = freq;
+  for (int i = 0; i < numChannels; i++) {
+    task.dutyCycles[i] = duty[i];
+    task.startPhases[i] = phase[i];
+    task.endPhases[i] = phase[i];
+    task.carrierDuties[i] = carrier[i];
+  }
+  return task;
+}
+
 PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;
@@ -24,102 +49,75 @@ void PhaseSequencer::addSequenceTask(SequenceTask task) {
   _queue.push_back(task);
 }
 
-// Updated builders to zero-initialize the new struct fields automatically
-void PhaseSequencer::addDutyCycleTask(const float *dutyCycles,
-                                      int numChannels) {
-  SequenceTask task = {}; // Zero-initializes all fields
-  task.type = TASK_SET_DUTY_CYCLES;
-  for (int i = 0; i < numChannels; i++) {
-    float value = dutyCycles[i];
-    if (value < 0.0f)
-      value = 0.0f;
-    if (value > 100.0f)
-      value = 100.0f;
-    task.dutyCycles[i] = value;
-  }
-  _queue.push_back(task);
-}
-
-// Add a carrier duty cycle set task for all channels.
-void PhaseSequencer::addCarrierDutyCycleTask(const float *carrierDutyCycles,
-                                             int numChannels) {
-  SequenceTask task = {}; // Zero-initializes all fields
-  task.type = TASK_SET_CARRIER_DUTY_CYCLES;
-  for (int i = 0; i < numChannels; i++) {
-    float value = carrierDutyCycles[i];
-    if (value < 0.0f)
-      value = 0.0f;
-    if (value > 100.0f)
-      value = 100.0f;
-    task.carrierDuties[i] = value;
-  }
-  _queue.push_back(task);
-}
-
-void PhaseSequencer::addPhaseTask(const float *phases, int numChannels) {
-  SequenceTask task = {};
-  task.type = TASK_SET_PHASES;
-  for (int i = 0; i < numChannels; i++) {
-    task.endPhases[i] = phases[i];
-  }
-  _queue.push_back(task);
-}
-
 void PhaseSequencer::addWaitTask(uint32_t durationMs) {
   SequenceTask task = {};
-  task.type = TASK_WAIT;
+  task.type = TaskType::WAIT;
   task.durationUs = (int64_t)durationMs * 1000LL;
   _queue.push_back(task);
 }
 
-void PhaseSequencer::addPWMRampTask(float startHz, float endHz,
-                                 uint32_t durationMs, TaskType type) {
-  if (durationMs == 0)
-    durationMs = 1;
-  SequenceTask task = {};
-  task.type = type;
-  task.cls = RAMP_PWM;
-  task.durationUs = (int64_t)durationMs * 1000LL;
-  task.startFreq = startHz;
-  task.endFreq = endHz;
-  _queue.push_back(task);
+// Global ramp
+void PhaseSequencer::addRampTask(float start, float end, uint32_t durationMs,
+                                 TaskType type, TaskMode ramp_mode) {
+  const float starts[4] = {start, start, start, start};
+  const float ends[4] = {end, end, end, end};
+  addRampTask(starts, ends, 4, durationMs, type, ramp_mode);
 }
 
-void PhaseSequencer::addCarrierRampTask(float startDuty, float endDuty,
-                                        uint32_t durationMs, TaskType type) {
-  if (durationMs == 0)
-    durationMs = 1;
-  if (startDuty < 0.0f)
-    startDuty = 0.0f;
-  if (startDuty > 100.0f)
-    startDuty = 100.0f;
-  if (endDuty < 0.0f)
-    endDuty = 0.0f;
-  if (endDuty > 100.0f)
-    endDuty = 100.0f;
+// Per-channel ramp
+void PhaseSequencer::addRampTask(const float *starts, const float *ends,
+                                 int numChannels, uint32_t durationMs,
+                                 TaskType type, TaskMode ramp_mode) {
   SequenceTask task = {};
   task.type = type;
-  task.cls = RAMP_CARRIER;
+  task.mode = ramp_mode;
   task.durationUs = (int64_t)durationMs * 1000LL;
-  for (int i = 0; i < 4; i++) {
-    task.startCarriers[i] = startDuty;
-    task.endCarriers[i] = endDuty;
+
+  if (type == TaskType::PWM_FREQ) {
+    // Frequency is global; only channel 0 is meaningful.
+    task.startFreq = starts[0];
+    task.endFreq = ends[0];
+    _queue.push_back(task);
+    return;
   }
-  _queue.push_back(task);
-}
 
-void PhaseSequencer::addPhaseRampTask(const float *startPhases,
-                                      const float *endPhases,
-                                      uint32_t durationMs) {
-  if (durationMs == 0)
-    durationMs = 1;
-  SequenceTask task = {};
-  task.type = TASK_RAMP_EASE;
-  task.cls = RAMP_PHASE;
-  task.durationUs = (int64_t)durationMs * 1000LL;
+  float *start_traj = nullptr;
+  float *end_traj = nullptr;
+  bool clamp = false;
+
+  switch (type) {
+  case TaskType::CARRIER_DUTY:
+    start_traj = task.startCarriers;
+    end_traj = task.endCarriers;
+    clamp = true;
+    break;
+  case TaskType::PWM_DUTY:
+    start_traj = task.startDuties;
+    end_traj = task.endDuties;
+    clamp = true;
+    break;
+  case TaskType::PWM_PHASE:
+    start_traj = task.startPhases;
+    end_traj = task.endPhases;
+    break;
+  default:
+    return; // you can only ramp frequency, duty, carrier duty, or phase
+  }
+
   for (int i = 0; i < 4; i++) {
-    task.startPhases[i] = startPhases[i];
-    task.endPhases[i] = endPhases[i];
+    if (i < numChannels && !isnan(starts[i])) {
+      float s = starts[i];
+      float e = ends[i];
+      if (clamp) {
+        s = clampDuty(s);
+        e = clampDuty(e);
+      }
+      start_traj[i] = s;
+      end_traj[i] = e;
+    } else {
+      start_traj[i] = NAN; // if channel is not selected (NAN), skip
+      end_traj[i] = NAN;
+    }
   }
   _queue.push_back(task);
 }
@@ -213,7 +211,7 @@ void PhaseSequencer::run() {
     if (elapsedUs < 0)
       elapsedUs = 0;
 
-    if (task.type == TASK_WAIT) {
+    if (task.type == TaskType::WAIT) {
       if (elapsedUs < task.durationUs)
         return;
       _currentFrameIdx++;
@@ -222,40 +220,7 @@ void PhaseSequencer::run() {
       continue;
     }
 
-    if (task.type == TASK_SET_DUTY_CYCLES) {
-      for (int i = 0; i < 4; i++) {
-        _currentDutyCycles[i] = task.dutyCycles[i];
-      }
-      applyCurrentState();
-      _currentFrameIdx++;
-      _taskStartTimeUs = nowUs;
-      _taskFrameOffsetUs = 0;
-      continue;
-    }
-
-    if (task.type == TASK_SET_CARRIER_DUTY_CYCLES) {
-      for (int i = 0; i < 4; i++) {
-        _currentCarrierDutyCycles[i] = task.carrierDuties[i];
-      }
-      applyCurrentState();
-      _currentFrameIdx++;
-      _taskStartTimeUs = nowUs;
-      _taskFrameOffsetUs = 0;
-      continue;
-    }
-
-    if (task.type == TASK_SET_PHASES) {
-      for (int i = 0; i < 4; i++) {
-        _currentPhaseDegrees[i] = task.endPhases[i];
-      }
-      applyCurrentState();
-      _currentFrameIdx++;
-      _taskStartTimeUs = nowUs;
-      _taskFrameOffsetUs = 0;
-      continue;
-    }
-
-    if (task.type == TASK_TRAJECTORY_POINT) {
+    if (task.type == TaskType::TRAJECTORY_POINT) {
       _currentFreqHz = task.startFreq;
       for (int i = 0; i < 4; i++) {
         _currentDutyCycles[i] = task.dutyCycles[i];
@@ -269,23 +234,34 @@ void PhaseSequencer::run() {
       continue;
     }
 
-    if (task.type == TASK_RAMP_LINEAR || task.type == TASK_RAMP_EASE) {
-      // Interpolate the target quantity (selected by task.cls) at fraction t.
+    if (task.type == TaskType::PWM_FREQ || task.type == TaskType::PWM_DUTY ||
+        task.type == TaskType::PWM_PHASE || task.type == TaskType::CARRIER_DUTY) {
+      // Interpolate the quantity selected by task.type at fraction t. A
+      // zero-duration task is an instant set (handled below via t = 1).
       auto applyRampAt = [&](float t) {
-        switch (task.cls) {
-        case RAMP_CARRIER:
+        switch (task.type) {
+        case TaskType::CARRIER_DUTY:
           for (int i = 0; i < 4; i++)
-            _currentCarrierDutyCycles[i] =
-                task.startCarriers[i] +
-                t * (task.endCarriers[i] - task.startCarriers[i]);
+            if (!isnan(task.startCarriers[i]))
+              _currentCarrierDutyCycles[i] =
+                  task.startCarriers[i] +
+                  t * (task.endCarriers[i] - task.startCarriers[i]);
           break;
-        case RAMP_PHASE:
+        case TaskType::PWM_DUTY:
           for (int i = 0; i < 4; i++)
-            _currentPhaseDegrees[i] =
-                task.startPhases[i] +
-                t * (task.endPhases[i] - task.startPhases[i]);
+            if (!isnan(task.startDuties[i]))
+              _currentDutyCycles[i] =
+                  task.startDuties[i] +
+                  t * (task.endDuties[i] - task.startDuties[i]);
           break;
-        case RAMP_PWM:
+        case TaskType::PWM_PHASE:
+          for (int i = 0; i < 4; i++)
+            if (!isnan(task.startPhases[i]))
+              _currentPhaseDegrees[i] =
+                  task.startPhases[i] +
+                  t * (task.endPhases[i] - task.startPhases[i]);
+          break;
+        case TaskType::PWM_FREQ:
         default:
           _currentFreqHz = task.startFreq + t * (task.endFreq - task.startFreq);
           break;
@@ -304,7 +280,7 @@ void PhaseSequencer::run() {
       int64_t sampleOffsetUs = _taskFrameOffsetUs;
       while (sampleOffsetUs <= elapsedUs && sampleOffsetUs <= task.durationUs) {
         float t = (float)sampleOffsetUs / (float)task.durationUs;
-        if (task.type == TASK_RAMP_EASE)
+        if (task.mode == TaskMode::EASE)
           t = easeInOut(t);
 
         applyRampAt(t);

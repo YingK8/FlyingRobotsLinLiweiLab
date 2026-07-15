@@ -34,7 +34,7 @@ RAMP = os.path.join(HERE, "seperate_ground_10sec_linear_carrier_ramp_15kHz_ABCD.
 
 CH = ["Channel A", "Channel B", "Channel C", "Channel D"]
 COLORS = {"Channel A": "C0", "Channel B": "C1", "Channel C": "C2", "Channel D": "C3"}
-R = {"Channel A": 2532., "Channel B": 2530., "Channel C": 2543., "Channel D": 2540.}
+R = {"Channel A": 2538., "Channel B": 2540., "Channel C": 2550., "Channel D": 2545.}
 OLD = {"Channel A": 14.38, "Channel B": 8.94, "Channel C": 9.89, "Channel D": 9.87}
 W = 41  # envelope window (matches the rest of the pipeline)
 
@@ -106,9 +106,12 @@ def main():
                        edgecolors="red", zorder=3, label="dropped (>3 MAD)")
         xx = np.array([0.0, I.max() * 1.05])
         ax.plot(xx, (c["slope"] * xx + c["intercept"]) * 1000, "k-", lw=1.5,
-                label=f"V = {c['offset_fit']*1000:.0f}mV + I/{c['g']:.2f}")
-        ax.set_title(f"{ch}  g={c['g']:.2f} A/V, K_eff={R[ch]*c['g']:.0f}, "
-                     f"R²={c['r2']:.4f}")
+                label=f"new: V = {c['offset_fit']*1000:.0f}mV + I/{c['g']:.2f}")
+        # old calibration: same offset, old gain -> slope-only comparison
+        ax.plot(xx, (c["offset_fit"] + xx / OLD[ch]) * 1000, "--",
+                color="0.45", lw=1.3, label=f"old: g={OLD[ch]:.2f} A/V")
+        ax.set_title(f"{ch}  g={c['g']:.2f} A/V (old {OLD[ch]:.2f}), "
+                     f"K_eff={R[ch]*c['g']:.0f}, R²={c['r2']:.4f}")
         ax.set_xlabel("Load current  I (A)")
         ax.set_ylabel("CS voltage  V$_{CS}$ (mV)")
         ax.grid(alpha=0.3)

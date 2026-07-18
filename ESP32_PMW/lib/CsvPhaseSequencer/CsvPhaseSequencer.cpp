@@ -27,7 +27,7 @@ SequenceTask makeTaskFromPoint(const TrajectoryPoint &point, int numChannels,
 
 } // namespace
 
-CsvPhaseSequencer::CsvPhaseSequencer(PhaseController *phaseCtrl)
+CsvPhaseSequencer::CsvPhaseSequencer(PwmController *phaseCtrl)
     : PhaseSequencer(phaseCtrl) {}
 
 bool CsvPhaseSequencer::loadFromCSVFile(const char *filename,

@@ -12,7 +12,7 @@
 
 #include <Arduino.h>
 #include "CurrentBalanceController.h"
-#include "PhaseController.h"
+#include "PwmController.h"
 #include "PhaseSequencer.h"
 #include "SerialComm.h"
 #include "constants.h"
@@ -39,7 +39,7 @@ const unsigned long ramp_duration_ms = 20000;
 // ============================== CURRENT SENSE ==============================
 // VNH5019 CS gain, A per V -- per-board calibration.
 const float SENS[NUM_CHANNELS] = {15.26, 15.28, 15.57, 15.34};
-CurrentSense currentSense(SENS); // TAU_FILTER_MS=50 default -- see current_sense.h
+CurrentSense currentSense(ADC_PINS, SENS); // TAU_FILTER_MS=50 default -- see current_sense.h
 
 // ============================== PI CONTROLLER ==============================
 // The balance law now lives in the shared CurrentBalanceController library
@@ -58,7 +58,7 @@ CurrentBalanceController balance;
 const float CEILING_100[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
 float duty_out[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
 
-PhaseController *controller;
+PwmController *controller;
 PhaseSequencer *seq;
 SerialComm comm;
 bool directionIsCcw = true; // default direction, matches this file's history
@@ -94,7 +94,7 @@ void reinitController(bool ccw) {
   directionIsCcw = ccw;
 
   if (controller) delete controller;
-  controller = new PhaseController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+  controller = new PwmController(PWM_PINS, phases, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
   // Explicit non-zero starting frequency -- begin(0.0f) divides by zero
   // inside setGlobalFrequency() and permanently corrupts commutation timing.
   controller->begin(start_freq);

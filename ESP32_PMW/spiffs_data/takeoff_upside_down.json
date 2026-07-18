@@ -1,9 +1,15 @@
-[
-  { "method": "setDirection", "value": 0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 100.0 },
-  { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_EASE_RAMP_1_190HZ" },
-  { "method": "addEaseRampTask", "from": 1.0, "to": 190.0, "duration_ms": 40000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CW",
+  "schedule": [
+    { "method": "setDirection", "value": 0 },
+    { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 100.0 },
+    { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_EASE_RAMP_1_190HZ" },
+    { "method": "addEaseRampTask", "from": 1.0, "to": 190.0, "duration_ms": 40000 }
+  ]
+}

@@ -9,7 +9,7 @@ This guide shows how to:
 
 ## Prerequisites
 
-- PhaseController and PhaseSequencer are already integrated in your project.
+- PwmController and PhaseSequencer are already integrated in your project.
 - SPIFFS is enabled and your CSV file is uploaded to the board filesystem.
 - Your channels are indexed 0..3.
 
@@ -80,7 +80,7 @@ time,channel,duty,carrier_duty,frequency,phase
 
 ```cpp
 #include "CsvPhaseSequencer.h"
-#include "PhaseController.h"
+#include "PwmController.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
 
@@ -90,7 +90,7 @@ const gpio_num_t PWM_PINS[NUM_CHANNELS] = {
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 
-PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY, NUM_CHANNELS);
+PwmController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY, NUM_CHANNELS);
 CsvPhaseSequencer seq(&controller);
 
 void setup() {

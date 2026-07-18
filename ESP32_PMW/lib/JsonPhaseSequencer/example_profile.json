@@ -1,8 +1,14 @@
-[
-  { "method": "setDirection", "value": 0 },
-  { "method": "label", "value": "CW_I100_SOLO_A" },
-  { "method": "activateChannels", "mask": 1, "value": 100.0 },
-  { "method": "addWaitTask", "duration_ms": 3000 },
-  { "method": "activateChannels", "mask": 0, "value": 0.0 },
-  { "method": "addWaitTask", "duration_ms": 2000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CW",
+  "schedule": [
+    { "method": "setDirection", "value": 0 },
+    { "method": "label", "value": "CW_I100_SOLO_A" },
+    { "method": "activateChannels", "mask": 1, "value": 100.0 },
+    { "method": "addWaitTask", "duration_ms": 3000 },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 2000 }
+  ]
+}

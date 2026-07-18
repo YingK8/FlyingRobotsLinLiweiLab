@@ -1,8 +1,14 @@
-[
-  { "method": "addPhaseTask", "channel": 0, "value": 0.0 },
-  { "method": "addPhaseTask", "channel": 1, "value": 180.0 },
-  { "method": "addPhaseTask", "channel": 2, "value": 90.0 },
-  { "method": "addPhaseTask", "channel": 3, "value": 270.0 },
-  { "method": "label", "value": "CARRIER_RAMP_0_100_190HZ" },
-  { "method": "addCarrierRampTask", "from": 0.0, "to": 100.0, "duration_ms": 10000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CCW",
+  "schedule": [
+    { "method": "addPhaseTask", "channel": 0, "value": 0.0 },
+    { "method": "addPhaseTask", "channel": 1, "value": 180.0 },
+    { "method": "addPhaseTask", "channel": 2, "value": 90.0 },
+    { "method": "addPhaseTask", "channel": 3, "value": 270.0 },
+    { "method": "label", "value": "CARRIER_RAMP_0_100_190HZ" },
+    { "method": "addCarrierRampTask", "from": 0.0, "to": 100.0, "duration_ms": 10000 }
+  ]
+}

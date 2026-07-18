@@ -26,7 +26,7 @@ SequenceTask makeTrajectoryTask(float freq, const float *duty,
   return task;
 }
 
-PhaseSequencer::PhaseSequencer(PhaseController *phaseCtrl) {
+PhaseSequencer::PhaseSequencer(PwmController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;
   _taskStartTimeUs = 0;

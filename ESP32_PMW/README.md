@@ -183,9 +183,9 @@ array order (not by a timestamp field):
 
 ```json
 [
-  { "method": "addDutyCycleTask",       "channel": 0, "value": 60.0 },
-  { "method": "addPhaseRampTask",       "channel": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
-  { "method": "addCarrierDutyCycleTask","channel": 0, "value": 75.0 },
+  { "method": "addDutyCycleTask",       "channels": 0, "value": 60.0 },
+  { "method": "addPhaseRampTask",       "channels": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
+  { "method": "addCarrierDutyCycleTask","channels": 0, "value": 75.0 },
   { "method": "addWaitTask",            "duration_ms": 3000 }
 ]
 ```

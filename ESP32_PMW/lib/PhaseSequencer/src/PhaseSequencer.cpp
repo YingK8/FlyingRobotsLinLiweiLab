@@ -58,19 +58,20 @@ void PhaseSequencer::addWaitTask(uint32_t durationMs) {
 
 // Global ramp
 void PhaseSequencer::addRampTask(float start, float end, uint32_t durationMs,
-                                 TaskType type, TaskMode ramp_mode) {
+                                 TaskType type, TaskMode ramp_mode, float shape) {
   const float starts[4] = {start, start, start, start};
   const float ends[4] = {end, end, end, end};
-  addRampTask(starts, ends, 4, durationMs, type, ramp_mode);
+  addRampTask(starts, ends, 4, durationMs, type, ramp_mode, shape);
 }
 
 // Per-channel ramp
 void PhaseSequencer::addRampTask(const float *starts, const float *ends,
                                  int numChannels, uint32_t durationMs,
-                                 TaskType type, TaskMode ramp_mode) {
+                                 TaskType type, TaskMode ramp_mode, float shape) {
   SequenceTask task = {};
   task.type = type;
   task.mode = ramp_mode;
+  task.shape = shape;
   task.durationUs = (int64_t)durationMs * 1000LL;
 
   if (type == TaskType::PWM_FREQ) {
@@ -122,12 +123,33 @@ void PhaseSequencer::addRampTask(const float *starts, const float *ends,
   _queue.push_back(task);
 }
 
-float PhaseSequencer::easeInOut(float t) {
-  if (t < 0.0f)
-    t = 0.0f;
-  if (t > 1.0f)
-    t = 1.0f;
-  return t * t * (3.0f - 2.0f * t);
+float PhaseSequencer::applyCurve(TaskMode mode, float t, float shape) {
+  if (t <= 0.0f)
+    return 0.0f;
+  if (t >= 1.0f)
+    return 1.0f;
+
+  switch (mode) {
+  case TaskMode::EASE: {
+    // Symmetric S-curve; k=1 is linear, larger k sharpens the transition.
+    float k = isnan(shape) ? 2.0f : shape;
+    if (k < 1.0f)
+      k = 1.0f;
+    float a = powf(t, k);
+    float b = powf(1.0f - t, k);
+    return a / (a + b);
+  }
+  case TaskMode::EXPONENTIAL: {
+    // Exponent multiplier: k>0 slow-start/fast-finish, k<0 the reverse.
+    float k = isnan(shape) ? 2.0f : shape;
+    if (fabsf(k) < 1e-6f)
+      return t; // degenerates to linear
+    return (expf(k * t) - 1.0f) / (expf(k) - 1.0f);
+  }
+  case TaskMode::LINEAR:
+  default:
+    return t;
+  }
 }
 
 void PhaseSequencer::resetStreamingState() {
@@ -280,8 +302,7 @@ void PhaseSequencer::run() {
       int64_t sampleOffsetUs = _taskFrameOffsetUs;
       while (sampleOffsetUs <= elapsedUs && sampleOffsetUs <= task.durationUs) {
         float t = (float)sampleOffsetUs / (float)task.durationUs;
-        if (task.mode == TaskMode::EASE)
-          t = easeInOut(t);
+        t = applyCurve(task.mode, t, task.shape);
 
         applyRampAt(t);
         applyCurrentState();

@@ -44,7 +44,7 @@ PhaseSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
-    // Ramp frequency 1Hz -> 100Hz over 10s with an eased curve
+    // Ramp frequency 1Hz -> 100Hz over 10s with an S-curve
     seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
     seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
     seq.start();
@@ -68,9 +68,13 @@ void loop() {
 ### How to Sequence a Ramp (any quantity)
 - Use the single `addRampTask(...)`. Pick the quantity with `TaskType`
   (`PWM_FREQ`, `PWM_DUTY`, `CARRIER_DUTY`, `PWM_PHASE`) and the curve with
-  `TaskMode` (`LINEAR` or `EASE`):
+  `TaskMode` (`LINEAR`, `EASE`, or `EXPONENTIAL`). The optional final `shape`
+  argument tunes EASE (S-curve sharpness k≥1) and EXPONENTIAL (exponent
+  multiplier k); omit it (NAN) for the per-mode default of 2:
   ```cpp
   seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
+  seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE, 4.0f); // sharper S
+  seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EXPONENTIAL, 3.0f); // hard ease-in
   seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
   ```
 - Call `compile(...)` then `start()`.
@@ -141,7 +145,8 @@ bool isDone() const;
   `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
   per-sketch constants like `const int PWM_FREQ = 15000`, so always qualify:
   `TaskType::PWM_FREQ`.
-- `TaskMode`: `LINEAR`, `EASE`, the interpolation curve for a ramp.
+- `TaskMode`: `LINEAR`, `EASE`, `EXPONENTIAL`, the interpolation curve for a
+  ramp (the last two take an optional `shape` parameter).
 
 Note: `PWM_FREQ` is a single global frequency; per-channel ramps ignore all but
 channel 0 for it. Duty/carrier tasks are clamped to 0–100%.

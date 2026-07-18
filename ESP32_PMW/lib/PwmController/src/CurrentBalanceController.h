@@ -40,16 +40,10 @@ struct BalanceConfig {
   // genuinely weaker channel.
   float minRampPctPerMs = 0.05f;
 
-  // Low-signal spin-up guard. At low drive frequency every channel reads ~0 A,
-  // so `magnitude` ~= 0: only the latched anchor would ramp (open-loop) toward
-  // its ceiling while the other three sit parked at their reset() duty -- a big
-  // duty spread with one coil pinned at 100%, the rest low (measured ~50-point
-  // spread over the first ~1/3 of a 1->200Hz ramp). While the anchor's
-  // normalized current is below this threshold, CO-RAMP every active channel
-  // together (not just the anchor) so all four stay exactly equal and climb
-  // toward ceiling in lockstep (balanced AND max current) until the measurement
-  // means something; the PI then takes over from a balanced state. See project
-  // memory balance-loop-low-signal-coramp (verified 2026-07-14).
+  // Below this anchor current, co-ramp all active channels together instead of
+  // only the anchor. At low drive frequency every channel reads ~0 A, so a lone
+  // anchor would run to 100% while the rest sit parked; co-ramping holds them
+  // equal until the current is measurable, then the PI takes over.
   float minSignalA = 0.25f;
 
   // Carrier within this % of the top carrier => a "reference" (held) channel,

@@ -5,7 +5,7 @@ PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
 JsonPhaseSequencer seq(&ctl);
 
 void setup() {
-  driveBoot();
+  driveBoot(); // from drive_common.h
   
   ctl.begin(); // DC (stationary); the schedule sets the running frequency
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);

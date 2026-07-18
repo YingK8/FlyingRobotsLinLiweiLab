@@ -10,8 +10,8 @@ void setup() {
   driveBoot();
   ctl.begin(); // DC (stationary); the schedule sets the running frequency
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
-  ctl.enableCurrentSense(ADC_PINS, SENS, /*tripA*/ 10.0f);
-  ctl.enableCurrentBalance();
+  ctl.enableCurrentSense(ADC_PINS, SENS);
+  // ctl.enableCurrentBalance();
   seq.loadFromJsonFile("/takeoff.json");
   seq.start();
 }

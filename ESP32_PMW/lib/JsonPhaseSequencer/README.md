@@ -51,11 +51,13 @@ are logged as a warning at load time but don't abort the rest of the file.
 | `addPhaseTask` | `channel`, `value` | instantly set the channel's phase (degrees) |
 | `addCarrierDutyCycleTask` | `channel`, `value` | instantly set the channel's carrier duty (0-100%) |
 
-For the three per-channel setters above, `channel` may be a **single int**
-(`"channel": 0`) or an **int array** (`"channel": [0, 3]`). The array form
-applies the same `value` to every listed channel in one queue step, so they
-change *simultaneously* — unlike two consecutive single-channel calls, which
-produce two steps a compile tick apart. Out-of-range indices are dropped.
+For every per-channel method (`addDutyCycleTask`, `addPhaseTask`,
+`addCarrierDutyCycleTask`, and `addPhaseRampTask`), the target may be given as a
+**single int** (`"channel": 0`), an **int array** (`"channel": [0, 3]`), or the
+plural key `"channels": [0, 1, 2, 3]`. Any array form applies the same value to
+every listed channel in one queue step, so they change *simultaneously* — unlike
+consecutive single-channel calls, which produce one step per channel a compile
+tick apart. Out-of-range indices are dropped.
 | `addWaitTask` | `duration_ms` | hold the current state for this long |
 | `addLinearRampTask` | `from`, `to`, `duration_ms` | linear ramp of the **global** drive frequency (Hz) |
 | `addEaseRampTask` | `from`, `to`, `duration_ms` | cubic ease-in-out ramp of the global drive frequency |

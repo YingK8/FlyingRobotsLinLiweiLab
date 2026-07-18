@@ -1,20 +1,14 @@
-"""Compact writer for JsonPhaseSequencer experiment files.
-
-Matches the hand-authored spiffs_data/*.json style: config keys indented,
-scalar arrays inline (e.g. "initial_duty": [50, 50, 50, 50]), and one schedule
-step per line (e.g. { "method": "addWaitTask", "duration_ms": 500 }). Keeping
-each step on its own line is compact yet still diff- and grep-friendly.
-"""
+"""Compact writer for JsonPhaseSequencer files: config keys indented, scalar
+arrays inline, one schedule step per line."""
 import json
 
 
 def _fmt_step(step):
-    # json.dumps already inlines scalar arrays ([0, 3]); just add brace padding.
+    # json.dumps already inlines scalar arrays; just pad the braces.
     return "{ " + json.dumps(step)[1:-1].strip() + " }"
 
 
 def dumps_experiment(obj):
-    """Return the object-form document as a compact, parsable string."""
     lines = ["{"]
     keys = list(obj)
     for i, k in enumerate(keys):
@@ -33,6 +27,5 @@ def dumps_experiment(obj):
 
 
 def write_experiment(obj, path):
-    """Write the object-form document to `path` in the compact style."""
     with open(path, "w") as f:
         f.write(dumps_experiment(obj) + "\n")

@@ -9,20 +9,6 @@
 #include "safety_startup.h"
 #include "telemetry.h"
 
-// Shared DATA + two small utilities for the per-experiment mains. The mains
-// instantiate PwmController + JsonPhaseSequencer directly and call their methods
-// in setup() (begin / initCarrierPWM / enableCurrentSense / enableCurrentBalance
-// / loadFromJsonFile / start) -- there is no construction wrapper to hide that.
-// This header only holds the things genuinely shared across experiments: the
-// const pin-phase/calibration arrays, the boot sequence, and the telemetry line.
-// There is NO arming gate: each main calls seq.start() at the end of setup().
-//
-// The PI current-balance loop is folded into PwmController (opt-in): lift
-// experiments call ctl.enableCurrentBalance(); characterization sweeps
-// (comp/coupling/dc/ceiling) skip it so their commanded carriers pass through.
-
-// Project rotation conventions (coil order A,B,C,D). A JSON setDirection in the
-// schedule overrides these at runtime; they seed the controller at construction.
 static const float PHASES_CW[NUM_CHANNELS] = {270.0f, 90.0f, 180.0f, 0.0f};
 static const float PHASES_CCW[NUM_CHANNELS] = {90.0f, 270.0f, 180.0f, 0.0f};
 static const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
@@ -41,13 +27,8 @@ inline void driveBoot() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
-  // Mount the SPIFFS partition that holds the JSON schedule. Without this,
-  // loadFromJsonFile()'s SPIFFS.open() fails, the queue stays empty, and the
-  // coils just idle at DC -- so a mount failure must be loud, not silent.
-  // formatOnFail=false: never auto-wipe an uploaded schedule on a transient
-  // mount hiccup; a genuinely empty partition just needs `pio run -t uploadfs`.
   if (!SPIFFS.begin(/*formatOnFail*/ false))
-    Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs`");
+    Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");
 }
 
 // Shared 2 Hz telemetry line, same field layout the ai/ log parsers expect:

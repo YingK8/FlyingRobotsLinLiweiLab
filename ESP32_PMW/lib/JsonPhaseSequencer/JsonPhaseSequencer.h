@@ -11,19 +11,11 @@ public:
   JsonPhaseSequencer(PwmController *phaseCtrl);
 
   /**
-   * @brief Load a JSON schedule (SPIFFS) and compile it. The file is an object
-   *        carrying the initial state plus the schedule:
-   *        {
-   *          "resolution_ms": 25, "initial_freq": 190.0,
-   *          "initial_duty": [50,50,50,50], "direction": "CCW",
-   *          "schedule": [ {method, channel, mask, value/from/to, duration_ms}, ... ]
-   *        }
-   *        All config keys are optional (defaults: resolution_ms 25,
-   *        initial_freq 0 (DC/stationary), initial_duty {50,50,50,50},
-   *        direction CCW). A bare
-   *        top-level array is still accepted as the schedule with those
-   *        defaults. No loop/repeat (unrolled by the generator). Full schema:
-   *        README.md.
+   * @brief Load and compile a JSON schedule from SPIFFS. Full schema: README.md.
+   *        Object {resolution_ms, initial_freq, initial_duty, direction,
+   *        schedule:[...]}; a bare array is the schedule with defaults
+   *        (resolution_ms 25, initial_freq 0 = DC, initial_duty {50,50,50,50},
+   *        direction CCW).
    * @return False if the file can't be opened or parsed.
    */
   bool loadFromJsonFile(const char *filename);

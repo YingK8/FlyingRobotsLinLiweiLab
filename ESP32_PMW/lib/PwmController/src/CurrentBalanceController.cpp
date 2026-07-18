@@ -64,15 +64,11 @@ void CurrentBalanceController::step(const float *iMeas, float dtMs,
     isRef[i] = active[i] && (ceiling[i] >= maxCeil - _cfg.refBandPct);
   }
 
-  // Anchor = argmin(nrm) over the REFERENCE channels only. This is the crux of
-  // the tilt: the held channels set the magnitude and stay balanced to their
-  // own weakest (thrust regulation), while the stepped-down followers are NEVER
-  // the anchor, so their (nonlinearly) lower current can't drag the reference
-  // channels down. Each follower is then PI'd to magnitude * ratio[i], i.e. a
-  // clean fraction of the held level. When nothing is stepped down (spin-up,
-  // uniform carrier sweep) every active channel is a reference => this reduces
-  // to the original global argmin / pure equal-balance, unchanged. Latch +
-  // hysteresis (minSwitchMarginA) as before.
+  // Anchor = argmin(nrm) over REFERENCE channels only (latched, hysteresis
+  // minSwitchMarginA). Held channels set the magnitude; stepped-down followers
+  // are never the anchor, so their lower current can't drag the reference
+  // channels down. Uniform carrier => all active are references => plain global
+  // argmin / equal-balance.
   int trueIdxMin = -1;
   for (int i = 0; i < N; i++)
     if (isRef[i] && (trueIdxMin < 0 || nrm[i] < nrm[trueIdxMin]))
@@ -91,16 +87,12 @@ void CurrentBalanceController::step(const float *iMeas, float dtMs,
   const float magnitude = nrm[_idxMin]; // normalized anchor level; each active
                                         // channel targets magnitude * ratio[i]
 
-  // Freeze-at-end-of-spin-up: the first tick the schedule commands a DIFFERENTIAL
-  // (a follower channel with ratio < 1 appears, i.e. a tilt step begins), latch
-  // the balanced level the anchor-ramp discovered during spin-up as a CONSTANT
-  // hold target. Thereafter every channel current-regulates to _holdTarget *
-  // ratio[i] (held channels to _holdTarget itself) and the anchor no longer
-  // ramps. This keeps the held channels' CURRENT flat: as the followers drop and
-  // free shared-supply headroom, the loop pulls the held channels' DUTY down to
-  // hold _holdTarget, instead of leaving them pinned at duty-ceiling while their
-  // current drifts up. A uniform-carrier schedule never produces a follower, so
-  // it never freezes and keeps the original anchor-ramp balance behavior.
+  // Freeze-at-end-of-spin-up: on the first differential (a follower with
+  // ratio < 1, i.e. a tilt step), latch _holdTarget to the spin-up balanced
+  // level and stop the anchor ramp. Every channel then regulates to
+  // _holdTarget*ratio[i], holding the held channels' CURRENT flat (their duty
+  // eases down as dropping followers free shared-supply headroom) instead of
+  // drifting up. Uniform carrier never has a follower, so it never freezes.
   bool hasFollower = false;
   for (int i = 0; i < N; i++)
     if (active[i] && !isRef[i]) {
@@ -113,14 +105,8 @@ void CurrentBalanceController::step(const float *iMeas, float dtMs,
   }
   const float mag = _holdFrozen ? _holdTarget : magnitude;
 
-  // Low-signal spin-up guard: while the anchor's normalized current is below
-  // minSignalA (and not hold-frozen), co-ramp EVERY active channel through the
-  // anchor branch together instead of just _idxMin. At low drive frequency all
-  // channels read ~0 A, so the PI targets (magnitude*ratio ~= 0) are meaningless
-  // and would leave three channels parked while the lone anchor runs to 100%.
-  // Co-ramping keeps all four equal and climbing to ceiling in lockstep until
-  // the current is measurable, then the PI takes over from a balanced state.
-  // See memory balance-loop-low-signal-coramp.
+  // All active channels ramp together while the signal is too low for the PI
+  // targets to mean anything (see BalanceConfig::minSignalA).
   const bool coRamp = !_holdFrozen && (magnitude < _cfg.minSignalA);
 
   for (int i = 0; i < N; i++) {
@@ -143,12 +129,9 @@ void CurrentBalanceController::step(const float *iMeas, float dtMs,
       _integrator[i] -= _cfg.overcurrentBackoffPct;
       duty = clampf(_integrator[i], lo, hi);
     } else if (!_holdFrozen && (coRamp || i == _idxMin)) {
-      // Anchor (spin-up only): ramp the bottleneck channel toward its ceiling to
-      // discover the balanced level. Ramped, not snapped, so the argmin above
-      // can reassign mid-ramp. Once the hold target is frozen this branch is
-      // disabled and the former anchor current-regulates like everyone else.
-      // While coRamp is set (low-signal spin-up), EVERY active channel enters
-      // here so they ramp identically -- no runaway anchor, no parked channels.
+      // Ramp the bottleneck channel toward its ceiling to discover the balanced
+      // level. Ramped, not snapped, so the argmin above can reassign mid-ramp.
+      // Under coRamp every active channel enters here and ramps identically.
       duty = clampf(_dutyOut[i] + _cfg.minRampPctPerMs * dtMs, lo, hi);
       _integrator[i] = duty; // continuity for when it later falls back to PI
       _lastErr[i] = 0.0f;    // keep the derivative fresh for the handoff

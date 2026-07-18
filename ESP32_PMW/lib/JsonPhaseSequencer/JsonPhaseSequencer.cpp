@@ -46,9 +46,8 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
     return false;
   }
 
-  // Initial state comes from the file. Project defaults apply when a key (or the
-  // whole config header) is absent; a bare top-level array is the schedule with
-  // all defaults. See loadFromJsonFile() doc / README.md for the schema.
+  // Initial state from the file; project defaults fill any absent key. A bare
+  // top-level array is the schedule with all defaults.
   uint32_t resolutionMs = 25;
   float initialFreq = 0.0f; // DC / stationary at rest; the schedule ramps it up
   float initialDuty[4] = {50, 50, 50, 50};
@@ -114,14 +113,14 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
     bool pushedTask = false;
     auto hasValidChannel = [&]() { return channel >= 0 && channel < 4; };
 
-    // "channel" may be a single int OR an int array. The array form updates
-    // every listed channel and pushes ONE trajectory snapshot, so they change
-    // simultaneously (vs. one snapshot per single-channel call). In-range
-    // entries only; empty => the per-channel methods below are skipped.
+    // Target channel(s): "channels":[...] or "channel": int|[...]. An array
+    // updates every listed channel in one snapshot (simultaneous). In-range only.
     int channels[4];
     int nChannels = 0;
-    if (obj["channel"].is<JsonArray>()) {
-      for (auto c : obj["channel"].as<JsonArray>()) {
+    if (obj["channels"].is<JsonArray>() || obj["channel"].is<JsonArray>()) {
+      auto arr2 = obj["channels"].is<JsonArray>() ? obj["channels"].as<JsonArray>()
+                                                  : obj["channel"].as<JsonArray>();
+      for (auto c : arr2) {
         int ci = c.as<int>();
         if (ci >= 0 && ci < 4 && nChannels < 4)
           channels[nChannels++] = ci;
@@ -168,15 +167,18 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
-    } else if (method == "addPhaseRampTask" && hasValidChannel()) {
-      // Ramp only the named channel; NAN leaves the others alone.
+    } else if (method == "addPhaseRampTask" && nChannels > 0) {
+      // Ramp only the named channel(s); NAN leaves the others alone. Accepts the
+      // same channel/channels forms as the instant per-channel setters.
       float starts[4] = {NAN, NAN, NAN, NAN};
       float ends[4] = {NAN, NAN, NAN, NAN};
-      starts[channel] = from;
-      ends[channel] = to;
+      for (int i = 0; i < nChannels; i++) {
+        starts[channels[i]] = from;
+        ends[channels[i]] = to;
+        curPhase[channels[i]] = to;
+      }
       addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
                   TaskMode::EASE);
-      curPhase[channel] = to;
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierDutyCycleTask" && nChannels > 0) {

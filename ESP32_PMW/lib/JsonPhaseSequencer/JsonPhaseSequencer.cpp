@@ -103,30 +103,29 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
   for (JsonObject obj : arr) {
     const char *methodCStr = obj["method"] | "";
     String method(methodCStr);
-    int channel = obj["channel"] | -1;
     int mask = obj["mask"] | 0;
     float value = obj["value"] | 0.0f;
     float from = obj["from"] | 0.0f;
     float to = obj["to"] | 0.0f;
+    float shape = obj["shape"] | NAN; // curve param for ease/exponential ramps
     uint32_t durationMs = obj["duration_ms"] | 0;
     bool called = false;
     bool pushedTask = false;
-    auto hasValidChannel = [&]() { return channel >= 0 && channel < 4; };
 
-    // Target channel(s): "channels":[...] or "channel": int|[...]. An array
-    // updates every listed channel in one snapshot (simultaneous). In-range only.
+    // Target channel(s): "channels" is an int (one) or an array (many, applied in
+    // one simultaneous snapshot). In-range (0-3) only; other entries dropped.
     int channels[4];
     int nChannels = 0;
-    if (obj["channels"].is<JsonArray>() || obj["channel"].is<JsonArray>()) {
-      auto arr2 = obj["channels"].is<JsonArray>() ? obj["channels"].as<JsonArray>()
-                                                  : obj["channel"].as<JsonArray>();
-      for (auto c : arr2) {
+    if (obj["channels"].is<JsonArray>()) {
+      for (auto c : obj["channels"].as<JsonArray>()) {
         int ci = c.as<int>();
         if (ci >= 0 && ci < 4 && nChannels < 4)
           channels[nChannels++] = ci;
       }
-    } else if (hasValidChannel()) {
-      channels[nChannels++] = channel;
+    } else if (obj["channels"].is<int>()) {
+      int ci = obj["channels"].as<int>();
+      if (ci >= 0 && ci < 4)
+        channels[nChannels++] = ci;
     }
 
     if (method == "addDutyCycleTask" && nChannels > 0) {
@@ -151,7 +150,14 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
       called = true;
       pushedTask = true;
     } else if (method == "addEaseRampTask") {
-      addRampTask(from, to, durationMs, TaskType::PWM_FREQ, TaskMode::EASE);
+      addRampTask(from, to, durationMs, TaskType::PWM_FREQ, TaskMode::EASE,
+                  shape);
+      curFreq = to;
+      called = true;
+      pushedTask = true;
+    } else if (method == "addExponentialRampTask") {
+      addRampTask(from, to, durationMs, TaskType::PWM_FREQ,
+                  TaskMode::EXPONENTIAL, shape);
       curFreq = to;
       called = true;
       pushedTask = true;
@@ -162,14 +168,22 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierEaseRampTask") {
-      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY, TaskMode::EASE);
+      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
+                  TaskMode::EASE, shape);
+      for (int i = 0; i < 4; i++)
+        curCarrier[i] = to;
+      called = true;
+      pushedTask = true;
+    } else if (method == "addCarrierExponentialRampTask") {
+      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
+                  TaskMode::EXPONENTIAL, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
     } else if (method == "addPhaseRampTask" && nChannels > 0) {
-      // Ramp only the named channel(s); NAN leaves the others alone. Accepts the
-      // same channel/channels forms as the instant per-channel setters.
+      // Ramp only the named channel(s); NAN leaves the others alone. Same
+      // "channels" int-or-array form as the instant per-channel setters.
       float starts[4] = {NAN, NAN, NAN, NAN};
       float ends[4] = {NAN, NAN, NAN, NAN};
       for (int i = 0; i < nChannels; i++) {
@@ -178,7 +192,7 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
         curPhase[channels[i]] = to;
       }
       addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
-                  TaskMode::EASE);
+                  TaskMode::EASE, shape);
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierDutyCycleTask" && nChannels > 0) {

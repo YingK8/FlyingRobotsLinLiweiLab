@@ -4,20 +4,23 @@
   "initial_duty": [50, 50, 50, 50],
   "direction": "CCW",
   "schedule": [
-    { "method": "addCarrierDutyCycleTask", "channel": [0, 1, 2, 3], "value": 100.0 },
-    { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_EASE_RAMP_1_190HZ" },
-    { "method": "addEaseRampTask", "from": 1.0, "to": 70.0, "duration_ms": 25000},
-    { "method": "addEaseRampTask", "from": 70.0, "to": 120.0, "duration_ms": 500},
-    { "method": "addEaseRampTask", "from": 120.0, "to": 100.0, "duration_ms": 1000},
-    { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_HOLD_190HZ" },
+    { "method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3], "value": 100.0 },
 
-    // { "method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3], "value": 100.0 },
-    // { "method": "addExponentialRampTask", "from": 1.0, "to": 200.0, "duration_ms": 35000},
+    // { "method": "addEaseRampTask", "from": 1.0, "to": 70.0, "duration_ms": 25000},
+    // { "method": "addEaseRampTask", "from": 70.0, "to": 120.0, "duration_ms": 500},
+    // { "method": "addEaseRampTask", "from": 120.0, "to": 100.0, "duration_ms": 1000},
+
+    { "method": "addEaseRampTask", "from": 1.0, "to": 200.0, "duration_ms": 25000},
+    { "method": "addEaseRampTask", "from": 200.0, "to": 210.0, "duration_ms": 500},
+    { "method": "addEaseRampTask", "from": 210.0, "to": 190.0, "duration_ms": 1000},
+
+    // { "method": "addExponentialRampTask", "from": 1.0, "to": 200.0, "duration_ms": 20000},
     // { "method": "addExponentialRampTask", "from": 200.0, "to": 130.0, "duration_ms": 3000, "shape": -2.0},
-    // { "method": "addWaitTask", "duration_ms": 5000 },
 
-    { "method": "activateChannels", "mask": 15, "value": 0.0 },
-    { "method": "addWaitTask", "duration_ms": 500 }
+    { "method": "addWaitTask", "duration_ms": 5000 },
+
+    { "method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3], "value": 100.0 },
+    { "method": "addWaitTask", "duration_ms": 600000 }
   ]
 }
 
@@ -27,11 +30,9 @@
 
 
 //Lin: { "method": "addCarrierDutyCycleTask", "channel": [0, 1, 2, 3], "value": 100.0 },
-// { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_EASE_RAMP_1_190HZ" },
 // { "method": "addEaseRampTask", "from": 1.0, "to": 70.0, "duration_ms": 25000},
 // { "method": "addEaseRampTask", "from": 70.0, "to": 120.0, "duration_ms": 500},
 // { "method": "addEaseRampTask", "from": 120.0, "to": 100.0, "duration_ms": 1000},
-// { "method": "label", "value": "TAKEOFF_UPSIDE_DOWN_HOLD_190HZ" },
 // { "method": "activateChannels", "mask": 15, "value": 0.0 },
 // { "method": "addWaitTask", "duration_ms": 500 }
 

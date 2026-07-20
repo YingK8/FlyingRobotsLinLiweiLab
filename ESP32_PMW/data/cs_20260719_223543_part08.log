@@ -1,0 +1,101 @@
+   0.01s  ets Jul 29 2019 12:21:46
+   0.01s  
+   0.01s  rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+   0.01s  configsip: 0, SPIWP:0xee
+   0.03s  clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+   0.03s  mode:DIO, clock div:2
+   0.03s  load:0x3fff0030,len:1184
+   0.04s  load:0x40078000,len:13232
+   0.04s  load:0x40080400,len:3028
+   0.04s  entry 0x400805e4
+   1.36s  [step 1]  freq=1.0
+   1.36s  t=1160 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=50.3 B=50.3 C=50.3 D=50.3 | spread=0.000 bal=1 trip=0
+   1.87s  t=1660 freq=1.0 | I[A]: A=0.01 B=0.01 C=0.00 D=0.00 | duty[%]: A=75.4 B=75.4 C=75.4 D=75.4 | spread=0.005 bal=1 trip=0
+   2.35s  t=2161 freq=1.1 | I[A]: A=0.01 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.006 bal=1 trip=0
+   2.86s  t=2661 freq=1.3 | I[A]: A=0.00 B=0.00 C=0.11 D=0.10 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.110 bal=1 trip=0
+   3.36s  t=3161 freq=1.5 | I[A]: A=0.24 B=0.19 C=0.01 D=0.01 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.238 bal=1 trip=0
+   3.86s  t=3661 freq=1.8 | I[A]: A=0.01 B=0.01 C=0.11 D=0.11 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.101 bal=1 trip=0
+   4.36s  t=4162 freq=2.3 | I[A]: A=0.01 B=0.01 C=0.10 D=0.08 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.086 bal=1 trip=0
+   4.86s  t=4662 freq=2.8 | I[A]: A=0.11 B=0.10 C=0.02 D=0.02 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.095 bal=1 trip=0
+   5.36s  t=5162 freq=3.4 | I[A]: A=0.10 B=0.11 C=0.02 D=0.03 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.084 bal=1 trip=0
+   5.86s  t=5662 freq=4.2 | I[A]: A=0.25 B=0.22 C=0.08 D=0.07 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.181 bal=1 trip=0
+   6.37s  t=6162 freq=5.1 | I[A]: A=0.07 B=0.08 C=0.23 D=0.24 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.172 bal=1 trip=0
+   6.86s  t=6662 freq=6.1 | I[A]: A=0.22 B=0.19 C=0.08 D=0.10 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.139 bal=1 trip=0
+   7.36s  t=7162 freq=7.3 | I[A]: A=0.12 B=0.12 C=0.22 D=0.22 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.107 bal=1 trip=0
+   7.86s  t=7662 freq=8.6 | I[A]: A=0.16 B=0.14 C=0.29 D=0.23 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.146 bal=1 trip=0
+   8.36s  t=8162 freq=10.1 | I[A]: A=0.15 B=0.14 C=0.26 D=0.26 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.120 bal=1 trip=0
+   8.86s  t=8662 freq=11.7 | I[A]: A=0.18 B=0.22 C=0.35 D=0.34 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.163 bal=1 trip=0
+   9.36s  t=9162 freq=13.5 | I[A]: A=0.33 B=0.36 C=0.26 D=0.22 | duty[%]: A=100.0 B=99.9 C=100.0 D=100.0 | spread=0.133 bal=1 trip=0
+   9.86s  t=9662 freq=15.5 | I[A]: A=0.31 B=0.27 C=0.43 D=0.38 | duty[%]: A=99.1 B=98.4 C=99.2 D=100.0 | spread=0.161 bal=1 trip=0
+  10.36s  t=10162 freq=17.6 | I[A]: A=0.52 B=0.52 C=0.39 D=0.33 | duty[%]: A=98.4 B=97.8 C=98.3 D=100.0 | spread=0.192 bal=1 trip=0
+  10.86s  t=10662 freq=19.8 | I[A]: A=0.42 B=0.38 C=0.55 D=0.51 | duty[%]: A=99.1 B=99.0 C=97.9 D=100.0 | spread=0.170 bal=1 trip=0
+  11.36s  t=11163 freq=22.2 | I[A]: A=0.42 B=0.46 C=0.56 D=0.49 | duty[%]: A=98.8 B=99.1 C=97.2 D=100.0 | spread=0.142 bal=1 trip=0
+  11.86s  t=11664 freq=24.7 | I[A]: A=0.63 B=0.66 C=0.55 D=0.58 | duty[%]: A=98.4 B=98.0 C=94.6 D=100.0 | spread=0.115 bal=1 trip=0
+  12.36s  t=12165 freq=27.3 | I[A]: A=0.67 B=0.75 C=0.80 D=0.71 | duty[%]: A=97.4 B=96.6 C=93.4 D=100.0 | spread=0.131 bal=1 trip=0
+  12.87s  t=12665 freq=30.0 | I[A]: A=0.86 B=0.88 C=0.65 D=0.74 | duty[%]: A=97.3 B=96.5 C=94.7 D=100.0 | spread=0.223 bal=1 trip=0
+  13.36s  t=13165 freq=32.7 | I[A]: A=0.83 B=0.83 C=0.87 D=1.02 | duty[%]: A=99.5 B=97.4 C=100.0 D=97.7 | spread=0.193 bal=1 trip=0
+  13.87s  t=13665 freq=35.5 | I[A]: A=0.89 B=0.86 C=0.97 D=1.09 | duty[%]: A=98.5 B=97.0 C=100.0 D=95.6 | spread=0.232 bal=1 trip=0
+  14.36s  t=14165 freq=38.3 | I[A]: A=1.03 B=1.09 C=0.85 D=0.81 | duty[%]: A=97.5 B=95.5 C=100.0 D=94.5 | spread=0.279 bal=1 trip=0
+  14.86s  t=14665 freq=41.0 | I[A]: A=1.11 B=1.09 C=1.05 D=0.93 | duty[%]: A=96.8 B=95.7 C=100.0 D=95.5 | spread=0.188 bal=1 trip=0
+  15.36s  t=15166 freq=43.7 | I[A]: A=1.19 B=1.17 C=1.14 D=0.97 | duty[%]: A=97.6 B=100.0 C=98.8 D=97.9 | spread=0.226 bal=1 trip=0
+  15.86s  t=15666 freq=46.3 | I[A]: A=1.17 B=1.27 C=1.19 D=0.94 | duty[%]: A=94.5 B=96.6 C=92.2 D=100.0 | spread=0.327 bal=1 trip=0
+  16.37s  t=16166 freq=48.8 | I[A]: A=1.13 B=1.12 C=1.33 D=1.13 | duty[%]: A=93.7 B=95.8 C=86.9 D=100.0 | spread=0.209 bal=1 trip=0
+  16.87s  t=16666 freq=51.2 | I[A]: A=1.14 B=1.18 C=1.26 D=1.13 | duty[%]: A=91.2 B=92.6 C=82.5 D=100.0 | spread=0.133 bal=1 trip=0
+  17.36s  t=17166 freq=53.4 | I[A]: A=1.22 B=1.25 C=1.16 D=1.06 | duty[%]: A=88.9 B=89.8 C=79.9 D=100.0 | spread=0.188 bal=1 trip=0
+  17.86s  t=17666 freq=55.5 | I[A]: A=1.24 B=1.19 C=1.31 D=1.20 | duty[%]: A=87.4 B=89.0 C=77.5 D=100.0 | spread=0.120 bal=1 trip=0
+  18.36s  t=18166 freq=57.5 | I[A]: A=1.31 B=1.29 C=1.21 D=1.18 | duty[%]: A=85.7 B=87.0 C=76.3 D=100.0 | spread=0.131 bal=1 trip=0
+  18.87s  t=18667 freq=59.3 | I[A]: A=1.29 B=1.28 C=1.27 D=1.27 | duty[%]: A=85.2 B=86.2 C=75.9 D=100.0 | spread=0.023 bal=1 trip=0
+  19.36s  t=19167 freq=60.9 | I[A]: A=1.26 B=1.23 C=1.27 D=1.26 | duty[%]: A=84.2 B=85.2 C=75.4 D=100.0 | spread=0.043 bal=1 trip=0
+  19.87s  t=19667 freq=62.4 | I[A]: A=1.25 B=1.42 C=1.27 D=1.13 | duty[%]: A=82.3 B=82.7 C=74.7 D=100.0 | spread=0.295 bal=1 trip=0
+  20.37s  t=20167 freq=63.7 | I[A]: A=1.39 B=1.42 C=1.19 D=1.20 | duty[%]: A=81.4 B=86.8 C=73.8 D=100.0 | spread=0.228 bal=1 trip=0
+  20.87s  t=20667 freq=64.9 | I[A]: A=1.26 B=1.24 C=1.32 D=1.34 | duty[%]: A=80.3 B=85.0 C=74.1 D=100.0 | spread=0.095 bal=1 trip=0
+  21.37s  t=21167 freq=65.9 | I[A]: A=1.40 B=1.42 C=1.26 D=1.27 | duty[%]: A=78.8 B=83.0 C=74.1 D=100.0 | spread=0.168 bal=1 trip=0
+  21.87s  t=21668 freq=66.8 | I[A]: A=1.32 B=1.31 C=1.37 D=1.37 | duty[%]: A=78.4 B=82.1 C=74.2 D=100.0 | spread=0.067 bal=1 trip=0
+  22.36s  t=22169 freq=67.6 | I[A]: A=1.34 B=1.40 C=1.32 D=1.33 | duty[%]: A=77.5 B=80.4 C=74.3 D=100.0 | spread=0.081 bal=1 trip=0
+  22.86s  t=22670 freq=68.2 | I[A]: A=1.36 B=1.44 C=1.33 D=1.27 | duty[%]: A=77.1 B=79.2 C=74.3 D=100.0 | spread=0.170 bal=1 trip=0
+  23.36s  t=23171 freq=68.7 | I[A]: A=1.37 B=1.32 C=1.42 D=1.40 | duty[%]: A=77.0 B=79.5 C=74.8 D=100.0 | spread=0.094 bal=1 trip=0
+  23.87s  t=23672 freq=69.2 | I[A]: A=1.34 B=1.35 C=1.36 D=1.40 | duty[%]: A=76.6 B=78.5 C=75.0 D=100.0 | spread=0.060 bal=1 trip=0
+  24.37s  t=24172 freq=69.5 | I[A]: A=1.46 B=1.45 C=1.33 D=1.30 | duty[%]: A=75.4 B=77.3 C=74.9 D=100.0 | spread=0.162 bal=1 trip=0
+  24.87s  t=24672 freq=69.7 | I[A]: A=1.34 B=1.37 C=1.41 D=1.40 | duty[%]: A=75.7 B=77.2 C=74.9 D=100.0 | spread=0.075 bal=1 trip=0
+  25.37s  t=25173 freq=69.9 | I[A]: A=1.36 B=1.31 C=1.45 D=1.44 | duty[%]: A=75.3 B=76.5 C=75.0 D=100.0 | spread=0.137 bal=1 trip=0
+  25.87s  t=25673 freq=70.0 | I[A]: A=1.33 B=1.34 C=1.44 D=1.42 | duty[%]: A=75.2 B=75.8 C=75.1 D=100.0 | spread=0.116 bal=1 trip=0
+  26.35s  [step 2]  freq=70.0
+  26.37s  t=26174 freq=70.0 | I[A]: A=1.41 B=1.40 C=1.40 D=1.44 | duty[%]: A=74.7 B=75.3 C=75.2 D=100.0 | spread=0.040 bal=1 trip=0
+  26.85s  [step 3]  freq=120.0
+  26.87s  t=26674 freq=120.0 | I[A]: A=2.90 B=2.89 C=2.71 D=3.98 | duty[%]: A=77.3 B=73.5 C=83.0 D=87.5 | spread=1.269 bal=1 trip=0
+  27.37s  t=27175 freq=110.0 | I[A]: A=2.81 B=3.01 C=3.00 D=2.90 | duty[%]: A=81.0 B=83.6 C=94.9 D=75.9 | spread=0.197 bal=1 trip=0
+  27.85s  [step 4]  freq=100.0
+  27.87s  t=27675 freq=100.0 | I[A]: A=2.50 B=2.40 C=2.42 D=2.48 | duty[%]: A=87.6 B=85.0 C=93.1 D=92.9 | spread=0.100 bal=1 trip=0
+  28.37s  t=28175 freq=100.0 | I[A]: A=2.53 B=2.69 C=2.47 D=2.50 | duty[%]: A=89.1 B=97.1 C=100.0 D=92.0 | spread=0.218 bal=1 trip=0
+  28.88s  t=28675 freq=100.0 | I[A]: A=2.56 B=2.68 C=2.50 D=2.51 | duty[%]: A=90.8 B=94.9 C=100.0 D=91.7 | spread=0.179 bal=1 trip=0
+  29.37s  t=29175 freq=100.0 | I[A]: A=2.70 B=2.68 C=2.47 D=2.50 | duty[%]: A=100.0 B=95.2 C=100.0 D=92.3 | spread=0.230 bal=1 trip=0
+  29.87s  t=29676 freq=100.0 | I[A]: A=2.68 B=2.67 C=2.45 D=2.55 | duty[%]: A=100.0 B=95.4 C=100.0 D=93.2 | spread=0.225 bal=1 trip=0
+  30.38s  t=30176 freq=100.0 | I[A]: A=2.62 B=2.61 C=2.58 D=2.79 | duty[%]: A=100.0 B=97.1 C=100.0 D=100.0 | spread=0.212 bal=1 trip=0
+  30.88s  t=30677 freq=100.0 | I[A]: A=2.58 B=2.59 C=2.61 D=2.76 | duty[%]: A=100.0 B=99.0 C=100.0 D=100.0 | spread=0.184 bal=1 trip=0
+  31.38s  t=31177 freq=100.0 | I[A]: A=2.54 B=2.61 C=2.63 D=2.79 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.256 bal=1 trip=0
+  31.88s  t=31677 freq=100.0 | I[A]: A=2.63 B=2.64 C=2.60 D=2.73 | duty[%]: A=98.6 B=96.9 C=100.0 D=95.8 | spread=0.139 bal=1 trip=0
+  32.38s  t=32177 freq=100.0 | I[A]: A=2.51 B=2.30 C=2.53 D=2.40 | duty[%]: A=97.2 B=95.8 C=100.0 D=94.3 | spread=0.231 bal=1 trip=0
+  32.85s  [step 6]  freq=100.0
+  32.87s  t=32677 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.001 bal=1 trip=0
+  33.37s  t=33177 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  33.87s  t=33677 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  34.37s  t=34178 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  34.87s  t=34679 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  35.38s  t=35179 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  35.88s  t=35679 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  36.37s  t=36179 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  36.88s  t=36679 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  37.38s  t=37180 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  37.87s  t=37680 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  38.38s  t=38180 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  38.87s  t=38680 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  39.38s  t=39180 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  39.88s  t=39680 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  40.38s  t=40180 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  40.88s  t=40680 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  41.37s  t=41180 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  41.88s  t=41681 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  42.38s  t=42182 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  42.88s  t=42683 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  43.39s  t=43183 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0
+  43.89s  t=43683 freq=100.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=1 trip=0

@@ -6,6 +6,7 @@
 #include "JsonPhaseSequencer.h"
 #include "PwmController.h"
 #include "constants.h"
+#include "reset_button.h"
 #include "safety_startup.h"
 #include "telemetry.h"
 
@@ -24,6 +25,7 @@ inline void driveBoot() {
   Serial.begin(115200);
   delay(1000);
   forceAllGatesLow();
+  initResetButton();
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
@@ -34,6 +36,8 @@ inline void driveBoot() {
 // Shared 2 Hz telemetry line, same field layout the ai/ log parsers expect:
 // "t=.. freq=.. | I[A]: .. | duty[%]: .. | spread=.. bal=.. trip=..".
 inline void driveTelemetry(PwmController &c) {
+  checkResetButton(); // poll every loop (before the 500 ms print throttle below)
+
   static unsigned long last = 0;
   unsigned long now = millis();
   if (now - last < 500)

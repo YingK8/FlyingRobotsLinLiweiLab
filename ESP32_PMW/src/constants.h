@@ -10,6 +10,11 @@ const int PWM_FREQ = 20000;       // carrier (Hz)
 const int LED_PIN = 2;
 const int NUM_CHANNELS = 4;
 
+// Momentary reset button: wired to drive this pin to 3V3 when pressed (active
+// HIGH). GPIO14 has an internal pulldown, so it idles LOW with no external
+// resistor. See reset_button.h.
+const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_14;
+
 const gpio_num_t A_PWM_PIN = GPIO_NUM_32;
 const gpio_num_t B_PWM_PIN = GPIO_NUM_25;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_18;

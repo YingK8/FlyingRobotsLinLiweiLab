@@ -18,7 +18,7 @@ static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 // VNH5019 CS gain, A per V -- per-board calibration (shared across experiments).
 static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
 
-// Boot: serial + force every gate LOW before any driver exists, LED off. Call
+// Boot: serial + force every gate LOW before any driver exists, LED on. Call
 // first in setup(), before ctl.begin(), so the coils can't glitch on and the
 // ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
 inline void driveBoot() {
@@ -27,7 +27,7 @@ inline void driveBoot() {
   forceAllGatesLow();
   initResetButton();
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  digitalWrite(LED_PIN, HIGH); // active indicator; goes LOW when blocked
 
   if (!SPIFFS.begin(/*formatOnFail*/ false))
     Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");

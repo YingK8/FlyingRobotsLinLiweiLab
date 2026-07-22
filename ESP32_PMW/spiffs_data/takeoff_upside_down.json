@@ -6,7 +6,7 @@
   "schedule": [
     { "method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3], "value": 100.0 },
     { "method": "addExponentialRampTask", "from": 1.0, "to": 200.0, "duration_ms": 35000},
-    { "method": "addExponentialRampTask", "from": 200.0, "to": 130.0, "duration_ms": 3000},
+    { "method": "addExponentialRampTask", "from": 200.0, "to": 130.0, "duration_ms": 3000, "shape": -2},
     { "method": "addWaitTask", "duration_ms": 5000 },
     { "method": "activateChannels", "mask": 15, "value": 0.0 },
     { "method": "addWaitTask", "duration_ms": 500 }

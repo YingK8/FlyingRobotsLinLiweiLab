@@ -4,7 +4,6 @@
   "initial_duty": [50, 50, 50, 50],
   "direction": "CCW",
   "schedule": [
-    { "method": "setDirection", "value": 1 },
     { "method": "label", "value": "CEILING_100PCT_SWEEP" },
     { "method": "activateChannels", "mask": 15, "value": 100.0 },
     { "method": "addEaseRampTask", "from": 1.0, "to": 210.0, "duration_ms": 30000 },

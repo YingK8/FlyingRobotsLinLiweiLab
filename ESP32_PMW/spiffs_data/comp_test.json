@@ -4,7 +4,6 @@
   "initial_duty": [50, 50, 50, 50],
   "direction": "CCW",
   "schedule": [
-    { "method": "setDirection", "value": 1 },
     { "method": "label", "value": "COMP_BASELINE_EQUAL_DUTY" },
     { "method": "addCarrierDutyCycleTask", "channels": 0, "value": 50.0 },
     { "method": "addCarrierDutyCycleTask", "channels": 1, "value": 50.0 },

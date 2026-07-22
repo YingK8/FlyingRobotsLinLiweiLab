@@ -2,9 +2,8 @@
   "resolution_ms": 25,
   "initial_freq": 0.0,
   "initial_duty": [50, 50, 50, 50],
-  "direction": "CCW",
+  "direction": "CW",
   "schedule": [
-    { "method": "setDirection", "value": 0 },
     { "method": "label", "value": "TILT_SPINUP_1_220HZ_100PCT" },
     { "method": "activateChannels", "mask": 15, "value": 100.0 },
     { "method": "addEaseRampTask", "from": 1.0, "to": 150.0, "duration_ms": 30000 },

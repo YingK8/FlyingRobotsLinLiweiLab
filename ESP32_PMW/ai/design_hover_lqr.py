@@ -17,18 +17,22 @@ u_trim = (mag=0, f_field=f_hover); u_ff is the analytic reference-acceleration
 feedforward from ai/reference_profiles.py. With the augmented double
 integrators u_ss = 0 for any constant setpoint, so no Nbar matrix is needed.
 
-Weights: Bryson's rule -- tolerate 10 mm error on both axes, 5 cm/s lateral
-/ 10 cm/s vertical velocity, integrator states scaled to position tolerance
-x 1 s; R = diag(1/0.5^2, 1/5^2). Chosen so BOTH axes land near ~1.3 Hz
-dominant poles: a faster vertical loop (e.g. 4 Hz with the tighter 5 mm /
-1/10^2 weighting) demands frequency slews ~300 Hz/s and limit-cycles against
-the slew limiter (verified in simulate_hover.py scenario a). Hard-fails if
-any closed-loop pole is faster than rate/6 -- the loop must stay well below
-Nyquist and the 15.6 Hz phase-lock mode.
+Weights: Bryson's rule, tuned for LATENCY ROBUSTNESS (simulate_hover.py
+scenario b). Both axes land at ~0.78 Hz dominant poles. The obvious tighter
+choices fail in closed loop against the full nonlinear plant:
+  - 5 mm z tol / R_f=1/10^2 -> 3.9 Hz vertical pole: demands ~300 Hz/s
+    frequency slew and limit-cycles against the slew limiter;
+  - 10 mm / 1/5^2 -> 1.33 Hz: stable with clean measurements but one camera
+    frame of latency + velocity-filter lag leaves so little phase margin
+    that sensor noise sustains a ~2.2 Hz vertical limit cycle (+-13 mm);
+  - 30 mm / 0.15 m/s / 1/3^2 -> 0.78 Hz: settles ~1 mm even with 0.5 mm
+    noise + 2 frames latency (verified sweep, 2026-07-23).
+Hard-fails if any closed-loop pole is faster than rate/6 -- the loop must
+stay well below Nyquist and the 15.6 Hz phase-lock mode.
 
-Slew default 200 Hz/s: the 1.33 Hz vertical loop needs up to
-2*pi*1.33*15 ~ 125 Hz/s, while phase-lock pull-out headroom at margin 5
-allows (tau_max - drag)/(2*pi*I) ~ 1250 Hz/s -- 6x safety factor.
+Slew default 200 Hz/s: the 0.78 Hz loops need well under that, while
+phase-lock pull-out headroom at margin 5 allows
+(tau_max - drag)/(2*pi*I) ~ 1250 Hz/s -- ample safety factor.
 
 Usage: uv run python ai/design_hover_lqr.py [--rate 30] [--k-lat 0.05] ...
 Writes ai/hover_controller.json (convention: compute_model_gains.py).
@@ -93,10 +97,10 @@ def main() -> None:
     Ad, Bd = discretize(A, B, ts)
     Aa, Ba = augment_integrators(Ad, Bd, C_MEAS, ts)
 
-    # Bryson weights (see module docstring)
-    q_diag = [1 / 0.010**2, 1 / 0.05**2, 1 / 0.010**2, 1 / 0.10**2,
-              1 / 0.010**2, 1 / 0.010**2]
-    r_diag = [1 / 0.5**2, 1 / 5.0**2]
+    # Bryson weights (see module docstring for why NOT tighter)
+    q_diag = [1 / 0.010**2, 1 / 0.05**2, 1 / 0.030**2, 1 / 0.15**2,
+              1 / 0.010**2, 1 / 0.030**2]
+    r_diag = [1 / 0.5**2, 1 / 3.0**2]
     K, _, eig = dlqr(Aa, Ba, np.diag(q_diag), np.diag(r_diag))
 
     # discrete eigenvalue -> equivalent continuous rate in Hz

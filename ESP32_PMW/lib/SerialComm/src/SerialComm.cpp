@@ -14,7 +14,7 @@ String SerialComm::handleSerialComm(const String &outgoing) {
         _rxBuf = "";
         return line;
       }
-      // bare CR/LF with nothing buffered (e.g. second half of CRLF) -- keep draining
+      // bare CR/LF with nothing buffered (e.g. second half of CRLF); keep draining
     } else {
       _rxBuf += c;
       if (_rxBuf.length() > MAX_LINE_LEN) _rxBuf = ""; // overflow guard

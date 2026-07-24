@@ -3,7 +3,7 @@
 ## 1. Tutorial: Getting Started
 
 ### Introduction
-This tutorial will guide you through setting up and using the PhaseController, PhaseSequencer, and JsonPhaseSequencer libraries to control PWM outputs on the ESP32. You will learn how to blink an LED, ramp PWM, and schedule carrier PWM changes using a JSON file.
+This tutorial will guide you through setting up and using the PwmController, PhaseSequencer, and JsonPhaseSequencer libraries to control PWM outputs on the ESP32. You will learn how to blink an LED, ramp PWM, and schedule carrier PWM changes using a JSON file.
 
 ### Prerequisites
 - ESP32 development board
@@ -17,14 +17,14 @@ This tutorial will guide you through setting up and using the PhaseController, P
 
 ### Step 2: Basic PWM Output
 ```cpp
-#include "PhaseController.h"
+#include "PwmController.h"
 
 const int NUM_CHANNELS = 4;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_19, GPIO_NUM_33, GPIO_NUM_27, GPIO_NUM_32};
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 90.0, 180.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 
-PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+PwmController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
 
 void setup() {
     controller.begin(100.0f); // Start at 100 Hz
@@ -77,7 +77,7 @@ void loop() {
 ## 2. How-to Guides
 
 ### How to Set a Duty Cycle or Phase
-- Use `setDutyCycle(channel, value)` and `setPhase(channel, degrees)` on your PhaseController instance.
+- Use `setDutyCycle(channel, value)` and `setPhase(channel, degrees)` on your PwmController instance.
 
 ### How to Schedule a Carrier PWM Change
 - Use `addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY)`, or an
@@ -90,7 +90,7 @@ void loop() {
 
 ## 3. Reference
 
-### PhaseController
+### PwmController
 - See header file for full docstrings.
 - Key methods: `begin`, `run`, `setGlobalFrequency`, `setDutyCycle`, `setPhase`, `initCarrierPWM`, `setCarrierDutyCycle`.
 

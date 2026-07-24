@@ -1,6 +1,6 @@
 # PhaseSequencer
 
-A high-level interface for sequencing PWM phase, frequency, and duty cycle behaviors over time, built on top of PhaseController for the ESP32 platform.
+A high-level interface for sequencing PWM phase, frequency, and duty cycle behaviors over time, built on top of PwmController for the ESP32 platform.
 
 ---
 
@@ -12,7 +12,7 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 - Sequence ramp-up, ramp-down, and hold behaviors
 - One `addRampTask` for every quantity (frequency, duty, carrier duty, phase), linear or eased
 - Full (all channels) **and** per-channel control on every builder
-- Integrates directly with PhaseController
+- Integrates directly with PwmController
 - Designed for PlatformIO and ESP-IDF/Arduino environments
 
 ---
@@ -23,15 +23,15 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 - ESP32 development board
 - PlatformIO (recommended) or ESP-IDF/Arduino
 - Basic C++ knowledge
-- Working PhaseController setup
+- Working PwmController setup
 
 ### Installation
-1. Add the `PhaseSequencer` and `PhaseController` source files to your PlatformIO project.
+1. Add the `PhaseSequencer` and `PwmController` source files to your PlatformIO project.
 2. Ensure all dependencies are available.
 
 ### Basic Usage Example
 ```cpp
-#include "PhaseController.h"
+#include "PwmController.h"
 #include "PhaseSequencer.h"
 
 const int NUM_CHANNELS = 4;
@@ -39,12 +39,12 @@ const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_19, GPIO_NUM_33, GPIO_NUM_27
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 90.0, 180.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 
-PhaseController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+PwmController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
 PhaseSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
-    // Ramp frequency 1Hz -> 100Hz over 10s with an eased curve
+    // Ramp frequency 1Hz -> 100Hz over 10s with an S-curve
     seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
     seq.compile(25, 1.0f, INITIAL_DUTY_CYCLES, INITIAL_PHASES);
     seq.start();
@@ -68,9 +68,13 @@ void loop() {
 ### How to Sequence a Ramp (any quantity)
 - Use the single `addRampTask(...)`. Pick the quantity with `TaskType`
   (`PWM_FREQ`, `PWM_DUTY`, `CARRIER_DUTY`, `PWM_PHASE`) and the curve with
-  `TaskMode` (`LINEAR` or `EASE`):
+  `TaskMode` (`LINEAR`, `EASE`, or `EXPONENTIAL`). The optional final `shape`
+  argument tunes EASE (S-curve sharpness k≥1) and EXPONENTIAL (exponent
+  multiplier k); omit it (NAN) for the per-mode default of 2:
   ```cpp
   seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
+  seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE, 4.0f); // sharper S
+  seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EXPONENTIAL, 3.0f); // hard ease-in
   seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
   ```
 - Call `compile(...)` then `start()`.
@@ -96,8 +100,8 @@ void loop() {
   hardware sync: this is what CSV/JSON import use. Unlike a ramp, a
   trajectory point has no NAN-skip. Every channel must be given explicitly.
 
-### How to Integrate with PhaseController
-- Pass a pointer to your PhaseController instance when constructing PhaseSequencer.
+### How to Integrate with PwmController
+- Pass a pointer to your PwmController instance when constructing PhaseSequencer.
 - Call `controller.run()` and `seq.run()` in your main loop.
 
 ---
@@ -108,9 +112,9 @@ void loop() {
 
 #### Constructor
 ```cpp
-PhaseSequencer(PhaseController* phaseCtrl);
+PhaseSequencer(PwmController* phaseCtrl);
 ```
-- `phaseCtrl`: Pointer to an initialized PhaseController
+- `phaseCtrl`: Pointer to an initialized PwmController
 
 #### Methods
 Every ramp builder has a **full** (scalar → all channels) and a
@@ -141,7 +145,8 @@ bool isDone() const;
   `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
   per-sketch constants like `const int PWM_FREQ = 15000`, so always qualify:
   `TaskType::PWM_FREQ`.
-- `TaskMode`: `LINEAR`, `EASE`, the interpolation curve for a ramp.
+- `TaskMode`: `LINEAR`, `EASE`, `EXPONENTIAL`, the interpolation curve for a
+  ramp (the last two take an optional `shape` parameter).
 
 Note: `PWM_FREQ` is a single global frequency; per-channel ramps ignore all but
 channel 0 for it. Duty/carrier tasks are clamped to 0–100%.
@@ -153,7 +158,7 @@ channel 0 for it. Duty/carrier tasks are clamped to 0–100%.
 ### How It Works
 - Maintains a queue of tasks (ramps, waits, phase changes)
 - Compiles tasks into a time-based trajectory for the controller
-- Calls PhaseController methods to update outputs in real time
+- Calls PwmController methods to update outputs in real time
 
 ### Advantages
 - Enables complex, repeatable PWM behaviors for experiments
@@ -172,7 +177,7 @@ channel 0 for it. Duty/carrier tasks are clamped to 0–100%.
 ---
 
 ## 6. Further Reading
-- [PhaseController documentation](../PhaseController/README.md)
+- [PwmController documentation](../PwmController/README.md)
 - [PlatformIO documentation](https://docs.platformio.org/)
 - Example projects in this repository
 

@@ -8,26 +8,20 @@ class JsonVariant;
 
 class JsonPhaseSequencer : public PhaseSequencer {
 public:
-  JsonPhaseSequencer(PhaseController *phaseCtrl);
+  JsonPhaseSequencer(PwmController *phaseCtrl);
 
   /**
-   * @brief Load a schedule from a JSON file (SPIFFS) and compile it. File is
-   * a flat JSON array of {method, channel, mask, value/from/to, duration_ms}
-   * entries, no loop/repeat primitive (repeats are unrolled by whoever
-   * generates the file). Full method list and schema: README.md.
-   * @param initialDuty float[4] duty (0-100%); defaults to {50,50,50,50}.
-   * @param initialPhase float[4] phase (degrees); defaults to {0,90,180,270}.
-   * @return False if the file can't be opened or fails to parse.
+   * @brief Load and compile a JSON schedule from SPIFFS. Full schema: README.md.
+   *        Object {resolution_ms, initial_freq, initial_duty, direction,
+   *        schedule:[...]}; a bare array is the schedule with defaults
+   *        (resolution_ms 25, initial_freq 0 = DC, initial_duty {50,50,50,50},
+   *        direction CCW).
+   * @return False if the file can't be opened or parsed.
    */
-  bool loadFromJsonFile(const char *filename, uint32_t resolutionMs = 25,
-                        float initialFreq = 300.0f,
-                        const float *initialDuty = nullptr,
-                        const float *initialPhase = nullptr);
+  bool loadFromJsonFile(const char *filename);
 
-  /** @brief The telemetry label active during queue step `i` (see
-   *  PhaseSequencer::currentIndex()), or "" if none was set / `i` is out of
-   *  range. Callers typically poll labelForStep(currentIndex()) once per
-   *  loop() and print it on change. */
+  /** @brief Telemetry label for queue step `i`, or "" if none / out of range.
+   *  Callers poll labelForStep(currentIndex()) each loop() and print on change. */
   const char *labelForStep(size_t i) const;
 
 private:

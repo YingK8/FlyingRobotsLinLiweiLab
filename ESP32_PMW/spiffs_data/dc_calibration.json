@@ -1,12 +1,18 @@
-[
-  { "method": "addDutyCycleTask", "channel": 0, "value": 100.0 },
-  { "method": "addDutyCycleTask", "channel": 1, "value": 100.0 },
-  { "method": "addDutyCycleTask", "channel": 2, "value": 100.0 },
-  { "method": "addDutyCycleTask", "channel": 3, "value": 100.0 },
-  { "method": "label", "value": "DC_CALIBRATION_ALL_HIGH" },
-  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 100.0 },
-  { "method": "addWaitTask", "duration_ms": 60000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CCW",
+  "schedule": [
+    { "method": "addDutyCycleTask", "channels": 0, "value": 100.0 },
+    { "method": "addDutyCycleTask", "channels": 1, "value": 100.0 },
+    { "method": "addDutyCycleTask", "channels": 2, "value": 100.0 },
+    { "method": "addDutyCycleTask", "channels": 3, "value": 100.0 },
+    { "method": "label", "value": "DC_CALIBRATION_ALL_HIGH" },
+    { "method": "addCarrierDutyCycleTask", "channels": 0, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channels": 1, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channels": 2, "value": 100.0 },
+    { "method": "addCarrierDutyCycleTask", "channels": 3, "value": 100.0 },
+    { "method": "addWaitTask", "duration_ms": 60000 }
+  ]
+}

@@ -1,13 +1,33 @@
-// Tilt experiment: EASE 1->210Hz frequency ramp, then a 100%->0% carrier
-// step-down (10% steps, 2.5s holds), CCW. The step-down commands one overall
-// ceiling per step; the shared PI current-balance loop holds the four channels
-// together (< 0.4 A spread) beneath it -- so the per-channel trims are found
-// automatically instead of hand-tuned. Schedule lives in /tilt.json.
-#include "balanced_experiment.h"
+#include "drive_common.h"
+
+// instantiate PWM controller and sequencer:
+PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
+JsonPhaseSequencer seq(&ctl);
 
 void setup() {
-  // jsonFile, ccwDefault, driveFreq, iSafetyMax, piEnabled
-  experimentSetup(ExperimentConfig("/tilt.json", true, 190.0f, 10.0f, true));
+  driveBoot(); // from drive_common.h
+  
+  ctl.begin(); // DC (stationary); the schedule sets the running frequency
+  ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
+  ctl.enableCurrentSense(ADC_PINS, SENS);
+
+  ctl.enableCurrentBalance(); // enable PI current balancing
+
+  seq.loadFromJsonFile("/tilt.json");
+  seq.start();
 }
 
-void loop() { experimentLoop(); }
+void loop() {
+  seq.run();
+  ctl.run();
+
+  // experiment-specific behaviour: blink LED once per step
+  static size_t lastStep = (size_t)-1;
+  size_t step = seq.currentIndex(); // gets the current step in the task sequence
+  if (step != lastStep) {
+    lastStep = step;
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  }
+
+  driveTelemetry(ctl);
+}

@@ -1,14 +1,16 @@
-[
-  { "method": "setDirection", "value": 1 },
-
-  { "method": "label", "value": "CEILING_100PCT_SWEEP" },
-  { "method": "activateChannels", "mask": 15, "value": 100.0 },
-  { "method": "addEaseRampTask", "from": 1.0, "to": 210.0, "duration_ms": 30000 },
-
-  { "method": "label", "value": "CEILING_HOLD_210HZ" },
-  { "method": "addWaitTask", "duration_ms": 3000 },
-
-  { "method": "label", "value": "CEILING_OFF" },
-  { "method": "activateChannels", "mask": 15, "value": 0.0 },
-  { "method": "addWaitTask", "duration_ms": 500 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CCW",
+  "schedule": [
+    { "method": "label", "value": "CEILING_100PCT_SWEEP" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 1.0, "to": 210.0, "duration_ms": 30000 },
+    { "method": "label", "value": "CEILING_HOLD_210HZ" },
+    { "method": "addWaitTask", "duration_ms": 3000 },
+    { "method": "label", "value": "CEILING_OFF" },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 500 }
+  ]
+}

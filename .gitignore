@@ -9,3 +9,4 @@ venv/
 
 # PlatformIO
 .pio/
+tilt_coramp_run.log

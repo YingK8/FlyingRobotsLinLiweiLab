@@ -2,22 +2,16 @@
 
 #include <Arduino.h>
 
-// Non-blocking, newline-framed serial link. Generalizes the ad-hoc reader in
-// main_tilt.cpp so any sketch can send/receive without re-deriving the
-// buffering. Framing: ASCII lines terminated by \n, \r, or \r\n. No checksum,
-// no binary framing -- matches the existing PC-side tools (run_experiment.py,
-// trigger_reset_log.py) and their python mirror (tools/serial_comm.py).
+// Non-blocking, newline-framed serial link. Framing: ASCII lines ending in \n,
+// \r, or \r\n; no checksum. Matches the PC-side tools (run_experiment.py,
+// trigger_reset_log.py, tools/serial_comm.py).
 class SerialComm {
 public:
   explicit SerialComm(Stream &port = Serial) : _port(port) {}
 
-  // Call once per loop() iteration. Never blocks.
-  // If `outgoing` is non-empty, writes it followed by '\n'.
-  // Drains whatever bytes are currently available; if a full line completes
-  // during this call, returns it (buffer cleared). Otherwise returns "".
-  // If more than one line's worth of bytes is waiting, only the first
-  // completed line is returned/cleared this call -- nothing is dropped, the
-  // rest stays in Serial's own buffer for the next call.
+  // Call once per loop(); never blocks. Writes `outgoing` + '\n' if non-empty.
+  // Returns the first complete line drained this call (buffer cleared), else "".
+  // Extra buffered lines stay in Serial for the next call; nothing is dropped.
   String handleSerialComm(const String &outgoing = String());
 
 private:

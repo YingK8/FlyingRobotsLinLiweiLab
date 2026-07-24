@@ -1,5 +1,5 @@
 #pragma once
-#include "../../PhaseController/src/PhaseController.h"
+#include "../../PwmController/src/PwmController.h"
 #include "esp_timer.h"
 #include <Arduino.h>
 #include <vector>
@@ -15,8 +15,9 @@ enum class TaskType {
 
 // Add to this for a sub-specification for TaskType:
 enum class TaskMode {
-  LINEAR,
-  EASE
+  LINEAR,       // constant rate, t
+  EASE,      // symmetric S-curve, t^k/(t^k+(1-t)^k); shape k>=1 sharpens
+  EXPONENTIAL   // (e^(k*t)-1)/(e^k-1); shape k>0 ease-in, k<0 ease-out
 };
 
 struct SequenceTask {
@@ -31,8 +32,9 @@ struct SequenceTask {
   float endDuties[4];
   float startPhases[4];
   float endPhases[4];
-  float dutyCycles[4];    
-  float carrierDuties[4]; 
+  float dutyCycles[4];
+  float carrierDuties[4];
+  float shape; // curve parameter for EASE/EXPONENTIAL; NAN = per-mode default
 };
 
 // Stores the explicit state of all channels at a given microsecond in time
@@ -44,50 +46,47 @@ struct TrajectoryPoint {
   float carrierDuties[4];
 };
 
-// Shared TRAJECTORY_POINT builder: used by CSV/JSON import (see
-// CsvPhaseSequencer.cpp / JsonPhaseSequencer.cpp).
+// Shared TRAJECTORY_POINT builder (CSV/JSON import).
 SequenceTask makeTrajectoryTask(float freq, const float *duty,
                                 const float *phase, const float *carrier,
                                 int numChannels = 4, int64_t durationUs = 0);
 
 class PhaseSequencer {
 public:
-  PhaseSequencer(PhaseController *phaseCtrl);
+  PhaseSequencer(PwmController *phaseCtrl);
 
   // Queue Builders
   /** @brief Reserve queue capacity for `size` tasks. */
   void reserve(size_t size);
-  /**
-   * @brief Push a task built by hand, e.g. a TRAJECTORY_POINT built via
-   * makeTrajectoryTask().
-   */
+  /** @brief Push a hand-built task (e.g. from makeTrajectoryTask()). */
   void addSequenceTask(SequenceTask task);
 
   /** @brief Insert a pause of `durationMs` in the sequence. */
   void addWaitTask(uint32_t durationMs);
 
   /**
-   * @brief Ramp one quantity, all channels identically, start -> end over
-   * durationMs (0 = instant set to end).
-   *
-   * @param start Hz for PWM_FREQ, else % or degrees.
-   * @param end Same units as start.
-   * @param type PWM_FREQ (default), PWM_DUTY, CARRIER_DUTY or PWM_PHASE.
-   *   Duty/carrier are clamped to 0-100%; PWM_FREQ ignores all but channel 0.
-   * @param ramp_mode LINEAR (default) or EASE.
+   * @brief Ramp one quantity on all channels, start -> end over durationMs
+   *        (0 = instant set to end).
+   * @param start/end  Hz for PWM_FREQ, else % or degrees.
+   * @param type       PWM_FREQ (default), PWM_DUTY, CARRIER_DUTY, PWM_PHASE.
+   *                   Duty/carrier clamped 0-100%; PWM_FREQ uses channel 0 only.
+   * @param ramp_mode  LINEAR (default), EASE, or EXPONENTIAL.
+   * @param shape      Curve parameter (NAN = per-mode default). EASE: S-curve
+   *                   sharpness k>=1 (1=linear, 2=default). EXPONENTIAL: exponent
+   *                   multiplier k (>0 ease-in, <0 ease-out, 2=default).
    */
   void addRampTask(float start, float end, uint32_t durationMs,
                    TaskType type = TaskType::PWM_FREQ,
-                   TaskMode ramp_mode = TaskMode::LINEAR);
+                   TaskMode ramp_mode = TaskMode::LINEAR, float shape = NAN);
 
   /**
-   * @brief Per-channel ramp: starts[i] -> ends[i] over durationMs (0 =
-   * instant set to end). NAN in starts[i] leaves that channel unchanged.
+   * @brief Per-channel ramp: starts[i] -> ends[i] over durationMs (0 = instant).
+   *        NAN in starts[i] leaves that channel unchanged.
    * @param numChannels Entries supplied in starts/ends; the rest are skipped.
    */
   void addRampTask(const float *starts, const float *ends, int numChannels,
                    uint32_t durationMs, TaskType type = TaskType::PWM_FREQ,
-                   TaskMode ramp_mode = TaskMode::LINEAR);
+                   TaskMode ramp_mode = TaskMode::LINEAR, float shape = NAN);
 
   // Compiler
   /**
@@ -99,27 +98,26 @@ public:
 
   // Control
   void start();
+
   /** @brief Advance the running sequence. Call every loop() iteration. */
   void run();
+
   bool isDone() const;
-  /** @brief Index of the queue entry currently running (== queue size once
-   *  isDone()). Used by callers (e.g. JsonPhaseSequencer::labelForStep) that
-   *  track auxiliary per-step data in parallel with the queue. */
+  
+  /** @brief Queue index currently running (== queue size once isDone()). Lets
+   *  callers track per-step data in parallel with the queue. */
   size_t currentIndex() const { return _currentFrameIdx; }
 
-  /** @brief The carrier duty (%) the schedule most recently COMMANDED for
-   *  channel `i`, or NAN if no carrier command has run yet. This is the
-   *  sequencer's *intent*, tracked independently of what anything else may
-   *  have written to the PhaseController -- a closed-loop overlay (e.g. a
-   *  current-balance PI that owns the actual carrier register) reads this as
-   *  the per-channel amplitude ceiling to regulate beneath. Held steady
-   *  across WAIT steps (run() returns early without re-asserting). */
+  /** @brief Carrier duty (%) the schedule last COMMANDED for channel `i`, or NAN
+   *  if none yet. This is the sequencer's intent, independent of what wrote the
+   *  actual carrier register: a current-balance overlay reads it as the
+   *  per-channel ceiling to regulate beneath. Held across WAIT steps. */
   float getCommandedCarrier(int i) const {
     return (i >= 0 && i < 4) ? _currentCarrierDutyCycles[i] : NAN;
   }
 
 private:
-  PhaseController *_phaseCtrl;
+  PwmController *_phaseCtrl;
   std::vector<SequenceTask> _queue;
   float _initialFreqHz;
   float _initialDutyCycles[4];
@@ -136,5 +134,6 @@ private:
   void resetStreamingState();
   void applyCurrentState();
 
-  float easeInOut(float t);
+  // Map linear progress t in [0,1] through the ramp's curve.
+  float applyCurve(TaskMode mode, float t, float shape);
 };

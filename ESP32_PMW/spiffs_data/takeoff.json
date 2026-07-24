@@ -1,14 +1,20 @@
-[
-  { "method": "addPhaseTask", "channel": 0, "value": 0.0 },
-  { "method": "addPhaseTask", "channel": 1, "value": 180.0 },
-  { "method": "addPhaseTask", "channel": 2, "value": 90.0 },
-  { "method": "addPhaseTask", "channel": 3, "value": 270.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 0, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 1, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 2, "value": 100.0 },
-  { "method": "addCarrierDutyCycleTask", "channel": 3, "value": 100.0 },
-  { "method": "label", "value": "TAKEOFF_EASE_RAMP_1_500HZ" },
-  { "method": "addEaseRampTask", "from": 1.0, "to": 500.0, "duration_ms": 400000 },
-  { "method": "label", "value": "TAKEOFF_LINEAR_RAMP_1_500HZ" },
-  { "method": "addLinearRampTask", "from": 1.0, "to": 500.0, "duration_ms": 400000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CCW",
+  "schedule": [
+    { "method": "addPhaseTask", "channels": 0, "value": 0.0 },
+    { "method": "addPhaseTask", "channels": 1, "value": 180.0 },
+    { "method": "addPhaseTask", "channels": 2, "value": 90.0 },
+    { "method": "addPhaseTask", "channels": 3, "value": 270.0 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3], "value": 100.0 },
+    { "method": "label", "value": "TAKEOFF_EASE_RAMP_1_157HZ" },
+    { "method": "addEaseRampTask", "from": 1.0, "to": 200.0, "duration_ms": 40000 },
+    { "method": "label", "value": "TAKEOFF_HOLD_157HZ" },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "TAKEOFF_OFF" },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 500 }
+  ]
+}

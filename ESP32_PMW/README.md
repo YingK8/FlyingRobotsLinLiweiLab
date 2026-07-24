@@ -6,16 +6,29 @@ Controls a 4-channel phased PWM coil array to spin and tilt a magnetic disk. Eac
 
 ## Upload
 
+Each experiment is a self-contained firmware that loads its schedule from SPIFFS
+and **runs on boot** (no arming). Upload the JSON payloads once, then the firmware:
+
 ```bash
-pio run -e <env> --target upload
+pio run -e <env> --target uploadfs   # packs spiffs_data/*.json to flash (once)
+pio run -e <env> --target upload     # builds + flashes the firmware
 ```
 
-| Environment | Source file | Purpose |
-|---|---|---|
-| `tilt` | `main_tilt.cpp` | Full carrier sweep 100% → 0%, channel D only |
-| `tilt1` | `main_tilt1.cpp` | High-half sweep 100% → 50%, channels B + D |
-| `tilt2` | `main_tilt2.cpp` | Low-half sweep 50% → 0%, channels A + C |
-| `takeoff` | `main_takeoff.cpp` | Takeoff sequence |
+| Environment | Source file | Balance | Purpose |
+|---|---|---|---|
+| `tilt` | `main_tilt.cpp` | PI | 1→210 Hz ramp, then 100%→0% carrier step-down |
+| `takeoff` | `main_takeoff.cpp` | PI | 1→500 Hz double ramp at 100% carrier |
+| `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | PI | CW, 1→190 Hz |
+| `carrier_ramp` | `main_carrier_ramp.cpp` | PI | carrier 0→100% at 190 Hz |
+| `comp_test` | `main_comp_test.cpp` | passthrough | per-channel trim A/B test |
+| `coupling_test` | `main_coupling_test.cpp` | passthrough | coil-coupling sweep |
+| `dc` | `main_dc.cpp` | passthrough | DC current-sense calibration |
+| `ceiling` | `main_ceiling.cpp` | passthrough | unregulated ceiling vs frequency |
+| `current_pid` | `main_current_pid.cpp` | PI | standalone serial PID tuning rig |
+
+"PI" = the current-balance loop (folded into `PwmController`, opt-in via
+`enableCurrentBalance()`) rebalances the four channels beneath the schedule's
+carrier ceiling. "passthrough" = the commanded carriers drive verbatim.
 
 Monitor serial after upload:
 ```bash
@@ -24,8 +37,10 @@ pio device monitor -e <env>   # 115200 baud
 
 Or chain both:
 ```bash
-pio run -e tilt1 --target upload && pio device monitor -e tilt1
+pio run -e tilt --target upload && pio device monitor -e tilt
 ```
+
+Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>.py`).
 
 ---
 
@@ -42,19 +57,26 @@ Rotation order (CCW): A → C → B → D
 
 ---
 
-## PhaseController
+## PwmController
 
-Controls PWM frequency, duty cycle, phase, and carrier duty per channel.
+Controls PWM frequency, duty cycle, phase, and carrier duty per channel. The
+onboard current-sense reader and the current-balance PI loop are folded in as
+opt-in capabilities (formerly a separate `CurrentBalanceController` + framework).
 
 ```cpp
-#include "PhaseController.h"
+#include "PwmController.h"
 
-PhaseController* controller = new PhaseController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
-controller->begin();
+PwmController* controller = new PwmController(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
+controller->begin(190.0f);   // pass a real freq; begin(0) divides by zero
 controller->initCarrierPWM(CARRIER_PINS, PWM_FREQ, INITIAL_CARRIER_DUTY_CYCLES);
 
+// Opt in to current sensing (+ overcurrent latch) and, for lift experiments,
+// the balance loop. Call with coils OFF so the ADC zero seeds cleanly.
+controller->enableCurrentSense(ADC_PINS, SENS, /*tripA*/10.0f);
+controller->enableCurrentBalance();   // omit for open-loop passthrough
+
 // In loop():
-controller->run();
+controller->run();   // drift-compensate + sample current + trip + balance
 ```
 
 Key methods:
@@ -63,15 +85,21 @@ Key methods:
 controller->setGlobalFrequency(float hz);          // change freq on all channels (phase-continuous)
 controller->setDutyCycle(int ch, float pct);        // 0–100%
 controller->setPhase(int ch, float degrees);        // 0–360°
-controller->setCarrierDutyCycle(int ch, float pct); // 0–100%, controls H-bridge current
+controller->setCarrierDutyCycle(int ch, float pct); // 0–100% H-bridge current; = the CEILING when balance is on
 controller->getFrequency();                         // returns current freq (Hz)
+controller->measuredCurrents();                     // float[4] sensed current (A), or nullptr
+controller->overcurrentTripped();                   // true once the latch fired
 ```
+
+Most experiment mains don't call these directly — `src/drive_common.h`
+(`driveBoot` / `driveMake` / `driveLoad` / `driveTelemetry`) wraps the boilerplate
+so each `main_*.cpp` stays a short, explicit `setup()` + `loop()`.
 
 ---
 
 ## PhaseSequencer
 
-Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PhaseController.
+Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PwmController.
 
 ```cpp
 #include "PhaseSequencer.h"
@@ -108,14 +136,13 @@ bool done = seq->isDone();
 
 ---
 
-## Carrier Sweep Pattern (tilt1 / tilt2)
+## Carrier Sweep Pattern (tilt)
 
-Both files ramp to 200 Hz with all channels at 100% carrier, then:
-
-- **tilt1**: steps B + D down from 100% → 50% in −10% steps, 3 s per step
-- **tilt2**: steps A + C down from 50% → 0% in −10% steps, 3 s per step (B + D stay at 100%)
-
-LED on GPIO 2 blinks each step. Run **tilt2 first** (lower power, safer).
+`main_tilt.cpp` ramps 1→210 Hz, then steps every channel's carrier ceiling down
+100% → 0% in −10% steps. The folded PI loop rebalances the four channels beneath
+each ceiling, so per-channel trims are found automatically instead of hand-tuned.
+The LED on GPIO 2 toggles once per schedule step — that per-step behavior lives
+right in the main's `loop()` and is the template for adding your own.
 
 ---
 
@@ -156,9 +183,9 @@ array order (not by a timestamp field):
 
 ```json
 [
-  { "method": "addDutyCycleTask",       "channel": 0, "value": 60.0 },
-  { "method": "addPhaseRampTask",       "channel": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
-  { "method": "addCarrierDutyCycleTask","channel": 0, "value": 75.0 },
+  { "method": "addDutyCycleTask",       "channels": 0, "value": 60.0 },
+  { "method": "addPhaseRampTask",       "channels": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
+  { "method": "addCarrierDutyCycleTask","channels": 0, "value": 75.0 },
   { "method": "addWaitTask",            "duration_ms": 3000 }
 ]
 ```
@@ -215,4 +242,4 @@ Upload the data file to SPIFFS with: `pio run -e <env> --target uploadfs`
 ## Further Reading
 
 - Full API docs: [`DOCS.md`](DOCS.md)
-- Library details: [`lib/PhaseController/README.md`](lib/PhaseController/README.md), [`lib/PhaseSequencer/README.md`](lib/PhaseSequencer/README.md)
+- Library details: [`lib/PwmController/README.md`](lib/PwmController/README.md), [`lib/PhaseSequencer/README.md`](lib/PhaseSequencer/README.md)

@@ -28,7 +28,7 @@ import sys, numpy as np, pandas as pd, matplotlib.pyplot as plt
 
 CH     = ["Channel A", "Channel B", "Channel C", "Channel D"]
 COLORS = {"Channel A":"C0","Channel B":"C1","Channel C":"C2","Channel D":"C3"}
-R      = {"Channel A":2532.,"Channel B":2530.,"Channel C":2543.,"Channel D":2540.}
+R      = {"Channel A":2538.,"Channel B":2540.,"Channel C":2550.,"Channel D":2545.}
 
 # ---- MODE A inputs: PEAK coil current (A) from a series probe at 100% duty ----
 # Fill these in once you measure them. Leave as None to skip a channel.

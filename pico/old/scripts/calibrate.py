@@ -13,7 +13,7 @@ import pandas as pd, numpy as np, matplotlib.pyplot as plt
 
 CH     = ["Channel A", "Channel B", "Channel C", "Channel D"]
 COLORS = {"Channel A":"C0","Channel B":"C1","Channel C":"C2","Channel D":"C3"}
-R      = {"Channel A":2532.,"Channel B":2530.,"Channel C":2543.,"Channel D":2540.}
+R      = {"Channel A":2538.,"Channel B":2540.,"Channel C":2550.,"Channel D":2545.}
 I100   = {"Channel A":5.466,"Channel B":3.618,"Channel C":5.234,"Channel D":5.247}  # supply A
 V100   = {"Channel A":0.380,"Channel B":0.4049,"Channel C":0.529,"Channel D":0.5315} # CS V
 ABCD   = "seperate_ground_10sec_linear_carrier_ramp_15kHz_ABCD.csv"

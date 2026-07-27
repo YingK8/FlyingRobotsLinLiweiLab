@@ -4,62 +4,53 @@
 % ground contact, the hover linearization and the text summary. It touches
 % no graphics, so it can be called from a script, a test or a sweep.
 %
-%   x = [delta; omega; z; z_dot],  u = f_field(t) in Hz,  f_robot = omega/(2*pi)
+%   x = [delta; omega; z; z_dot],  u = f_field(t)
 %
 %   delta_dot = 2*pi*f_field(t) - omega
 %   omega_dot = (tau_max(f_field)*sin(delta) - k_drag*f_robot*|f_robot|) / I_robot
-%   z_ddot    = g*((f_robot/f_hover)^2 - 1) - |f_robot|/(f_hover*tau_h)*z_dot
+%   z_ddot    = g*((f_robot/f_hover)^2 - 1)
 %   z_ddot    = 0, z = z_dot = 0              while resting on the pad
+% Where:
+%   delta    field-to-robot phase lag, theta_field - theta_robot (rad)
+%   omega    robot spin rate (rad/s); f_robot = omega/(2*pi) (Hz)
+%   z        height above the pad (m), upward positive
+%   f_field  commanded field frequency (Hz), the only input
+%   f_hover  spin frequency where lift = weight (Hz)
+%   tau_max  peak magnetic torque m*B(f) at the command frequency (N m)
+%   k_drag   quadratic drag-torque coefficient (N m/Hz^2), fit in modelConstants
+%   I_robot  spin-axis moment of inertia (kg m^2)
 %
-% Heave damping (lecture_notes.md Sec. 6.3):
-% Climbing tilts the inflow at each blade element by z_dot/(2*pi*f*r), which
-% cuts the angle of attack and hence the thrust. To first order in the lift
-% slope a = dC_L/dalpha,
-%
-%   dT/dz_dot = -1/2*rho*a*(2*pi*f)*int(c(r)*r dr) = -k_w*f  <  0
-%   m_R*z_ddot = k_T*f^2 - m_R*g - k_w*f*z_dot
-%
-% so a spinning rotor gets heave-rate damping for free, PROPORTIONAL TO SPIN
-% FREQUENCY rather than constant. Dividing by m_R and substituting the hover
-% calibration k_T*f_hover^2 = m_R*g plus the heave lag tau_h = m_R/(k_w*f_hover)
-% from Sec. 8.2 removes m_R, k_T and k_w from the model entirely:
-%
-%   z_ddot = g*((f_robot/f_hover)^2 - 1) - f_robot/(f_hover*tau_h) * z_dot
-%
-% That is why tau_h is the single exposed vertical-drag parameter: the notes
-% list m_R, k_T and k_w as symbolic, to be calibrated by a hover test, and
-% only this one combination of them is observable in a mass-free model. |f|
-% is used so that a backwards-spinning rotor still damps rather than driving
-% the heave unstable. At f_robot = 0 there is no damping at all -- a dead
-% rotor free-falls, which is the correct limit of dT/dz_dot = -k_w*f.
+% Heave is undamped: air resistance is not modelled, so the vertical channel
+% is thrust minus weight alone. The hover calibration k_T*f_hover^2 = m_R*g
+% (thrust coefficient k_T, robot mass m_R) divides both out, so z_ddot carries
+% no free parameter. A thrust surplus therefore accelerates indefinitely
+% instead of settling at a terminal climb rate, and both vertical eigenvalues
+% sit at the origin.
 %
 % Ground contact:
-% The robot starts on a pad, so the vertical channel is a UNILATERAL
-% constraint, not a free double integrator. While it rests there the pad
-% supplies a normal force
+% The robot starts on a pad, so z is a UNILATERAL constraint. While it rests
+% there the pad supplies a normal force
 %
 %   N/W = 1 - (f_robot/f_hover)^2 >= 0
 %
-% that exactly cancels the net downward force, so z and z_dot stay pinned at
-% zero and the robot cannot sink. N shrinks as the robot spins up and reaches
-% zero at f_robot = f_hover, where thrust balances gravity: that instant is
-% liftoff, and from then on the free-flight z_ddot above applies. If lift
-% later falls back below weight the robot descends, lands at z = 0
-% (inelastic, z_dot -> 0) and the pad reloads. N is reported as a fraction of
-% weight because the four-state model carries no robot mass -- the vertical
-% equation is mass-free, and so is N/W.
+% that cancels the net downward force, pinning z and z_dot at zero. N falls to
+% zero at f_robot = f_hover: that instant is liftoff, and the free-flight
+% z_ddot applies from then on. If lift later drops below weight the robot
+% descends, lands inelastically at z = 0 (z_dot -> 0) and the pad reloads. N
+% is a fraction of weight because the vertical equation carries no robot mass.
 %
 % Drive model:
-% Series-RLC coil channel, tau_max = m*B scales with drive frequency:
+% Series-RLC coil channel, so the peak torque tau_max = m*B moves with the
+% drive frequency:
 %
 %   X(f)       = 2*pi*f*L - 1/(2*pi*f*C)
 %   gain(f)    = R/sqrt(R^2 + X(f)^2)          = |I(f)|/|I(f_res)|, <= 1
 %   tau_max(f) = m * B_max * gain(f)
 %
-% gain = 1 at f_res = 1/(2*pi*sqrt(L*C)) and gain -> 0 at DC because the series
-% capacitor blocks it; that low-frequency rolloff is what limits spin-up from
-% rest. Because tau_max moves with the command, the torque margin and the
-% step-out ceiling are outputs rather than inputs.
+% gain = 1 at f_res = 1/(2*pi*sqrt(L*C)) and gain -> 0 at DC, where the series
+% capacitor blocks current; that rolloff is what limits spin-up from rest.
+% Because tau_max moves with the command, the torque margin and the step-out
+% ceiling are outputs rather than inputs.
 %
 % Usage:
 %   result = frequency_tracking_statespace_sim(segments, parameters)
@@ -67,18 +58,14 @@
 %       parameters struct with fields
 %                    drive                   from api.makeDrive(...)
 %                    hoverFrequency          Hz
-%                    heaveTimeConstant       s, tau_h = m_R/(k_w*f_hover)
 %                    initialVerticalVelocity m/s, upward positive (default 0)
 %                    frequencyTolerance      Hz, Hold pass/fail band (default 1)
 %                    autoChain               logical (default true)
 %       result     struct of traces, scalars and the [A,B] hover linearization
 %
 %   api = frequency_tracking_statespace_sim()
-%       Function-handle struct for the pieces the GUI needs on their own:
-%       constants, makeDrive, coilGain, coilGainDerivative, hoverStateSpace,
-%       findStepOutCeiling, normalizeSegments, validateSegments,
-%       parseSegments, evaluateSegmentFrequency, sampleCommand, numericValue,
-%       run, summaryLines, ternary.
+%       Struct of function handles, for calling the pieces on their own. The
+%       struct literal below lists the fields.
 %
 % Example:
 %   api   = frequency_tracking_statespace_sim();
@@ -133,6 +120,7 @@ function constants = modelConstants()
         (3.0 * 0.79375^2.0 * 1E-6 + 0.79375^2.0 * 1E-6) ...
         + 1.17832E-5 * (0.496875^2.0 * 1E-6));
     
+    % Rig-measured drag torque against spin frequency, fitted below to -k_drag*f^2.
     fre_points = (10:10:230)';
     drag_torque_points = [
         -7.20311E-08;
@@ -178,15 +166,8 @@ function constants = modelConstants()
         'capacitanceMicroF', 500.0, ...
         'resistanceOhm',    1.7, ...
         'hoverFrequency',   140, ...
-        'heaveTimeConstant', 0.30, ...
         'frequencyTolerance', 1, ...
         'initialVerticalVelocity', 0);
-    % tau_h is an ASSUMPTION, like the N52 grade behind momentMilli: the notes
-    % leave m_R, k_T and k_w symbolic pending a hover test. 0.30 s puts the heave
-    % pole at 1/(2*pi*tau_h) = 0.53 Hz, inside the 0.1-1 Hz heave band the
-    % timescale stack in Sec. 7 asserts. Calibrate it from a climb test: release
-    % at a fixed offset above f_hover and fit the exponential approach to the
-    % steady climb rate, whose time constant IS tau_h.
     defaults.momentSI      = 1E-3*defaults.momentMilli;
     defaults.bMaxSI        = 1E-3*defaults.bMaxMilliTesla;
     defaults.inductanceSI  = 1E-3*defaults.inductanceMilliH;
@@ -251,17 +232,14 @@ function derivativeValue = coilGainDerivative(frequencyHz, drive)
 end
 
 function ceilingHz = findStepOutCeiling(tauMaxOf, hoverFrequency)
-    % Highest frequency the field can still hold synchronously, i.e. the
-    % largest f with tau_max(f) >= k_drag*f^2. With a resonant drive this
-    % is no longer f_hover*sqrt(M) -- above resonance tau_max falls while
-    % drag keeps rising, so the crossing has to be found numerically.
+    % Highest frequency the field can still hold synchronously:
+    % largest f with tau_max(f) >= k_drag*f^2.
+    %
+    % This is found numerically by sampling values:
+
     k_drag = modelConstants().k_drag;
     scanTop = max(10*hoverFrequency, 10*1000);
     frequencyGrid = linspace(0, scanTop, 200001);
-    % Drop f = 0: there both sides are identically zero, so it always
-    % counts as sustainable and the "no ceiling exists" branch below
-    % could never fire -- a dead drive reported a 0.000000 Hz ceiling
-    % instead of saying it cannot turn the robot at all.
     frequencyGrid(1) = [];
     sustainable = arrayfun(tauMaxOf, frequencyGrid) >= ...
         k_drag*frequencyGrid.^2;
@@ -274,8 +252,7 @@ function ceilingHz = findStepOutCeiling(tauMaxOf, hoverFrequency)
 end
 
 %% ---- Hover linearization -----------------------------------------------
-function [A, B, deltaHover, reachable] = hoverStateSpace( ...
-        drive, hoverFrequency, heaveTimeConstant)
+function [A, B, deltaHover, reachable] = hoverStateSpace(drive, hoverFrequency)
     % Jacobian of the four-state model at the hover trim.
     % States [delta; omega; z; z_dot], input f_field in Hz.
     % This is the FREE-FLIGHT Jacobian. The hover trim sits exactly on
@@ -283,9 +260,6 @@ function [A, B, deltaHover, reachable] = hoverStateSpace( ...
     % it is the valid linearization for the airborne side only: on the
     % pad the z rows are identically zero instead.
     constants = modelConstants();
-    if nargin < 3 || isempty(heaveTimeConstant)
-        heaveTimeConstant = constants.defaults.heaveTimeConstant;
-    end
     I_robot = constants.I_robot;
     k_drag = constants.k_drag;
     
@@ -313,13 +287,9 @@ function [A, B, deltaHover, reachable] = hoverStateSpace( ...
     A(3,4) = 1;
     % g/(pi*f_h): thrust sensitivity to ACTUAL spin speed, notes Sec. 8.2.
     A(4,2) = 2*constants.gravity/(2*pi*hoverFrequency);
-    % -1/tau_h: inflow heave damping. At the trim f_robot = f_hover, so the
-    % |f_robot|/(f_hover*tau_h) coefficient in the nonlinear model is exactly
-    % 1/tau_h here. The z_dot perturbation is first order and multiplies that
-    % coefficient; the reverse path (perturbing f_robot times z_dot* = 0) is
-    % second order and drops out, which is why column 2 is untouched by damping.
-    A(4,4) = -1/heaveTimeConstant;
-    
+    % A(4,4) stays 0: no z_dot feedback, so z and z_dot form a bare double
+    % integrator.
+
     % Commanding a different frequency now moves the operating point on
     % the RLC curve, so it changes the available torque as well as the
     % phase. That second path is what makes B(2) nonzero here but zero
@@ -348,6 +318,11 @@ end
 
 %% ---- Simulation --------------------------------------------------------
 function result = runModel(segments, parameters)
+    % Integrate the four-state model over the segment list and derive the
+    % result contract in the file header. Integration restarts at every
+    % liftoff and landing, so contact discontinuities land on exact times;
+    % a run that chatters between modes gives up after MAX_CONTACT_SWITCHES
+    % and flags result.contactSwitchesExhausted.
     constants = modelConstants();
     I_robot = constants.I_robot;
     k_drag = constants.k_drag;
@@ -355,7 +330,6 @@ function result = runModel(segments, parameters)
     
     parameters = fillDefaults(parameters, struct( ...
         'hoverFrequency',          constants.defaults.hoverFrequency, ...
-        'heaveTimeConstant',       constants.defaults.heaveTimeConstant, ...
         'initialVerticalVelocity', 0, ...
         'frequencyTolerance',      constants.defaults.frequencyTolerance, ...
         'autoChain',               true));
@@ -364,12 +338,8 @@ function result = runModel(segments, parameters)
     end
     drive = parameters.drive;
     hoverFrequency = parameters.hoverFrequency;
-    heaveTimeConstant = parameters.heaveTimeConstant;
     initialVerticalVelocity = parameters.initialVerticalVelocity;
-    if ~isfinite(heaveTimeConstant) || heaveTimeConstant <= 0
-        error('parameters.heaveTimeConstant must be a positive finite number of s.');
-    end
-    
+
     segments = normalizeSegments(segments, parameters.autoChain);
     validateSegments(segments);
     [types, starts, ends, durations, shapes, edges] = parseSegments(segments);
@@ -420,14 +390,8 @@ function result = runModel(segments, parameters)
         (tauMaxOf(command(t))*sin(y(1)) ...
         - k_drag*(y(2)/(2*pi))*abs(y(2)/(2*pi))) / I_robot
         ];
-    % Inflow heave damping, notes Sec. 6.3: -k_w*f*z_dot per unit mass becomes
-    % -|f_robot|/(f_hover*tau_h)*z_dot once k_w and m_R are folded into tau_h.
-    % It only appears in flight -- on the pad z_dot is pinned at zero, so the
-    % damping term vanishes there anyway and the two modes stay consistent.
-    heaveDampingOf = @(omegaValue)abs(omegaValue)/(2*pi) / ...
-        (hoverFrequency*heaveTimeConstant);
     flightODE = @(t,y,command)[spinRows(t,y,command); ...
-        y(4); gravity*(liftRatioOf(y(2)) - 1) - heaveDampingOf(y(2))*y(4)];
+        y(4); gravity*(liftRatioOf(y(2)) - 1)];
     groundODE = @(t,y,command)[spinRows(t,y,command); 0; 0];
     liftOffEvent = @(t,y)liftOffCrossing(t, y, hoverFrequency);
     touchDownEvent = @touchDownCrossing;
@@ -572,35 +536,16 @@ function result = runModel(segments, parameters)
     liftToWeight = (fRobot./hoverFrequency).^2;
     
     % Every vertical force as a fraction of weight, so they add up on one axis:
-    %   lift - 1 + normal - drag = z_ddot/g
-    % Air resistance is the Sec. 6.3 inflow term, signed so that it is negative
-    % while climbing (it pulls down) and positive while descending.
-    heaveDragToWeight = -(abs(fRobot)./(hoverFrequency*heaveTimeConstant)) ...
-        .* verticalVelocity ./ gravity;
-    verticalAcceleration = gravity.*(liftToWeight - 1 + heaveDragToWeight);
+    %   lift - 1 + normal = z_ddot/g
+    verticalAcceleration = gravity.*(liftToWeight - 1);
     % Standing on the pad the net vertical force is zero, not negative: the
-    % normal force makes up the shortfall. z_dot is pinned there, so the drag
-    % term is already zero and only the normal force has to be filled in.
+    % normal force makes up the shortfall.
     verticalAcceleration(allOnGround) = 0;
     normalForceRatio = zeros(size(liftToWeight));
     normalForceRatio(allOnGround) = ...
         max(0, 1 - liftToWeight(allOnGround));
     timeOnGround = trapz(allTime, double(allOnGround));
     
-    % Terminal climb rate the final spin would settle at if held: the z_ddot=0
-    % root of g*(L/W - 1) = (|f|/(f_h*tau_h))*z_dot. NaN while the robot is
-    % parked (the pad, not aerodynamics, is holding z_dot at zero) and -Inf at
-    % f_robot = 0, where there is no damping and nothing to settle to.
-    if allOnGround(end)
-        terminalClimbRate = NaN;
-    elseif abs(fRobot(end)) > 0
-        terminalClimbRate = gravity*heaveTimeConstant*hoverFrequency* ...
-            (liftToWeight(end) - 1)/abs(fRobot(end));
-    else
-        terminalClimbRate = -Inf;
-    end
-    % Sec. 6.4 small-signal gain: w_ss/df = (2g/f_h)*tau_h.
-    climbRatePerHz = 2*gravity*heaveTimeConstant/hoverFrequency;
     if isempty(liftOffTimes)
         liftOffTime = NaN;
     else
@@ -610,8 +555,7 @@ function result = runModel(segments, parameters)
     % Linearization about the hover trim of this same four-state model.
     % Because tau_max depends on the command, the input also reaches
     % omega_dot directly: B(2) is nonzero.
-    [A, B, deltaHover, hoverReachable] = hoverStateSpace( ...
-        drive, hoverFrequency, heaveTimeConstant);
+    [A, B, deltaHover, hoverReachable] = hoverStateSpace(drive, hoverFrequency);
     
     result = struct( ...
         'segments',                 {segments}, ...
@@ -644,9 +588,6 @@ function result = runModel(segments, parameters)
         'angularAcceleration',      angularAcceleration, ...
         'liftToWeight',             liftToWeight, ...
         'normalForceRatio',         normalForceRatio, ...
-        'heaveDragToWeight',        heaveDragToWeight, ...
-        'terminalClimbRate',        terminalClimbRate, ...
-        'climbRatePerHz',           climbRatePerHz, ...
         'timeOnGround',             timeOnGround, ...
         'liftOffTimes',             liftOffTimes, ...
         'touchDownTimes',           touchDownTimes, ...
@@ -684,6 +625,10 @@ end
 
 %% ---- Command shaping ---------------------------------------------------
 function data = normalizeSegments(data, autoChain)
+    % Coerce a raw table to canonical 5-column form: unknown type names become
+    % 'Hold', columns 2-5 become numeric, Hold rows get End = Start and
+    % Order = 0, Polynomial orders round to integers >= 1. With autoChain,
+    % each row's Start is overwritten by the previous row's End.
     if nargin < 2
         autoChain = true;
     end
@@ -749,6 +694,8 @@ function validateSegments(data)
 end
 
 function [types,starts,ends,durations,shapes,edges] = parseSegments(data)
+    % Split the table into per-column vectors. edges holds the n+1 boundary
+    % times, [0; cumsum(durations)], so segment k spans edges(k) to edges(k+1).
     types = cellfun(@char, data(:,1), 'UniformOutput', false);
     starts = cellfun(@numericValue, data(:,2));
     ends = cellfun(@numericValue, data(:,3));
@@ -759,6 +706,12 @@ end
 
 function frequency = evaluateSegmentFrequency(time,segmentStartTime, ...
         duration,typeName,startFrequency,endFrequency,shape)
+    % Frequency within one segment, blending Start to End by segment shape.
+    % s = (time - segmentStartTime)/duration, clamped to [0,1]:
+    %   Hold         blend = 0, holds Start
+    %   Polynomial   blend = s^shape, shape >= 1 (1 is a linear ramp)
+    %   Exponential  blend = (1-exp(-shape*s))/(1-exp(-shape)), linear as shape -> 0
+    % time may be a vector.
     s = (time-segmentStartTime)./duration;
     s = min(max(s,0),1);
     switch lower(typeName)
@@ -857,20 +810,9 @@ function rows = resultRows(result)
                 '  <-- CONTACT CHATTER: switch cap hit, later hops not resolved', ''))
         'Time resting on the pad', sprintf('%.6f s  (%.2f%% of the run)', ...
             result.timeOnGround, 100*result.timeOnGround/result.totalTime)
-        'Heave time constant tau_h', sprintf('%.6f s  (heave pole -%.4f 1/s, %.4f Hz)', ...
-            result.parameters.heaveTimeConstant, ...
-            1/result.parameters.heaveTimeConstant, ...
-            1/(2*pi*result.parameters.heaveTimeConstant))
-        'Climb rate per Hz at hover', sprintf('%.6f (m/s)/Hz  (2*g/f_h * tau_h)', ...
-            result.climbRatePerHz)
-        'Peak air resistance', sprintf('%.6f of weight', ...
-            max(abs(result.heaveDragToWeight)))
-        'Terminal climb at f_final', ternary(isnan(result.terminalClimbRate), ...
-            'n/a -- parked on the pad at the end of the run', ...
-            ternary(isfinite(result.terminalClimbRate), ...
-                sprintf('%.6f m/s  (z_ddot = 0 root at the final spin)', ...
-                    result.terminalClimbRate), ...
-                'unbounded -- f_robot = 0, no inflow damping, free fall'))
+        'Final vertical acceleration', sprintf('%.6f m/s^2%s', ...
+            result.verticalAcceleration(end), ...
+            ternary(result.onGround(end), '  (held at 0 by the pad)', ''))
         'Initial vertical velocity', sprintf('%.6f m/s', ...
             result.parameters.initialVerticalVelocity)
         'Final vertical velocity', sprintf('%.6f m/s', result.verticalVelocity(end))
@@ -919,12 +861,9 @@ function lines = stateSpaceSummary(result)
             abs(imag(lambda))/(2*pi), -real(lambda)/abs(lambda));
     end
     % The block-triangular factorization of notes Sec. 8.3: the two complex
-    % roots above are the phase lock, -1/tau_h is the heave mode, and the
-    % remaining root at the origin is the altitude integrator -- open-loop
-    % height has no feedback, so it stays marginally stable even with drag.
-    lines{end+1,1} = sprintf( ...
-        '  Heave mode    : %.6f 1/s (tau_h = %.4f s), altitude integrator at 0', ...
-        -1/result.parameters.heaveTimeConstant, result.parameters.heaveTimeConstant);
+    % roots above are the phase lock, and the vertical block contributes a
+    % double root at the origin -- undamped, with no open-loop height feedback.
+    lines{end+1,1} = '  Heave block   : undamped double integrator, both roots at 0';
 end
 
 function lines = holdSummary(result)

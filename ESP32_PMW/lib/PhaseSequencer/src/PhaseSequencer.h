@@ -15,8 +15,8 @@ enum class TaskType {
 
 // Add to this for a sub-specification for TaskType:
 enum class TaskMode {
-  LINEAR,       // constant rate, t
-  EASE,      // symmetric S-curve, t^k/(t^k+(1-t)^k); shape k>=1 sharpens
+  POLYNOMIAL,   // power ramp about the origin, t^p; shape p>0, p=1 is linear
+  EASE,         // symmetric S-curve (sigmoid), t^k/(t^k+(1-t)^k); shape k>=1 sharpens
   EXPONENTIAL   // (e^(k*t)-1)/(e^k-1); shape k>0 ease-in, k<0 ease-out
 };
 
@@ -34,7 +34,7 @@ struct SequenceTask {
   float endPhases[4];
   float dutyCycles[4];
   float carrierDuties[4];
-  float shape; // curve parameter for EASE/EXPONENTIAL; NAN = per-mode default
+  float shape; // curve parameter for the ramp mode; NAN = per-mode default
 };
 
 // Stores the explicit state of all channels at a given microsecond in time
@@ -70,14 +70,16 @@ public:
    * @param start/end  Hz for PWM_FREQ, else % or degrees.
    * @param type       PWM_FREQ (default), PWM_DUTY, CARRIER_DUTY, PWM_PHASE.
    *                   Duty/carrier clamped 0-100%; PWM_FREQ uses channel 0 only.
-   * @param ramp_mode  LINEAR (default), EASE, or EXPONENTIAL.
-   * @param shape      Curve parameter (NAN = per-mode default). EASE: S-curve
-   *                   sharpness k>=1 (1=linear, 2=default). EXPONENTIAL: exponent
-   *                   multiplier k (>0 ease-in, <0 ease-out, 2=default).
+   * @param ramp_mode  POLYNOMIAL (default), EASE, or EXPONENTIAL.
+   * @param shape      Curve parameter (NAN = per-mode default). POLYNOMIAL:
+   *                   power p>0 (1=linear and the default, >1 slow-start,
+   *                   0<p<1 fast-start). EASE: S-curve sharpness k>=1
+   *                   (1=linear, 2=default). EXPONENTIAL: exponent multiplier
+   *                   k (>0 ease-in, <0 ease-out, 2=default).
    */
   void addRampTask(float start, float end, uint32_t durationMs,
                    TaskType type = TaskType::PWM_FREQ,
-                   TaskMode ramp_mode = TaskMode::LINEAR, float shape = NAN);
+                   TaskMode ramp_mode = TaskMode::POLYNOMIAL, float shape = NAN);
 
   /**
    * @brief Per-channel ramp: starts[i] -> ends[i] over durationMs (0 = instant).
@@ -86,7 +88,7 @@ public:
    */
   void addRampTask(const float *starts, const float *ends, int numChannels,
                    uint32_t durationMs, TaskType type = TaskType::PWM_FREQ,
-                   TaskMode ramp_mode = TaskMode::LINEAR, float shape = NAN);
+                   TaskMode ramp_mode = TaskMode::POLYNOMIAL, float shape = NAN);
 
   // Compiler
   /**

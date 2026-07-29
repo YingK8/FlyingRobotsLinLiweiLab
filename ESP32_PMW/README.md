@@ -191,10 +191,17 @@ array order (not by a timestamp field):
 ```
 
 `method` is one of: `addDutyCycleTask` / `addPhaseTask` / `addCarrierDutyCycleTask`
-(instant, per-channel set), `addWaitTask`, `addLinearRampTask` / `addEaseRampTask`
-(global frequency ramp), `addCarrierRampTask` / `addCarrierEaseRampTask` (all
-channels), or `addPhaseRampTask` (per-channel). Unrecognized methods are
-skipped and logged to serial.
+(instant, per-channel set), `addWaitTask`, `addLinearRampTask` /
+`addEaseRampTask` / `addExponentialRampTask` (global frequency ramp),
+`addCarrierRampTask` / `addCarrierEaseRampTask` / `addCarrierExponentialRampTask`
+(all channels), `addPhaseRampTask` (per-channel), `setDirection`,
+`activateChannels`, or `label`. Unrecognized methods are skipped and logged to
+serial.
+
+Every ramp method takes an optional `"shape"` that tunes its curve.
+`addLinearRampTask` / `addCarrierRampTask` are power ramps `t^p` — `shape` is
+the power `p>0`, defaulting to 1, i.e. the straight line they have always
+produced. See `lib/JsonPhaseSequencer/README.md` for the full table.
 
 ```cpp
 #include "JsonPhaseSequencer.h"

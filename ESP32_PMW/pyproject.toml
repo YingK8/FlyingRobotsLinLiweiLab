@@ -10,6 +10,8 @@ dependencies = [
     "matplotlib>=3.8",
     "picosdk>=1.1",
     "pyserial>=3.5",
+    "opencv-contrib-python>=4.10",  # cv2.aruco (ChArUco) lives in contrib
+    "ipykernel>=6.29",              # model/visual_servo.ipynb
 ]
 
 # No Python package to build — this project is just scripts under tools/.

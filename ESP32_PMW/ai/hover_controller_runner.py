@@ -39,6 +39,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
+import z_track
 from reference_profiles import Profile
 from simulate_hover import DiscreteHoverController, Scenario, simulate
 
@@ -145,7 +146,8 @@ class CommandLink:
 
 
 def controller_loop(src: PositionSource, link: CommandLink,
-                    ctrl: DiscreteHoverController, args) -> None:
+                    ctrl: DiscreteHoverController, args,
+                    ztrk: "z_track.ZTracker | None" = None) -> None:
     landed = False
 
     def land(reason: str):
@@ -193,9 +195,18 @@ def controller_loop(src: PositionSource, link: CommandLink,
                     land(f"no position fix for {args.timeout}s")
                 time.sleep(0.002)
                 continue
-            last_fix = now
             _, x_m, z_m = fix
-            mag, f_field = ctrl.step(now - t_start, x_m, z_m)
+            mag, f_lqr = ctrl.step(now - t_start, x_m, z_m)
+
+            # Lateral (mag) stays on the LQR. The vertical channel goes through
+            # ai/z_track.py instead: exact lift inversion + torque-ratio clamps,
+            # tracking the z waypoint file. See its module docstring for why the
+            # LQR's linearized 2g/f_hover gain is the wrong tool at takeoff.
+            if ztrk is not None:
+                f_field = ztrk.step(now - t_start, z_m, max(now - last_fix, 1e-3))
+            else:
+                f_field = f_lqr
+            last_fix = now
 
             az = args.az_axis_deg if mag >= 0 else (args.az_axis_deg + 180.0) % 360.0
             if az != prev_az_flip:
@@ -206,7 +217,7 @@ def controller_loop(src: PositionSource, link: CommandLink,
                 link.send(f"freq={f_field:.2f}")
             else:
                 link.log.write(f"[{now:.3f}] (freq={f_field:.2f} not sent -- "
-                               f"no firmware freq= command)\n")
+                               f"pass --enable-freq-cmd to close the loop)\n")
     except Exception as e:  # noqa: BLE001 -- de-energize on ANY failure
         print(f"error: {e}", file=sys.stderr)
         link.send("stop")
@@ -236,9 +247,16 @@ def main() -> None:
                     help="firmware SPINUP_MS + margin")
     ap.add_argument("--throttle", type=float, default=80.0)
     ap.add_argument("--enable-freq-cmd", action="store_true",
-                    help="send freq= (requires the deferred firmware command)")
+                    help="actually send freq= (firmware accepts it in FLIGHT only); "
+                         "omit for a telemetry-only dress rehearsal")
     ap.add_argument("--dry-run", action="store_true",
                     help="print commands instead of opening serial")
+    ap.add_argument("--waypoints", default=os.path.join(os.path.dirname(__file__),
+                                                       "waypoints_z.json"),
+                    help="z waypoint JSON [[t_s, z_m], ...]; --no-waypoints "
+                         "reverts the vertical channel to the LQR")
+    ap.add_argument("--no-waypoints", dest="waypoints", action="store_const",
+                    const=None, help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     with open(args.gains) as f:
@@ -255,9 +273,21 @@ def main() -> None:
     else:
         src = CameraSource()
 
+    ztrk = None
+    if args.waypoints:
+        times, heights = z_track.load_waypoints(args.waypoints)
+        # Constructing ZTracker computes f_ceiling, which raises if the torque
+        # calibration leaves no headroom at f_hover. Fail here, on the bench,
+        # rather than after the robot is already spinning.
+        ztrk = z_track.ZTracker(times, heights)
+        print(f"altitude: {len(times)} waypoints from {args.waypoints}, "
+              f"f_hover={ztrk.lim.f_hover:.0f} Hz, "
+              f"f_ceiling={ztrk.lim.f_ceiling():.1f} Hz, "
+              f"a_max={ztrk.a_ceiling:.2f} m/s^2")
+
     link = CommandLink(args.port, args.dry_run, args.log)
     try:
-        controller_loop(src, link, ctrl, args)
+        controller_loop(src, link, ctrl, args, ztrk)
     finally:
         src.close()
         link.close()

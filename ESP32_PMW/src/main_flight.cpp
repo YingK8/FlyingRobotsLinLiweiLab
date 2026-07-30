@@ -1,6 +1,7 @@
 // Live PC-commanded flight: takeoff -> hover -> directional acceleration.
 // Commands (newline, 115200): takeoff | throttle=<pct> | az=<deg> | mag=<0..1> |
-// hover | land | stop. With enableCurrentBalance on, setCarrierDutyCycle sets each
+// hover | land | stop | freq=<hz>. freq= is the altitude-loop handle (ai/z_track.py),
+// accepted in FLIGHT only. With enableCurrentBalance on, setCarrierDutyCycle sets each
 // channel's ceiling and run() balances thrust beneath it, so a differential
 // ceiling tilts the disk. One flight per boot; reset to re-arm.
 #include "drive_common.h"
@@ -14,6 +15,11 @@ static const float SPINUP_THROTTLE = 100.0f;
 static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 // Tilt authority: az-facing coils drop MIX_GAIN*mag. Fit from ../writeup/single_results.csv.
 static const float MIX_GAIN = 0.6f;
+// freq= band for the host altitude loop (ai/z_track.py). Independent of the host's
+// own clamp on purpose: a mangled or truncated line must not be able to command DC.
+// setGlobalFrequency() treats <=0 as DC -- field stops rotating and the robot drops.
+static const float FREQ_MIN = 120.0f;
+static const float FREQ_MAX = 170.0f; // >= z_track.py f_ceiling (167.3 Hz)
 
 static PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
 static PhaseSequencer seq(&ctl);
@@ -52,6 +58,14 @@ static void dispatch(String cmd) {
     azSet = cmd.substring(3).toFloat();
   } else if (cmd.startsWith("mag=")) {
     magSet = clampf(cmd.substring(4).toFloat(), 0.0f, 1.0f);
+  } else if (cmd.startsWith("freq=")) {
+    // FLIGHT only: seq.run() owns the frequency during SPINUP and would overwrite
+    // this on its next tick. Reject out-of-band rather than clamp, so a corrupt
+    // line is visible in the log instead of silently flying at the limit.
+    float hz = cmd.substring(5).toFloat();
+    if (state != FLIGHT) { Serial.printf("!freq state=%d\n", (int)state); return; }
+    if (hz < FREQ_MIN || hz > FREQ_MAX) { Serial.printf("!freq=%.2f\n", hz); return; }
+    ctl.setGlobalFrequency(hz);
   } else if (cmd == "hover") {
     magSet = 0.0f;
   } else if (cmd == "land") {
@@ -59,10 +73,11 @@ static void dispatch(String cmd) {
   } else if (cmd == "stop") {
     allCoilsOff(); state = OFF;
   } else {
-    Serial.printf("? '%s' (takeoff|throttle=|az=|mag=|hover|land|stop)\n", cmd.c_str());
+    Serial.printf("? '%s' (takeoff|throttle=|az=|mag=|hover|land|stop|freq=)\n", cmd.c_str());
     return;
   }
-  Serial.printf("state=%d col=%.0f az=%.0f mag=%.2f\n", (int)state, collective, azSet, magSet);
+  Serial.printf("state=%d col=%.0f az=%.0f mag=%.2f freq=%.2f\n",
+                (int)state, collective, azSet, magSet, ctl.getFrequency());
 }
 
 void setup() {

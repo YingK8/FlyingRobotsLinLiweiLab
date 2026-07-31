@@ -7,10 +7,9 @@ produce a stroke, then cut the coils. 30 Hz is far below the 150-210 Hz flight
 regime, so the stroke bounds here are seeds to tune on hardware -- that is why
 they are flags rather than constants.
 
-Only emits objects the on-device JsonPhaseSequencer parser already understands
-(addCarrierDutyCycleTask / add*RampTask / activateChannels / addWaitTask /
-label); this script's only job is unrolling the stroke cycles (repeats aren't a
-queue primitive), not adding capability the firmware lacks.
+Only emits objects the on-device JsonPhaseSequencer parser already understands;
+this script's only job is unrolling the stroke cycles (repeats aren't a queue
+primitive), not adding capability the firmware lacks.
 
 Usage:
     uv run python ai/gen_swim_experiment.py
@@ -31,80 +30,71 @@ RAMP_METHOD = {
     "exp": "addExponentialRampTask",     # shape > 0 ease-in, < 0 ease-out
 }
 
-DEFAULT_START_HZ = 1.0
-DEFAULT_SPINUP_HZ = 30.0
-DEFAULT_SPINUP_MS = 20000
-DEFAULT_STROKE_LOW_HZ = 22.0
-DEFAULT_STROKE_DOWN_MS = 1000
-DEFAULT_STROKE_UP_MS = 1000
-DEFAULT_STROKES = 5
-DEFAULT_CARRIER = 100.0
 SHUTDOWN_MS = 500
 
 
-def build_events(start_hz: float, spinup_hz: float, spinup_ms: int,
-                 ramp_mode: str, ramp_shape: float | None,
-                 stroke_low_hz: float, stroke_down_ms: int, stroke_up_ms: int,
-                 strokes: int, carrier: float) -> list[dict]:
-    spinup = RAMP_METHOD[ramp_mode]
+def build_events(args) -> list[dict]:
+    spinup = {"method": RAMP_METHOD[args.ramp_mode], "from": args.start_hz,
+              "to": args.spinup_hz, "duration_ms": args.spinup_ms}
+    if args.ramp_shape is not None:
+        spinup["shape"] = args.ramp_shape
 
-    def ramp(method: str, frm: float, to: float, duration_ms: int) -> dict:
-        step = {"method": method, "from": frm, "to": to, "duration_ms": duration_ms}
-        if ramp_shape is not None and method == spinup:
-            step["shape"] = ramp_shape
-        return step
-
-    events: list[dict] = [
+    events = [
         {"method": "addCarrierDutyCycleTask", "channels": [0, 1, 2, 3],
-         "value": carrier},
+         "value": args.carrier},
         {"method": "label",
-         "value": f"SWIM_SPINUP_{start_hz:g}_{spinup_hz:g}HZ"},
-        ramp(spinup, start_hz, spinup_hz, spinup_ms),
+         "value": f"SWIM_SPINUP_{args.start_hz:g}_{args.spinup_hz:g}HZ"},
+        spinup,
     ]
-    # Strokes are unrolled: the sequencer has no loop primitive. Consecutive
-    # ramps compose because the loader carries curFreq = to across steps.
-    for i in range(1, strokes + 1):
-        events.append({"method": "label", "value": f"SWIM_STROKE_{i:02d}_DOWN"})
-        events.append(ramp("addLinearRampTask", spinup_hz, stroke_low_hz,
-                           stroke_down_ms))
-        events.append({"method": "label", "value": f"SWIM_STROKE_{i:02d}_UP"})
-        events.append(ramp("addLinearRampTask", stroke_low_hz, spinup_hz,
-                           stroke_up_ms))
-    events.append({"method": "label", "value": "SWIM_OFF"})
-    events.append({"method": "activateChannels", "mask": 15, "value": 0.0})
-    events.append({"method": "addWaitTask", "duration_ms": SHUTDOWN_MS})
+    # Unrolled: the sequencer has no loop primitive. Consecutive ramps compose
+    # because the loader carries curFreq = to across steps.
+    for i in range(1, args.strokes + 1):
+        events += [
+            {"method": "label", "value": f"SWIM_STROKE_{i:02d}_DOWN"},
+            {"method": "addLinearRampTask", "from": args.spinup_hz,
+             "to": args.stroke_low_hz, "duration_ms": args.stroke_down_ms},
+            {"method": "label", "value": f"SWIM_STROKE_{i:02d}_UP"},
+            {"method": "addLinearRampTask", "from": args.stroke_low_hz,
+             "to": args.spinup_hz, "duration_ms": args.stroke_up_ms},
+        ]
+    events += [
+        {"method": "label", "value": "SWIM_OFF"},
+        {"method": "activateChannels", "mask": 15, "value": 0.0},
+        {"method": "addWaitTask", "duration_ms": SHUTDOWN_MS},
+    ]
     return events
 
 
-def total_duration_ms(spinup_ms: int, stroke_down_ms: int, stroke_up_ms: int,
-                      strokes: int) -> int:
-    return spinup_ms + strokes * (stroke_down_ms + stroke_up_ms) + SHUTDOWN_MS
+def total_duration_ms(args) -> int:
+    strokes_ms = args.strokes * (args.stroke_down_ms + args.stroke_up_ms)
+    return args.spinup_ms + strokes_ms + SHUTDOWN_MS
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--start-hz", type=float, default=DEFAULT_START_HZ,
+    ap.add_argument("--start-hz", type=float, default=1.0,
                     help="frequency the spin-up starts from (default: %(default)s)")
-    ap.add_argument("--spinup-hz", type=float, default=DEFAULT_SPINUP_HZ,
+    ap.add_argument("--spinup-hz", type=float, default=30.0,
                     help="swim frequency at the top of the ramp, Hz "
                          "(default: %(default)s)")
-    ap.add_argument("--spinup-ms", type=int, default=DEFAULT_SPINUP_MS,
+    ap.add_argument("--spinup-ms", type=int, default=20000,
                     help="spin-up ramp duration, ms (default: %(default)s)")
     ap.add_argument("--ramp-mode", choices=sorted(RAMP_METHOD), default="linear",
                     help="spin-up curve family (default: %(default)s)")
     ap.add_argument("--ramp-shape", type=float, default=None,
-                    help="curve parameter for the spin-up ramp; omitted means "
-                         "the firmware default (linear p=1, ease k=2, exp k=2)")
-    ap.add_argument("--stroke-low-hz", type=float, default=DEFAULT_STROKE_LOW_HZ,
+                    help="curve parameter for the spin-up ramp only; omitted "
+                         "means the firmware default (linear p=1, ease k=2, "
+                         "exp k=2). Strokes are always straight linear ramps")
+    ap.add_argument("--stroke-low-hz", type=float, default=22.0,
                     help="bottom of the undulation, Hz (default: %(default)s)")
-    ap.add_argument("--stroke-down-ms", type=int, default=DEFAULT_STROKE_DOWN_MS,
+    ap.add_argument("--stroke-down-ms", type=int, default=1000,
                     help="down-stroke duration, ms (default: %(default)s)")
-    ap.add_argument("--stroke-up-ms", type=int, default=DEFAULT_STROKE_UP_MS,
+    ap.add_argument("--stroke-up-ms", type=int, default=1000,
                     help="up-stroke duration, ms (default: %(default)s)")
-    ap.add_argument("--strokes", type=int, default=DEFAULT_STROKES,
+    ap.add_argument("--strokes", type=int, default=5,
                     help="number of stroke cycles (default: %(default)s)")
-    ap.add_argument("--carrier", type=float, default=DEFAULT_CARRIER,
+    ap.add_argument("--carrier", type=float, default=100.0,
                     help="carrier duty on all four channels, percent "
                          "(default: %(default)s)")
     ap.add_argument("--direction", choices=("cw", "ccw"), default="ccw",
@@ -116,25 +106,20 @@ def main() -> None:
                     help="output filename (default: %(default)s)")
     args = ap.parse_args()
 
-    events = build_events(args.start_hz, args.spinup_hz, args.spinup_ms,
-                          args.ramp_mode, args.ramp_shape, args.stroke_low_hz,
-                          args.stroke_down_ms, args.stroke_up_ms, args.strokes,
-                          args.carrier)
-    total_ms = total_duration_ms(args.spinup_ms, args.stroke_down_ms,
-                                 args.stroke_up_ms, args.strokes)
+    events = build_events(args)
+    total_ms = total_duration_ms(args)
     print(f"{args.spinup_ms / 1000:.1f}s spin-up to {args.spinup_hz:g}Hz + "
           f"{args.strokes} strokes -> {total_ms / 1000:.1f}s "
           f"(record >= {total_ms / 1000 + 5:.1f}s)")
 
     out_path = os.path.join(args.out_dir, args.out_name)
-    schedule = {
+    write_experiment({
         "resolution_ms": 25,
         "initial_freq": 0.0,
         "initial_duty": [50, 50, 50, 50],
         "direction": args.direction.upper(),
         "schedule": events,
-    }
-    write_experiment(schedule, out_path)
+    }, out_path)
     print(f"wrote {out_path}: {len(events)} events")
 
 

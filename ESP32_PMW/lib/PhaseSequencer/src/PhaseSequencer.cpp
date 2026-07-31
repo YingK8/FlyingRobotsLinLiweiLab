@@ -131,7 +131,8 @@ float PhaseSequencer::applyCurve(TaskMode mode, float t, float shape) {
 
   switch (mode) {
   case TaskMode::EASE: {
-    // Symmetric S-curve; k=1 is linear, larger k sharpens the transition.
+    // Symmetric S-curve (sigmoid), not a power: it eases in AND out about
+    // t=0.5. k=1 is linear, larger k sharpens the transition.
     float k = isnan(shape) ? 2.0f : shape;
     if (k < 1.0f)
       k = 1.0f;
@@ -146,9 +147,13 @@ float PhaseSequencer::applyCurve(TaskMode mode, float t, float shape) {
       return t; // degenerates to linear
     return (expf(k * t) - 1.0f) / (expf(k) - 1.0f);
   }
-  case TaskMode::LINEAR:
-  default:
-    return t;
+  case TaskMode::POLYNOMIAL:
+  default: {
+    // t^p about the origin: p=1 linear, p>1 slow-start, 0<p<1 fast-start.
+    // p<=0 would step or blow up, so it falls back to linear.
+    float p = (isnan(shape) || shape <= 0.0f) ? 1.0f : shape;
+    return powf(t, p);
+  }
   }
 }
 

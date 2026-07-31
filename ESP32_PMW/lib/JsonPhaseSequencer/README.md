@@ -58,16 +58,26 @@ applies the same value to every listed channel in one queue step, so they change
 *simultaneously*, unlike consecutive single-channel calls, which produce one step per
 channel a compile tick apart. Out-of-range indices are dropped.
 | `addWaitTask` | `duration_ms` | hold the current state for this long |
-| `addLinearRampTask` | `from`, `to`, `duration_ms` | linear ramp of the **global** drive frequency (Hz) |
+| `addLinearRampTask` | `from`, `to`, `duration_ms`, `shape` | power ramp `t^p` of the **global** drive frequency (Hz); `shape` = power p>0 (**default 1 = a straight line**, >1 slow-start, 0<p<1 fast-start) |
 | `addEaseRampTask` | `from`, `to`, `duration_ms`, `shape` | symmetric S-curve ramp of the global drive frequency; `shape` = sharpness k≥1 (1=linear, default 2) |
 | `addExponentialRampTask` | `from`, `to`, `duration_ms`, `shape` | exponential ramp of the global drive frequency; `shape` = exponent multiplier k (>0 ease-in, <0 ease-out, default 2) |
-| `addCarrierRampTask` | `from`, `to`, `duration_ms` | linear ramp of carrier duty, all channels identically |
+| `addCarrierRampTask` | `from`, `to`, `duration_ms`, `shape` | power ramp `t^p` of carrier duty, all channels identically; same `shape` semantics as `addLinearRampTask` |
 | `addCarrierEaseRampTask` | `from`, `to`, `duration_ms`, `shape` | S-curve ramp of carrier duty, all channels identically |
 | `addCarrierExponentialRampTask` | `from`, `to`, `duration_ms`, `shape` | exponential ramp of carrier duty, all channels identically |
 | `addPhaseRampTask` | `channels`, `from`, `to`, `duration_ms`, `shape` | S-curve ramp of one channel's phase, others unchanged (`shape` optional) |
 | `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention |
 | `activateChannels` | `mask` (0-15 bitmask), `value` (ON carrier duty %) | instantly set carrier duty to `value` for masked channels, `0` for the rest |
 | `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation (`labelForStep()`); no hardware effect, does not advance the queue |
+
+`addLinearRampTask` / `addCarrierRampTask` keep their historical names but are
+really *power* ramps (firmware `TaskMode::POLYNOMIAL`). Omitting `shape` gives
+p=1, which is exactly the straight line they always produced, so existing
+schedules need no edit:
+
+```json
+{ "method": "addLinearRampTask", "from": 1.0, "to": 160.0, "duration_ms": 15000 }
+{ "method": "addLinearRampTask", "from": 1.0, "to": 160.0, "duration_ms": 15000, "shape": 2.0 }
+```
 
 There is **no loop/repeat primitive** — an experiment that needs repeats
 (e.g. a coupling sweep across several current levels) must be unrolled into

@@ -107,7 +107,7 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
     float value = obj["value"] | 0.0f;
     float from = obj["from"] | 0.0f;
     float to = obj["to"] | 0.0f;
-    float shape = obj["shape"] | NAN; // curve param for ease/exponential ramps
+    float shape = obj["shape"] | NAN; // curve param for any ramp; NAN = default
     uint32_t durationMs = obj["duration_ms"] | 0;
     bool called = false;
     bool pushedTask = false;
@@ -145,7 +145,8 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
       called = true;
       pushedTask = true;
     } else if (method == "addLinearRampTask") {
-      addRampTask(from, to, durationMs, TaskType::PWM_FREQ, TaskMode::LINEAR);
+      addRampTask(from, to, durationMs, TaskType::PWM_FREQ,
+                  TaskMode::POLYNOMIAL, shape);
       curFreq = to;
       called = true;
       pushedTask = true;
@@ -162,7 +163,8 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierRampTask") {
-      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
+      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
+                  TaskMode::POLYNOMIAL, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;
       called = true;

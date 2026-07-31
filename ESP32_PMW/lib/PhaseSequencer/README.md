@@ -10,7 +10,7 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 
 **Key Features:**
 - Sequence ramp-up, ramp-down, and hold behaviors
-- One `addRampTask` for every quantity (frequency, duty, carrier duty, phase), linear or eased
+- One `addRampTask` for every quantity (frequency, duty, carrier duty, phase), with a tunable curve
 - Full (all channels) **and** per-channel control on every builder
 - Integrates directly with PwmController
 - Designed for PlatformIO and ESP-IDF/Arduino environments
@@ -68,14 +68,17 @@ void loop() {
 ### How to Sequence a Ramp (any quantity)
 - Use the single `addRampTask(...)`. Pick the quantity with `TaskType`
   (`PWM_FREQ`, `PWM_DUTY`, `CARRIER_DUTY`, `PWM_PHASE`) and the curve with
-  `TaskMode` (`LINEAR`, `EASE`, or `EXPONENTIAL`). The optional final `shape`
-  argument tunes EASE (S-curve sharpness k≥1) and EXPONENTIAL (exponent
-  multiplier k); omit it (NAN) for the per-mode default of 2:
+  `TaskMode` (`POLYNOMIAL`, `EASE`, or `EXPONENTIAL`). The optional final
+  `shape` argument tunes all three — POLYNOMIAL (power p>0, default 1), EASE
+  (S-curve sharpness k≥1, default 2), EXPONENTIAL (exponent multiplier k,
+  default 2); omit it (NAN) for the per-mode default:
   ```cpp
   seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE);
   seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EASE, 4.0f); // sharper S
   seq.addRampTask(1.0f, 100.0f, 10000, TaskType::PWM_FREQ, TaskMode::EXPONENTIAL, 3.0f); // hard ease-in
-  seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::LINEAR);
+  seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY);                      // straight line (p=1)
+  seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::POLYNOMIAL, 2.0f); // quadratic
+  seq.addRampTask(0.0f, 100.0f, 2000, TaskType::CARRIER_DUTY, TaskMode::POLYNOMIAL, 0.5f); // sqrt, fast start
   ```
 - Call `compile(...)` then `start()`.
 
@@ -90,7 +93,7 @@ void loop() {
   ```cpp
   float starts[4] = {NAN, 0.0f, NAN, 0.0f};   // only ch1 & ch3
   float ends[4]   = {NAN, 90.0f, NAN, 90.0f};
-  seq.addRampTask(starts, ends, 4, 2000, TaskType::PWM_PHASE, TaskMode::LINEAR);
+  seq.addRampTask(starts, ends, 4, 2000, TaskType::PWM_PHASE);
   ```
 
 ### How to Instantly Set the Full State
@@ -128,10 +131,12 @@ void addWaitTask(uint32_t durationMs);
 // Ramps: one builder for freq / duty / carrier / phase
 void addRampTask(float start, float end, uint32_t durationMs,
                  TaskType type = TaskType::PWM_FREQ,
-                 TaskMode ramp_mode = TaskMode::LINEAR);           // full
+                 TaskMode ramp_mode = TaskMode::POLYNOMIAL,
+                 float shape = NAN);                               // full
 void addRampTask(const float* starts, const float* ends, int numChannels,
                  uint32_t durationMs, TaskType type = TaskType::PWM_FREQ,
-                 TaskMode ramp_mode = TaskMode::LINEAR);           // per-channel
+                 TaskMode ramp_mode = TaskMode::POLYNOMIAL,
+                 float shape = NAN);                               // per-channel
 
 void compile(uint32_t resolutionMs, float initialFreq,
              const float* initialDuty, const float* initialPhase);
@@ -145,8 +150,19 @@ bool isDone() const;
   `TRAJECTORY_POINT`. Scoped (`enum class`) to avoid colliding with
   per-sketch constants like `const int PWM_FREQ = 15000`, so always qualify:
   `TaskType::PWM_FREQ`.
-- `TaskMode`: `LINEAR`, `EASE`, `EXPONENTIAL`, the interpolation curve for a
-  ramp (the last two take an optional `shape` parameter).
+- `TaskMode`: the interpolation curve for a ramp, each tuned by the optional
+  `shape` parameter (NAN = per-mode default). Progress `t` runs 0→1 over the
+  task duration and the endpoints are always pinned exactly.
+
+  | Mode | Curve | `shape` |
+  |---|---|---|
+  | `POLYNOMIAL` | `t^p` — power ramp about the origin | power `p>0`; **default 1 = a straight line**, `p>1` slow-start, `0<p<1` fast-start. `p<=0` falls back to 1 |
+  | `EASE` | `t^k/(t^k+(1-t)^k)` — symmetric S-curve (sigmoid) | sharpness `k>=1`, default 2; `k=1` is linear |
+  | `EXPONENTIAL` | `(e^(k*t)-1)/(e^k-1)` | multiplier `k`, default 2; `k>0` ease-in, `k<0` ease-out |
+
+  `EASE` is a sigmoid, not a power: it is symmetric about `t=0.5` and eases in
+  *and* out, so it is a genuinely different family from `POLYNOMIAL` and cannot
+  be expressed as some `t^p`.
 
 Note: `PWM_FREQ` is a single global frequency; per-channel ramps ignore all but
 channel 0 for it. Duty/carrier tasks are clamped to 0–100%.

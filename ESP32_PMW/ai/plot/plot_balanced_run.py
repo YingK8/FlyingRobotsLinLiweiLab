@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Plot a balanced_experiment run (main_tilt / main_ceiling / ...). Parses the
-current-PID telemetry line format emitted by src/balanced_experiment.cpp:
+"""Plot a schedule-driven run. Parses the telemetry line format emitted by
+driveTelemetry() in src/drive_common.h:
   t=<ms> phase=<n> freq=<Hz> | I[A]: A=.. B=.. C=.. D=.. | duty[%]: A=.. ... | spread=..
 Renders current, per-channel carrier duty, and freq/spread vs time.
 Usage: python3 ai/plot/plot_balanced_run.py <run.log>

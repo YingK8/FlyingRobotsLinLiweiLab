@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Passive, no-command serial recorder. Opens the port, reads, logs -- never
 writes anything to the board (no reset by default, no start/stop/e-stop
-commands, no TUI). Pairs with autonomous firmware (main_experiment.cpp,
-main_tilt_pi.cpp) that needs no serial handshake to run: flash it separately
+commands, no TUI). Pairs with autonomous firmware (main_swim.cpp) that
+needs no serial handshake to run: flash it separately
 (`pio run -t upload`), then run this to capture whatever it streams.
 
 Reuses the same buffered, split-proof line-reading design as
-ai/run_experiment.py's SerialSession (non-blocking, accumulates raw bytes
+ai/run_swim.py's SerialSession (non-blocking, accumulates raw bytes
 across polls, only ever returns a complete line -- a short poll timeout on a
 plain blocking readline() was confirmed on hardware to truncate/split lines,
 desyncing anything parsing the output).
@@ -48,7 +48,7 @@ def find_port(explicit=None):
 
 class PassiveSerialReader:
     """Non-blocking, buffered, split-proof line reader -- read-only, never
-    writes to the port. See ai/run_experiment.py's SerialSession for the
+    writes to the port. See ai/run_swim.py's SerialSession for the
     same buffering design (used there alongside command-sending)."""
 
     def __init__(self, port: str, baud: int):
@@ -61,7 +61,7 @@ class PassiveSerialReader:
         # the ESP32 dev board's auto-reset circuit, and can glitch GPIO0
         # low, dropping it into DOWNLOAD_BOOT ("waiting for download")
         # instead of a normal app boot. Confirmed on hardware: this bit
-        # was missing here (present in ai/run_experiment.py's
+        # was missing here (present in ai/run_swim.py's
         # SerialSession) and reliably reproduced the download-mode glitch
         # even with --reset never passed.
         self.ser.dtr = False  # IO0 stays high -> APP boot, not bootloader

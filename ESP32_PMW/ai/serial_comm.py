@@ -1,9 +1,10 @@
 """Non-blocking, newline-framed serial link -- Python mirror of the ESP32
-SerialComm library (lib/SerialComm). Call handle_serial_comm() once per tick;
+SerialComm library that used to live in lib/. Call handle_serial_comm() once
+per tick;
 it never blocks.
 
 Framing: ASCII lines terminated by \\n, \\r, or \\r\\n -- matches the existing
-firmware protocol (main_tilt.cpp) and PC-side tools (run_experiment.py,
+firmware telemetry format and PC-side tools (run_swim.py,
 trigger_reset_log.py), which this module's find_port()/reset pulse are
 lifted from.
 """

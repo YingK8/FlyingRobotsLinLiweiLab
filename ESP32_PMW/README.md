@@ -33,6 +33,12 @@ Or chain both:
 pio run -e swim --target upload && pio device monitor -e swim
 ```
 
+Or drive the whole loop — uploadfs, flash, reset, capture — from the host:
+
+```bash
+uv run python ai/run_swim.py --capture-s 40 --log swim_run.log
+```
+
 Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>.py`).
 
 ---

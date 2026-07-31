@@ -157,7 +157,7 @@ sign-controlled (bipolar) drive with magnitude set by carrier duty.
 
 ### Mapping to the firmware
 
-This matches the firmware convention (`src/main_tilt.cpp` and the `PhaseController` library):
+This matches the firmware convention (`src/drive_common.h`'s `PHASES_CW` / `PHASES_CCW`):
 
 | Firmware concept | Board net | Effect |
 |---|---|---|

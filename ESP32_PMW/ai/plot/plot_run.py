@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""General per-run plotter for a balanced_experiment serial log.
+"""General per-run plotter for a schedule-driven serial log.
 
 Plots the FULL run (spin-up ramp + tilt) against wall time: drive frequency, the
 per-channel carrier duty with the commanded V/f ceiling overlaid, the per-channel

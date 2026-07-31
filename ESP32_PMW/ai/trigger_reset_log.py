@@ -10,18 +10,18 @@ bootloader), assert RTS 150 ms (EN low = reset), release. Manual RST-button
 timing was flaky and gave empty captures; this wasn't.
 
 SAFETY: unconditionally sends 's' (e-stop) before closing the port, on EVERY
-exit path (normal completion, Ctrl-C, or error) -- matching run_experiment.py's
-`finally: do_stop()`. Firmware with an unbounded HOLD state (main_current_pid.cpp)
+exit path (normal completion, Ctrl-C, or error) -- matching run_swim.py's
+`finally: do_stop()`. Firmware with an unbounded HOLD state
 will otherwise keep driving the coils forever after this script exits, since
 --log-seconds only stops the PC-side log, not the ESP32's own control loop.
-Harmless no-op on firmware with no serial command listener (main_coupling_test.cpp).
+Harmless no-op on firmware with no serial command listener (main_swim.cpp).
 
 Usage:
   uv run python ai/trigger_reset_log.py [--port /dev/ttyUSB0] [--delay 4]
       [--log-seconds 60] [--out serial.log]
       [--cmd b --cmd-delay 7]   # optional: send a one-letter serial command
                                 # --cmd-delay seconds after the reset (e.g. 'b'
-                                # to begin once main_current_pid.cpp's boot/
+                                # to begin once the firmware's boot/
                                 # sanity-check sequence has reached IDLE)
 """
 import argparse

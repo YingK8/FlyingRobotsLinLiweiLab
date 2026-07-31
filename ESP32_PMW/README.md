@@ -6,38 +6,31 @@ Controls a 4-channel phased PWM coil array to spin and tilt a magnetic disk. Eac
 
 ## Upload
 
-Each experiment is a self-contained firmware that loads its schedule from SPIFFS
-and **runs on boot** (no arming). Upload the JSON payloads once, then the firmware:
+The firmware is self-contained: it loads its schedule from SPIFFS and **runs on
+boot** (no arming). Upload the JSON payload once, then the firmware:
 
 ```bash
-pio run -e <env> --target uploadfs   # packs spiffs_data/*.json to flash (once)
-pio run -e <env> --target upload     # builds + flashes the firmware
+pio run -e swim --target uploadfs   # packs spiffs_data/*.json to flash (once)
+pio run -e swim --target upload     # builds + flashes the firmware
 ```
 
-| Environment | Source file | Balance | Purpose |
-|---|---|---|---|
-| `tilt` | `main_tilt.cpp` | PI | 1→210 Hz ramp, then 100%→0% carrier step-down |
-| `takeoff` | `main_takeoff.cpp` | PI | 1→500 Hz double ramp at 100% carrier |
-| `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | PI | CW, 1→190 Hz |
-| `carrier_ramp` | `main_carrier_ramp.cpp` | PI | carrier 0→100% at 190 Hz |
-| `comp_test` | `main_comp_test.cpp` | passthrough | per-channel trim A/B test |
-| `coupling_test` | `main_coupling_test.cpp` | passthrough | coil-coupling sweep |
-| `dc` | `main_dc.cpp` | passthrough | DC current-sense calibration |
-| `ceiling` | `main_ceiling.cpp` | passthrough | unregulated ceiling vs frequency |
-| `current_pid` | `main_current_pid.cpp` | PI | standalone serial PID tuning rig |
+| Environment | Source file | Schedule | Balance | Purpose |
+|---|---|---|---|---|
+| `swim` | `main_swim.cpp` | `spiffs_data/swim.json` | PI | 1→30 Hz ramp over 20 s, then 30↔22 Hz undulation ×5 |
 
 "PI" = the current-balance loop (folded into `PwmController`, opt-in via
 `enableCurrentBalance()`) rebalances the four channels beneath the schedule's
-carrier ceiling. "passthrough" = the commanded carriers drive verbatim.
+carrier ceiling. Omitting `enableCurrentBalance()` gives "passthrough", where the
+commanded carriers drive verbatim.
 
 Monitor serial after upload:
 ```bash
-pio device monitor -e <env>   # 115200 baud
+pio device monitor -e swim   # 115200 baud
 ```
 
 Or chain both:
 ```bash
-pio run -e tilt --target upload && pio device monitor -e tilt
+pio run -e swim --target upload && pio device monitor -e swim
 ```
 
 Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>.py`).
@@ -46,14 +39,17 @@ Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>
 
 ## Channel Map
 
-| Index | Name | PWM pin | Carrier pin | Phase |
-|---|---|---|---|---|
-| 0 | A | GPIO 32 | GPIO 33 | 0° |
-| 1 | B | GPIO 25 | GPIO 26 | 180° |
-| 2 | C | GPIO 27 | GPIO 14 | 90° |
-| 3 | D | GPIO 23 | GPIO 13 | 270° |
+Authoritative source: [`src/constants.h`](src/constants.h).
 
-Rotation order (CCW): A → C → B → D
+| Index | Name | PWM pin | Carrier pin | Current-sense ADC | CCW phase |
+|---|---|---|---|---|---|
+| 0 | A | GPIO 32 | GPIO 33 | GPIO 36 | 90° |
+| 1 | B | GPIO 25 | GPIO 26 | GPIO 39 | 270° |
+| 2 | C | GPIO 18 | GPIO 19 | GPIO 34 | 180° |
+| 3 | D | GPIO 22 | GPIO 23 | GPIO 35 | 0° |
+
+Rotation order (CCW): A → C → B → D. CW swaps A and B to 270°/90°; both phase
+sets live in `src/drive_common.h` as `PHASES_CCW` / `PHASES_CW`.
 
 ---
 
@@ -91,9 +87,10 @@ controller->measuredCurrents();                     // float[4] sensed current (
 controller->overcurrentTripped();                   // true once the latch fired
 ```
 
-Most experiment mains don't call these directly — `src/drive_common.h`
-(`driveBoot` / `driveMake` / `driveLoad` / `driveTelemetry`) wraps the boilerplate
-so each `main_*.cpp` stays a short, explicit `setup()` + `loop()`.
+`main_swim.cpp` doesn't call most of these directly — `src/drive_common.h`
+(`driveBoot` / `driveTelemetry`, plus the shared `PHASES_*` / `INITIAL_DUTY` /
+`CARRIER_ZERO` / `SENS` constants) wraps the boilerplate so the main stays a
+short, explicit `setup()` + `loop()`.
 
 ---
 
@@ -136,13 +133,28 @@ bool done = seq->isDone();
 
 ---
 
-## Carrier Sweep Pattern (tilt)
+## The swim task
 
-`main_tilt.cpp` ramps 1→210 Hz, then steps every channel's carrier ceiling down
-100% → 0% in −10% steps. The folded PI loop rebalances the four channels beneath
-each ceiling, so per-channel trims are found automatically instead of hand-tuned.
-The LED on GPIO 2 toggles once per schedule step — that per-step behavior lives
-right in the main's `loop()` and is the template for adding your own.
+`main_swim.cpp` is 20 lines: boot, configure the carrier, enable current sense
+and the balance loop, load `/swim.json`, run. All the motion lives in the JSON.
+
+The schedule ramps the global commutation frequency 1 → 30 Hz over 20 s at 100%
+carrier, then undulates 30 ↔ 22 Hz five times (1 s each way) to produce a stroke,
+then cuts the coils. 30 Hz is well below the 150–210 Hz flight regime, so the
+stroke bounds are seeds to tune on hardware, not derived values.
+
+Regenerate the schedule rather than hand-editing it:
+
+```bash
+uv run python ai/gen_swim_experiment.py                        # the committed defaults
+uv run python ai/gen_swim_experiment.py --strokes 3 --ramp-mode ease
+uv run python ai/gen_swim_experiment.py --spinup-hz 25 --stroke-low-hz 18
+```
+
+The generator only emits methods the on-device parser already understands — its
+job is unrolling the stroke cycles, since repeat is not a queue primitive. Each
+phase is preceded by a `label` (`SWIM_SPINUP_1_30HZ`, `SWIM_STROKE_01_DOWN`, …,
+`SWIM_OFF`) so `labelForStep()` and `ai/plot_serial_log.py` can segment a run.
 
 ---
 
@@ -211,38 +223,7 @@ seq->start();
 // call seq->run() in loop()
 ```
 
----
-
-### CSV waypoints (CsvPhaseSequencer)
-
-Define channel states at each timestamp; the sequencer interpolates between them:
-
-```csv
-# channels, 4
-# step_size_ms, 25
-# interpolation, linear
-time,channel,duty,carrier_duty,frequency,phase
-0,0,50,100,10,0
-0,1,50,100,10,90
-0,2,50,100,10,180
-0,3,50,100,10,270
-500,0,60,80,15,0
-500,1,60,80,15,90
-500,2,60,80,15,180
-500,3,60,80,15,270
-```
-
-Interpolation modes: `linear`, `hermite` / `ease` (smoothstep).
-
-```cpp
-#include "CsvPhaseSequencer.h"
-CsvPhaseSequencer* seq = new CsvPhaseSequencer(controller);
-seq->loadFromCSVFile("/profile.csv");
-seq->start();
-// call seq->run() in loop()
-```
-
-Upload the data file to SPIFFS with: `pio run -e <env> --target uploadfs`
+Upload the data file to SPIFFS with: `pio run -e swim --target uploadfs`
 
 ---
 

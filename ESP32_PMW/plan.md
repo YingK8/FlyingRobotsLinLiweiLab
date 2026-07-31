@@ -1,5 +1,11 @@
 # Deep-research session: coil coupling vs. tilt — root-cause + sensorless stabilization
 
+> **Archived.** This branch now carries only the drone swim task. The firmware,
+> schedules and analysis scripts named below (`main_current_pid`, `main_tilt`,
+> `main_coupling_test`, `ai/coupling_matrix.py`, …) were removed — see the commit
+> "Strip branch to the drone-swimming task" to recover them. The measurements and
+> conclusions are kept here because they still describe the hardware.
+
 ## Context
 
 The 4-coil rotating-field platform spins a passive magnetic disk suspended above the

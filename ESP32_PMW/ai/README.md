@@ -114,8 +114,8 @@ You are probing the BRIDGE OUTPUT (OUTA/OUTB).
 2. Bridge output is NOT a clean 190 Hz square (wrong freq / DC / asymmetric / distorted)
    -> FIRMWARE/DRIVE issue: carrier duty, phase/direction signal, or channel mapping.
       Capture the ESP32 carrier + phase GPIOs (3.3 V logic) and confirm carrier=15 kHz,
-      phase toggles at the drive frequency. Firmware map: A=carrier33/pwm32, B=26/25,
-      C=14/27, D=13/23.
+      phase toggles at the drive frequency. Firmware map (src/constants.h):
+      A=carrier33/pwm32, B=26/25, C=19/18, D=23/22.
 
 3. Current channel added -- what does the CURRENT look like?
    * SINE, in phase with bridge output (|phase|<10 deg), ~190 Hz -> healthy tank. Done.

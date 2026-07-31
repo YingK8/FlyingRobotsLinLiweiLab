@@ -33,13 +33,9 @@ Or chain both:
 pio run -e swim --target upload && pio device monitor -e swim
 ```
 
-Or drive the whole loop — uploadfs, flash, reset, capture — from the host:
-
-```bash
-uv run python ai/run_swim.py --capture-s 40 --log swim_run.log
-```
-
-Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>.py`).
+Host-side tooling — the schedule generator, the flash-and-capture runner, and the
+log plotters — lives in `ai/`, which `.gitignore` keeps off `main` on purpose.
+Check out `drone-swimming` to get it.
 
 ---
 
@@ -149,18 +145,15 @@ carrier, then undulates 30 ↔ 22 Hz five times (1 s each way) to produce a stro
 then cuts the coils. 30 Hz is well below the 150–210 Hz flight regime, so the
 stroke bounds are seeds to tune on hardware, not derived values.
 
-Regenerate the schedule rather than hand-editing it:
+`swim.json` is generated, not hand-written. The generator
+(`ai/gen_swim_experiment.py`, on the `drone-swimming` branch — `ai/` is
+gitignored here) takes the ramp curve, stroke bounds and cycle count as flags
+and regenerates the file. It only emits methods the on-device parser already
+understands; its job is unrolling the stroke cycles, since repeat is not a queue
+primitive.
 
-```bash
-uv run python ai/gen_swim_experiment.py                        # the committed defaults
-uv run python ai/gen_swim_experiment.py --strokes 3 --ramp-mode ease
-uv run python ai/gen_swim_experiment.py --spinup-hz 25 --stroke-low-hz 18
-```
-
-The generator only emits methods the on-device parser already understands — its
-job is unrolling the stroke cycles, since repeat is not a queue primitive. Each
-phase is preceded by a `label` (`SWIM_SPINUP_1_30HZ`, `SWIM_STROKE_01_DOWN`, …,
-`SWIM_OFF`) so `labelForStep()` and `ai/plot_serial_log.py` can segment a run.
+Each phase is preceded by a `label` (`SWIM_SPINUP_1_30HZ`, `SWIM_STROKE_01_DOWN`,
+…, `SWIM_OFF`) so `labelForStep()` and the log plotters can segment a run.
 
 ---
 

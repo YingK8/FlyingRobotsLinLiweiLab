@@ -32,12 +32,12 @@ carrier drives verbatim — the right choice for anything that deliberately driv
 channels unequally, since balancing would erase what it measures.
 
 Telemetry is the shared line format emitted by `driveTelemetry()` in
-`src/drive_common.h`, parseable by `ai/plot_serial_log.py`.
+`src/drive_common.h`, parseable by the log plotters in `ai/` (see README).
 
 ## Files
 
 - `swim.json` — the swim task: 1→30 Hz linear ramp over 20 s at 100% carrier,
   then a 30↔22 Hz undulation ×5 (1 s each way), then coils off. CCW, PI-balanced.
-  Loaded by `[env:swim]`. **Generated — do not hand-edit; regenerate with**
-  `uv run python ai/gen_swim_experiment.py` (see `--help` for the ramp and stroke
-  flags). Each phase carries a `SWIM_*` label for log segmentation.
+  Loaded by `[env:swim]`. **Generated — do not hand-edit**; regenerate it with
+  `ai/gen_swim_experiment.py` on the `drone-swimming` branch (`ai/` is gitignored
+  on main). Each phase carries a `SWIM_*` label for log segmentation.

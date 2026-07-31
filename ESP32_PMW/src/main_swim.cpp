@@ -1,7 +1,7 @@
 // Swim: spin up to a swim frequency, then undulate around it to produce a
 // stroke. PI-balanced, runs on boot -- no arming. The motion itself (and its
-// own direction=CCW) lives in /swim.json; regenerate it with
-// ai/gen_swim_experiment.py rather than editing it by hand.
+// own direction=CCW) lives in /swim.json; regenerate it with the generator in
+// ai/ (see README) rather than editing it by hand.
 #include "drive_common.h"
 
 static PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);

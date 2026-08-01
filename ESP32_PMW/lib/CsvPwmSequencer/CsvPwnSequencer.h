@@ -1,7 +1,7 @@
 
 #pragma once
 #include "PwmController.h"
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 #include <Arduino.h>
 #include <FS.h>
 #include <SPIFFS.h>
@@ -9,9 +9,9 @@
 
 const uint32_t STEP_SIZE_MS = 25; // Default time step for trajectory points
 
-class CsvPhaseSequencer : public PhaseSequencer {
+class CsvPwmSequencer : public PwmSequencer {
 public:
-  CsvPhaseSequencer(PwmController *phaseCtrl);
+  CsvPwmSequencer(PwmController *phaseCtrl);
 
   /**
    * @brief Load CSV waypoints (SPIFFS) and compile. Header

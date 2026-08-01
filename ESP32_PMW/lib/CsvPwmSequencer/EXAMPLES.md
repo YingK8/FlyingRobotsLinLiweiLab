@@ -1,6 +1,6 @@
-# CsvPhaseSequencer CSV Examples
+# CsvPwmSequencer CSV Examples
 
-All examples define waypoints. CsvPhaseSequencer interpolates between waypoints
+All examples define waypoints. CsvPwmSequencer interpolates between waypoints
 using # step_size_ms and # interpolation.
 
 ## Example 1: Minimal hold profile

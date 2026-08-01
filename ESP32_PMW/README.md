@@ -96,14 +96,14 @@ short, explicit `setup()` + `loop()`.
 
 ---
 
-## PhaseSequencer
+## PwmSequencer
 
 Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PwmController.
 
 ```cpp
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 
-PhaseSequencer* seq = new PhaseSequencer(controller);
+PwmSequencer* seq = new PwmSequencer(controller);
 
 // One addRampTask for every quantity; TaskType picks it, TaskMode the curve
 seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::EASE);   // 1→200 Hz ease
@@ -159,7 +159,7 @@ Each phase is preceded by a `label` (`SWIM_SPINUP_1_30HZ`, `SWIM_STROKE_01_DOWN`
 
 ## Scheduling Tasks
 
-### Code-based (PhaseSequencer)
+### Code-based (PwmSequencer)
 
 Build the sequence in `setup()`, then execute it in `loop()`:
 
@@ -186,10 +186,10 @@ void loop() {
 
 ---
 
-### JSON file (JsonPhaseSequencer)
+### JSON file (JsonPwmSequencer)
 
 Upload a `.json` file to SPIFFS, then load it at startup. It's an array of
-entries, each naming a `PhaseSequencer` method and its arguments, applied in
+entries, each naming a `PwmSequencer` method and its arguments, applied in
 array order (not by a timestamp field):
 
 ```json
@@ -212,11 +212,11 @@ serial.
 Every ramp method takes an optional `"shape"` that tunes its curve.
 `addLinearRampTask` / `addCarrierRampTask` are power ramps `t^p` — `shape` is
 the power `p>0`, defaulting to 1, i.e. the straight line they have always
-produced. See `lib/JsonPhaseSequencer/README.md` for the full table.
+produced. See `lib/JsonPwmSequencer/README.md` for the full table.
 
 ```cpp
-#include "JsonPhaseSequencer.h"
-JsonPhaseSequencer* seq = new JsonPhaseSequencer(controller);
+#include "JsonPwmSequencer.h"
+JsonPwmSequencer* seq = new JsonPwmSequencer(controller);
 seq->loadFromJsonFile("/schedule.json");
 seq->start();
 // call seq->run() in loop()
@@ -229,4 +229,4 @@ Upload the data file to SPIFFS with: `pio run -e swim --target uploadfs`
 ## Further Reading
 
 - Full API docs: [`DOCS.md`](DOCS.md)
-- Library details: [`lib/PwmController/README.md`](lib/PwmController/README.md), [`lib/PhaseSequencer/README.md`](lib/PhaseSequencer/README.md)
+- Library details: [`lib/PwmController/README.md`](lib/PwmController/README.md), [`lib/PwmSequencer/README.md`](lib/PwmSequencer/README.md)

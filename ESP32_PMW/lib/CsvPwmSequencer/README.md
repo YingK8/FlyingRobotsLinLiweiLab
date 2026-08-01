@@ -1,6 +1,6 @@
-# CsvPhaseSequencer
+# CsvPwmSequencer
 
-Use CsvPhaseSequencer when you want to define PWM motion as time-based waypoints in a CSV file, then interpolate between those waypoints at a fixed step size.
+Use CsvPwmSequencer when you want to define PWM motion as time-based waypoints in a CSV file, then interpolate between those waypoints at a fixed step size.
 
 This guide shows how to:
 - Write a valid CSV waypoint file.
@@ -9,13 +9,13 @@ This guide shows how to:
 
 ## Prerequisites
 
-- PwmController and PhaseSequencer are already integrated in your project.
+- PwmController and PwmSequencer are already integrated in your project.
 - SPIFFS is enabled and your CSV file is uploaded to the board filesystem.
 - Your channels are indexed 0..3.
 
 ## CSV format
 
-CsvPhaseSequencer accepts metadata lines (starting with #), then data lines.
+CsvPwmSequencer accepts metadata lines (starting with #), then data lines.
 
 ### Metadata
 
@@ -76,10 +76,10 @@ time,channel,duty,carrier_duty,frequency,phase
 200,3,40,80,12,270
 ```
 
-## Step-by-step: use CsvPhaseSequencer in main.cpp
+## Step-by-step: use CsvPwmSequencer in main.cpp
 
 ```cpp
-#include "CsvPhaseSequencer.h"
+#include "CsvPwmSequencer.h"
 #include "PwmController.h"
 #include <Arduino.h>
 #include <SPIFFS.h>
@@ -91,7 +91,7 @@ const float INITIAL_PHASES[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 
 PwmController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY, NUM_CHANNELS);
-CsvPhaseSequencer seq(&controller);
+CsvPwmSequencer seq(&controller);
 
 void setup() {
   Serial.begin(115200);

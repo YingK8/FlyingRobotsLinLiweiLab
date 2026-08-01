@@ -1,6 +1,6 @@
-# JsonPhaseSequencer
+# JsonPwmSequencer
 
-A `PhaseSequencer` that loads a schedule from a JSON file (SPIFFS) and compiles
+A `PwmSequencer` that loads a schedule from a JSON file (SPIFFS) and compiles
 it into a runnable queue. The file is an **object** carrying the initial state
 plus a `schedule` array of method-call objects, executed in order — not a
 schedule of absolute timestamps.
@@ -109,7 +109,7 @@ can load as-is.
 ## Usage
 
 ```cpp
-JsonPhaseSequencer seq(&controller);
+JsonPwmSequencer seq(&controller);
 seq.loadFromJsonFile("/experiment.json");  // parses + compiles
 seq.start();
 // in loop(): seq.run();  isDone() reports queue exhaustion.

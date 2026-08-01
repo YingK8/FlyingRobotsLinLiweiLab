@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
 
-#include "JsonPhaseSequencer.h"
+#include "JsonPwmSequencer.h"
 #include "PwmController.h"
 #include "constants.h"
 #include "reset_button.h"

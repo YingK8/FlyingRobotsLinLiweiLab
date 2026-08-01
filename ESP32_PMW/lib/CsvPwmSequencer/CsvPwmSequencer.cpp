@@ -1,4 +1,4 @@
-#include "CsvPhaseSequencer.h"
+#include "CsvPwmSequencer.h"
 
 namespace {
 
@@ -27,14 +27,14 @@ SequenceTask makeTaskFromPoint(const TrajectoryPoint &point, int numChannels,
 
 } // namespace
 
-CsvPhaseSequencer::CsvPhaseSequencer(PwmController *phaseCtrl)
-    : PhaseSequencer(phaseCtrl) {}
+CsvPwmSequencer::CsvPwmSequencer(PwmController *phaseCtrl)
+    : PwmSequencer(phaseCtrl) {}
 
-bool CsvPhaseSequencer::loadFromCSVFile(const char *filename,
+bool CsvPwmSequencer::loadFromCSVFile(const char *filename,
                                         uint32_t resolutionMs) {
   File file = SPIFFS.open(filename, "r");
   if (!file) {
-    Serial.println("[CsvPhaseSequencer] Failed to open CSV file");
+    Serial.println("[CsvPwmSequencer] Failed to open CSV file");
     return false;
   }
 
@@ -151,13 +151,13 @@ bool CsvPhaseSequencer::loadFromCSVFile(const char *filename,
   file.close();
 
   if (csvRows.empty()) {
-    Serial.println("[CsvPhaseSequencer] CSV file contained no trajectory rows");
+    Serial.println("[CsvPwmSequencer] CSV file contained no trajectory rows");
     return false;
   }
 
   if (csvRows.front().timeUs != 0) {
     Serial.println(
-        "[CsvPhaseSequencer] First CSV block must start at time 0 ms");
+        "[CsvPwmSequencer] First CSV block must start at time 0 ms");
     return false;
   }
 

@@ -1,4 +1,4 @@
-# PhaseSequencer
+# PwmSequencer
 
 A high-level interface for sequencing PWM phase, frequency, and duty cycle behaviors over time, built on top of PwmController for the ESP32 platform.
 
@@ -6,7 +6,7 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 
 ## 1. Introduction
 
-**PhaseSequencer** enables you to create complex, time-varying PWM patterns and behaviors for multi-channel systems. It is ideal for robotics, experimental setups, and research where you need to ramp, sequence, or synchronize PWM outputs in a repeatable and programmable way.
+**PwmSequencer** enables you to create complex, time-varying PWM patterns and behaviors for multi-channel systems. It is ideal for robotics, experimental setups, and research where you need to ramp, sequence, or synchronize PWM outputs in a repeatable and programmable way.
 
 **Key Features:**
 - Sequence ramp-up, ramp-down, and hold behaviors
@@ -26,13 +26,13 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 - Working PwmController setup
 
 ### Installation
-1. Add the `PhaseSequencer` and `PwmController` source files to your PlatformIO project.
+1. Add the `PwmSequencer` and `PwmController` source files to your PlatformIO project.
 2. Ensure all dependencies are available.
 
 ### Basic Usage Example
 ```cpp
 #include "PwmController.h"
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 
 const int NUM_CHANNELS = 4;
 const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_19, GPIO_NUM_33, GPIO_NUM_27, GPIO_NUM_32};
@@ -40,7 +40,7 @@ const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 90.0, 180.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 
 PwmController controller(PWM_PINS, INITIAL_PHASES, INITIAL_DUTY_CYCLES, NUM_CHANNELS);
-PhaseSequencer seq(&controller);
+PwmSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
@@ -104,18 +104,18 @@ void loop() {
   trajectory point has no NAN-skip. Every channel must be given explicitly.
 
 ### How to Integrate with PwmController
-- Pass a pointer to your PwmController instance when constructing PhaseSequencer.
+- Pass a pointer to your PwmController instance when constructing PwmSequencer.
 - Call `controller.run()` and `seq.run()` in your main loop.
 
 ---
 
 ## 4. Reference
 
-### Class: PhaseSequencer
+### Class: PwmSequencer
 
 #### Constructor
 ```cpp
-PhaseSequencer(PwmController* phaseCtrl);
+PwmSequencer(PwmController* phaseCtrl);
 ```
 - `phaseCtrl`: Pointer to an initialized PwmController
 

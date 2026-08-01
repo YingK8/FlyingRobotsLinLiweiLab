@@ -3,7 +3,7 @@
 ## 1. Tutorial: Getting Started
 
 ### Introduction
-This tutorial will guide you through setting up and using the PwmController, PhaseSequencer, and JsonPhaseSequencer libraries to control PWM outputs on the ESP32. You will learn how to blink an LED, ramp PWM, and schedule carrier PWM changes using a JSON file.
+This tutorial will guide you through setting up and using the PwmController, PwmSequencer, and JsonPwmSequencer libraries to control PWM outputs on the ESP32. You will learn how to blink an LED, ramp PWM, and schedule carrier PWM changes using a JSON file.
 
 ### Prerequisites
 - ESP32 development board
@@ -35,11 +35,11 @@ void loop() {
 }
 ```
 
-### Step 3: Sequencing PWM with PhaseSequencer
+### Step 3: Sequencing PWM with PwmSequencer
 ```cpp
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 // ...existing code...
-PhaseSequencer seq(&controller);
+PwmSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
@@ -56,9 +56,9 @@ void loop() {
 
 ### Step 4: Scheduling Carrier PWM with JSON
 ```cpp
-#include "JsonPhaseSequencer.h"
+#include "JsonPwmSequencer.h"
 // ...existing code...
-JsonPhaseSequencer seq(&controller);
+JsonPwmSequencer seq(&controller);
 
 void setup() {
     controller.begin(100.0f);
@@ -84,7 +84,7 @@ void loop() {
   `addCarrierDutyCycleTask` / `addCarrierRampTask` entry in your JSON schedule.
 
 ### How to Load and Run a JSON Schedule
-- Use `JsonPhaseSequencer::loadFromJsonFile("/path/to/file.json")` and call `run()` in your main loop.
+- Use `JsonPwmSequencer::loadFromJsonFile("/path/to/file.json")` and call `run()` in your main loop.
 
 ---
 
@@ -94,11 +94,11 @@ void loop() {
 - See header file for full docstrings.
 - Key methods: `begin`, `run`, `setGlobalFrequency`, `setDutyCycle`, `setPhase`, `initCarrierPWM`, `setCarrierDutyCycle`.
 
-### PhaseSequencer
+### PwmSequencer
 - See header file for full docstrings.
 - Key methods: `addWaitTask`, `addRampTask` (full and per-channel forms), `addSequenceTask` (push a hand-built task, e.g. a full-state `TRAJECTORY_POINT`), `compile`, `start`, `run`, `isDone`. `addRampTask` takes either a scalar (all channels) or a `float[4]` (per-channel; `NAN` = leave unchanged).
 
-### JsonPhaseSequencer
+### JsonPwmSequencer
 - See header file for full docstrings.
 - Key method: `loadFromJsonFile`.
 
@@ -113,7 +113,7 @@ A sequencer allows you to define a series of PWM changes (frequency, duty, phase
 Carrier PWM is a high-frequency PWM signal (often used for modulation or power electronics) that can be independently controlled per channel, in addition to the main PWM signal.
 
 ### How Does the JSON Scheduler Work?
-The JsonPhaseSequencer loads a schedule from a JSON file, where each entry specifies a method (e.g., `addCarrierDutyCycleTask`) and its parameters. The sequencer compiles these into a trajectory and executes them at the correct time, calling the appropriate hardware methods.
+The JsonPwmSequencer loads a schedule from a JSON file, where each entry specifies a method (e.g., `addCarrierDutyCycleTask`) and its parameters. The sequencer compiles these into a trajectory and executes them at the correct time, calling the appropriate hardware methods.
 
 ---
 

@@ -13,7 +13,7 @@
 #include <Arduino.h>
 #include "CurrentBalanceController.h"
 #include "PwmController.h"
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 #include "SerialComm.h"
 #include "constants.h"
 #include "current_sense.h"
@@ -59,7 +59,7 @@ const float CEILING_100[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
 float duty_out[NUM_CHANNELS] = {START_DUTY, START_DUTY, START_DUTY, START_DUTY};
 
 PwmController *controller;
-PhaseSequencer *seq;
+PwmSequencer *seq;
 SerialComm comm;
 bool directionIsCcw = true; // default direction, matches this file's history
 
@@ -102,7 +102,7 @@ void reinitController(bool ccw) {
   allCoilsOff();
 
   if (seq) delete seq;
-  seq = new PhaseSequencer(controller);
+  seq = new PwmSequencer(controller);
   seq->addRampTask(start_freq, end_freq, ramp_duration_ms, TaskType::PWM_FREQ, TaskMode::EASE);
   seq->compile(25, 1.0f, INITIAL_DUTY_CYCLES, phases);
 }

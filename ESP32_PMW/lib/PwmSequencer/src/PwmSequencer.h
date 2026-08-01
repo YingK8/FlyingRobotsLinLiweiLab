@@ -51,9 +51,9 @@ SequenceTask makeTrajectoryTask(float freq, const float *duty,
                                 const float *phase, const float *carrier,
                                 int numChannels = 4, int64_t durationUs = 0);
 
-class PhaseSequencer {
+class PwmSequencer {
 public:
-  PhaseSequencer(PwmController *phaseCtrl);
+  PwmSequencer(PwmController *phaseCtrl);
 
   // Queue Builders
   /** @brief Reserve queue capacity for `size` tasks. */

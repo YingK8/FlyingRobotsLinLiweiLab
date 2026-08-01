@@ -1,14 +1,14 @@
 #pragma once
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 #include <Arduino.h>
 #include <vector>
 
 // Forward declaration for ArduinoJson
 class JsonVariant;
 
-class JsonPhaseSequencer : public PhaseSequencer {
+class JsonPwmSequencer : public PwmSequencer {
 public:
-  JsonPhaseSequencer(PwmController *phaseCtrl);
+  JsonPwmSequencer(PwmController *phaseCtrl);
 
   /**
    * @brief Load and compile a JSON schedule from SPIFFS. Full schema: README.md.

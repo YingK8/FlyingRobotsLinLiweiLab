@@ -2,7 +2,7 @@
 
 // instantiate PWM controller and sequencer:
 PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
-JsonPhaseSequencer seq(&ctl);
+JsonPwmSequencer seq(&ctl);
 
 void setup() {
   driveBoot(); // from drive_common.h

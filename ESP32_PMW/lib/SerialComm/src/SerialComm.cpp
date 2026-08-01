@@ -9,15 +9,11 @@ String SerialComm::handleSerialComm(const String &outgoing) {
   while (_port.available()) {
     char c = (char)_port.read();
     if (c == '\n' || c == '\r') {
-      if (_rxBuf.length()) {
-        String line = _rxBuf;
-        _rxBuf = "";
-        return line;
-      }
-      // bare CR/LF with nothing buffered (e.g. second half of CRLF); keep draining
-    } else {
-      _rxBuf += c;
-      if (_rxBuf.length() > MAX_LINE_LEN) _rxBuf = ""; // overflow guard
+      String line = _rxBuf;
+      _rxBuf = "";
+      if (line.length() && line.length() <= MAX_LINE_LEN) return line;
+    } else if (_rxBuf.length() <= MAX_LINE_LEN) {
+      _rxBuf += c; // stop appending once over the cap; the line is already doomed
     }
   }
   return String();

@@ -22,7 +22,7 @@ static const float FREQ_MIN = 120.0f;
 static const float FREQ_MAX = 170.0f; // >= z_track.py f_ceiling (167.3 Hz)
 
 static PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
-static PhaseSequencer seq(&ctl);
+static PwmSequencer seq(&ctl);
 static SerialComm comm;
 
 enum State { IDLE, SPINUP, FLIGHT, LANDING, OFF };

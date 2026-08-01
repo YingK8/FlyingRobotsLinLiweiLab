@@ -11,7 +11,8 @@ public:
 
   // Call once per loop(); never blocks. Writes `outgoing` + '\n' if non-empty.
   // Returns the first complete line drained this call (buffer cleared), else "".
-  // Extra buffered lines stay in Serial for the next call; nothing is dropped.
+  // Extra buffered lines stay in Serial for the next call. Lines longer than
+  // MAX_LINE_LEN are discarded whole rather than truncated.
   String handleSerialComm(const String &outgoing = String());
 
 private:

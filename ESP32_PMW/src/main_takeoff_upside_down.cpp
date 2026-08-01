@@ -5,7 +5,7 @@
 #include "drive_common.h"
 
 static PwmController ctl(PWM_PINS, PHASES_CW, INITIAL_DUTY, NUM_CHANNELS);
-static JsonPhaseSequencer seq(&ctl);
+static JsonPwmSequencer seq(&ctl);
 
 void setup() {
   driveBoot();

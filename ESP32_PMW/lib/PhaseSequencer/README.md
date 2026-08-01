@@ -35,7 +35,7 @@ A high-level interface for sequencing PWM phase, frequency, and duty cycle behav
 #include "PhaseSequencer.h"
 
 const int NUM_CHANNELS = 4;
-const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_32, GPIO_NUM_25, GPIO_NUM_18, GPIO_NUM_22}; // A,B,C,D -- see src/constants.h
+const gpio_num_t PWM_PINS[NUM_CHANNELS] = {GPIO_NUM_19, GPIO_NUM_33, GPIO_NUM_27, GPIO_NUM_32};
 const float INITIAL_PHASES[NUM_CHANNELS] = {0.0, 90.0, 180.0, 270.0};
 const float INITIAL_DUTY_CYCLES[NUM_CHANNELS] = {50.0, 50.0, 50.0, 50.0};
 

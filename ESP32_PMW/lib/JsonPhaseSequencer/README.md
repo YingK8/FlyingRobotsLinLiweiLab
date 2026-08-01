@@ -21,7 +21,7 @@ The top-level object is:
 
 The config keys seed the compiled queue's initial state — they replace the
 arguments the loader used to take, so the call site is just
-`seq.loadFromJsonFile("/swim.json")`. All are optional:
+`seq.loadFromJsonFile("/experiment.json")`. All are optional:
 
 | key | default | meaning |
 |---|---|---|
@@ -110,7 +110,7 @@ can load as-is.
 
 ```cpp
 JsonPhaseSequencer seq(&controller);
-seq.loadFromJsonFile("/swim.json");  // parses + compiles
+seq.loadFromJsonFile("/experiment.json");  // parses + compiles
 seq.start();
 // in loop(): seq.run();  isDone() reports queue exhaustion.
 ```

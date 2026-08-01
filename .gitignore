@@ -13,3 +13,4 @@ venv/
 # PlatformIO
 .pio/
 tilt_coramp_run.log
+.DS_Store

@@ -1,4 +1,4 @@
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 #include <math.h>
 
 static float clampDuty(float v) {
@@ -26,7 +26,7 @@ SequenceTask makeTrajectoryTask(float freq, const float *duty,
   return task;
 }
 
-PhaseSequencer::PhaseSequencer(PwmController *phaseCtrl) {
+PwmSequencer::PwmSequencer(PwmController *phaseCtrl) {
   _phaseCtrl = phaseCtrl;
   _currentFrameIdx = 0;
   _taskStartTimeUs = 0;
@@ -43,13 +43,13 @@ PhaseSequencer::PhaseSequencer(PwmController *phaseCtrl) {
   }
 }
 
-void PhaseSequencer::reserve(size_t size) { _queue.reserve(size); }
+void PwmSequencer::reserve(size_t size) { _queue.reserve(size); }
 
-void PhaseSequencer::addSequenceTask(SequenceTask task) {
+void PwmSequencer::addSequenceTask(SequenceTask task) {
   _queue.push_back(task);
 }
 
-void PhaseSequencer::addWaitTask(uint32_t durationMs) {
+void PwmSequencer::addWaitTask(uint32_t durationMs) {
   SequenceTask task = {};
   task.type = TaskType::WAIT;
   task.durationUs = (int64_t)durationMs * 1000LL;
@@ -57,7 +57,7 @@ void PhaseSequencer::addWaitTask(uint32_t durationMs) {
 }
 
 // Global ramp
-void PhaseSequencer::addRampTask(float start, float end, uint32_t durationMs,
+void PwmSequencer::addRampTask(float start, float end, uint32_t durationMs,
                                  TaskType type, TaskMode ramp_mode, float shape) {
   const float starts[4] = {start, start, start, start};
   const float ends[4] = {end, end, end, end};
@@ -65,7 +65,7 @@ void PhaseSequencer::addRampTask(float start, float end, uint32_t durationMs,
 }
 
 // Per-channel ramp
-void PhaseSequencer::addRampTask(const float *starts, const float *ends,
+void PwmSequencer::addRampTask(const float *starts, const float *ends,
                                  int numChannels, uint32_t durationMs,
                                  TaskType type, TaskMode ramp_mode, float shape) {
   SequenceTask task = {};
@@ -123,7 +123,7 @@ void PhaseSequencer::addRampTask(const float *starts, const float *ends,
   _queue.push_back(task);
 }
 
-float PhaseSequencer::applyCurve(TaskMode mode, float t, float shape) {
+float PwmSequencer::applyCurve(TaskMode mode, float t, float shape) {
   if (t <= 0.0f)
     return 0.0f;
   if (t >= 1.0f)
@@ -157,7 +157,7 @@ float PhaseSequencer::applyCurve(TaskMode mode, float t, float shape) {
   }
 }
 
-void PhaseSequencer::resetStreamingState() {
+void PwmSequencer::resetStreamingState() {
   _currentFrameIdx = 0;
   _taskStartTimeUs = 0;
   _taskFrameOffsetUs = 0;
@@ -170,7 +170,7 @@ void PhaseSequencer::resetStreamingState() {
   }
 }
 
-void PhaseSequencer::applyCurrentState() {
+void PwmSequencer::applyCurrentState() {
   if (!_phaseCtrl)
     return;
 
@@ -186,7 +186,7 @@ void PhaseSequencer::applyCurrentState() {
   }
 }
 
-void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
+void PwmSequencer::compile(uint32_t resolutionMs, float initialFreq,
                              const float *initialDuty,
                              const float *initialPhase) {
   _initialFreqHz = initialFreq;
@@ -202,7 +202,7 @@ void PhaseSequencer::compile(uint32_t resolutionMs, float initialFreq,
   resetStreamingState();
 }
 
-void PhaseSequencer::start() {
+void PwmSequencer::start() {
   _currentFrameIdx = 0;
   _taskStartTimeUs = esp_timer_get_time();
   _taskFrameOffsetUs = 0;
@@ -219,14 +219,14 @@ void PhaseSequencer::start() {
   applyCurrentState();
 }
 
-bool PhaseSequencer::isDone() const {
+bool PwmSequencer::isDone() const {
   return _currentFrameIdx >= _queue.size();
 }
 
 // =========================================================
 // HIGH-SPEED HOT LOOP: No math, just pointer lookups
 // =========================================================
-void PhaseSequencer::run() {
+void PwmSequencer::run() {
   if (_queue.empty() || _currentFrameIdx >= _queue.size())
     return;
 

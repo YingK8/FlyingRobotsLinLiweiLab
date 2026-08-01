@@ -10,7 +10,7 @@
 // ramped toward its ceiling duty (push the bottleneck as hard as allowed);
 // every other channel runs PI(+D) toward magnitude*ratio[i], so the four
 // currents converge to that ratio. Ceiling is per-channel, supplied every tick
-// (PhaseSequencer::getCommandedCarrier).
+// (PwmSequencer::getCommandedCarrier).
 //   - UNIFORM carrier => all ratios 1 => equal-balance (below 100% still
 //     equalizes, capped at that duty).
 //   - DIFFERENTIAL carrier (tilt: some coils stepped down) makes those channels

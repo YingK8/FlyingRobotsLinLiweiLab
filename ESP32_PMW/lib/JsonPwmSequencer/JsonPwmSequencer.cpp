@@ -1,4 +1,4 @@
-#include "JsonPhaseSequencer.h"
+#include "JsonPwmSequencer.h"
 #include <ArduinoJson.h>
 #include <FS.h>
 #include <SPIFFS.h>
@@ -6,25 +6,25 @@
 #include <strings.h> // strcasecmp
 
 namespace {
-// Project-wide rotation conventions (see lib/JsonPhaseSequencer/README.md):
+// Project-wide rotation conventions (see lib/JsonPwmSequencer/README.md):
 // coil order is A,B,C,D.
 const float PHASES_CW[4] = {270.0f, 90.0f, 180.0f, 0.0f};
 const float PHASES_CCW[4] = {90.0f, 270.0f, 180.0f, 0.0f};
 } // namespace
 
-JsonPhaseSequencer::JsonPhaseSequencer(PwmController *phaseCtrl)
-    : PhaseSequencer(phaseCtrl) {}
+JsonPwmSequencer::JsonPwmSequencer(PwmController *phaseCtrl)
+    : PwmSequencer(phaseCtrl) {}
 
-const char *JsonPhaseSequencer::labelForStep(size_t i) const {
+const char *JsonPwmSequencer::labelForStep(size_t i) const {
   if (i >= _stepLabels.size())
     return "";
   return _stepLabels[i].c_str();
 }
 
-bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
+bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
   File file = SPIFFS.open(filename, "r");
   if (!file) {
-    Serial.printf("[JsonPhaseSequencer] cannot open %s -- is SPIFFS mounted "
+    Serial.printf("[JsonPwmSequencer] cannot open %s -- is SPIFFS mounted "
                   "and the filesystem image uploaded (pio run -t uploadfs)?\n",
                   filename);
     return false;
@@ -40,7 +40,7 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
   JsonDocument doc;
   auto err = deserializeJson(doc, buf.get());
   if (err) {
-    Serial.printf("[JsonPhaseSequencer] parse failed: %s (file=%u bytes, "
+    Serial.printf("[JsonPwmSequencer] parse failed: %s (file=%u bytes, "
                   "free heap=%u bytes)\n",
                   err.c_str(), (unsigned)size, (unsigned)ESP.getFreeHeap());
     return false;
@@ -234,7 +234,7 @@ bool JsonPhaseSequencer::loadFromJsonFile(const char *filename) {
   }
 
   if (!unknownMethods.empty()) {
-    Serial.println("[JsonPhaseSequencer] Unknown methods found in schedule:");
+    Serial.println("[JsonPwmSequencer] Unknown methods found in schedule:");
     for (const auto &m : unknownMethods) {
       Serial.println(m);
     }

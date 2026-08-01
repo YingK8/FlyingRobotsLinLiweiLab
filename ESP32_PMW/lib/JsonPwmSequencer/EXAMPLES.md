@@ -1,4 +1,4 @@
-# JsonPhaseSequencer Example JSON Schedules
+# JsonPwmSequencer Example JSON Schedules
 
 ## Example 1: Set Carrier Duty Cycle
 ```json

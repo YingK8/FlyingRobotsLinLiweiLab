@@ -1,6 +1,6 @@
-# JsonPhaseSequencer
+# JsonPwmSequencer
 
-A `PhaseSequencer` that loads a schedule from a JSON file (SPIFFS) and compiles
+A `PwmSequencer` that loads a schedule from a JSON file (SPIFFS) and compiles
 it into a runnable queue. The file is an **object** carrying the initial state
 plus a `schedule` array of method-call objects, executed in order — not a
 schedule of absolute timestamps.
@@ -21,7 +21,7 @@ The top-level object is:
 
 The config keys seed the compiled queue's initial state — they replace the
 arguments the loader used to take, so the call site is just
-`seq.loadFromJsonFile("/swim.json")`. All are optional:
+`seq.loadFromJsonFile("/experiment.json")`. All are optional:
 
 | key | default | meaning |
 |---|---|---|
@@ -109,8 +109,8 @@ can load as-is.
 ## Usage
 
 ```cpp
-JsonPhaseSequencer seq(&controller);
-seq.loadFromJsonFile("/swim.json");  // parses + compiles
+JsonPwmSequencer seq(&controller);
+seq.loadFromJsonFile("/experiment.json");  // parses + compiles
 seq.start();
 // in loop(): seq.run();  isDone() reports queue exhaustion.
 ```

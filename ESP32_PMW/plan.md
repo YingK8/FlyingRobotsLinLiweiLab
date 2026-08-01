@@ -70,7 +70,7 @@ session. Findings and docs get pushed to the repo's `origin`
   finding that "CS→ADC taps were disconnected" during one session (`2026-07-04b`,
   `comp_ab_162530`), which — if it silently recurred — would explain compensation
   "working" on nothing.
-- **Direction convention drift:** `main_current_pid.cpp`/`JsonPhaseSequencer` use
+- **Direction convention drift:** `main_current_pid.cpp`/`JsonPwmSequencer` use
   `PHASES_CW={270,90,180,0}` / `PHASES_CCW={90,270,180,0}` (A,B,C,D); this differs from
   the README's older stated `CCW: A→C→B→D` — worth reconciling so "CW vs CCW" claims in
   the new report are unambiguous.

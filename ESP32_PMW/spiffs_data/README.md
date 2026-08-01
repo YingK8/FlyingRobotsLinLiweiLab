@@ -1,43 +1,67 @@
 # spiffs_data/
 
-SPIFFS-uploaded task-sequence payloads for the JSON-driven firmware. **Not** the
-top-level `data/` directory — that one holds captured experiment results (CSVs,
-plots, logs; see `data/README.md`). PlatformIO's default SPIFFS source dir is
-also named `data/`, which is exactly the collision this rename avoids:
-`[env:swim]` points `board_build.filesystem_dir` at `spiffs_data/`.
+SPIFFS-uploaded task-sequence payloads for the JSON-driven experiment
+firmwares. **Not** the top-level `data/` directory — that one holds captured
+experiment results (CSVs, plots, logs; see `data/README.md`). PlatformIO's
+default SPIFFS source dir is also named `data/`, which is exactly the collision
+this rename avoids: every JSON-loading env points `board_build.filesystem_dir`
+at `spiffs_data/`.
 
-## One firmware per task
+## One firmware per experiment (no copy-swap)
 
-Each task is its own firmware entry point (`src/main_<name>.cpp` +
+Each experiment is now its own firmware entry point (`src/main_<name>.cpp` +
 `[env:<name>]` in `platformio.ini`) that opens **its own** JSON file from SPIFFS.
-There is no swappable `experiment.json` to copy over. `uploadfs` uploads every
-JSON in this directory at once; each firmware just opens the filename it was
-built for.
+There is no swappable `experiment.json` to copy over anymore. All the JSONs below
+live in this directory and are uploaded together; each firmware just opens the
+filename it was built for.
 
 ```
 # once (uploads every JSON in spiffs_data/ to the device filesystem):
-~/.platformio/penv/bin/pio run -e swim -t uploadfs
+~/.platformio/penv/bin/pio run -e tilt -t uploadfs
 # then the firmware itself:
-~/.platformio/penv/bin/pio run -e swim -t upload
+~/.platformio/penv/bin/pio run -e tilt -t upload
 ```
 
-The firmware plays the JSON's commutation (frequency / phase / direction) and —
-for lift tasks — overlays the current-balance PI loop, which is folded into
-`PwmController` and opted into with `enableCurrentBalance()` in the main (there
-is no `piEnabled` flag in the JSON). With balance on, the JSON's commanded
-carrier duty is the PI's per-channel **ceiling**; the loop keeps the four channel
-currents within ~0.4 A of each other beneath it, so per-channel balance trims are
-found automatically rather than hand-tuned. Omit the call and the sequencer's
-carrier drives verbatim — the right choice for anything that deliberately drives
-channels unequally, since balancing would erase what it measures.
+All of these share `src/balanced_experiment.cpp`: it arms 3s (coils off, ADC
+self-zero), plays the JSON's commutation (frequency / phase / direction), and —
+for lift experiments — overlays the shared current-balance PI loop
+(`lib/CurrentBalanceController`). The JSON's commanded carrier duty is the PI's
+per-channel **ceiling**; the loop keeps the four channel currents within ~0.4 A
+of each other beneath it (so per-channel balance trims are found automatically,
+not hand-tuned). Telemetry is the current-PID line format, parseable by
+`tools/pid_metrics.py` and `tools/tilt_metrics.py`.
 
-Telemetry is the shared line format emitted by `driveTelemetry()` in
-`src/drive_common.h`, parseable by the log plotters in `ai/` (see README).
+`piEnabled` per firmware (set in each `main_<name>.cpp`):
+- **true** (balance) — `tilt`, `takeoff`, `takeoff_upside_down`, `carrier_ramp`.
+- **false** (passthrough, sequencer's carrier stands) — `comp_test`,
+  `coupling_test`, `dc`, `ceiling`: these deliberately drive channels unequally
+  (per-channel trims / solo+pairwise coupling / DC / 100%-all ceiling map), so
+  balancing them would erase what they measure.
 
 ## Files
 
-- `swim.json` — the swim task: 1→30 Hz linear ramp over 20 s at 100% carrier,
-  then a 30↔22 Hz undulation ×5 (1 s each way), then coils off. CCW, PI-balanced.
-  Loaded by `[env:swim]`. **Generated — do not hand-edit**; regenerate it with
-  `ai/gen_swim_experiment.py` on the `drone-swimming` branch (`ai/` is gitignored
-  on main). Each phase carries a `SWIM_*` label for log segmentation.
+- `tilt.json` — the tilt experiment: EASE 1→210Hz ramp, then a 100%→0% carrier
+  step-down in 10% steps (2.5s holds), CCW. Each step now commands one **uniform**
+  ceiling (`activateChannels` mask=15) instead of the old hand-tuned per-channel
+  trims `{63.0, 100.0, 73.8, 63.7}` — the PI produces the trims live. Loaded by
+  `[env:tilt]`.
+- `ceiling_sweep.json` — all four channels held at 100% carrier across a 1→210Hz
+  EASE ramp, open-loop. Loaded by `[env:ceiling]`; gives `Ceiling_i(f)` for
+  `tools/tilt_metrics.py`.
+- `takeoff.json` / `takeoff_upside_down.json` — the takeoff ramps (1→500Hz/400s
+  double ramp; CW 1→190Hz/40s respectively). Loaded by `[env:takeoff]` /
+  `[env:takeoff_upside_down]`.
+- `carrier_ramp.json` — carrier duty 0→100% ramp at fixed 190Hz, phases
+  `{0,180,90,270}`. Loaded by `[env:carrier_ramp]`.
+- `comp_test.json` — BASELINE (equal 50%) → GAP → TRIMMED per-channel A/B
+  comparison, CCW. Loaded by `[env:comp_test]` (passthrough).
+- `coupling_cw.json` / `coupling_ccw.json` — coil-coupling characterization sweep
+  (solo + pairwise + all-4, several current levels), generated by
+  `tools/gen_coupling_experiment.py` (do not hand-edit; regenerate). `[env:coupling_test]`
+  loads `coupling_cw.json` (passthrough); edit `main_coupling_test.cpp` to run
+  the CCW file. `tools/run_coupling_sweep.py` still handles the uploadfs step.
+- `dc_calibration.json` — 100% commutation + 100% carrier on all channels (pins
+  parked HIGH via the driver path) for a DC current-sense calibration capture;
+  latches off after its window. Loaded by `[env:dc]` (passthrough).
+- `experiment.json` / `test_experiment.json` — legacy generic payloads kept for
+  reference; no dedicated env now that each experiment has its own firmware.

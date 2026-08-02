@@ -1,0 +1,116 @@
+// Per-channel SOLO frequency sweep -- the LCR-meter substitute.
+//
+// One coil energized at a time, stepped across 100..220 Hz and held at each
+// point long enough to read a handheld gaussmeter. Yields, per channel:
+//   * I_cs(f)  -- from telemetry; its peak locates that channel's own series
+//                 R-L-C resonance f0 = 1/(2*pi*sqrt(L*C)). Four different f0
+//                 values would explain the 3x strength spread at a fixed 200 Hz
+//                 (C=1.55 A vs D=4.75 A) without ever measuring L or C directly.
+//   * B(f)     -- gaussmeter, probe fixed over the live coil. B tracks TOTAL
+//                 coil current including the reactive part CS cannot see (CS is
+//                 high-side-conducting only). If B peaks where I_cs does not,
+//                 that gap IS the hidden circulating current.
+//
+// SOLO, so phase/direction are irrelevant and only one channel loads the supply
+// (trip is ~7.5 A total). CARRIER is 70% deliberately: the strongest channel (D)
+// drew 4.75 A at 200 Hz / 100% duty, and near its resonance it would draw more.
+// Raise toward 100% only if the gaussmeter signal is too weak to read.
+//
+// Timing: 20 s de-energized probe-move gap before each channel, then 7 points
+// x 6 s. Total ~4.1 min. Watch the serial label line for what is live.
+{
+  "resolution_ms": 25,
+  "initial_freq": 100.0,
+  "initial_duty": [50, 50, 50, 50],
+  "direction": "CCW",
+  "schedule": [
+    // ---------------- channel A (index 0, mask 1) ----------------
+    { "method": "label", "value": "GAP_MOVE_PROBE_TO_A" },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 20000 },
+
+    { "method": "label", "value": "A_100HZ" },
+    { "method": "activateChannels", "mask": 1, "value": 70.0 },
+    { "method": "addLinearRampTask", "from": 100.0, "to": 100.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_120HZ" },
+    { "method": "addLinearRampTask", "from": 120.0, "to": 120.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_140HZ" },
+    { "method": "addLinearRampTask", "from": 140.0, "to": 140.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_155HZ" },
+    { "method": "addLinearRampTask", "from": 155.0, "to": 155.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_170HZ" },
+    { "method": "addLinearRampTask", "from": 170.0, "to": 170.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_190HZ" },
+    { "method": "addLinearRampTask", "from": 190.0, "to": 190.0, "duration_ms": 6000 },
+    { "method": "label", "value": "A_220HZ" },
+    { "method": "addLinearRampTask", "from": 220.0, "to": 220.0, "duration_ms": 6000 },
+
+    // ---------------- channel B (index 1, mask 2) ----------------
+    { "method": "label", "value": "GAP_MOVE_PROBE_TO_B" },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 20000 },
+
+    { "method": "label", "value": "B_100HZ" },
+    { "method": "activateChannels", "mask": 2, "value": 70.0 },
+    { "method": "addLinearRampTask", "from": 100.0, "to": 100.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_120HZ" },
+    { "method": "addLinearRampTask", "from": 120.0, "to": 120.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_140HZ" },
+    { "method": "addLinearRampTask", "from": 140.0, "to": 140.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_155HZ" },
+    { "method": "addLinearRampTask", "from": 155.0, "to": 155.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_170HZ" },
+    { "method": "addLinearRampTask", "from": 170.0, "to": 170.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_190HZ" },
+    { "method": "addLinearRampTask", "from": 190.0, "to": 190.0, "duration_ms": 6000 },
+    { "method": "label", "value": "B_220HZ" },
+    { "method": "addLinearRampTask", "from": 220.0, "to": 220.0, "duration_ms": 6000 },
+
+    // ---------------- channel C (index 2, mask 4) ----------------
+    { "method": "label", "value": "GAP_MOVE_PROBE_TO_C" },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 20000 },
+
+    { "method": "label", "value": "C_100HZ" },
+    { "method": "activateChannels", "mask": 4, "value": 70.0 },
+    { "method": "addLinearRampTask", "from": 100.0, "to": 100.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_120HZ" },
+    { "method": "addLinearRampTask", "from": 120.0, "to": 120.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_140HZ" },
+    { "method": "addLinearRampTask", "from": 140.0, "to": 140.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_155HZ" },
+    { "method": "addLinearRampTask", "from": 155.0, "to": 155.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_170HZ" },
+    { "method": "addLinearRampTask", "from": 170.0, "to": 170.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_190HZ" },
+    { "method": "addLinearRampTask", "from": 190.0, "to": 190.0, "duration_ms": 6000 },
+    { "method": "label", "value": "C_220HZ" },
+    { "method": "addLinearRampTask", "from": 220.0, "to": 220.0, "duration_ms": 6000 },
+
+    // ---------------- channel D (index 3, mask 8) ----------------
+    { "method": "label", "value": "GAP_MOVE_PROBE_TO_D" },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 20000 },
+
+    { "method": "label", "value": "D_100HZ" },
+    { "method": "activateChannels", "mask": 8, "value": 70.0 },
+    { "method": "addLinearRampTask", "from": 100.0, "to": 100.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_120HZ" },
+    { "method": "addLinearRampTask", "from": 120.0, "to": 120.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_140HZ" },
+    { "method": "addLinearRampTask", "from": 140.0, "to": 140.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_155HZ" },
+    { "method": "addLinearRampTask", "from": 155.0, "to": 155.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_170HZ" },
+    { "method": "addLinearRampTask", "from": 170.0, "to": 170.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_190HZ" },
+    { "method": "addLinearRampTask", "from": 190.0, "to": 190.0, "duration_ms": 6000 },
+    { "method": "label", "value": "D_220HZ" },
+    { "method": "addLinearRampTask", "from": 220.0, "to": 220.0, "duration_ms": 6000 },
+
+    // ---------------- latch off ----------------
+    { "method": "label", "value": "SOLO_SWEEP_OFF" },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 500 }
+  ]
+}

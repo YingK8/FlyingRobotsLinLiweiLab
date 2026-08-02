@@ -21,15 +21,5 @@ void loop() {
   seq.run();
   ctl.run();
 
-  // LED steady-on while spinning up; print frequency at each schedule step
-  digitalWrite(LED_PIN, seq.isDone() ? LOW : HIGH);
-  static size_t lastStep = (size_t)-1;
-  size_t step = seq.currentIndex();
-  if (step != lastStep) {
-    lastStep = step;
-    Serial.printf("[step %u] %s freq=%.1f\n", (unsigned)step,
-                  seq.labelForStep(step), ctl.getFrequency());
-  }
-
   driveTelemetry(ctl);
 }

@@ -6,46 +6,11 @@
 // ceiling tilts the disk. One flight per boot; reset to re-arm.
 #include "drive_common.h"
 #include "SerialComm.h"
-
-// Hardware knobs, tune on the rig.
-static const float HOVER_HZ = 150.0f; // ~130-157 Hz torque band
-static const unsigned long SPINUP_MS = 30000;
-static const float SPINUP_THROTTLE = 100.0f;
-// Physical coil azimuths A,B,C,D (deg). SEED GUESS: sweep az, see which pair weakens.
-static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
-// Tilt authority: az-facing coils drop MIX_GAIN*mag. Fit from ../writeup/single_results.csv.
-static const float MIX_GAIN = 0.6f;
-// freq= band for the host altitude loop (ai/z_track.py). Independent of the host's
-// own clamp on purpose: a mangled or truncated line must not be able to command DC.
-// setGlobalFrequency() treats <=0 as DC -- field stops rotating and the robot drops.
-static const float FREQ_MIN = 120.0f;
-static const float FREQ_MAX = 170.0f; // >= z_track.py f_ceiling (167.3 Hz)
+#include "constants.h"
 
 static PwmController ctl(PWM_PINS, PHASES_CCW, INITIAL_DUTY, NUM_CHANNELS);
 static PwmSequencer seq(&ctl);
 static SerialComm comm;
-
-enum State { IDLE, SPINUP, FLIGHT, LANDING, OFF };
-static State state = IDLE;
-
-static float collective = 0.0f; // % carrier ceiling (throttle)
-static float azSet = 0.0f;      // deg
-static float magSet = 0.0f;     // 0..1
-
-static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-// Thrust-vector mixer: drop the az-facing coils' ceilings so the disk tilts toward
-// az. Strong side stays at collective, the balance reference. Verify sign on rig.
-static void applyMixer() {
-  for (int i = 0; i < NUM_CHANNELS; i++) {
-    float drop = MIX_GAIN * magSet * max(0.0f, cosf((azSet - COIL_AZ[i]) * (float)DEG_TO_RAD));
-    ctl.setCarrierDutyCycle(i, clampf(collective * (1.0f - drop), 0.0f, 100.0f));
-  }
-}
-
-static void allCoilsOff() {
-  for (int i = 0; i < NUM_CHANNELS; i++) ctl.setCarrierDutyCycle(i, 0.0f);
-}
 
 static void dispatch(String cmd) {
   cmd.trim();

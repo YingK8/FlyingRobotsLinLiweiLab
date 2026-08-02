@@ -16,14 +16,20 @@ import time
 import serial
 
 
+PORT_PATTERNS = (
+    "/dev/ttyUSB*", "/dev/ttyACM*",            # Linux
+    "/dev/tty.usbserial*", "/dev/tty.usbmodem*",  # macOS: CP210x/FTDI, then native CDC
+)
+
+
 def find_port(explicit=None):
     if explicit:
         return explicit
-    for pat in ("/dev/ttyUSB*", "/dev/ttyACM*"):
+    for pat in PORT_PATTERNS:
         hits = sorted(glob.glob(pat))
         if hits:
             return hits[0]
-    sys.exit("no /dev/ttyUSB* or /dev/ttyACM* found -- pass port explicitly")
+    sys.exit(f"no serial device matching {PORT_PATTERNS} -- pass port explicitly")
 
 
 class SerialComm:

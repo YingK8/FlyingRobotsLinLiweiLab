@@ -1,0 +1,55 @@
+{
+  "coef_pos": [
+    0.03295711624123479,
+    0.28795924170058146,
+    0.3375596261376831,
+    -1.3700099700419182
+  ],
+  "features_pos": [
+    "log_e_over_m2",
+    "log1p_disc",
+    "log1p_refine_rms",
+    "one"
+  ],
+  "coef_ang": [
+    0.4406346961157829,
+    0.23398804626931205,
+    0.19611717350070068,
+    1.027972768855665,
+    1.1812101028506525,
+    3.841622711954152
+  ],
+  "features_ang": [
+    "log_e_over_m",
+    "log_inv_sin",
+    "log1p_disc",
+    "log_inv_margin",
+    "log1p_refine_rms",
+    "one"
+  ],
+  "k_pos": 1.7288840431604573,
+  "k_ang": 2.248676208752689,
+  "model": "least-squares scale on derived features, inflated by the high quantile of actual/predicted",
+  "created": "2026-08-12T01:45:11+00:00",
+  "source": "resolution_sweep",
+  "poses": 150,
+  "seed": 20260810,
+  "chosen_quantile": 0.9199999999999999,
+  "plateau": [
+    0.8999999999999999,
+    0.94
+  ],
+  "select_modes": [
+    "1024x768",
+    "1280x800",
+    "640x400",
+    "640x480",
+    "800x600"
+  ],
+  "report_modes": [
+    "1280x720",
+    "320x240"
+  ],
+  "n_samples": 625,
+  "quantile": 0.9199999999999999
+}

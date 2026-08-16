@@ -1,0 +1,26 @@
+{
+  "tilt_knots_deg": [
+    15.0,
+    25.0,
+    35.0,
+    45.0,
+    55.0,
+    60.0,
+    65.0,
+    70.0
+  ],
+  "offset_over_major": [
+    -0.0042173772974845895,
+    -0.00555139065908983,
+    -0.006845880917386201,
+    -0.008289637115375026,
+    -0.006694172944974893,
+    0.004779893615602305,
+    0.03303170187904577,
+    0.04354758632352901
+  ],
+  "model": "centre displacement along the projected rotor axis, as a fraction of the major axis, interpolated in tilt",
+  "created": "2026-08-09T19:14:46+00:00",
+  "source": "random tilt/azimuth/range/lighting sweep",
+  "n_samples": 420
+}

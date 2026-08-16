@@ -1,0 +1,13 @@
+{
+  "a": 1.0735807766196785,
+  "b": 0.0007036129532730186,
+  "k": 0.0,
+  "kind": "quadratic",
+  "model": "theta_true_deg = a*theta_raw_deg + b*theta_raw_deg**2",
+  "created": "2026-08-12T03:05:48+00:00",
+  "source": "dataset.npz",
+  "radius_mm": 10.244633961845084,
+  "split": "train",
+  "body_mm": 20.409,
+  "n_samples": 699
+}

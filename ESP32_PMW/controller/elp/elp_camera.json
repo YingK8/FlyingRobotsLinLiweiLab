@@ -1,0 +1,25 @@
+{
+  "device": {
+    "name": "Global Shutter Camera",
+    "vendor_id": "0x32E4",
+    "product_id": "0x9281",
+    "sensor": "OV9281-class monochrome global shutter",
+    "backend": "AVFOUNDATION",
+    "index_hint": 0,
+    "note": "system_profiler SPCameraDataType reports 'Global Shutter Camera'; OpenCV sees it at index 0 on this machine, with the built-in FaceTime at 1. Chroma is identically zero in every pixel -- it is a true mono sensor, which is why segment.py's dark appearance cannot gate on colour."
+  },
+  "modes": [
+    {"width": 1280, "height": 800, "fps": 120, "measured_fps": 121.4, "verdict": "native"},
+    {"width": 1280, "height": 720, "fps": 120, "measured_fps": 121.2, "verdict": "cropped from 800, slower and narrower"},
+    {"width": 1024, "height": 768, "fps": 120, "measured_fps": 120.3, "verdict": "native"},
+    {"width": 800, "height": 600, "fps": 120, "measured_fps": 98.8, "verdict": "undershoots -- unexplained, see modes.py"},
+    {"width": 640, "height": 480, "fps": 210, "measured_fps": 209.9, "verdict": "native"},
+    {"width": 640, "height": 400, "fps": 210, "measured_fps": 271.3, "verdict": "exceeds the asked rate; true 0.5x rescale of 1280x800"},
+    {"width": 320, "height": 240, "fps": 420, "measured_fps": 421.7, "verdict": "native"},
+    {"width": 160, "height": 120, "fps": 640, "measured_fps": 285.4, "verdict": "undershoots badly -- likely a consumer-side ceiling, see modes.py"}
+  ],
+  "created": "2026-08-15",
+  "source": "planning sweep: MJPG fourcc, 10-frame warmup, 100 timed reads per mode, single process",
+  "n_samples": 100,
+  "caveat": "These are the numbers modes.py exists to re-measure properly. The 10-frame warmup is 16 ms at 640 fps -- nothing has settled -- and the reads ran with grayscale=True, so a cvtColor is inside the timing. Treat measured_fps as provisional until modes.py has written over it."
+}

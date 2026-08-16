@@ -104,9 +104,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+# Pipeline layering: a stage sees only the stages before it, so a forward import
+# fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
+sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
 import conic  # noqa: E402
+import shape  # noqa: E402  (calib/: owns APPEARANCE)
 
 # Carried over from visual_servo/servo.py so both paths behave the same.
 #
@@ -648,7 +652,7 @@ def silhouette_points(mask, keep_fraction=_BLOB_KEEP_FRACTION):
     """Every boundary pixel of the kept blobs, as an (N, 2) array.
 
     `silhouette_hull` returns the convex hull's **vertices**, which is 9-31
-    points on the real captures in `vision/drone_orientation/` -- against
+    points on the real captures in `pose/assets/captures/` -- against
     192-3072 in the contour they came from, a factor of 21-134 discarded before
     anything is fitted. Two reductions do it: `CHAIN_APPROX_SIMPLE` drops
     collinear runs, then `convexHull` keeps only extreme vertices.
@@ -885,7 +889,7 @@ REDNESS_THRESH = 30
 # The reasoning was that the body is dark and achromatic, the coils dark and
 # coloured, so `max(BGR) - min(BGR)` separates them. It does -- on a colour
 # camera. The ELP OV9281 is a mono sensor: measured over both frames in
-# `vision/drone_orientation/elp/`, chroma is **exactly 0 in every pixel** (max 0,
+# `pose/assets/captures/elp/`, chroma is **exactly 0 in every pixel** (max 0,
 # mean 0.00), so `compare(chroma, CHROMA_MAX, CMP_LE)` passes the entire frame.
 # It is a no-op whether the frame arrives with one channel or three, and it used
 # to fail *silently* where the `red` path raises. Recorded rather than deleted
@@ -982,7 +986,11 @@ DARK_THRESH = 190
 # silhouette would invalidate all of them.
 DARK_MAX_SPREAD = 1.35
 
-APPEARANCE = os.environ.get("POSE_APPEARANCE", "bright")
+# Re-exported from `calib/shape.py`, which owns it: the appearance is the key the
+# *calibration files* are named by, and calibration is stage 2 to this stage 3.
+# Re-exported rather than referenced through `shape.` because `segment.APPEARANCE`
+# is what every caller, test and notebook already reads.
+APPEARANCE = shape.APPEARANCE
 
 _BACKGROUND_CACHE = {}
 

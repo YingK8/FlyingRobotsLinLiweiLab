@@ -27,7 +27,7 @@ scatter is ~23x the photon bound (`validation/limits.py`), which is what proves
 the residual is silhouette *bias* rather than sensor noise -- and therefore that
 better sensors, longer exposures and finer sub-pixel interpolation cannot help.
 
-Full derivations: `controller/vision/theory/lecture_notes.md` S13.
+Full derivations: `controller/pose/theory.md` S13.
 Monte-Carlo verification of every formula here: `test_bounds.py`.
 """
 

@@ -68,11 +68,14 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import least_squares
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+# Pipeline layering: a stage sees only the stages before it, so a forward import
+# fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
+sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
 import conic  # noqa: E402
 import segment as segmod  # noqa: E402
-from calibration import CentreCalibration, TiltCalibration  # noqa: E402
+from shape import CentreCalibration, TiltCalibration  # noqa: E402
 from uncertainty import ErrorModel  # noqa: E402
 from uncertainty import features as uncertainty_features  # noqa: E402
 from uncertainty import GATE_MARGIN as uncertainty_GATE_MARGIN  # noqa: E402

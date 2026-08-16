@@ -29,17 +29,20 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+# Pipeline layering: a stage sees only the stages before it, so a forward import
+# fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
+sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
 import conic  # noqa: E402
 import segment as segmod  # noqa: E402
-from calibration import TiltCalibration  # noqa: E402
+from shape import TiltCalibration  # noqa: E402
 from zeroing import Zero  # noqa: E402
 
 # Effective rim radius, in mm.
 #
 # Starts from the mesh: the *outer* radius of
-# ESP32_PMW/controller/vision/flyingrobot_thick _rod2.STL (99.9th percentile of
+# ESP32_PMW/controller/flyingrobot_rod2.STL (99.9th percentile of
 # vertex radius, 10.2065 mm), not the mean rim radius (9.965 mm), because the
 # segmenter returns a convex hull and a hull traces the outermost surface. Using
 # the mean instead biases every distance by 2.4% -- a systematic 5 mm at 200 mm
@@ -72,7 +75,7 @@ RADIUS_BY_APPEARANCE = {
 RADIUS_MM = RADIUS_BY_APPEARANCE[segmod.APPEARANCE]
 
 DEFAULT_INTRINSICS = (
-    Path(__file__).resolve().parents[1] / "vision" / "camera_intrinsics.npz"
+    Path(__file__).resolve().parents[1] / "calib" / "assets" / "camera_intrinsics.npz"
 )
 
 

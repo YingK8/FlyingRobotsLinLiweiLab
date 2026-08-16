@@ -1,6 +1,6 @@
 """Pose of a circle of known radius from its image ellipse.
 
-The robot's duct ring is a circle -- measured off ``flyingrobot_thick _rod2.STL``
+The robot's duct ring is a circle -- measured off ``flyingrobot_rod2.STL``
 it is 20.409 mm across with a radial standard deviation of 0.108 mm, so treating
 the silhouette rim as a perfect circle is good to about half a percent.
 

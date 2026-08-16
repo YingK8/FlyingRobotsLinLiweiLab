@@ -31,7 +31,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+# Pipeline layering: a stage sees only the stages before it, so a forward import
+# fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
+sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
 from estimator import RADIUS_MM, PoseEstimator, load_intrinsics  # noqa: E402
 from zeroing import DEFAULT_PATH, Zero, average_poses  # noqa: E402

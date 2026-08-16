@@ -57,13 +57,13 @@ CV_TO_GL = np.diag([1.0, -1.0, -1.0, 1.0])
 #: Base-colour factor for a matt red body, for the red-on-white rig. Chosen so
 #: the rendered chroma ``R - max(G, B)`` lands in the 48-135 band measured off
 #: real red surfaces (`test/test_appearance.py`), rather than a saturated primary
-#: that no paint produces.
-RED_BODY = (0.70, 0.13, 0.12)
 
-#: Base-colour factor for a matt black body, for the black-on-white rig. Not
-#: zero: real black paint reflects, and a body rendered at 0 would make the
-#: threshold look far better than the bench ever will.
-BLACK_BODY = (0.09, 0.095, 0.10)
+#: Base-colour factor for a matt black body. Not zero: real black paint reflects.
+#: Set to match the body level measured on `assets/captures/elp/` (median 42-78
+#: counts). The renderer does not yet reproduce how the real body responds across
+#: the lighting sweep -- see `ai/notes/pose_appearance.md` before fitting
+#: anything through it.
+BLACK_BODY = (0.055, 0.058, 0.061)
 
 #: Bronze drive coils, the clutter beside the robot.
 #:
@@ -73,8 +73,6 @@ BLACK_BODY = (0.09, 0.095, 0.10)
 #: OV9281 -- chroma is identically zero at every pixel -- so that gate is gone and
 #: nothing reads this constant. The citation this line used to carry, to
 #: `test/test_appearance.py`, was also wrong: that file has never contained a coil.
-#: Clutter is now rejected by region and spread instead; see lecture notes section 15.
-COIL_BODY = (0.16, 0.34, 0.56)
 
 
 @dataclass
@@ -398,11 +396,11 @@ class Renderer:
         rotates the lights to match, swaps the intrinsics, and adds occluders.
         Leaving it ``None`` is the monocular path and behaves exactly as before.
 
-        ``body_colour`` is a linear base-colour factor. ``None`` keeps the white
-        body and returns a **single-channel** frame, which is what every result
-        in this package was measured on. Anything else (e.g. `RED_BODY`) returns
-        **BGR**, because the whole point of a coloured body is that the chroma is
-        the signal -- see `segment.score_channel`.
+        ``body_colour`` is a linear base-colour factor; ``None`` keeps the white
+        body. The frame is always **single-channel**, because every camera this
+        package targets is a mono sensor -- see `segment`. A non-neutral factor
+        is still accepted, since it changes how the body *shades*, but its colour
+        is not recoverable from the result.
         """
         light = light or LightRig(dome=((60.0, 0.0),))
 
@@ -548,11 +546,10 @@ class Renderer:
             )
 
         colour, _ = self._renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
-        # White body: collapse to one channel with `max`, which is what every
-        # measured result here used. Coloured body: keep the channels and hand
-        # back BGR, since the chroma is the entire signal.
-        gray = (colour[..., :3].max(axis=2) if body_colour is None
-                else colour[..., 2::-1])
+        # One channel, always: the cameras are mono. `max` over RGB rather than a
+        # luminance conversion, which is what every measured result here used and
+        # what `segment.score_channel` matches for a neutral body.
+        gray = colour[..., :3].max(axis=2)
 
         if background is not None:
             # Straight "over": `robot * a + backdrop * (1 - a)`.
@@ -582,11 +579,9 @@ class Renderer:
             # than a continuation of the flat-background ones.
             a = colour[..., 3].astype(np.float64) / 255.0
             back = np.asarray(background, dtype=np.float64)
-            if back.shape != gray.shape[:2]:
+            if back.shape != gray.shape:
                 raise ValueError(
-                    f"background {back.shape} does not match frame {gray.shape[:2]}")
-            if gray.ndim == 3:                      # broadcast over BGR
-                a, back = a[..., None], back[..., None]
+                    f"background {back.shape} does not match frame {gray.shape}")
             gray = gray.astype(np.float64) * a + (1.0 - a) * back
         gray = np.clip(gray, 0, 255).astype(np.uint8)
 

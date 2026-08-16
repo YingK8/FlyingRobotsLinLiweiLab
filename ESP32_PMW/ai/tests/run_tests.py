@@ -37,7 +37,7 @@ SUITES = [
     ("filter", "constant-velocity Kalman: velocity, coasting, dropout"),
     ("bounds", "Cramer-Rao floors vs Monte Carlo"),
     ("stereo", "two-view solver against analytic geometry  [needs a display]"),
-    ("appearance", "rig appearance: bright, red, and black-on-white (mono)"),
+    ("appearance", "rig appearance: bright-on-dark and black-on-white (mono)"),
     ("backgrounds", "synthetic background generators"),
     ("elp_captures", "the dark appearance on the real ELP frames"),
 ]

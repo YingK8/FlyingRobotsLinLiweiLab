@@ -12,6 +12,7 @@ dependencies = [
     "pyserial>=3.5",
     "opencv-contrib-python>=4.10",  # cv2.aruco (ChArUco) lives in contrib
     "ipykernel>=6.29",              # model/visual_servo.ipynb
+    "ipywidgets>=8.1",              # camera/elp_capture.ipynb: capture button + live preview
     # controller/pose/validation: offscreen rendering of the robot mesh at known
     # poses, to validate the pose estimator against ground truth.
     "trimesh>=4.0",

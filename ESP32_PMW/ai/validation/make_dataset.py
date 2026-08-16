@@ -123,10 +123,7 @@ def build(n_train, n_test, width, height, seed=20260806, realistic=True, subfram
     # The backdrop sweep runs *away from* whatever the robot is, since the whole
     # question a backdrop level asks is how close it gets to the robot's own
     # level before segmentation gives up.
-    if appearance == "red":
-        body = rendermod.RED_BODY
-        bgs = rng.choice([1.0, 0.9, 0.8, 0.7], n)
-    elif appearance == "dark":
+    if appearance == "dark":
         body = rendermod.BLACK_BODY
         # Not down to 0.7: `segment.DARK_THRESH` needs the ground above ~145
         # counts, and a dim backdrop is a lighting fault rather than a condition
@@ -195,9 +192,9 @@ def main(argv=None):
                     help="no noise or motion blur (the original idealised renders)")
     ap.add_argument("--subframes", type=int, default=7,
                     help="sub-frames averaged across the exposure; cost scales with this")
-    ap.add_argument("--appearance", default="bright", choices=("bright", "dark", "red"),
-                    help="rig appearance; 'red' and 'dark' render a coloured or "
-                         "black body on a light ground (see segment.score_channel)")
+    ap.add_argument("--appearance", default="bright", choices=("bright", "dark"),
+                    help="rig appearance; 'dark' renders a black body on a light "
+                         "ground (see segment.score_channel)")
     args = ap.parse_args(argv)
 
     print(f"rendering {args.train} train + {args.test} test at {args.width}x{args.height}"

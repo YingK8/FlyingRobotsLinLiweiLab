@@ -53,10 +53,7 @@ from zeroing import Zero  # noqa: E402
 # Fitted on 700 training poses rendered with realistic sensor noise and motion
 # blur, where the residual bias was -0.374%.
 #
-# The same value serves both fits. Refitting from a dataset regenerated with
-# axial weighting on gives 10.2418 mm, 0.03% away -- an order of magnitude inside
-# the residual. (An earlier comment claimed 10.2662 for the weighted fit and a
-# depth bias "larger than the whole residual"; both are withdrawn, Iteration 14.)
+# The same value serves the weighted and unweighted fits, to 0.03%.
 #
 # The fit uses the *median* bias, not the mean, and the difference is not
 # cosmetic: about 1% of noisy frames fail catastrophically (the face-on, dimly
@@ -64,13 +61,16 @@ from zeroing import Zero  # noqa: E402
 # On that data the mean reads +1.09% and the median -0.37% -- opposite signs.
 # Fitting to the mean moved this constant the wrong way and tripled the median
 # position error, from 1.49 to 3.30 mm.
-#: One entry per rig appearance, because the effective radius depends on which
-#: channel the boundary was thresholded in. Both fitted the same way, on their
-#: own 1400-pose dataset: `validation/tune.py --data dataset[_red].npz`.
+#: One entry per rig appearance: the effective radius depends on where the
+#: threshold cuts the boundary, and the two appearances cut different edges.
+#:
+#: `dark` is NOT fitted -- it was carried over from a dataset rendered at a
+#: different threshold, and refitting is blocked on the renderer being unable to
+#: reproduce this rig. Its metric output is uncalibrated. See
+#: `ai/notes/pose_appearance.md`.
 RADIUS_BY_APPEARANCE = {
     "bright": 10.2446,   # white body, luminance threshold
-    "red": 10.2616,      # red body on a light ground, chroma threshold
-    "dark": 10.1106,     # black body on a light ground, inverted + chroma-gated
+    "dark": 10.1106,     # provisional, see above
 }
 RADIUS_MM = RADIUS_BY_APPEARANCE[segmod.APPEARANCE]
 
@@ -174,11 +174,8 @@ class PoseEstimator:
         self.dist = None if dist_coeffs is None else np.asarray(dist_coeffs, dtype=np.float64)
         self.radius_mm = float(radius_mm)
         self.zero = zero if zero is not None else Zero.identity()
-        # None, not `segmod.THRESH`: the meaningful level depends on which
-        # channel `segment.score_channel` returns, and 128 is a luminance level
-        # that means nothing on a chroma one. Binding it here forced the
-        # brightness threshold onto the red-on-white path and silently detected
-        # nothing -- the same duplicated-default failure as journal Iteration 12.
+        # None, not `segmod.THRESH`: the level belongs to the appearance, and
+        # `segment.score_channel` resolves it at call time.
         self.thresh = thresh
         self.min_area = min_area
         self.dropout_s = dropout_s
@@ -236,8 +233,8 @@ class PoseEstimator:
         ``axial`` forwards to `segment.segment`; only the validation code sets
         it, to compare against the unweighted fit. ``None`` means "whatever
         `segment.AXIAL_DEFAULT` says", read at call time -- not a duplicated
-        default, which is how this silently ignored the module flag for every
-        caller that went through the estimator (journal Iteration 12).
+        default -- a duplicated default here silently overrides the module flag
+        for every caller that goes through the estimator.
         """
         now = time.monotonic() if t is None else float(t)
         self.frame_index = self.frame_index + 1 if frame_index is None else int(frame_index)

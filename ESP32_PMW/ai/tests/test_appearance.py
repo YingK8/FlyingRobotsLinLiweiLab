@@ -3,24 +3,15 @@
 Run: uv run python controller/pose/test_appearance.py
 
 The bright-on-dark rig is covered indirectly by every other suite. This one
-exists for the red robot, and for two claims in particular:
+exists for the `dark` rig -- a black robot on a white backdrop under a
+**monochrome** camera, with the drive coils and the room beyond the backdrop in
+frame.
 
-    **1. Brightness cannot separate a red robot from its backdrop reliably --
-    not on white in either polarity, and not on black once the backdrop has any
-    sheen. Chroma can.**
-
-    **2. Chroma is background-invariant.** ``R - max(G, B)`` responds to the
-    paint, and every neutral surface has R = G = B however it is lit, so black,
-    grey and white all read ~0-4. One threshold and one calibration serve all of
-    them -- measured at 0.21 % spread in fitted rim size across seven backdrops.
-
-Neither is a preference; both are measurements over plausible surface patches
-spanning specular highlight to deep shade. If a future change reintroduces a
-luminance threshold for this rig, the overlap assertion below is what catches it.
-
-Scenes are drawn analytically rather than rendered, deliberately: the renderer
-produces a white mesh on a dark ground and cannot express this rig at all yet, so
-a test that depended on it could not exist.
+A chroma-based appearance was tried and removed. The argument was sound -- the
+robot is dark and achromatic, the coils dark and coloured -- but the high-speed
+cameras are mono sensors, so there is no colour to act on and a chroma test is an
+exact no-op rather than a weak signal. What is left is brightness and smoothness,
+which is what `valid_region` uses.
 """
 
 from __future__ import annotations
@@ -49,21 +40,22 @@ K = np.array(
 )
 RNG = np.random.default_rng(20260815)
 
-#: BGR patches a red robot and a white backdrop plausibly present. The point of
-#: the spread is that it is the *illumination* varying, not the paint.
-RED = {"bright": (55, 45, 190), "mid": (40, 32, 130),
-       "shadowed": (22, 18, 70), "specular": (150, 145, 235)}
+#: Grey levels a white backdrop plausibly presents. The point of the spread is
+#: that it is the *illumination* varying, not the paint.
 WHITE = {"blown": (252, 252, 252), "nominal": (225, 228, 230),
          "shadowed": (120, 124, 128), "deep shade": (60, 62, 66)}
 #: A "black" backdrop is never 0. Velvet gets close; matte paper under working
 #: light sits near 30, and anything with a sheen picks up a specular wash.
 BLACK = {"velvet": (4, 4, 5), "matte lit": (28, 30, 32),
          "matte bright": (45, 48, 50), "sheen": (70, 72, 75)}
-#: The bronze/orange drive coils beside the robot. Dark against a white ground,
-#: so an inverted threshold picks them up; strongly coloured, so chroma does not.
-COILS = {"bright orange": (30, 110, 225), "orange": (30, 90, 180),
-         "bronze": (40, 85, 140), "dark bronze": (25, 55, 95),
-         "shadowed": (18, 38, 66), "copper sheen": (90, 150, 215)}
+#: The drive coils, as the grey levels they actually present. Taken from
+#: `pose/assets/captures/elp/` -- p5 8-28, median 85-104, p95 224. Neutral
+#: triples, because the sensor is mono and there is nothing else to record.
+COILS = {"shadowed": (18, 18, 18), "body": (85, 85, 85),
+         "lit": (104, 104, 104), "specular": (224, 224, 224)}
+#: The drive coils beside the robot, as grey levels. Dark against a white ground,
+#: so an inverted threshold picks them up; a mono sensor has nothing else to
+#: tell them apart by, which is why `valid_region` exists.
 
 _failures = []
 
@@ -111,78 +103,6 @@ def truth_ellipse(z=240.0, tilt_deg=30.0, az=0.7):
 
 
 # ---------------------------------------------------------------------------
-
-
-def test_channel_separation():
-    """The measurement the red appearance exists because of."""
-    print("\nchannel separation, red robot vs white ground")
-    gr, gw = [_gray(v) for v in RED.values()], [_gray(v) for v in WHITE.values()]
-    rr, rw = [_redness(v) for v in RED.values()], [_redness(v) for v in WHITE.values()]
-    print(f"        luminance   robot [{min(gr):3d},{max(gr):3d}]  ground [{min(gw):3d},{max(gw):3d}]")
-    print(f"        R-max(G,B)  robot [{min(rr):3d},{max(rr):3d}]  ground [{min(rw):3d},{max(rw):3d}]")
-
-    check("luminance ranges OVERLAP (no threshold works, either polarity)",
-          min(gr) < max(gw) and min(gw) < max(gr),
-          f"gap {min(gr) - max(gw):+d} counts")
-    check("chroma ranges are disjoint", min(rr) > max(rw),
-          f"margin {min(rr) - max(rw):+d} counts")
-    check("the shipped threshold sits inside that margin",
-          max(rw) < segment.REDNESS_THRESH < min(rr),
-          f"{max(rw)} < {segment.REDNESS_THRESH} < {min(rr)}")
-
-
-def test_background_invariance():
-    """The claim that makes this appearance worth having.
-
-    ``R - max(G, B)`` responds to the *paint*, not the illumination, and every
-    neutral surface -- black, grey or white -- has R = G = B by definition. So the
-    same channel, the same threshold and the same calibration should serve any
-    neutral backdrop, and swapping the backdrop should not move the fitted rim.
-    """
-    print("\nbackground invariance (red appearance)")
-    e = truth_ellipse()
-    grounds = ([(f"black {k}", v) for k, v in BLACK.items()]
-               + [(f"white {k}", v) for k, v in WHITE.items() if k != "deep shade"])
-    majors = {}
-    for name, bg in grounds:
-        img = scene(RED["mid"], bg, e, ramp=0.25)
-        seg = segment.segment(img, appearance="red")
-        check(f"{name}: detected", seg is not None)
-        if seg is not None:
-            majors[name] = seg.ellipse[1][0]
-    if len(majors) > 1:
-        v = np.array(list(majors.values()))
-        spread = (v.max() - v.min()) / v.mean() * 100
-        print(f"        major axis {v.min():.2f}-{v.max():.2f} px over "
-              f"{len(v)} backdrops ({spread:.2f}% spread)")
-        check("one calibration serves every neutral backdrop", spread < 1.0,
-              f"{spread:.2f}% < 1%")
-
-
-def test_luminance_is_fragile_on_black():
-    """Red on black *nearly* works on brightness, and that is the trap.
-
-    The polarity is right and the robot is brighter than a dark backdrop, so a
-    lowered threshold detects it -- until the backdrop picks up a sheen, at which
-    point the whole frame passes the threshold. The chroma channel is indifferent.
-    """
-    print("\nred on black: brightness vs chroma")
-    e = truth_ellipse()
-    for name, bg in BLACK.items():
-        img = scene(RED["mid"], bg, e, ramp=0.25)
-        lum = segment.segment(img, appearance="bright", thresh=40)
-        chroma = segment.segment(img, appearance="red")
-        print(f"        {name:<14} brightness@40 {'ok' if lum else 'none':>4}"
-              f"   chroma {'ok' if chroma else 'none':>4}")
-        check(f"black {name}: chroma detects", chroma is not None)
-    lit = segment.segment(scene(RED["mid"], BLACK["sheen"], e, ramp=0.25),
-                          appearance="bright", thresh=40)
-    check("brightness fails on a sheeny black backdrop (chroma does not)",
-          lit is None)
-    default = segment.segment(scene(RED["mid"], BLACK["velvet"], e),
-                              appearance="bright")
-    check("the shipped brightness threshold (128) misses red entirely",
-          default is None)
 
 
 def test_dark_rejects_clutter():
@@ -294,39 +214,6 @@ def test_dark_refuses_without_a_region():
           segment.segment(flat, appearance="dark") is None)
 
 
-def test_red_detects_where_bright_fails():
-    print("\nsegmentation across illumination")
-    e = truth_ellipse()
-    true_major = e[1][0]
-    cases = [
-        ("even light", RED["mid"], WHITE["nominal"], 0.0),
-        ("+-35% ramp", RED["mid"], WHITE["nominal"], 0.35),
-        ("robot in shade", RED["shadowed"], WHITE["nominal"], 0.0),
-        ("blown-out ground", RED["specular"], WHITE["blown"], 0.0),
-    ]
-    majors = []
-    for name, fg, bg, ramp in cases:
-        img = scene(fg, bg, e, ramp=ramp)
-        a = segment.segment(img, appearance="bright")
-        b = segment.segment(img, appearance="red")
-        print(f"        {name:<18} bright={'none' if a is None else 'DETECTED'}"
-              f"   red={'none' if b is None else f'{b.ellipse[1][0]:6.1f} px'}")
-        check(f"{name}: red appearance detects", b is not None)
-        check(f"{name}: bright appearance does not", a is None)
-        if b is not None:
-            majors.append(b.ellipse[1][0])
-
-    # The absolute size is offset by the drawn stroke width, so what matters is
-    # that illumination does not move it: a chroma threshold cuts the same place
-    # on the edge however the scene is lit.
-    if majors:
-        spread = (max(majors) - min(majors)) / np.mean(majors) * 100
-        print(f"        major axis across all four: {min(majors):.1f}-{max(majors):.1f} px "
-              f"({spread:.1f}% spread), stroke-inflated from {true_major:.1f} px true")
-        check("major axis is stable across illumination", spread < 4.0,
-              f"{spread:.1f}% < 4%")
-
-
 def test_empty_scene_is_not_a_detection():
     """The property the module docstring rejects Otsu for.
 
@@ -341,22 +228,9 @@ def test_empty_scene_is_not_a_detection():
                            ("white, blown", WHITE["blown"], 0.0),
                            ("deep shade", WHITE["deep shade"], 0.0)):
         img = scene(None, bg, e, ramp=ramp, noise=6.0)
-        seg = segment.segment(img, appearance="red")
+        seg = segment.segment(img, appearance="dark")
         check(f"empty {name}: no detection", seg is None,
               "" if seg is None else f"{seg.area_px:.0f} px blob")
-
-
-def test_grayscale_input_is_refused():
-    """A grayscale frame cannot carry chroma, so say so rather than guess."""
-    print("\ninput validation")
-    img = scene(RED["mid"], WHITE["nominal"], truth_ellipse())
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    try:
-        segment.segment(gray, appearance="red")
-        check("grayscale input raises a clear error", False, "no exception")
-    except ValueError as exc:
-        check("grayscale input raises a clear error", "colour" in str(exc).lower(),
-              f"{str(exc)[:60]}...")
 
 
 def test_constants_are_matched_per_appearance():
@@ -376,7 +250,7 @@ def test_constants_are_matched_per_appearance():
     import estimator
 
     known = set(estimator.RADIUS_BY_APPEARANCE)
-    check("every appearance has a radius", known >= {"bright", "red"},
+    check("every appearance has a radius", known == {"bright", "dark"},
           ", ".join(sorted(known)))
 
     seen = {}
@@ -416,6 +290,53 @@ def test_constants_are_matched_per_appearance():
               len(files) == len(seen), f"{sorted(files)}")
 
 
+def test_constants_match_the_shipped_threshold():
+    """A calibration fitted at one threshold must not ship with another.
+
+    `test_constants_are_matched_per_appearance` checks a calibration *exists*.
+    It cannot check the thing that actually goes wrong, which is that the file
+    exists and was fitted through a different pipeline than the one now running.
+    That is the Iteration 12-14 failure and it is always silent -- a mismatched
+    constant does not raise, it biases.
+
+    The check that catches it is a round trip: render a body at a known pose
+    under the *current* constants and see whether the fitted rim comes back.
+    It caught exactly this. `DARK_THRESH` was retuned from 110 to 190 against the
+    real ELP captures while `BLACK_BODY` still rendered a body at 93 counts --
+    brighter than the resulting dividing luminance of 65 -- so most of the body
+    failed the darkness test and the major axis came back 63 px against a true
+    120, a 47% underestimate that nothing else in the suite noticed.
+
+    Skipped without a GL context, since it is the one test here that renders.
+    """
+    print("\nconstants round-trip against a render")
+    try:
+        import render as rendermod
+    except Exception as exc:                                   # pragma: no cover
+        print(f"        SKIP -- renderer unavailable ({type(exc).__name__})")
+        return
+
+    pose = (30.0, 40.0, np.array([4.0, -3.0, 240.0]))
+    cases = {"bright": (None, 0.0), "dark": (None, 1.0)}
+    cases["dark"] = (rendermod.BLACK_BODY, 1.0)
+    try:
+        with rendermod.Renderer(1024, 768) as r:
+            for app, (body, bg) in cases.items():
+                s = r.render(*pose, light=rendermod.LightRig(dome=((60.0, 25.0),),
+                                                             ambient=0.45),
+                             bg_level=bg, body_colour=body)
+                seg = segment.segment(s.image, appearance=app)
+                true = s.ellipse_gt[1][0]
+                got = None if seg is None else seg.ellipse[1][0]
+                err = float("inf") if got is None else abs(got - true) / true * 100
+                print(f"        {app:<7} fitted {'none' if got is None else f'{got:6.1f}'} px"
+                      f"   true {true:6.1f} px   error {err:5.1f}%")
+                check(f"{app}: shipped constants recover the rim", err < 12.0,
+                      f"{err:.1f}% < 12%")
+    except Exception as exc:                                   # pragma: no cover
+        print(f"        SKIP -- render failed ({type(exc).__name__}: {exc})")
+
+
 def test_bright_appearance_unchanged():
     """The bright path must still behave as every constant was fitted against.
 
@@ -432,30 +353,28 @@ def test_bright_appearance_unchanged():
         return
     print(f"        major {seg.ellipse[1][0]:.1f} px, rms {seg.fit_rms_px:.2f} px "
           f"(module default is {segment.APPEARANCE!r})")
-    # The luminance path must not have picked up the chroma threshold.
     explicit = segment.segment(img, appearance="bright", thresh=segment.THRESH)
-    check("bright uses the luminance threshold by default",
+    check("bright uses its own threshold by default",
           explicit is not None and explicit.ellipse == seg.ellipse)
+    # The two appearances must not share a level: 128 is right for one and far
+    # too low for the inverted other, and binding one to the other is how the
+    # duplicated-default bug of Iteration 12 recurred.
     check("the two appearances resolve different thresholds",
-          segment.score_channel(img, "bright")[1] != segment.score_channel(img, "red")[1],
+          segment.score_channel(img, "bright")[1] != segment.score_channel(img, "dark")[1],
           f"{segment.score_channel(img, 'bright')[1]} vs "
-          f"{segment.score_channel(img, 'red')[1]}")
+          f"{segment.score_channel(img, 'dark')[1]}")
 
 
 def main():
     print("=" * 68)
     print("rig appearance: bright-on-dark, red-on-white, black-on-white (mono)")
     print("=" * 68)
-    test_channel_separation()
-    test_background_invariance()
-    test_luminance_is_fragile_on_black()
     test_dark_rejects_clutter()
     test_dark_needs_no_colour()
     test_dark_refuses_without_a_region()
-    test_red_detects_where_bright_fails()
     test_empty_scene_is_not_a_detection()
-    test_grayscale_input_is_refused()
     test_constants_are_matched_per_appearance()
+    test_constants_match_the_shipped_threshold()
     test_bright_appearance_unchanged()
     print("\n" + "=" * 68)
     if _failures:

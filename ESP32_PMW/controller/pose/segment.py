@@ -1,14 +1,14 @@
 """Segment the robot from its background and fit the rim ellipse.
 
-Three rig appearances are supported, selected by `APPEARANCE` / `score_channel`:
+Two rig appearances are supported, selected by `APPEARANCE` / `score_channel`:
 a bright robot on a dark ground (the original bench setup, and the one every
-calibration constant here was fitted on); a **red** robot on a white ground,
-which needs chroma rather than brightness -- see `score_channel` for why
-inverting the threshold does not work; and **dark**, a black robot on a white
-backdrop under a *monochrome* camera, with the drive coils and the room beyond
-the backdrop in frame. Everything below the first paragraph of `segment` is
-appearance-agnostic: it operates on whichever single channel makes the robot
-bright.
+calibration constant here was fitted on), and **dark**, a black robot on a white
+backdrop with the drive coils and the room beyond the backdrop in frame.
+Everything below the first paragraph of `segment` is appearance-agnostic: it
+operates on whichever single channel makes the robot bright.
+
+Both are **monochrome**: the high-speed cameras are mono sensors, so brightness
+and smoothness are the only separations available.
 
 `dark` is the only one that cannot be reduced to a channel and a level. Inverting
 the threshold finds the robot and also the coils, the wires and the room, all of
@@ -190,17 +190,6 @@ AXIAL_WEIGHT_POWER = 1.0
 # difference -- it costs no gate coverage (59 certified frames against 61) and
 # improves both error metrics in every sensor mode (1280x800: position 0.268 ->
 # 0.186 mm, angle 0.294 -> 0.178 deg; modes at 100% in spec 5/8 -> 6/8).
-#
-# Two claims that used to live here are withdrawn; see journal Iterations 12-14
-# for the evidence, which is not repeated here:
-#   * that the weighting collapses certified detection (it does not -- that was
-#     measured while `PoseEstimator.update` ignored this flag entirely);
-#   * that the weighted fit needs its own radius, 10.2662 mm (refitting gives
-#     10.2418, i.e. 0.03% from the unweighted value -- the same radius serves).
-#
-# Regenerating the whole constant chain for the weighted fit was tried and
-# *rejected on measurement*: it certifies 12 frames where the shipped set
-# certifies 59. Refitting the error model properly is open work.
 #
 # **It costs latency, and that is an open trade rather than a settled one.**
 # Measured end to end over a 1000x720 sequence: 2.31 ms/frame unweighted against
@@ -867,31 +856,6 @@ def silhouette_hull(mask, keep_fraction=_BLOB_KEEP_FRACTION, max_spread=None):
     return hull, float(areas[keep - 1].sum())
 
 
-# Which appearance the rig presents, i.e. what makes the robot stand out from its
-# background. ``POSE_APPEARANCE`` overrides it per process.
-#
-#   "bright"  white robot on a dark ground -- the original bench setup, and the
-#             only one every calibration constant in this package was fitted on.
-#   "red"     red robot on any neutral backdrop, black or white.
-#
-# **A red robot cannot be segmented reliably by brightness.** Measured over
-# plausible patches spanning specular highlight to deep shade, luminance puts the
-# robot at 34-172 counts, a white backdrop at 63-252 and a black one at 4-73 --
-# overlapping in both cases, so no threshold in either polarity separates them.
-# On black a lowered threshold *nearly* works, which is the trap: it detects on
-# velvet and matte paper and returns nothing once the backdrop has a sheen.
-#
-# Chroma does separate them, and is indifferent to the backdrop. ``R - max(G, B)``
-# reads 48-135 on the robot and 0-4 on black, grey or white alike, because any
-# neutral surface has R = G = B however it is lit. Measured across seven backdrops
-# the fitted rim moves by 0.21%, so one threshold and one calibration serve all of
-# them.
-#
-# It also fails the right way. The module docstring rejects Otsu because with the
-# robot out of frame it thresholds noise into a confident detection; an absolute
-# chroma threshold cannot, since an empty white scene has no red in it at all.
-REDNESS_THRESH = 30
-
 # --- "dark": a black body on a white ground, with clutter in frame ---
 #
 # Inverting the threshold is most of it, but not all of it. The rig has bronze
@@ -899,16 +863,6 @@ REDNESS_THRESH = 30
 # ground **all of it is dark too**. `silhouette_hull` pools every blob and takes
 # one convex hull, so clutter anywhere in frame does not add a stray contour, it
 # swallows the rim: the hull spans both and the fitted ellipse is meaningless.
-#
-# **This appearance used to gate on chroma, and on the ELP that is inoperative.**
-# The reasoning was that the body is dark and achromatic, the coils dark and
-# coloured, so `max(BGR) - min(BGR)` separates them. It does -- on a colour
-# camera. The ELP OV9281 is a mono sensor: measured over both frames in
-# `pose/assets/captures/elp/`, chroma is **exactly 0 in every pixel** (max 0,
-# mean 0.00), so `compare(chroma, CHROMA_MAX, CMP_LE)` passes the entire frame.
-# It is a no-op whether the frame arrives with one channel or three, and it used
-# to fail *silently* where the `red` path raises. Recorded rather than deleted
-# because the chroma argument is still correct for a colour camera.
 #
 # Measured on those frames, which is what the constants below are fitted to:
 #
@@ -1143,21 +1097,7 @@ def score_channel(frame, appearance=None, thresh=None, region=None):
         dark = cv2.bitwise_and(cv2.bitwise_not(gray), region)
         return dark, int(DARK_THRESH if thresh is None else thresh)
 
-    if appearance == "red":
-        if frame.ndim != 3:
-            raise ValueError(
-                "appearance='red' needs a colour frame; this one is single-channel. "
-                "Check the capture path -- sources.CameraSource defaults to "
-                "grayscale=True, which throws away the only usable signal here."
-            )
-        b, g, r = cv2.split(frame)
-        # Saturating subtraction, so a bluer-than-red pixel clamps at 0 rather
-        # than wrapping to 255 and inventing a detection.
-        redness = cv2.subtract(r, cv2.max(g, b))
-        return redness, int(REDNESS_THRESH if thresh is None else thresh)
-
-    raise ValueError(
-        f"unknown appearance {appearance!r}; use 'bright', 'dark' or 'red'")
+    raise ValueError(f"unknown appearance {appearance!r}; use 'bright' or 'dark'")
 
 
 def clutter_mask(frame):

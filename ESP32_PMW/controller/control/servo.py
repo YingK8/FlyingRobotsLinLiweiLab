@@ -36,7 +36,7 @@ HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. control is stage 4 of 4.
 sys.path[:0] = [str(HERE), str(HERE.parent / "pose"), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
-from link import SerialComm  # noqa: E402  (ESP32_PMW/ai/serial_comm.py)
+from link import SerialComm  # noqa: E402  (controller/control/link.py)
 from z_track import TorqueLimits  # noqa: E402  (phase-lock torque budget)
 
 # flight constraints:

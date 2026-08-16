@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Real-time hover-controller runner -- closes the position loop around
 src/main_flight.cpp using the state-space controller designed by
-ai/design_hover_lqr.py (gains: ai/hover_controller.json).
+controller/control/design_hover_lqr.py (gains: controller/control/hover_controller.json).
 
-Replaces the open-loop ai/flight_controller.py once the camera exists.
-Position sources are pluggable behind PositionSource: today a simulation
-replay (--source stub) or CSV playback (--source replay); the camera team
-implements CameraSource.read() and everything else stays untouched.
+Replaces the open-loop controller/control/flight_controller.py.
+Position sources are pluggable behind PositionSource: a simulation replay
+(--source stub), CSV playback (--source replay), or the live camera
+(--source camera), which runs the whole stage 1-3 pipeline behind
+CameraSource.read() and hands back (t, x_m, z_m).
 
 Control law per frame (same DiscreteHoverController code path that passed
 the simulate_hover.py scenarios):
@@ -21,8 +22,8 @@ Safety: measurement watchdog (no fix for --timeout s -> "hover" then
 unhandled exception.
 
 Usage:
-  uv run python ai/hover_controller_runner.py --source stub --dry-run
-  uv run python ai/hover_controller_runner.py --source replay --replay-csv run.csv \
+  uv run python controller/control/hover_controller_runner.py --source stub --dry-run
+  uv run python controller/control/hover_controller_runner.py --source replay --replay-csv run.csv \
       --port /dev/ttyUSB0 --log hover_run.log
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ import math
 import os
 import signal
 import sys
+from pathlib import Path
 import time
 from abc import ABC, abstractmethod
 
@@ -101,14 +103,76 @@ class ReplaySource(PositionSource):
 
 
 class CameraSource(PositionSource):
-    """TODO(camera team): return (time.monotonic(), x_m, z_m) per frame.
-    See docs/pose_localization_project_context.md for the pose pipeline."""
+    """Live position from the camera: the seam where vision meets control.
 
-    def __init__(self):
-        raise NotImplementedError("camera position source not implemented yet")
+    The whole of stages 1-3 sits behind this one method. `camera.sources` opens
+    the device and grabs on its own thread, `pose.estimator` turns each frame
+    into a 5-DOF pose, and `pose.filter` smooths position and supplies velocity.
+    This class does nothing but adapt that to `PositionSource`'s contract, and
+    the adaptation is two specific things, both easy to get silently wrong:
+
+    **Units.** The contract is metres. The pose stack is millimetres throughout
+    -- `RADIUS_MM`, `xyz_mm`, `SIGMA_LATERAL_MM`. The conversion happens here,
+    once, at the boundary. A missed factor of 1000 does not raise; it produces a
+    controller that thinks the robot is a kilometre away and commands
+    accordingly.
+
+    **Which axes.** The controller is planar: it wants `x` (lateral) and `z`
+    (height). The camera's frame is `x` right, `y` down, `z` along the optical
+    axis, so *the camera's z is depth, not height*. For a side-on camera looking
+    horizontally at the robot, height is **-y**: negated because the image y axis
+    points down and height points up. `axes=` makes that explicit rather than
+    assumed, because the right mapping depends on where the camera is mounted and
+    getting it wrong yields a control loop that is stable and flying the wrong
+    axis.
+
+    **Non-blocking.** `read()` must return rather than wait. A frame that has not
+    arrived, and a frame the segmenter could not use, both return ``None`` -- the
+    caller's watchdog treats a gap the same either way, and returning a stale
+    repeat instead would hide a lost robot as a stationary one.
+    """
+
+    def __init__(self, source="camera:0", width=1280, height=800,
+                 axes=("x", "-y"), intrinsics=None, use_filter=True, timeout=0.0):
+        HERE = Path(__file__).resolve().parent
+        sys.path[:0] = [str(HERE.parent / "pose"), str(HERE.parent / "calib"),
+                        str(HERE.parent / "camera")]
+        import sources
+        from estimator import PoseEstimator, load_intrinsics
+        from filter import PoseFilter
+
+        K, dist = load_intrinsics(intrinsics) if intrinsics else load_intrinsics()
+        self._src = sources.open_source(source, width=width, height=height)
+        self._est = PoseEstimator(camera_matrix=K, dist_coeffs=dist)
+        self._filt = PoseFilter() if use_filter else None
+        self._axes = axes
+        self._timeout = timeout
+        self.n_lost = 0
+
+    def _component(self, xyz_mm, spec):
+        i = {"x": 0, "y": 1, "z": 2}[spec[-1]]
+        v = float(xyz_mm[i]) / 1000.0            # mm -> m, once, here
+        return -v if spec.startswith("-") else v
 
     def read(self):
-        raise NotImplementedError
+        item = self._src.read(self._timeout) if self._timeout else self._src.read()
+        if item is None:
+            return None
+        t_cap, frame = item
+        pose = self._est.update(frame, t=t_cap)
+        if pose is None:
+            self.n_lost += 1
+            return None
+        xyz = pose.xyz_mm
+        if self._filt is not None:
+            fused = self._filt.update(pose, t=t_cap)
+            if fused is not None:
+                xyz = fused[0]
+        return time.monotonic(), self._component(xyz, self._axes[0]), \
+            self._component(xyz, self._axes[1])
+
+    def close(self):
+        self._src.close()
 
 
 class CommandLink:
@@ -120,7 +184,7 @@ class CommandLink:
         if dry_run:
             self.comm = None
         else:
-            from serial_comm import SerialComm  # local import: pyserial only if needed
+            from link import SerialComm  # local import: pyserial only if needed
             self.comm = SerialComm(port=port)
             self.comm.reset_device()  # reboot firmware to IDLE
             time.sleep(1.5)           # wait out the boot banner
@@ -231,6 +295,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", choices=["stub", "replay", "camera"], default="stub")
+    ap.add_argument("--camera", default="camera:0", help="device for --source camera")
+    ap.add_argument("--width", type=int, default=1280)
+    ap.add_argument("--height", type=int, default=800)
+    ap.add_argument("--axes", default="x,-y",
+                    help="which pose axes are (lateral, height); see CameraSource")
     ap.add_argument("--replay-csv", help="CSV (t,x,z) for --source replay")
     ap.add_argument("--gains", default=os.path.join(os.path.dirname(__file__),
                                                     "hover_controller.json"))
@@ -271,7 +340,8 @@ def main() -> None:
             sys.exit("--source replay requires --replay-csv")
         src = ReplaySource(args.replay_csv)
     else:
-        src = CameraSource()
+        src = CameraSource(args.camera, args.width, args.height,
+                           axes=tuple(args.axes.split(",")))
 
     ztrk = None
     if args.waypoints:

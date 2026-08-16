@@ -2,7 +2,7 @@
 """Open-loop flight maneuver over serial: drive main_flight.cpp (env:flight)
 through takeoff -> hover -> accelerate -> land, logging telemetry to a .log.
 
-Outer-loop stand-in until the camera returns. Reuses ai/serial_comm.py.
+Outer-loop stand-in until the camera returns. Reuses controller/control/link.py.
 
 Usage: uv run python ai/flight_controller.py [--port /dev/ttyUSB0] [--log flight_run.log]
 """

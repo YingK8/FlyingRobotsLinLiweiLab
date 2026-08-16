@@ -73,7 +73,7 @@ def _fit_weighted(pts, w):
     if len(rep) < 5:
         return None
     try:
-        return conic.normalise_ellipse(cv2.fitEllipseDirect(rep.astype(np.float32)))
+        return segment.fit_ellipse_direct(rep)
     except cv2.error:
         return None
 

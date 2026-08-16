@@ -83,6 +83,7 @@ def normalise_ellipse(ellipse):
     return (float(cx), float(cy)), (float(a), float(b)), float(ang % 180.0)
 
 
+
 def conic_from_ellipse(ellipse):
     """3x3 image conic ``C`` from an OpenCV ``fitEllipse`` result.
 

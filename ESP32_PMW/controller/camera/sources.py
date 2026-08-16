@@ -18,6 +18,7 @@ are counted rather than hidden.
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
@@ -171,7 +172,7 @@ class CameraSource(FrameSource):
         backend=None,
     ):
         if backend is None:
-            backend = cv2.CAP_AVFOUNDATION if _is_macos() else cv2.CAP_V4L2
+            backend = default_backend()
         self._cap = cv2.VideoCapture(index, backend)
         if not self._cap.isOpened():
             raise OSError(f"could not open camera index {index}")
@@ -317,10 +318,13 @@ def open_stereo(specs, max_skew_s=None, **kw):
     return StereoSource([open_source(s, **kw) for s in specs], max_skew_s=max_skew_s)
 
 
-def _is_macos():
-    import sys
+def default_backend():
+    """The capture backend for this platform.
 
-    return sys.platform == "darwin"
+    Defined here because `CameraSource` is where a backend is actually opened;
+    `elp.py` imports it rather than re-deriving the same two-way choice.
+    """
+    return cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else cv2.CAP_V4L2
 
 
 def measure_fps(source, n=120):

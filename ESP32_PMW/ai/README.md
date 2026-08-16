@@ -63,7 +63,7 @@ Default — capture just the bridge output (the node you're probing). Replace th
 `SCALE` with your differential-probe attenuation (e.g. `20` for ÷20):
 
 ```bash
-python ESP32_PMW/ai/picoscope_capture.py --preset envelope \
+python ESP32_PMW/ai/instrumentation/picoscope_capture.py --preset envelope \
     --ch A:5v:DC:20:V:bridge_out
 ```
 
@@ -71,7 +71,7 @@ python ESP32_PMW/ai/picoscope_capture.py --preset envelope \
 `10` for a 0.1 Ω sense) and ask for the V–I phase:
 
 ```bash
-python ESP32_PMW/ai/picoscope_capture.py --preset envelope \
+python ESP32_PMW/ai/instrumentation/picoscope_capture.py --preset envelope \
     --ch A:5v:DC:20:V:bridge_out \
     --ch B:500mv:DC:10:A:coil_current \
     --vi bridge_out,coil_current
@@ -80,7 +80,7 @@ python ESP32_PMW/ai/picoscope_capture.py --preset envelope \
 Inspect the 15 kHz carrier instead of the 190 Hz envelope:
 
 ```bash
-python ESP32_PMW/ai/picoscope_capture.py --preset carrier --ch A:5v:DC:20:V:bridge_out
+python ESP32_PMW/ai/instrumentation/picoscope_capture.py --preset carrier --ch A:5v:DC:20:V:bridge_out
 ```
 
 `--ch` format: `CHANNEL:RANGE:COUPLING:SCALE:UNIT:LABEL` (only `CHANNEL:RANGE`

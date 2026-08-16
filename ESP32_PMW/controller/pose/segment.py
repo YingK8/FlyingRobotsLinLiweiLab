@@ -342,6 +342,21 @@ class Segmentation:
     valid: np.ndarray | None = None
 
 
+def fit_ellipse_direct(pts):
+    """Fitzgibbon direct fit of ``pts``, axes ordered major-first.
+
+    Pairing `cv2.fitEllipseDirect` with `conic.normalise_ellipse` is not
+    optional: an unnormalised result reports its angle against whichever axis
+    OpenCV happened to call ``width``, so the angle jumps 90 degrees on a nearly
+    circular silhouette. That pairing was written out four separate times;
+    separating the two calls is the mistake this exists to make impossible.
+
+    It lives here rather than in `conic.py` because that module is deliberately
+    OpenCV-free -- pure geometry over numpy -- and this is the OpenCV side.
+    """
+    return conic.normalise_ellipse(cv2.fitEllipseDirect(np.asarray(pts, dtype=np.float32)))
+
+
 def sampson_distance_conic(c, pts):
     """First-order geometric distance from points to a conic, in pixels.
 
@@ -468,7 +483,7 @@ def fit_ellipse(pts, axial=None, power=None, iters=None):
     if len(pts) < _MIN_CONTOUR_PTS:
         return None
     try:
-        ellipse = conic.normalise_ellipse(cv2.fitEllipseDirect(pts.astype(np.float32)))
+        ellipse = fit_ellipse_direct(pts)
     except cv2.error:
         return None
 
@@ -772,7 +787,7 @@ def _best_group(keep, labels, stats, centroids, n, max_spread):
         if hull is None:
             continue
         try:
-            ellipse = conic.normalise_ellipse(cv2.fitEllipseDirect(hull.astype(np.float32)))
+            ellipse = fit_ellipse_direct(hull)
         except (cv2.error, ValueError, np.linalg.LinAlgError):
             continue
         major = ellipse[1][0]
@@ -1264,7 +1279,7 @@ def undistort_ellipse(ellipse, camera_matrix, dist_coeffs, n_samples=180):
 
     src = np.column_stack([xs, ys]).astype(np.float64).reshape(-1, 1, 2)
     dst = cv2.undistortPoints(src, camera_matrix, dist_coeffs, P=camera_matrix)
-    return conic.normalise_ellipse(cv2.fitEllipseDirect(dst.reshape(-1, 2).astype(np.float32)))
+    return fit_ellipse_direct(dst.reshape(-1, 2))
 
 
 # How strongly the ignored area is tinted. Faint on purpose: it has to be legible

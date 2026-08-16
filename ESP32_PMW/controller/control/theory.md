@@ -159,7 +159,7 @@ The body-plus-rod-plus-propeller term dominates; the two magnets together contri
 > kg in a cylinder of volume $\pi r_b^2 h_b = 1.5711\times10^{-9}$ m³ gives
 > $\rho = 7500$ kg/m³, which is NdFeB; two cylinders per magnet would require
 > $\rho = 15000$ kg/m³, which is not a real material. All executable models
-> (the three `*_gui.m` files and `ai/hover_model.py`) use the factor 2. The dynamic effect
+> (the three `*_gui.m` files and `control/hover_model.py`) use the factor 2. The dynamic effect
 > of the discrepancy was negligible either way ($\omega_n \propto 1/\sqrt I$ shifts by
 > ≈ 0.14 %).
 
@@ -751,7 +751,7 @@ holds and the §7–§8 model is the complete story.
 
 | Model element | Code location (search anchor) |
 |---|---|
-| $I$ assembly (§3: body+rod+props $I_0$ + two magnets) | `%% Fixed robot model` block: the inlined `I_robot = 3.89E-9 + 2.0*(...)` expression, identical in all three `*_gui.m` files; mirrored as `I_ROBOT` in `ai/hover_model.py` |
+| $I$ assembly (§3: body+rod+props $I_0$ + two magnets) | `%% Fixed robot model` block: the inlined `I_robot = 3.89E-9 + 2.0*(...)` expression, identical in all three `*_gui.m` files; mirrored as `I_ROBOT` in `control/hover_model.py` |
 | drag data + through-origin LS fit + $R^2$ | `fre_points`, `drag_torque_points`, `k_drag = sum(...)`, `R_squared` |
 | $\tau_{max} = M k_d f_0^2$ | `tauMagMax = torqueMargin * tauRequiredInitial` |
 | initial condition $[\arcsin(1/M),\ 2\pi f_0]$ | `deltaInitial = asin(...)`, `stateAtStart` |

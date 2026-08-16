@@ -38,20 +38,13 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE)]
 
 import sources  # noqa: E402
+from sources import default_backend  # noqa: E402
 
 DEFAULT_PATH = HERE / "elp_camera.json"
 
 Mode = namedtuple("Mode", "width height fps")
 
 _MODE_RE = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*(?:@\s*(\d+(?:\.\d+)?))?\s*$")
-
-
-def _is_macos():
-    return sys.platform == "darwin"
-
-
-def default_backend():
-    return cv2.CAP_AVFOUNDATION if _is_macos() else cv2.CAP_V4L2
 
 
 def load_profile(path=DEFAULT_PATH):

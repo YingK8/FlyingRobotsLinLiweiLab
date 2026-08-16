@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Altitude waypoint tracking by rotating-field frequency modulation.
 
-The plant (theory/lecture_notes.md 6.2, with k_T = m_R*g/f_hover^2 from the
+The plant (theory.md 6.2, with k_T = m_R*g/f_hover^2 from the
 hover test) reduces to a form carrying no robot mass at all:
 
     z_ddot = g*((f_robot/f_hover)^2 - 1)

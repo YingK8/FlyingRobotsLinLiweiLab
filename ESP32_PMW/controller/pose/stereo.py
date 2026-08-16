@@ -84,7 +84,7 @@ from zeroing import Zero  # noqa: E402
 
 # Per-view error scales used to weight the fusion, in mm at the calibration
 # resolution (1024x768).  Straight from the held-out measurements in
-# controller/pose/README.md: lateral 0.078, depth 0.857.  They are weights, not
+# controller/pose/theory.md S13: lateral 0.078, depth 0.857.  They are weights, not
 # predictions -- only their *ratio* matters to the fused answer, which is why a
 # rough figure is good enough and why the ratio is the thing to keep current if
 # these are ever refitted.

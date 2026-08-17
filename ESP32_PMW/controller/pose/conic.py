@@ -1,4 +1,5 @@
-"""Pose of a circle of known radius from its image ellipse.
+"""
+Pose of a circle of known radius from its image ellipse.
 
 The robot's duct ring is a circle -- measured off ``flyingrobot_rod2.STL``
 it is 20.409 mm across with a radial standard deviation of 0.108 mm, so treating
@@ -38,20 +39,22 @@ CirclePose = namedtuple("CirclePose", "center normal")
 
 
 def cone_from_circle(center, normal, radius):
-    """Analytic cone matrix ``Q`` for a circle seen from the origin.
-
-    A point ``X`` lies on the cone iff the ray ``sX`` pierces the circle.  With
-    the circle's plane written ``n . X = d`` (``d = n . C``) that ray meets the
-    plane at ``P = d X / (n . X)``, and demanding ``|P - C| = r`` then clearing
-    the denominator gives a quadratic form:
-
-        d^2 |X|^2 - 2d (n.X)(C.X) + (|C|^2 - r^2)(n.X)^2 = 0
-
-    so ``Q = d^2 I - d (n C^T + C n^T) + (|C|^2 - r^2) n n^T``.
-
-    This is the exact inverse of `backproject` and is what the round-trip test
-    checks against.  It is also how `backproject` validates its own candidates.
     """
+    Analytic cone matrix ``Q`` for a circle seen from the origin.
+
+        A point ``X`` lies on the cone iff the ray ``sX`` pierces the circle.  With
+        the circle's plane written ``n . X = d`` (``d = n . C``) that ray meets the
+        plane at ``P = d X / (n . X)``, and demanding ``|P - C| = r`` then clearing
+        the denominator gives a quadratic form:
+
+            d^2 |X|^2 - 2d (n.X)(C.X) + (|C|^2 - r^2)(n.X)^2 = 0
+
+        so ``Q = d^2 I - d (n C^T + C n^T) + (|C|^2 - r^2) n n^T``.
+
+        This is the exact inverse of `backproject` and is what the round-trip test
+        checks against.  It is also how `backproject` validates its own candidates.
+    """
+
     c = np.asarray(center, dtype=np.float64).reshape(3)
     n = np.asarray(normal, dtype=np.float64).reshape(3)
     n = n / np.linalg.norm(n)
@@ -64,39 +67,42 @@ def cone_from_circle(center, normal, radius):
 
 
 def normalise_ellipse(ellipse):
-    """Reorder an OpenCV ellipse so the first axis is the major one.
-
-    ``cv2.fitEllipse`` returns a RotatedRect whose ``width`` and ``height`` are
-    in no particular order, and whose angle refers to ``width``.  So on an image
-    that is a hair taller than it is wide, the reported angle jumps by 90
-    degrees for no physical reason.  That is harmless inside
-    `conic_from_ellipse` (which only needs "axis along the angle" and "axis
-    across it"), but it wrecks anything that reads the angle as a heading --
-    which is exactly what the estimator's ``psi`` channel does.
-
-    Swapping the axes means rotating the angle by 90 degrees; the result is
-    wrapped into [0, 180) since an ellipse axis has no direction.
     """
+    Reorder an OpenCV ellipse so the first axis is the major one.
+
+        ``cv2.fitEllipse`` returns a RotatedRect whose ``width`` and ``height`` are
+        in no particular order, and whose angle refers to ``width``.  So on an image
+        that is a hair taller than it is wide, the reported angle jumps by 90
+        degrees for no physical reason.  That is harmless inside
+        `conic_from_ellipse` (which only needs "axis along the angle" and "axis
+        across it"), but it wrecks anything that reads the angle as a heading --
+        which is exactly what the estimator's ``psi`` channel does.
+
+        Swapping the axes means rotating the angle by 90 degrees; the result is
+        wrapped into [0, 180) since an ellipse axis has no direction.
+    """
+
     (cx, cy), (a, b), ang = ellipse
     if b > a:
         a, b, ang = b, a, ang + 90.0
     return (float(cx), float(cy)), (float(a), float(b)), float(ang % 180.0)
 
 
-
 def conic_from_ellipse(ellipse):
-    """3x3 image conic ``C`` from an OpenCV ``fitEllipse`` result.
-
-    Takes ``((cx, cy), (major, minor), angle_deg)`` exactly as
-    ``cv2.fitEllipse`` returns it -- note those are full axis *lengths*, not
-    semi-axes -- and returns ``C`` with ``p^T C p = 0`` for homogeneous image
-    points ``p = (u, v, 1)`` on the ellipse.
-
-    The rotation is applied as written, without trying to reason about OpenCV's
-    y-down image axis.  Whichever way the angle turns, the resulting conic fits
-    the same point set, because a sign flip on the angle is absorbed by the
-    symmetric form.  `residual` exists to confirm that empirically.
     """
+    3x3 image conic ``C`` from an OpenCV ``fitEllipse`` result.
+
+        Takes ``((cx, cy), (major, minor), angle_deg)`` exactly as
+        ``cv2.fitEllipse`` returns it -- note those are full axis *lengths*, not
+        semi-axes -- and returns ``C`` with ``p^T C p = 0`` for homogeneous image
+        points ``p = (u, v, 1)`` on the ellipse.
+
+        The rotation is applied as written, without trying to reason about OpenCV's
+        y-down image axis.  Whichever way the angle turns, the resulting conic fits
+        the same point set, because a sign flip on the angle is absorbed by the
+        symmetric form.  `residual` exists to confirm that empirically.
+    """
+
     (cx, cy), (major, minor), angle_deg = ellipse
     a = major / 2.0
     b = minor / 2.0
@@ -118,21 +124,23 @@ def conic_from_ellipse(ellipse):
 
 
 def ellipse_from_conic(conic):
-    """Inverse of `conic_from_ellipse`: ``C`` -> ``((cx,cy),(major,minor),deg)``.
-
-    Used to draw the predicted ellipse for a hypothesised pose, to compare a
-    rendered silhouette against the analytic ground-truth projection, and -- the
-    reason it is written out longhand rather than calling numpy -- inside the
-    stereo refinement's residual, which evaluates it a few hundred times a frame
-    at 420 Hz.
-
-    Everything here is 2x2, where `np.linalg.solve` and `np.linalg.eigh` spend
-    almost all their time in dispatch rather than arithmetic.  The closed forms
-    are the standard ones: the centre solves ``M c = -b``, and a symmetric
-    ``[[a, b], [b, c]]`` has eigenvalues ``(a+c)/2 +- sqrt(((a-c)/2)^2 + b^2)``
-    with eigenvector ``(b, l - a)``.  `test_conic.test_ellipse_conic_roundtrip`
-    is what keeps this honest against the algebra it replaced.
     """
+    Inverse of `conic_from_ellipse`: ``C`` -> ``((cx,cy),(major,minor),deg)``.
+
+        Used to draw the predicted ellipse for a hypothesised pose, to compare a
+        rendered silhouette against the analytic ground-truth projection, and -- the
+        reason it is written out longhand rather than calling numpy -- inside the
+        stereo refinement's residual, which evaluates it a few hundred times a frame
+        at 420 Hz.
+
+        Everything here is 2x2, where `np.linalg.solve` and `np.linalg.eigh` spend
+        almost all their time in dispatch rather than arithmetic.  The closed forms
+        are the standard ones: the centre solves ``M c = -b``, and a symmetric
+        ``[[a, b], [b, c]]`` has eigenvalues ``(a+c)/2 +- sqrt(((a-c)/2)^2 + b^2)``
+        with eigenvector ``(b, l - a)``.  `test_conic.test_ellipse_conic_roundtrip`
+        is what keeps this honest against the algebra it replaced.
+    """
+
     a, b, c = float(conic[0, 0]), float(conic[0, 1]), float(conic[1, 1])
     bx, by = float(conic[0, 2]), float(conic[1, 2])
 
@@ -145,7 +153,11 @@ def ellipse_from_conic(conic):
 
     # Value of the quadratic form at the centre; the ellipse is the level set
     # where the centred form equals -k.
-    k = (a * cx * cx + 2.0 * b * cx * cy + c * cy * cy) + 2.0 * (bx * cx + by * cy) + conic[2, 2]
+    k = (
+        (a * cx * cx + 2.0 * b * cx * cy + c * cy * cy)
+        + 2.0 * (bx * cx + by * cy)
+        + conic[2, 2]
+    )
     if abs(k) < 1e-15:
         raise ValueError("degenerate conic (zero scale)")
 
@@ -174,12 +186,14 @@ def ellipse_from_conic(conic):
 
 
 def residual(conic, points):
-    """RMS of ``p^T C p`` over image points, normalised by the conic scale.
-
-    A sanity probe, not part of the solve: it is how the tests confirm that a
-    conic built from `conic_from_ellipse` really does pass through the contour
-    it came from, without anyone having to be right about angle conventions.
     """
+    RMS of ``p^T C p`` over image points, normalised by the conic scale.
+
+        A sanity probe, not part of the solve: it is how the tests confirm that a
+        conic built from `conic_from_ellipse` really does pass through the contour
+        it came from, without anyone having to be right about angle conventions.
+    """
+
     pts = np.asarray(points, dtype=np.float64).reshape(-1, 2)
     ph = np.hstack([pts, np.ones((len(pts), 1))])
     vals = np.einsum("ij,jk,ik->i", ph, conic, ph)
@@ -188,12 +202,14 @@ def residual(conic, points):
 
 
 def _normalise_cone(cone):
-    """Scale/flip ``Q`` to the canonical (+, +, -) eigenvalue signature.
-
-    Returns ``(eigenvalues, eigenvectors)`` ordered ``l1 >= l2 > 0 > l3``, or
-    ``None`` if the quadratic form is not a real elliptic cone (which happens on
-    a degenerate or near-line contour).
     """
+    Scale/flip ``Q`` to the canonical (+, +, -) eigenvalue signature.
+
+        Returns ``(eigenvalues, eigenvectors)`` ordered ``l1 >= l2 > 0 > l3``, or
+        ``None`` if the quadratic form is not a real elliptic cone (which happens on
+        a degenerate or near-line contour).
+    """
+
     q = 0.5 * (cone + cone.T)  # enforce symmetry against accumulated round-off
     scale = np.abs(q).max()
     if not np.isfinite(scale) or scale < 1e-300:
@@ -217,26 +233,28 @@ def _normalise_cone(cone):
 
 
 def backproject(cone, radius, verify_tol=1e-6):
-    """Recover the two circle poses consistent with a cone.
-
-    ``cone`` is ``Q`` in normalised camera coordinates -- either straight from
-    `cone_from_circle`, or ``K^T C K`` for an image conic ``C`` (see
-    `backproject_ellipse`).  ``radius`` sets the scale, and its units are the
-    units of the returned centre.
-
-    Returns a list of `CirclePose`, normally length 2.  Both are geometrically
-    valid and produce the identical image; disambiguation needs outside
-    information.  A shorter list means the conic was degenerate or the circle
-    straddles the camera plane, and the caller should treat the frame as lost.
-
-    Rather than committing to one published sign convention, all four
-    ``(s1, s2)`` branches are generated and then filtered on two objective
-    tests: the centre must be in front of the camera, and rebuilding the cone
-    from the candidate must reproduce ``Q``.  ``verify_tol`` is that relative
-    reprojection tolerance; set it to ``None`` to skip the check once you trust
-    the inputs (it is roughly a third of the cost, and irrelevant next to the
-    segmentation that precedes it).
     """
+    Recover the two circle poses consistent with a cone.
+
+        ``cone`` is ``Q`` in normalised camera coordinates -- either straight from
+        `cone_from_circle`, or ``K^T C K`` for an image conic ``C`` (see
+        `backproject_ellipse`).  ``radius`` sets the scale, and its units are the
+        units of the returned centre.
+
+        Returns a list of `CirclePose`, normally length 2.  Both are geometrically
+        valid and produce the identical image; disambiguation needs outside
+        information.  A shorter list means the conic was degenerate or the circle
+        straddles the camera plane, and the caller should treat the frame as lost.
+
+        All four ``(s1, s2)`` branches are generated and filtered on two objective
+        tests -- centre in front of the camera, and rebuilding the cone reproduces
+        ``Q`` -- rather than committing to one published sign convention.
+
+        @param verify_tol: relative reprojection tolerance for that second test;
+            ``None`` skips it. Worth about a third of the cost, and irrelevant next to
+            the segmentation that precedes it.
+    """
+
     decomposed = _normalise_cone(cone)
     if decomposed is None:
         return []
@@ -289,23 +307,21 @@ def backproject(cone, radius, verify_tol=1e-6):
 
 
 def _circle_on_cone(lam, n_e, radius, isotropy_tol=1e-6):
-    """Centre of the radius-``radius`` circle cut from a cone by normal ``n_e``.
-
-    Works in the cone's eigenframe, where the quadric is ``diag(lam)``.  Slice
-    with the plane ``n.X = d`` and write points as ``X = d n + a u + b v`` for an
-    orthonormal ``u, v`` spanning the plane.  The quadratic form becomes
-
-        (u'Lu) a^2 + 2(u'Lv) ab + (v'Lv) b^2 + 2d[(n'Lu) a + (n'Lv) b] + d^2 n'Ln = 0
-
-    which is a circle exactly when ``u'Lu == v'Lv`` and ``u'Lv == 0`` -- checked
-    here, and the check is what confirms ``n_e`` really is a circular-section
-    normal rather than an artefact of eigenvalue ordering.  Completing the
-    square then gives centre and radius, both linear in ``d``, so ``d`` follows
-    directly from the wanted radius.
-
-    Deriving the centre this way rather than quoting a published closed form
-    keeps the module free of sign conventions that are easy to transcribe wrong.
     """
+    Centre of the radius-``radius`` circle cut from a cone by normal ``n_e``.
+
+        Works in the cone's eigenframe, where the quadric is ``diag(lam)``.  Slice
+        with the plane ``n.X = d`` and write points as ``X = d n + a u + b v`` for an
+        orthonormal ``u, v`` spanning the plane.  The quadratic form becomes
+
+            (u'Lu) a^2 + 2(u'Lv) ab + (v'Lv) b^2 + 2d[(n'Lu) a + (n'Lv) b] + d^2 n'Ln = 0
+
+        which is a circle exactly when ``u'Lu == v'Lv`` and ``u'Lv == 0``. That check
+        is what confirms ``n_e`` is really a circular-section normal and not an
+        artefact of eigenvalue ordering. Completing the square gives centre and radius,
+        both linear in ``d``, so ``d`` follows from the wanted radius.
+    """
+
     # The quadric is diagonal here, so `diag(lam) @ x` is just `lam * x`.
     # Any two vectors completing n_e to an orthonormal frame.
     seed = np.array([0.0, 1.0, 0.0]) if abs(n_e[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
@@ -337,11 +353,15 @@ def _circle_on_cone(lam, n_e, radius, isotropy_tol=1e-6):
 
 
 def _dedupe(poses, tol=1e-9):
-    """Drop duplicate branches (they collide when the circle is head-on)."""
+    """
+    Drop duplicate branches (they collide when the circle is head-on).
+    """
+
     kept = []
     for p in poses:
         if not any(
-            np.allclose(p.center, q.center, atol=tol) and np.allclose(p.normal, q.normal, atol=tol)
+            np.allclose(p.center, q.center, atol=tol)
+            and np.allclose(p.normal, q.normal, atol=tol)
             for q in kept
         ):
             kept.append(p)
@@ -349,27 +369,31 @@ def _dedupe(poses, tol=1e-9):
 
 
 def backproject_ellipse(ellipse, camera_matrix, radius, verify_tol=1e-6):
-    """`backproject` starting from an image ellipse instead of a cone.
-
-    ``p = K X`` up to scale, so ``p^T C p = 0`` becomes ``X^T (K^T C K) X = 0``
-    and the cone in normalised coordinates is simply ``K^T C K``.
-
-    The ellipse must already be in ideal-pinhole pixels -- undistort the contour
-    before fitting, which is what `estimator.py` does.
     """
+    `backproject` starting from an image ellipse instead of a cone.
+
+        ``p = K X`` up to scale, so ``p^T C p = 0`` becomes ``X^T (K^T C K) X = 0``
+        and the cone in normalised coordinates is simply ``K^T C K``.
+
+        The ellipse must already be in ideal-pinhole pixels -- undistort the contour
+        before fitting, which is what `estimator.py` does.
+    """
+
     conic = conic_from_ellipse(ellipse)
     cone = camera_matrix.T @ conic @ camera_matrix
     return backproject(cone, radius, verify_tol=verify_tol)
 
 
 def ambiguity_margin_deg(poses):
-    """Angle between the two candidate normals, in degrees.
-
-    Near zero the two solutions have merged (the circle is close to head-on) and
-    the choice barely matters; when it is large a wrong pick is a large error.
-    Logged every frame so ambiguity failures are visible in the CSV rather than
-    hidden inside an averaged residual.
     """
+    Angle between the two candidate normals, in degrees.
+
+        Near zero the two solutions have merged (the circle is close to head-on) and
+        the choice barely matters; when it is large a wrong pick is a large error.
+        Logged every frame so ambiguity failures are visible in the CSV rather than
+        hidden inside an averaged residual.
+    """
+
     if len(poses) < 2:
         return 0.0
     d = float(np.clip(poses[0].normal @ poses[1].normal, -1.0, 1.0))
@@ -377,29 +401,34 @@ def ambiguity_margin_deg(poses):
 
 
 def project_circle(center, normal, radius, camera_matrix):
-    """Forward model: circle -> image ellipse. Handy for overlays and tests."""
+    """
+    Forward model: circle -> image ellipse. Handy for overlays and tests.
+    """
+
     cone = cone_from_circle(center, normal, radius)
     kinv = np.linalg.inv(camera_matrix)
     return ellipse_from_conic(kinv.T @ cone @ kinv)
 
 
 def fit_conic_weighted(pts, weights=None):
-    """Direct least-squares ellipse fit with per-point weights.
-
-    Halir & Flusser's numerically stable form of Fitzgibbon's direct fit: the
-    design matrix is split into its quadratic and linear halves so the
-    generalised eigenproblem stays well conditioned, and the ``4ac - b^2 = 1``
-    constraint guarantees the result is an ellipse rather than a hyperbola --
-    which matters here, because a weighted fit on a short arc can otherwise run
-    away to an unbounded conic.
-
-    ``weights`` enters as ``D' W D`` on the scatter matrices, which is the whole
-    reason this exists: `cv2.fitEllipseDirect` has no weighted form, and the
-    alternative -- duplicating points in proportion to weight -- quantises the
-    weighting and inflates the point count.
-
-    Returns the 3x3 conic matrix, or ``None`` if the fit degenerates.
     """
+    Direct least-squares ellipse fit with per-point weights.
+
+        Halir & Flusser's numerically stable form of Fitzgibbon's direct fit: the
+        design matrix is split into its quadratic and linear halves so the
+        generalised eigenproblem stays well conditioned, and the ``4ac - b^2 = 1``
+        constraint guarantees the result is an ellipse rather than a hyperbola --
+        which matters here, because a weighted fit on a short arc can otherwise run
+        away to an unbounded conic.
+
+        ``weights`` enters as ``D' W D`` on the scatter matrices, which is the whole
+        reason this exists: `cv2.fitEllipseDirect` has no weighted form, and the
+        alternative -- duplicating points in proportion to weight -- quantises the
+        weighting and inflates the point count.
+
+        Returns the 3x3 conic matrix, or ``None`` if the fit degenerates.
+    """
+
     pts = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
     if len(pts) < 5:
         return None
@@ -443,12 +472,15 @@ def fit_conic_weighted(pts, weights=None):
 
     # Undo the normalising similarity: x = (X - mu)/s.
     s, mx, my = scale, mu[0], mu[1]
-    conic = np.array([
-        [a / s**2, b / (2 * s**2), (d / s - (2 * a * mx + b * my) / s**2) / 2.0],
-        [b / (2 * s**2), c / s**2, (e / s - (b * mx + 2 * c * my) / s**2) / 2.0],
-        [0.0, 0.0, 0.0],
-    ])
+    conic = np.array(
+        [
+            [a / s**2, b / (2 * s**2), (d / s - (2 * a * mx + b * my) / s**2) / 2.0],
+            [b / (2 * s**2), c / s**2, (e / s - (b * mx + 2 * c * my) / s**2) / 2.0],
+            [0.0, 0.0, 0.0],
+        ]
+    )
     conic[2, 0], conic[2, 1] = conic[0, 2], conic[1, 2]
-    conic[2, 2] = (a * mx**2 + b * mx * my + c * my**2) / s**2 \
-        - (d * mx + e * my) / s + f
+    conic[2, 2] = (
+        (a * mx**2 + b * mx * my + c * my**2) / s**2 - (d * mx + e * my) / s + f
+    )
     return conic if np.all(np.isfinite(conic)) else None

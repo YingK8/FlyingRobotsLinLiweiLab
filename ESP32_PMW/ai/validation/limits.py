@@ -1,4 +1,5 @@
-"""Measure the real system against the Cramer-Rao floors in `pose/bounds.py`.
+"""
+Measure the real system against the Cramer-Rao floors in `pose/bounds.py`.
 
 `bounds.py` says what is possible, `sweep.py` says what happens; the gap between
 them is what says *what to work on next*.
@@ -49,8 +50,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import bounds  # noqa: E402
 import conic  # noqa: E402
@@ -74,16 +80,19 @@ PHOTON_SIGMA_PX = bounds.edge_crlb_discrete(200.0, 5.0, 1.0)
 
 
 def signed_radial_distance(pts, ellipse):
-    """Signed distance from each point to the ellipse, positive outward, in px.
-
-    Uses the Sampson (first-order geometric) distance, which is what the rest of
-    the package uses for the same job, with the sign taken from the algebraic
-    form so "outward" means "outside the ellipse". Exact geometric distance would
-    need a quartic root per point and changes nothing at these magnitudes.
     """
+    Signed distance from each point to the ellipse, positive outward, in px.
+
+        Uses the Sampson (first-order geometric) distance, which is what the rest of
+        the package uses for the same job, with the sign taken from the algebraic
+        form so "outward" means "outside the ellipse". Exact geometric distance would
+        need a quartic root per point and changes nothing at these magnitudes.
+    """
+
     c = conic.conic_from_ellipse(ellipse)
-    h = np.column_stack([np.asarray(pts, dtype=np.float64).reshape(-1, 2),
-                         np.ones(len(pts))])
+    h = np.column_stack(
+        [np.asarray(pts, dtype=np.float64).reshape(-1, 2), np.ones(len(pts))]
+    )
     alg = np.einsum("ni,ij,nj->n", h, c, h)
     grad = 2.0 * (c @ h.T).T[:, :2]
     gn = np.linalg.norm(grad, axis=1)
@@ -91,27 +100,30 @@ def signed_radial_distance(pts, ellipse):
 
 
 def correlation_length_px(pts, resid):
-    """Along-contour correlation length of the boundary residual, in pixels.
-
-    Contour points arrive in order, so the residual is a 1-D signal indexed by
-    arc length. The correlation length is taken as the lag at which the
-    normalised autocorrelation first falls below 1/e -- a robust definition that
-    does not assume the correlation is Gaussian, exponential, or anything else.
-
-    This is the number that turns a raw point count into an honest one. A hull
-    with 400 vertices whose residual decorrelates only after 6 px is carrying
-    about 65 independent measurements, not 400, and the CRLB differs by 2.5x.
     """
+    Along-contour correlation length of the boundary residual, in pixels.
+
+        Contour points arrive in order, so the residual is a 1-D signal indexed by
+        arc length. The correlation length is taken as the lag at which the
+        normalised autocorrelation first falls below 1/e -- a robust definition that
+        does not assume the correlation is Gaussian, exponential, or anything else.
+
+        This is the number that turns a raw point count into an honest one. A hull
+        with 400 vertices whose residual decorrelates only after 6 px is carrying
+        about 65 independent measurements, not 400, and the CRLB differs by 2.5x.
+    """
+
     r = np.asarray(resid, dtype=np.float64)
     r = r - r.mean()
     if len(r) < 8 or r.std() < 1e-12:
         return 1.0
-    step = np.linalg.norm(np.diff(np.asarray(pts, dtype=np.float64).reshape(-1, 2),
-                                  axis=0), axis=1)
+    step = np.linalg.norm(
+        np.diff(np.asarray(pts, dtype=np.float64).reshape(-1, 2), axis=0), axis=1
+    )
     spacing = float(np.median(step)) if len(step) else 1.0
 
     n = len(r)
-    ac = np.correlate(r, r, mode="full")[n - 1:]
+    ac = np.correlate(r, r, mode="full")[n - 1 :]
     ac /= ac[0]
     below = np.nonzero(ac < math.exp(-1.0))[0]
     lag = float(below[0]) if len(below) else float(n)
@@ -124,23 +136,25 @@ def correlation_length_px(pts, resid):
 
 
 def analyse(sample, seg, pose, K, radius_mm):
-    """One frame: boundary decomposition, CRLB, observed error.
-
-    Two methodological points, each worth more than the effect being measured:
-
-    **The CRLB is a local bound**, describing the curvature of the likelihood at
-    a maximum -- and this likelihood has two equal maxima
-    (`bounds.ambiguity_is_exact`). A frame where the wrong branch was picked is
-    not an imprecise estimator, it is one answering a question the data cannot
-    answer, so pose error is scored against the branch nearest truth and branch
-    failures are counted separately.
-
-    **std(d) is not a Gaussian sigma.** The departures are one-sided and
-    heavy-tailed, so std is set by a few excursions; feeding it to a Gaussian
-    CRLB inflates the floor until the observed error sits *below* it. The floor
-    uses 1.4826*MAD, with std carried alongside -- the gap between them is the
-    contamination.
     """
+    One frame: boundary decomposition, CRLB, observed error.
+
+        Two methodological points, each worth more than the effect being measured:
+
+        **The CRLB is a local bound**, describing the curvature of the likelihood at
+        a maximum -- and this likelihood has two equal maxima
+        (`bounds.ambiguity_is_exact`). A frame where the wrong branch was picked is
+        not an imprecise estimator, it is one answering a question the data cannot
+        answer, so pose error is scored against the branch nearest truth and branch
+        failures are counted separately.
+
+        **std(d) is not a Gaussian sigma.** The departures are one-sided and
+        heavy-tailed, so std is set by a few excursions; feeding it to a Gaussian
+        CRLB inflates the floor until the observed error sits *below* it. The floor
+        uses 1.4826*MAD, with std carried alongside -- the gap between them is the
+        contamination.
+    """
+
     gt = sample.ellipse_gt
     pts = np.asarray(seg.contour, dtype=np.float64).reshape(-1, 2)
     d = signed_radial_distance(pts, gt)
@@ -152,10 +166,12 @@ def analyse(sample, seg, pose, K, radius_mm):
 
     (_, _), (ma, mi), ang = gt
     a_px, b_px = 0.5 * ma, 0.5 * mi
-    perim = math.pi * (3.0 * (a_px + b_px)
-                       - math.sqrt(max(0.0, (3 * a_px + b_px) * (a_px + 3 * b_px))))
-    n_eff = bounds.effective_point_count(len(pts), lcorr,
-                                         spacing_px=perim / max(1, len(pts)))
+    perim = math.pi * (
+        3.0 * (a_px + b_px) - math.sqrt(max(0.0, (3 * a_px + b_px) * (a_px + 3 * b_px)))
+    )
+    n_eff = bounds.effective_point_count(
+        len(pts), lcorr, spacing_px=perim / max(1, len(pts))
+    )
 
     row = {
         "tilt_deg": float(sample.tilt_deg),
@@ -193,9 +209,15 @@ def analyse(sample, seg, pose, K, radius_mm):
     #              because the real errors are correlated and the radius
     #              calibration absorbs their common mode.
     def crlb(prefix, sigma, n):
-        cov, _ = bounds.pose_crlb((gt[0][0], gt[0][1]), (a_px, b_px),
-                                  math.radians(ang), K, radius_mm, n,
-                                  max(float(sigma), 1e-6))
+        cov, _ = bounds.pose_crlb(
+            (gt[0][0], gt[0][1]),
+            (a_px, b_px),
+            math.radians(ang),
+            K,
+            radius_mm,
+            n,
+            max(float(sigma), 1e-6),
+        )
         if cov is None:
             return
         sd = np.sqrt(np.clip(np.diag(cov), 0.0, None))
@@ -224,8 +246,9 @@ def analyse(sample, seg, pose, K, radius_mm):
             # Did the shipped branch choice agree with the oracle?
             shipped = float(np.clip(np.asarray(pose.normal) @ truth_n, -1.0, 1.0))
             row["shipped_angle_deg"] = float(math.degrees(math.acos(shipped)))
-            row["branch_wrong"] = bool(row["shipped_angle_deg"]
-                                       > row["obs_angle_deg"] + 1e-6)
+            row["branch_wrong"] = bool(
+                row["shipped_angle_deg"] > row["obs_angle_deg"] + 1e-6
+            )
             row["ambiguity_margin_deg"] = float(pose.ambiguity_margin_deg)
 
     # The bias, converted to the depth error it alone would cause. A boundary
@@ -247,37 +270,43 @@ def analyse(sample, seg, pose, K, radius_mm):
 # ---------------------------------------------------------------------------
 
 
-def run(n_poses=200, seed=7, width=1280, height=800, subframes=5, tiers=("core", "edge")):
-    """Render both condition tiers and analyse every frame.
-
-    Conditions (lighting, exposure, alpha, background) come from `conditions.py`
-    -- the same ``core``/``edge`` vocabulary the resolution sweep and the error
-    model use -- so the numbers here sit on the same axis as every other result
-    in the package. The pose set is shared between tiers, so a tier difference is
-    a difference in conditions and not in what was asked.
-
-    Poses are drawn here rather than by ``conditions.sample_poses``, and the
-    difference is not stylistic: that function returns **world** offsets for the
-    stereo rig, with z in +-40 mm about the rig origin. Feeding those to the
-    monocular `Renderer`, whose centres are in **camera** coordinates, puts the
-    robot on top of the lens. It renders without complaint and produces 35-point
-    hulls, 9 px boundary scatter and 47 deg of angular error -- numbers that look
-    like a catastrophic estimator rather than a units mistake.
-
-    Tilt is drawn uniformly in the cosine, matching `sample_poses`, so the
-    orientation distribution is comparable.
+def run(
+    n_poses=200, seed=7, width=1280, height=800, subframes=5, tiers=("core", "edge")
+):
     """
+    Render both condition tiers and analyse every frame.
+
+        Conditions (lighting, exposure, alpha, background) come from `conditions.py`
+        -- the same ``core``/``edge`` vocabulary the resolution sweep and the error
+        model use -- so the numbers here sit on the same axis as every other result
+        in the package. The pose set is shared between tiers, so a tier difference is
+        a difference in conditions and not in what was asked.
+
+        Poses are drawn here rather than by ``conditions.sample_poses``, and the
+        difference is not stylistic: that function returns **world** offsets for the
+        stereo rig, with z in +-40 mm about the rig origin. Feeding those to the
+        monocular `Renderer`, whose centres are in **camera** coordinates, puts the
+        robot on top of the lens. It renders without complaint and produces 35-point
+        hulls, 9 px boundary scatter and 47 deg of angular error -- numbers that look
+        like a catastrophic estimator rather than a units mistake.
+
+        Tilt is drawn uniformly in the cosine, matching `sample_poses`, so the
+        orientation distribution is comparable.
+    """
+
     import conditions as cond
 
     rng = np.random.default_rng(seed)
     cos_lo = math.cos(math.radians(70.0))
     tilt = np.degrees(np.arccos(rng.uniform(cos_lo, 1.0, n_poses)))
     az = rng.uniform(0.0, 360.0, n_poses)
-    centres = np.column_stack([
-        rng.uniform(-22.0, 22.0, n_poses),
-        rng.uniform(-22.0, 22.0, n_poses),
-        rng.uniform(170.0, 340.0, n_poses),
-    ])
+    centres = np.column_stack(
+        [
+            rng.uniform(-22.0, 22.0, n_poses),
+            rng.uniform(-22.0, 22.0, n_poses),
+            rng.uniform(170.0, 340.0, n_poses),
+        ]
+    )
     shape = (height, width)
     plans = {t: getattr(cond, t)(rng, n_poses, shape, subframes) for t in tiers}
 
@@ -285,17 +314,27 @@ def run(n_poses=200, seed=7, width=1280, height=800, subframes=5, tiers=("core",
     with R.Renderer(width=width, height=height) as ren:
         K = ren.K
         radius = R.RIM_RADIUS_MM
-        e = est.PoseEstimator(camera_matrix=K, dist_coeffs=np.zeros(5),
-                              radius_mm=est.RADIUS_MM)
+        e = est.PoseEstimator(
+            camera_matrix=K, dist_coeffs=np.zeros(5), radius_mm=est.RADIUS_MM
+        )
         total, done = n_poses * len(plans), 0
-        print(f"rendering {total} frames at {width}x{height} "
-              f"({n_poses} poses x {len(plans)} tiers) ...", flush=True)
+        print(
+            f"rendering {total} frames at {width}x{height} "
+            f"({n_poses} poses x {len(plans)} tiers) ...",
+            flush=True,
+        )
         for tier, conds in plans.items():
             for i in range(n_poses):
                 c = conds[i]
-                s = ren.render(float(tilt[i]), float(az[i]), centres[i],
-                               alpha=c.alpha, light=c.light, exposure=c.exposure,
-                               background=c.background)
+                s = ren.render(
+                    float(tilt[i]),
+                    float(az[i]),
+                    centres[i],
+                    alpha=c.alpha,
+                    light=c.light,
+                    exposure=c.exposure,
+                    background=c.background,
+                )
                 done += 1
                 if done % 50 == 0:
                     print(f"    {done}/{total}", flush=True)
@@ -315,46 +354,82 @@ def summarise(rows):
         return np.array([r[k] for r in rows if k in r and np.isfinite(r[k])])
 
     out = {"n": len(rows)}
-    for k in ("boundary_bias_px", "boundary_scatter_px",
-              "boundary_scatter_robust_px", "contamination_ratio", "corr_len_px",
-              "n_points", "n_effective",
-              "photon_pos_mm", "photon_depth_mm", "photon_lateral_mm",
-              "photon_angle_deg", "quant_pos_mm", "quant_depth_mm",
-              "quant_lateral_mm", "quant_angle_deg",
-              "hull_pos_mm", "hull_depth_mm", "hull_lateral_mm", "hull_angle_deg",
-              "noiseq_pos_mm", "noiseq_depth_mm", "noiseq_lateral_mm",
-              "noiseq_angle_deg", "obs_pos_mm", "obs_depth_mm",
-              "obs_lateral_mm", "obs_angle_deg", "shipped_angle_deg",
-              "bias_implied_depth_mm", "residual_bias_px",
-              "residual_bias_depth_mm"):
+    for k in (
+        "boundary_bias_px",
+        "boundary_scatter_px",
+        "boundary_scatter_robust_px",
+        "contamination_ratio",
+        "corr_len_px",
+        "n_points",
+        "n_effective",
+        "photon_pos_mm",
+        "photon_depth_mm",
+        "photon_lateral_mm",
+        "photon_angle_deg",
+        "quant_pos_mm",
+        "quant_depth_mm",
+        "quant_lateral_mm",
+        "quant_angle_deg",
+        "hull_pos_mm",
+        "hull_depth_mm",
+        "hull_lateral_mm",
+        "hull_angle_deg",
+        "noiseq_pos_mm",
+        "noiseq_depth_mm",
+        "noiseq_lateral_mm",
+        "noiseq_angle_deg",
+        "obs_pos_mm",
+        "obs_depth_mm",
+        "obs_lateral_mm",
+        "obs_angle_deg",
+        "shipped_angle_deg",
+        "bias_implied_depth_mm",
+        "residual_bias_px",
+        "residual_bias_depth_mm",
+    ):
         v = col(k)
         if len(v):
-            out[k] = {"median": float(np.median(v)),
-                      "mean": float(np.mean(v)),
-                      "p95": float(np.percentile(v, 95))}
+            out[k] = {
+                "median": float(np.median(v)),
+                "mean": float(np.mean(v)),
+                "p95": float(np.percentile(v, 95)),
+            }
 
     # The headline: how many times the floor is the observed error.
-    pairs = [(f"obs_{q}", f"{lvl}_{q}")
-             for lvl in ("photon", "quant", "hull", "noiseq")
-             for q in ("pos_mm", "depth_mm", "lateral_mm", "angle_deg")]
+    pairs = [
+        (f"obs_{q}", f"{lvl}_{q}")
+        for lvl in ("photon", "quant", "hull", "noiseq")
+        for q in ("pos_mm", "depth_mm", "lateral_mm", "angle_deg")
+    ]
     for a, b in pairs:
-        ratio = [r[a] / r[b] for r in rows
-                 if a in r and b in r and r[b] > 0 and np.isfinite(r[a])]
+        ratio = [
+            r[a] / r[b]
+            for r in rows
+            if a in r and b in r and r[b] > 0 and np.isfinite(r[a])
+        ]
         if ratio:
-            out[f"ratio_{a}_over_{b}"] = {"median": float(np.median(ratio)),
-                                 "p95": float(np.percentile(ratio, 95))}
+            out[f"ratio_{a}_over_{b}"] = {
+                "median": float(np.median(ratio)),
+                "p95": float(np.percentile(ratio, 95)),
+            }
 
     # And how well the bias alone accounts for the depth error, which is the
     # positive form of the same claim.
-    pair = [(abs(r["bias_implied_depth_mm"]), r["obs_depth_mm"]) for r in rows
-            if "obs_depth_mm" in r]
+    pair = [
+        (abs(r["bias_implied_depth_mm"]), r["obs_depth_mm"])
+        for r in rows
+        if "obs_depth_mm" in r
+    ]
     if pair:
         p = np.array(pair)
         out["bias_explains_depth"] = {
             "median_predicted_mm": float(np.median(p[:, 0])),
             "median_observed_mm": float(np.median(p[:, 1])),
-            "correlation": float(np.corrcoef(p[:, 0], p[:, 1])[0, 1])
-            if len(p) > 2 else float("nan"),
+            "correlation": (
+                float(np.corrcoef(p[:, 0], p[:, 1])[0, 1])
+                if len(p) > 2
+                else float("nan")
+            ),
         }
 
     # Branch selection: how often the single-view ambiguity is resolved wrongly.
@@ -362,10 +437,14 @@ def summarise(rows):
     flags = [r["branch_wrong"] for r in rows if "branch_wrong" in r]
     if flags:
         out["branch_wrong_fraction"] = float(np.mean(flags))
-        marg = [r["ambiguity_margin_deg"] for r in rows
-                if r.get("branch_wrong") and "ambiguity_margin_deg" in r]
+        marg = [
+            r["ambiguity_margin_deg"]
+            for r in rows
+            if r.get("branch_wrong") and "ambiguity_margin_deg" in r
+        ]
         out["branch_wrong_median_margin_deg"] = (
-            float(np.median(marg)) if marg else float("nan"))
+            float(np.median(marg)) if marg else float("nan")
+        )
 
     # The photon floor, for scale: what the scatter WOULD be if the sensor were
     # the limit. Contrast and read noise taken from the render's exposure model.
@@ -388,71 +467,114 @@ def main():
     summary = summarise(rows)
 
     print("\nboundary decomposition (px)")
-    for k in ("boundary_bias_px", "residual_bias_px", "boundary_scatter_px",
-              "boundary_scatter_robust_px", "contamination_ratio", "corr_len_px"):
+    for k in (
+        "boundary_bias_px",
+        "residual_bias_px",
+        "boundary_scatter_px",
+        "boundary_scatter_robust_px",
+        "contamination_ratio",
+        "corr_len_px",
+    ):
         s = summary[k]
-        print(f"  {k:<28} median {s['median']:+.4f}   mean {s['mean']:+.4f}"
-              f"   p95 {s['p95']:+.4f}")
-    print(f"  {'photon CRLB':<28} {summary['photon_sigma_px']:.4f} px"
-          f"   (pixel quantisation {summary['quantisation_sigma_px']:.4f} px)")
-    print(f"  robust scatter is "
-          f"{summary['boundary_scatter_robust_px']['median'] / summary['photon_sigma_px']:.0f}x"
-          f" the photon floor and "
-          f"{summary['boundary_scatter_robust_px']['median'] / summary['quantisation_sigma_px']:.1f}x"
-          f" the pixel-quantisation floor")
+        print(
+            f"  {k:<28} median {s['median']:+.4f}   mean {s['mean']:+.4f}"
+            f"   p95 {s['p95']:+.4f}"
+        )
+    print(
+        f"  {'photon CRLB':<28} {summary['photon_sigma_px']:.4f} px"
+        f"   (pixel quantisation {summary['quantisation_sigma_px']:.4f} px)"
+    )
+    print(
+        f"  robust scatter is "
+        f"{summary['boundary_scatter_robust_px']['median'] / summary['photon_sigma_px']:.0f}x"
+        f" the photon floor and "
+        f"{summary['boundary_scatter_robust_px']['median'] / summary['quantisation_sigma_px']:.1f}x"
+        f" the pixel-quantisation floor"
+    )
 
     print("\npoints: raw vs effective")
     print(f"  n_points   median {summary['n_points']['median']:.0f}")
-    print(f"  n_effective median {summary['n_effective']['median']:.0f}"
-          f"  (correlation length {summary['corr_len_px']['median']:.2f} px)")
+    print(
+        f"  n_effective median {summary['n_effective']['median']:.0f}"
+        f"  (correlation length {summary['corr_len_px']['median']:.2f} px)"
+    )
 
     print("\nthree reference levels vs observed  (medians)")
-    print(f"  {'quantity':<14}{'photon':<11}{'quantised':<11}{'hulled':<11}"
-          f"{'noise-eq':<11}{'observed':<11}{'obs/photon':<12}{'obs/hull'}")
-    for nm, q in (("position mm", "pos_mm"), ("depth mm", "depth_mm"),
-                  ("lateral mm", "lateral_mm"), ("angle deg", "angle_deg")):
-        keys = [f"{lvl}_{q}" for lvl in ("photon", "quant", "hull", "noiseq")] + [f"obs_{q}"]
+    print(
+        f"  {'quantity':<14}{'photon':<11}{'quantised':<11}{'hulled':<11}"
+        f"{'noise-eq':<11}{'observed':<11}{'obs/photon':<12}{'obs/hull'}"
+    )
+    for nm, q in (
+        ("position mm", "pos_mm"),
+        ("depth mm", "depth_mm"),
+        ("lateral mm", "lateral_mm"),
+        ("angle deg", "angle_deg"),
+    ):
+        keys = [f"{lvl}_{q}" for lvl in ("photon", "quant", "hull", "noiseq")] + [
+            f"obs_{q}"
+        ]
         if not all(k in summary for k in keys):
             continue
         vals = [summary[k]["median"] for k in keys]
-        rp = summary.get(f"ratio_obs_{q}_over_photon_{q}", {}).get("median", float("nan"))
+        rp = summary.get(f"ratio_obs_{q}_over_photon_{q}", {}).get(
+            "median", float("nan")
+        )
         rq = summary.get(f"ratio_obs_{q}_over_hull_{q}", {}).get("median", float("nan"))
-        print(f"  {nm:<14}" + "".join(f"{v:<11.4f}" for v in vals[:4])
-              + f"{vals[4]:<11.4f}{rp:<12.0f}{rq:.0f}")
-    print("  (photon/quantised/hulled are BOUNDS -- nothing may beat them."
-          " noise-equivalent is a\n   prediction, and the estimator beating it is"
-          " itself a result: see the module docstring)")
+        print(
+            f"  {nm:<14}"
+            + "".join(f"{v:<11.4f}" for v in vals[:4])
+            + f"{vals[4]:<11.4f}{rp:<12.0f}{rq:.0f}"
+        )
+    print(
+        "  (photon/quantised/hulled are BOUNDS -- nothing may beat them."
+        " noise-equivalent is a\n   prediction, and the estimator beating it is"
+        " itself a result: see the module docstring)"
+    )
     if "hull_pos_mm" in summary and "quant_pos_mm" in summary:
-        print(f"  hulling alone costs "
-              f"{summary['hull_pos_mm']['median'] / summary['quant_pos_mm']['median']:.1f}x "
-              f"(it keeps {summary['n_points']['median']:.0f} of ~"
-              f"{summary['n_effective']['median'] * 0 + 0:.0f}".replace(' of ~0','')
-              + " boundary points)")
+        print(
+            f"  hulling alone costs "
+            f"{summary['hull_pos_mm']['median'] / summary['quant_pos_mm']['median']:.1f}x "
+            f"(it keeps {summary['n_points']['median']:.0f} of ~"
+            f"{summary['n_effective']['median'] * 0 + 0:.0f}".replace(" of ~0", "")
+            + " boundary points)"
+        )
 
-    print("\n(pose error is against the ORACLE ambiguity branch; the local CRLB "
-          "does not\n describe a bimodal likelihood -- branch failures are "
-          "counted separately)")
+    print(
+        "\n(pose error is against the ORACLE ambiguity branch; the local CRLB "
+        "does not\n describe a bimodal likelihood -- branch failures are "
+        "counted separately)"
+    )
     if "branch_wrong_fraction" in summary:
-        print(f"  branch chosen wrongly on {summary['branch_wrong_fraction'] * 100:.1f}% "
-              f"of frames (median margin "
-              f"{summary['branch_wrong_median_margin_deg']:.1f} deg)")
-        print("  NB: these are independent poses with the estimator reset each"
-              " frame, so this is\n      the PRIOR-FREE rate -- the worst case."
-              " In a video stream the live loop carries a\n      temporal prior"
-              " and the rate is far lower; this number is the size of the"
-              " problem\n      that prior has to solve, not the shipped failure"
-              " rate.")
-        print(f"  shipped angular error median "
-              f"{summary['shipped_angle_deg']['median']:.3f} deg vs oracle "
-              f"{summary['obs_angle_deg']['median']:.3f} deg")
+        print(
+            f"  branch chosen wrongly on {summary['branch_wrong_fraction'] * 100:.1f}% "
+            f"of frames (median margin "
+            f"{summary['branch_wrong_median_margin_deg']:.1f} deg)"
+        )
+        print(
+            "  NB: these are independent poses with the estimator reset each"
+            " frame, so this is\n      the PRIOR-FREE rate -- the worst case."
+            " In a video stream the live loop carries a\n      temporal prior"
+            " and the rate is far lower; this number is the size of the"
+            " problem\n      that prior has to solve, not the shipped failure"
+            " rate."
+        )
+        print(
+            f"  shipped angular error median "
+            f"{summary['shipped_angle_deg']['median']:.3f} deg vs oracle "
+            f"{summary['obs_angle_deg']['median']:.3f} deg"
+        )
 
     b = summary.get("bias_explains_depth")
     if b:
-        print("\nresidual bias (after the radius calibration absorbs the mean), "
-              "propagated to depth")
-        print(f"  predicted {summary['residual_bias_depth_mm']['median']:+.3f} mm "
-              f"vs observed depth error {b['median_observed_mm']:.3f} mm"
-              f"  (r = {b['correlation']:+.3f})")
+        print(
+            "\nresidual bias (after the radius calibration absorbs the mean), "
+            "propagated to depth"
+        )
+        print(
+            f"  predicted {summary['residual_bias_depth_mm']['median']:+.3f} mm "
+            f"vs observed depth error {b['median_observed_mm']:.3f} mm"
+            f"  (r = {b['correlation']:+.3f})"
+        )
 
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps({"summary": summary, "rows": rows}, indent=1))

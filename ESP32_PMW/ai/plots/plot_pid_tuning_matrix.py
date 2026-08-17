@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Preliminary coil-decoupling feedforward compensation tuning: baseline vs
+"""
+Preliminary coil-decoupling feedforward compensation tuning: baseline vs
 successive trim iterations, as a matrix of subplots (one panel per stage).
 
 Two independent tuning sequences exist in data/ (see project memory
@@ -21,11 +22,13 @@ directly from the raw files so the number and the plot are self-consistent).
 Usage:
   uv run python ai/plot_pid_tuning_matrix.py
 """
+
 import os
 
 import numpy as np
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -49,17 +52,23 @@ CW_STAGES = [
 
 def envelope(x_v: np.ndarray, win: int) -> np.ndarray:
     s = pd.Series(x_v)
-    return np.sqrt((s ** 2).rolling(win, center=True, min_periods=1).mean()).to_numpy()
+    return np.sqrt((s**2).rolling(win, center=True, min_periods=1).mean()).to_numpy()
 
 
 def load(path: str) -> pd.DataFrame:
-    df = pd.read_csv(os.path.join(REPO_ROOT, path), skiprows=2, header=None,
-                      names=["t", "A", "B", "C", "D"])
+    df = pd.read_csv(
+        os.path.join(REPO_ROOT, path),
+        skiprows=2,
+        header=None,
+        names=["t", "A", "B", "C", "D"],
+    )
     return df.apply(pd.to_numeric, errors="coerce").dropna()
 
 
 def spread(df: pd.DataFrame) -> float:
-    rms = {ch: float(np.sqrt(np.mean((df[ch].to_numpy() * 1000.0) ** 2))) for ch in "ABCD"}
+    rms = {
+        ch: float(np.sqrt(np.mean((df[ch].to_numpy() * 1000.0) ** 2))) for ch in "ABCD"
+    }
     return max(rms.values()) / min(rms.values())
 
 
@@ -78,12 +87,21 @@ def plot_matrix(stages: list[tuple[str, str]], suptitle: str, out_path: str) -> 
             raw_mv = df[ch].to_numpy() * 1000.0
             env_mv = envelope(raw_mv, ENV_WIN_MS)
             ax.plot(t_ms, raw_mv, color=CHAN_COLOR[ch], alpha=0.20, linewidth=0.5)
-            ax.plot(t_ms, env_mv, color=CHAN_COLOR[ch], alpha=1.0, linewidth=1.8,
-                     label=f"channel {ch}")
+            ax.plot(
+                t_ms,
+                env_mv,
+                color=CHAN_COLOR[ch],
+                alpha=1.0,
+                linewidth=1.8,
+                label=f"channel {ch}",
+            )
             y_max = max(y_max, np.nanmax(raw_mv))
         s = spread(df)
-        ax.set_title(f"{label}\n({os.path.basename(path)}, spread max/min = {s:.2f})",
-                     fontsize=11, pad=10)
+        ax.set_title(
+            f"{label}\n({os.path.basename(path)}, spread max/min = {s:.2f})",
+            fontsize=11,
+            pad=10,
+        )
         ax.set_xlabel("time [ms]")
         ax.grid(True, alpha=0.25)
 
@@ -92,8 +110,14 @@ def plot_matrix(stages: list[tuple[str, str]], suptitle: str, out_path: str) -> 
         ax.set_ylim(0, y_max * 1.15)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False,
-               bbox_to_anchor=(0.5, -0.05))
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        bbox_to_anchor=(0.5, -0.05),
+    )
 
     fig.tight_layout(rect=(0, 0.02, 1, 0.90))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
@@ -102,15 +126,19 @@ def plot_matrix(stages: list[tuple[str, str]], suptitle: str, out_path: str) -> 
 
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
-    plot_matrix(CCW_STAGES,
-                "Coil-decoupling feedforward compensation tuning (CCW)\n"
-                "data/2026-07-04e_recalibration-ccw",
-                os.path.join(OUT_DIR, "ccw_compensation_tuning_matrix.png"))
-    plot_matrix(CW_STAGES,
-                "Coil-decoupling feedforward compensation tuning (CW)\n"
-                "data/2026-07-04b_comp-calibration-cw -- no separate untrimmed-baseline "
-                "capture exists for this sequence, only iter1/iter2",
-                os.path.join(OUT_DIR, "cw_compensation_tuning_matrix.png"))
+    plot_matrix(
+        CCW_STAGES,
+        "Coil-decoupling feedforward compensation tuning (CCW)\n"
+        "data/2026-07-04e_recalibration-ccw",
+        os.path.join(OUT_DIR, "ccw_compensation_tuning_matrix.png"),
+    )
+    plot_matrix(
+        CW_STAGES,
+        "Coil-decoupling feedforward compensation tuning (CW)\n"
+        "data/2026-07-04b_comp-calibration-cw -- no separate untrimmed-baseline "
+        "capture exists for this sequence, only iter1/iter2",
+        os.path.join(OUT_DIR, "cw_compensation_tuning_matrix.png"),
+    )
 
 
 if __name__ == "__main__":

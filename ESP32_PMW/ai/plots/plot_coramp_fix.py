@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Before/after the minSignalA co-ramp fix: per-channel carrier duty and current
+"""
+Before/after the minSignalA co-ramp fix: per-channel carrier duty and current
 through the 1->200Hz spin-up.
 
 The bug: reset() latches channel A as the anchor, which then ramps open-loop to
@@ -28,7 +29,10 @@ COLORS = ["#d62728", "#1f77b4", "#2ca02c", "#ff7f0e"]
 
 
 def parse(path):
-    """Spin-up samples only (phase=1, pre-freeze) -- the region the fix targets."""
+    """
+    Spin-up samples only (phase=1, pre-freeze) -- the region the fix targets.
+    """
+
     rows = []
     for line in Path(path).read_text(errors="ignore").splitlines():
         m = LINE.search(line)
@@ -47,13 +51,16 @@ def parse(path):
 
 
 def main(before_log, after_log, out):
-    runs = [("Before: anchor ramps alone", parse(before_log)),
-            ("After: co-ramp below minSignalA", parse(after_log))]
+    runs = [
+        ("Before: anchor ramps alone", parse(before_log)),
+        ("After: co-ramp below minSignalA", parse(after_log)),
+    ]
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 10), sharex="col")
     fig.suptitle(
         "Spin-up drive symmetry, 1→200 Hz ramp  —  minSignalA co-ramp fix",
-        fontsize=14, fontweight="bold",
+        fontsize=14,
+        fontweight="bold",
     )
 
     for col, (title, rows) in enumerate(runs):
@@ -61,8 +68,13 @@ def main(before_log, after_log, out):
 
         ax = axes[0][col]
         for k in range(4):
-            ax.plot(f, [r["duty"][k] for r in rows], color=COLORS[k], lw=1.4,
-                    label=f"coil {CH[k]}")
+            ax.plot(
+                f,
+                [r["duty"][k] for r in rows],
+                color=COLORS[k],
+                lw=1.4,
+                label=f"coil {CH[k]}",
+            )
         ax.set_title(title, fontsize=11, fontweight="bold")
         ax.set_ylabel("carrier duty [%]")
         ax.set_ylim(40, 105)
@@ -75,9 +87,14 @@ def main(before_log, after_log, out):
         ax.set_ylabel("duty spread [%]\n(drive asymmetry)")
         ax.set_ylim(0, 55)
         peak = max(dsp)
-        ax.annotate(f"peak {peak:.0f} pts", xy=(f[dsp.index(peak)], peak),
-                    xytext=(0.55, 0.8), textcoords="axes fraction", fontsize=9,
-                    arrowprops=dict(arrowstyle="->", lw=1))
+        ax.annotate(
+            f"peak {peak:.0f} pts",
+            xy=(f[dsp.index(peak)], peak),
+            xytext=(0.55, 0.8),
+            textcoords="axes fraction",
+            fontsize=9,
+            arrowprops=dict(arrowstyle="->", lw=1),
+        )
 
         ax = axes[2][col]
         for k in range(4):
@@ -91,8 +108,15 @@ def main(before_log, after_log, out):
             a.grid(alpha=0.25)
             # Region where the loop is blind: currents below minSignalA.
             a.axvspan(0, 25, color="tab:red", alpha=0.07)
-        axes[0][col].text(12.5, 102, "no current signal", ha="center", fontsize=8,
-                          style="italic", color="tab:red")
+        axes[0][col].text(
+            12.5,
+            102,
+            "no current signal",
+            ha="center",
+            fontsize=8,
+            style="italic",
+            color="tab:red",
+        )
 
     fig.tight_layout()
     fig.savefig(out, dpi=140)

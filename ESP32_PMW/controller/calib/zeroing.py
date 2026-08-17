@@ -1,4 +1,5 @@
-"""Express pose relative to a reference image instead of the camera.
+"""
+Express pose relative to a reference image instead of the camera.
 
 Raw output from `conic.py` is in camera coordinates: position in millimetres
 from the lens, normal in the camera's axes.  That is rarely what you want to
@@ -31,25 +32,35 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "pose_zero.json"
 
 
 def frame_from_normal(normal, in_plane=None):
-    """Right-handed rotation whose +z is ``normal``.
-
-    ``in_plane`` optionally fixes the remaining spin about that axis; without it
-    an arbitrary but deterministic perpendicular is chosen, so the frame is
-    reproducible run to run.
-
-    The result is passed through `Rotation.from_matrix`, which orthonormalises
-    via SVD -- cheap insurance that accumulated round-off never yields a matrix
-    that is almost, but not quite, a rotation.
     """
+    Right-handed rotation whose +z is ``normal``.
+
+        ``in_plane`` optionally fixes the remaining spin about that axis; without it
+        an arbitrary but deterministic perpendicular is chosen, so the frame is
+        reproducible run to run.
+
+        The result is passed through `Rotation.from_matrix`, which orthonormalises
+        via SVD -- cheap insurance that accumulated round-off never yields a matrix
+        that is almost, but not quite, a rotation.
+    """
+
     z = np.asarray(normal, dtype=np.float64)
     z = z / np.linalg.norm(z)
 
     if in_plane is None:
-        seed = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        seed = (
+            np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        )
     else:
         seed = np.asarray(in_plane, dtype=np.float64)
-        if np.linalg.norm(np.cross(z, seed)) < 1e-8:  # parallel: unusable as a reference
-            seed = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        if (
+            np.linalg.norm(np.cross(z, seed)) < 1e-8
+        ):  # parallel: unusable as a reference
+            seed = (
+                np.array([1.0, 0.0, 0.0])
+                if abs(z[0]) < 0.9
+                else np.array([0.0, 1.0, 0.0])
+            )
 
     x = seed - (seed @ z) * z
     x /= np.linalg.norm(x)
@@ -59,10 +70,11 @@ def frame_from_normal(normal, in_plane=None):
 
 @dataclass
 class Zero:
-    """A pose datum: rotation, translation, and the reference in-plane angle.
+    """
+    A pose datum: rotation, translation, and the reference in-plane angle.
 
-    ``identity()`` gives the pass-through datum, i.e. report raw camera
-    coordinates.  That is what an estimator uses when no zero file is supplied.
+        ``identity()`` gives the pass-through datum, i.e. report raw camera
+        coordinates.  That is what an estimator uses when no zero file is supplied.
     """
 
     R: np.ndarray = field(default_factory=lambda: np.eye(3))
@@ -80,7 +92,10 @@ class Zero:
 
     @classmethod
     def from_pose(cls, center, normal, psi_deg=0.0, in_plane=None, meta=None):
-        """Build a datum from one estimated reference pose."""
+        """
+        Build a datum from one estimated reference pose.
+        """
+
         return cls(
             R=frame_from_normal(normal, in_plane),
             t=np.asarray(center, dtype=np.float64).reshape(3).copy(),
@@ -89,17 +104,22 @@ class Zero:
         )
 
     def apply(self, center, normal):
-        """Map a camera-frame pose into the datum frame.
-
-        ``xyz = R' (c - t)`` and ``n = R' n`` -- so at the reference itself the
-        position is the zero vector and the normal is +z.
         """
+        Map a camera-frame pose into the datum frame.
+
+                ``xyz = R' (c - t)`` and ``n = R' n`` -- so at the reference itself the
+                position is the zero vector and the normal is +z.
+        """
+
         c = np.asarray(center, dtype=np.float64).reshape(3)
         n = np.asarray(normal, dtype=np.float64).reshape(3)
         return self.R.T @ (c - self.t), self.R.T @ n
 
     def apply_psi(self, psi_deg):
-        """Offset an image-plane angle by the reference, wrapped to +-180 deg."""
+        """
+        Offset an image-plane angle by the reference, wrapped to +-180 deg.
+        """
+
         return (float(psi_deg) - self.psi_ref_deg + 180.0) % 360.0 - 180.0
 
     def save(self, path=DEFAULT_PATH):
@@ -121,12 +141,14 @@ class Zero:
 
     @classmethod
     def load(cls, path=DEFAULT_PATH):
-        """Load a datum; returns `identity()` if the file is absent.
-
-        Missing is not an error -- running without a zero is a legitimate mode
-        (raw camera coordinates), and forcing a calibration step before the
-        first run would be annoying.
         """
+        Load a datum; returns `identity()` if the file is absent.
+
+                Missing is not an error -- running without a zero is a legitimate mode
+                (raw camera coordinates), and forcing a calibration step before the
+                first run would be annoying.
+        """
+
         path = Path(path)
         if not path.exists():
             return cls.identity()
@@ -141,13 +163,15 @@ class Zero:
 
 
 def average_poses(centers, normals):
-    """Mean of several reference observations, for a less noisy datum.
-
-    Positions average directly.  Normals are unit vectors, so they get the
-    standard treatment: sum, then renormalise, after flipping any that point
-    the opposite way (the estimator's sign choice can flap between frames on a
-    near head-on view, and averaging those raw would cancel to nothing).
     """
+    Mean of several reference observations, for a less noisy datum.
+
+        Positions average directly.  Normals are unit vectors, so they get the
+        standard treatment: sum, then renormalise, after flipping any that point
+        the opposite way (the estimator's sign choice can flap between frames on a
+        near head-on view, and averaging those raw would cancel to nothing).
+    """
+
     c = np.asarray(centers, dtype=np.float64).reshape(-1, 3)
     n = np.asarray(normals, dtype=np.float64).reshape(-1, 3)
     ref = n[0]

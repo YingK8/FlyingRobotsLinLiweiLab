@@ -1,4 +1,5 @@
-"""Frame in, 5-DOF pose out.
+"""
+Frame in, 5-DOF pose out.
 
 Chains `segment` -> `conic.backproject_ellipse` -> `zeroing`, and owns the one
 piece of state the chain needs: which of the two back-projection solutions we
@@ -69,8 +70,8 @@ from zeroing import Zero  # noqa: E402
 #: reproduce this rig. Its metric output is uncalibrated. See
 #: `ai/notes/pose_appearance.md`.
 RADIUS_BY_APPEARANCE = {
-    "bright": 10.2446,   # white body, luminance threshold
-    "dark": 10.1106,     # provisional, see above
+    "bright": 10.2446,  # white body, luminance threshold
+    "dark": 10.1106,  # provisional, see above
 }
 RADIUS_MM = RADIUS_BY_APPEARANCE[segmod.APPEARANCE]
 
@@ -80,7 +81,10 @@ DEFAULT_INTRINSICS = (
 
 
 def load_intrinsics(path=DEFAULT_INTRINSICS):
-    """Read ``camera_matrix`` and ``dist_coeffs`` from the calibration npz."""
+    """
+    Read ``camera_matrix`` and ``dist_coeffs`` from the calibration npz.
+    """
+
     d = np.load(Path(path))
     return (
         np.asarray(d["camera_matrix"], dtype=np.float64),
@@ -90,20 +94,21 @@ def load_intrinsics(path=DEFAULT_INTRINSICS):
 
 @dataclass
 class Pose:
-    """One frame's estimate, in the datum frame set by `zeroing.Zero`.
+    """
+    One frame's estimate, in the datum frame set by `zeroing.Zero`.
 
-    ``theta_deg`` is tilt away from the datum axis and ``phi_deg`` the azimuth
-    that tilt points along -- together they are the normal on S^2, just in the
-    form that plots readably.  ``psi_deg`` is the image ellipse's major-axis
-    angle; it is geometrically tied to ``phi_deg``, and is carried separately
-    precisely so the two can be compared as a consistency check on the fit.
+        ``theta_deg`` is tilt away from the datum axis and ``phi_deg`` the azimuth
+        that tilt points along -- together they are the normal on S^2, just in the
+        form that plots readably.  ``psi_deg`` is the image ellipse's major-axis
+        angle; it is geometrically tied to ``phi_deg``, and is carried separately
+        precisely so the two can be compared as a consistency check on the fit.
 
-    ``jump_deg`` is how far the normal moved since the previous frame (NaN on
-    the first frame and after a dropout).  Deliberately a raw measurement rather
-    than a "did it flip" verdict: read against ``ambiguity_margin_deg`` it tells
-    you whether a large step was real motion or a branch flip, and that
-    judgement belongs to whoever reads the log rather than to a threshold buried
-    in here.
+        ``jump_deg`` is how far the normal moved since the previous frame (NaN on
+        the first frame and after a dropout).  Deliberately a raw measurement rather
+        than a "did it flip" verdict: read against ``ambiguity_margin_deg`` it tells
+        you whether a large step was real motion or a branch flip, and that
+        judgement belongs to whoever reads the log rather than to a threshold buried
+        in here.
     """
 
     t: float
@@ -129,12 +134,14 @@ class Pose:
 
 
 def _angles_from_normal(normal):
-    """Normal -> (tilt from +z, azimuth of that tilt), both in degrees.
-
-    Azimuth is meaningless when the tilt is zero; it returns 0 there rather than
-    whatever ``atan2(0, 0)`` yields, so a level hover plots a flat line instead
-    of noise.
     """
+    Normal -> (tilt from +z, azimuth of that tilt), both in degrees.
+
+        Azimuth is meaningless when the tilt is zero; it returns 0 there rather than
+        whatever ``atan2(0, 0)`` yields, so a level hover plots a flat line instead
+        of noise.
+    """
+
     n = np.asarray(normal, dtype=np.float64)
     n = n / np.linalg.norm(n)
     theta = math.degrees(math.acos(float(np.clip(abs(n[2]), -1.0, 1.0))))
@@ -144,12 +151,13 @@ def _angles_from_normal(normal):
 
 
 class PoseEstimator:
-    """Stateful per-frame estimator.
+    """
+    Stateful per-frame estimator.
 
-    State is only what disambiguation needs: the previously chosen normal, and
-    how long ago it was seen.  After ``dropout_s`` without a detection the
-    history is treated as stale and the pick falls back to the datum, so the
-    estimator cannot latch onto a solution branch from before an occlusion.
+        State is only what disambiguation needs: the previously chosen normal, and
+        how long ago it was seen.  After ``dropout_s`` without a detection the
+        history is treated as stale and the pick falls back to the datum, so the
+        estimator cannot latch onto a solution branch from before an occlusion.
     """
 
     def __init__(
@@ -171,7 +179,9 @@ class PoseEstimator:
                 dist_coeffs = loaded_dist
 
         self.K = np.asarray(camera_matrix, dtype=np.float64)
-        self.dist = None if dist_coeffs is None else np.asarray(dist_coeffs, dtype=np.float64)
+        self.dist = (
+            None if dist_coeffs is None else np.asarray(dist_coeffs, dtype=np.float64)
+        )
         self.radius_mm = float(radius_mm)
         self.zero = zero if zero is not None else Zero.identity()
         # None, not `segmod.THRESH`: the level belongs to the appearance, and
@@ -192,23 +202,31 @@ class PoseEstimator:
         self._prev_t = None
 
     def reset(self):
-        """Forget branch history without touching calibration or the datum."""
+        """
+        Forget branch history without touching calibration or the datum.
+        """
+
         self._prev_normal = None
         self._prev_t = None
 
     def _prior_normal(self):
-        """Which way we expect the rotor to face, absent recent history.
-
-        The datum's axis if one is set, else straight at the camera.  Normals
-        from `conic.backproject` are oriented toward the camera, so the face-on
-        prior is -z.
         """
+        Which way we expect the rotor to face, absent recent history.
+
+                The datum's axis if one is set, else straight at the camera.  Normals
+                from `conic.backproject` are oriented toward the camera, so the face-on
+                prior is -z.
+        """
+
         if not self.zero.is_identity:
             return self.zero.R[:, 2]
         return np.array([0.0, 0.0, -1.0])
 
     def _choose(self, poses, now):
-        """Resolve the two-fold ambiguity. Returns ``(pose, jump_deg)``."""
+        """
+        Resolve the two-fold ambiguity. Returns ``(pose, jump_deg)``.
+        """
+
         stale = (
             self._prev_normal is None
             or self._prev_t is None
@@ -216,7 +234,11 @@ class PoseEstimator:
         )
         ref = self._prior_normal() if stale else self._prev_normal
 
-        chosen = poses[0] if len(poses) == 1 else max(poses, key=lambda p: float(p.normal @ ref))
+        chosen = (
+            poses[0]
+            if len(poses) == 1
+            else max(poses, key=lambda p: float(p.normal @ ref))
+        )
         if stale:
             return chosen, float("nan")
 
@@ -224,24 +246,29 @@ class PoseEstimator:
         return chosen, math.degrees(math.acos(cos))
 
     def update(self, frame, t=None, frame_index=None, axial=None):
-        """Estimate pose for one frame. Returns a `Pose`, or ``None`` if lost.
-
-        ``None`` is a normal outcome -- the robot leaves frame, the threshold
-        finds nothing, the contour is too collinear to fit.  Callers must handle
-        it rather than assume a detection.
-
-        ``axial`` forwards to `segment.segment`; only the validation code sets
-        it, to compare against the unweighted fit. ``None`` means "whatever
-        `segment.AXIAL_DEFAULT` says", read at call time -- not a duplicated
-        default -- a duplicated default here silently overrides the module flag
-        for every caller that goes through the estimator.
         """
+        Estimate pose for one frame. Returns a `Pose`, or ``None`` if lost.
+
+                ``None`` is a normal outcome -- the robot leaves frame, the threshold
+                finds nothing, the contour is too collinear to fit.  Callers must handle
+                it rather than assume a detection.
+
+                ``axial`` forwards to `segment.segment`; only the validation code sets
+                it, to compare against the unweighted fit. ``None`` means "whatever
+                `segment.AXIAL_DEFAULT` says", read at call time -- not a duplicated
+                default -- a duplicated default here silently overrides the module flag
+                for every caller that goes through the estimator.
+        """
+
         now = time.monotonic() if t is None else float(t)
-        self.frame_index = self.frame_index + 1 if frame_index is None else int(frame_index)
+        self.frame_index = (
+            self.frame_index + 1 if frame_index is None else int(frame_index)
+        )
 
         use_axial = segmod.AXIAL_DEFAULT if axial is None else bool(axial)
-        seg = segmod.segment(frame, thresh=self.thresh, min_area=self.min_area,
-                             axial=use_axial)
+        seg = segmod.segment(
+            frame, thresh=self.thresh, min_area=self.min_area, axial=use_axial
+        )
         if seg is None:
             self.n_lost += 1
             return None
@@ -253,7 +280,9 @@ class PoseEstimator:
             try:
                 ellipse = segmod.undistort_ellipse(ellipse, self.K, self.dist)
             except Exception:
-                ellipse = seg.ellipse  # keep the distorted fit rather than lose the frame
+                ellipse = (
+                    seg.ellipse
+                )  # keep the distorted fit rather than lose the frame
 
         # Shape correction goes after undistortion and before back-projection, so
         # a single ellipse produces mutually consistent position and normal.
@@ -300,11 +329,13 @@ class PoseEstimator:
         )
 
     def solve_camera_frame(self, frame):
-        """Un-zeroed pose, for building a datum. Returns ``(center, normal, psi)``.
-
-        `calibrate_zero.py` needs the raw camera-frame answer -- applying the
-        datum you are about to compute would be circular.
         """
+        Un-zeroed pose, for building a datum. Returns ``(center, normal, psi)``.
+
+                `calibrate_zero.py` needs the raw camera-frame answer -- applying the
+                datum you are about to compute would be circular.
+        """
+
         seg = segmod.segment(frame, thresh=self.thresh, min_area=self.min_area)
         if seg is None:
             return None

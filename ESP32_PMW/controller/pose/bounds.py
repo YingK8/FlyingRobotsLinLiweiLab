@@ -1,4 +1,5 @@
-"""Fundamental precision limits for the single-view conic pose estimator.
+"""
+Fundamental precision limits for the single-view conic pose estimator.
 
 How well could *any* estimator do, given the same pixels? Everything else in
 `controller/pose/` measures what this one does; without a floor to compare
@@ -73,50 +74,54 @@ def _Phi(u):
 
 
 def edge_crlb_continuum(contrast, sigma_noise, psf_px):
-    """CRLB on edge position for point-sampled pixels, continuum limit.
-
-    With samples dense compared to the blur, the sum becomes an integral:
-
-        J = (C^2/sigma_n^2) * (1/s^2) * INT phi((x-x0)/s)^2 dx
-          = (C^2/sigma_n^2) * (1/s) * INT phi(u)^2 du
-          = C^2 / (2 sqrt(pi) s sigma_n^2)                 [INT phi^2 = 1/(2 sqrt pi)]
-
-    hence
-
-        sigma_x0 >= (sigma_n/C) * sqrt(2 sqrt(pi) s)  ~  1.8826 (sigma_n/C) sqrt(s)
-
-    **Blur costs precision here, as sqrt(s).** That is the opposite of the usual
-    folklore that a blurrier edge is easier to interpolate. The folklore is
-    describing a different failure (a sharp edge under-sampled by *point*
-    sampling loses information because no pixel straddles it), which is exactly
-    what the discrete form below captures and this continuum form does not.
     """
+    CRLB on edge position for point-sampled pixels, continuum limit.
+
+        With samples dense compared to the blur, the sum becomes an integral:
+
+            J = (C^2/sigma_n^2) * (1/s^2) * INT phi((x-x0)/s)^2 dx
+              = (C^2/sigma_n^2) * (1/s) * INT phi(u)^2 du
+              = C^2 / (2 sqrt(pi) s sigma_n^2)                 [INT phi^2 = 1/(2 sqrt pi)]
+
+        hence
+
+            sigma_x0 >= (sigma_n/C) * sqrt(2 sqrt(pi) s)  ~  1.8826 (sigma_n/C) sqrt(s)
+
+        **Blur costs precision here, as sqrt(s)** -- the opposite of the folklore that
+        a blurrier edge interpolates better. The folklore describes a different
+        failure, which `edge_crlb_discrete` captures and this form cannot: a sharp
+        edge under point sampling loses information because no pixel straddles it.
+    """
+
     contrast = float(contrast)
     if contrast <= 0.0 or sigma_noise <= 0.0 or psf_px <= 0.0:
         raise ValueError("contrast, sigma_noise and psf_px must be positive")
     return (sigma_noise / contrast) * math.sqrt(2.0 * math.sqrt(math.pi) * psf_px)
 
 
-def edge_crlb_discrete(contrast, sigma_noise, psf_px, box_pixel=True,
-                       half_width=12, reduce="rms"):
-    """CRLB on edge position for a sampled sensor. Lecture notes S13.1.
-
-    ``box_pixel`` integrates the blurred step over the pixel's own footprint,
-    which is what a real sensor does, and it changes the limit rather than
-    refining it:
-
-      * **point sampling** -- a sharp edge falling between samples moves no
-        sample, every derivative underflows, and the bound *diverges*. There is
-        an interior optimum near s ~ 0.5 px.
-      * **box pixels** -- the derivative vector becomes a partition of unity over
-        two pixels, so ``sigma_n/C <= sigma_x0 <= sqrt(2) sigma_n/C``: finite at
-        every blur width and monotone, sharper always better. The sensor's own
-        area integration is what makes the sub-pixel phase observable at all.
-
-    ``reduce`` handles the unknown sub-pixel phase: ``"rms"`` (compare against a
-    Monte Carlo over uniform phase), ``"worst"`` (the figure to quote), or
-    ``"best"``.
+def edge_crlb_discrete(
+    contrast, sigma_noise, psf_px, box_pixel=True, half_width=12, reduce="rms"
+):
     """
+    CRLB on edge position for a sampled sensor. Lecture notes S13.1.
+
+        ``box_pixel`` integrates the blurred step over the pixel's own footprint,
+        which is what a real sensor does, and it changes the limit rather than
+        refining it:
+
+          point sampling  a sharp edge between samples moves no sample, so the bound
+                          *diverges*. Interior optimum near s ~ 0.5 px.
+          box pixels      the derivatives form a partition of unity over two pixels,
+                          so ``sigma_n/C <= sigma_x0 <= sqrt(2) sigma_n/C``: finite at
+                          every blur and monotone, sharper always better. The sensor's
+                          own area integration is what makes sub-pixel phase
+                          observable at all.
+
+        @param reduce: how the unknown sub-pixel phase is handled -- ``"rms"`` (to
+            compare against a Monte Carlo over uniform phase), ``"worst"`` (the figure
+            to quote), or ``"best"``.
+    """
+
     if contrast <= 0.0 or sigma_noise <= 0.0 or psf_px <= 0.0:
         raise ValueError("contrast, sigma_noise and psf_px must be positive")
     offsets = np.linspace(0.0, 0.5, 21)
@@ -130,14 +135,14 @@ def edge_crlb_discrete(contrast, sigma_noise, psf_px, box_pixel=True,
             deriv = -contrast * (_Phi(up) - _Phi(lo))
         else:
             deriv = -contrast * _phi((idx - x0) / psf_px) / psf_px
-        j = float(np.sum(deriv ** 2)) / (sigma_noise ** 2)
+        j = float(np.sum(deriv**2)) / (sigma_noise**2)
         sigmas.append(math.inf if j <= 0.0 else 1.0 / math.sqrt(j))
     sigmas = np.asarray(sigmas)
     if reduce == "best":
         return float(sigmas.min())
     if reduce == "worst":
         return float(sigmas.max())
-    return float(np.sqrt(np.mean(sigmas ** 2)))
+    return float(np.sqrt(np.mean(sigmas**2)))
 
 
 #: Standard deviation of a boundary point quantised to the pixel grid with no
@@ -148,12 +153,14 @@ QUANTISATION_SIGMA_PX = 1.0 / math.sqrt(12.0)  # 0.2887 px
 
 
 def subpixel_breakeven_snr(psf_px=1.0, box_pixel=True):
-    """Contrast-to-noise ratio at which sub-pixel refinement starts to pay.
-
-    Below this, the CRLB on a fitted edge is worse than simply rounding to the
-    pixel grid (``QUANTISATION_SIGMA_PX``), and the refinement adds variance for
-    nothing. Solving ``edge_crlb(C, sigma_n, s) = 1/sqrt(12)`` for ``C/sigma_n``.
     """
+    Contrast-to-noise ratio at which sub-pixel refinement starts to pay.
+
+        Below this, the CRLB on a fitted edge is worse than simply rounding to the
+        pixel grid (``QUANTISATION_SIGMA_PX``), and the refinement adds variance for
+        nothing. Solving ``edge_crlb(C, sigma_n, s) = 1/sqrt(12)`` for ``C/sigma_n``.
+    """
+
     unit = edge_crlb_discrete(1.0, 1.0, psf_px, box_pixel=box_pixel)
     return unit / QUANTISATION_SIGMA_PX
 
@@ -164,24 +171,26 @@ def subpixel_breakeven_snr(psf_px=1.0, box_pixel=True):
 
 
 def effective_point_count(n_points, correlation_px, spacing_px=1.0):
-    """Independent-sample count for boundary points whose errors are correlated.
-
-    Adjacent contour points are *not* independent: they are produced by the same
-    PSF, so their position errors share a correlation length of roughly the blur
-    width. For noise with correlation length ``L`` sampled every ``d``, the
-    variance of an average over N samples is inflated by about ``L/d``, so the
-    honest count to put in a 1/sqrt(N) is
-
-        N_eff = N * d / max(d, L).
-
-    Measured on real renders, ``L`` is 17.5 px against a hull-point spacing of
-    about 11 px, so 31 hull points carry roughly 15 independent measurements --
-    a factor of 1.4 in the bound. That is smaller than the factor of 3.4 lost by
-    hulling a ~350 px perimeter down to 31 points in the first place, so it is
-    the *second* largest source of optimism in a naive contour CRLB, not the
-    first; both are reported separately by `validation/limits.py`, which is also
-    what measures ``L``.
     """
+    Independent-sample count for boundary points whose errors are correlated.
+
+        Adjacent contour points are *not* independent: they are produced by the same
+        PSF, so their position errors share a correlation length of roughly the blur
+        width. For noise with correlation length ``L`` sampled every ``d``, the
+        variance of an average over N samples is inflated by about ``L/d``, so the
+        honest count to put in a 1/sqrt(N) is
+
+            N_eff = N * d / max(d, L).
+
+        Measured on real renders, ``L`` is 17.5 px against a hull-point spacing of
+        about 11 px, so 31 hull points carry roughly 15 independent measurements --
+        a factor of 1.4 in the bound. That is smaller than the factor of 3.4 lost by
+        hulling a ~350 px perimeter down to 31 points in the first place, so it is
+        the *second* largest source of optimism in a naive contour CRLB, not the
+        first; both are reported separately by `validation/limits.py`, which is also
+        what measures ``L``.
+    """
+
     n_points = float(n_points)
     lag = max(float(spacing_px), float(correlation_px))
     return max(1.0, n_points * float(spacing_px) / lag)
@@ -208,7 +217,10 @@ def effective_point_count(n_points, correlation_px, spacing_px=1.0):
 
 
 def ellipse_points(centre, semi_axes, angle_rad, phis):
-    """Boundary points and outward unit normals at eccentric angles ``phis``."""
+    """
+    Boundary points and outward unit normals at eccentric angles ``phis``.
+    """
+
     a, b = float(semi_axes[0]), float(semi_axes[1])
     ca, sa = math.cos(angle_rad), math.sin(angle_rad)
     rot = np.array([[ca, -sa], [sa, ca]])
@@ -221,35 +233,42 @@ def ellipse_points(centre, semi_axes, angle_rad, phis):
 
 
 def arclength_phis(semi_axes, n_points):
-    """Eccentric angles spaced uniformly in *arc length*.
-
-    Contour pixels are spaced along the boundary, not in the eccentric angle, and
-    for an elongated ellipse the two differ enormously -- uniform-in-phi puts far
-    too few points near the ends of the major axis, which is exactly where the
-    curvature information about ``a`` lives. Getting this wrong makes the bound
-    on ``a`` too pessimistic and the bound on tilt too optimistic.
     """
+    Eccentric angles spaced uniformly in *arc length*.
+
+        Contour pixels are spaced along the boundary, not in the eccentric angle, and
+        for an elongated ellipse the two differ enormously -- uniform-in-phi puts far
+        too few points near the ends of the major axis, which is exactly where the
+        curvature information about ``a`` lives. Getting this wrong makes the bound
+        on ``a`` too pessimistic and the bound on tilt too optimistic.
+    """
+
     a, b = float(semi_axes[0]), float(semi_axes[1])
     dense = np.linspace(0.0, 2.0 * math.pi, 4096)
     speed = np.hypot(a * np.sin(dense), b * np.cos(dense))
-    s = np.concatenate([[0.0], np.cumsum(0.5 * (speed[1:] + speed[:-1]) * np.diff(dense))])
+    s = np.concatenate(
+        [[0.0], np.cumsum(0.5 * (speed[1:] + speed[:-1]) * np.diff(dense))]
+    )
     targets = np.linspace(0.0, s[-1], int(n_points), endpoint=False)
     return np.interp(targets, s, dense)
 
 
-def ellipse_fisher(centre, semi_axes, angle_rad, n_points, sigma_r_px,
-                   phis=None, arc_fraction=1.0):
-    """5x5 Fisher information for ``(cx, cy, a, b, theta)`` in pixel units.
-
-    ``arc_fraction`` < 1 keeps only that fraction of the perimeter, which is how
-    an occluded or partly-thresholded rim behaves; the conditioning collapse from
-    a short arc is one of the things this makes quantitative.
-
-    The matrix is singular when a == b: a circle has no defined orientation, so
-    the theta row and column vanish identically. That is a genuine rank
-    deficiency of the measurement, not a numerical artefact, and callers that
-    need a bound near face-on must marginalise rather than invert.
+def ellipse_fisher(
+    centre, semi_axes, angle_rad, n_points, sigma_r_px, phis=None, arc_fraction=1.0
+):
     """
+    5x5 Fisher information for ``(cx, cy, a, b, theta)`` in pixel units.
+
+        ``arc_fraction`` < 1 keeps only that fraction of the perimeter, which is how
+        an occluded or partly-thresholded rim behaves; the conditioning collapse from
+        a short arc is one of the things this makes quantitative.
+
+        The matrix is singular when a == b: a circle has no defined orientation, so
+        the theta row and column vanish identically. That is a genuine rank
+        deficiency of the measurement, not a numerical artefact, and callers that
+        need a bound near face-on must marginalise rather than invert.
+    """
+
     a, b = float(semi_axes[0]), float(semi_axes[1])
     if phis is None:
         phis = arclength_phis((a, b), n_points)
@@ -276,7 +295,10 @@ def ellipse_fisher(centre, semi_axes, angle_rad, n_points, sigma_r_px,
 
 
 def ellipse_crlb(centre, semi_axes, angle_rad, n_points, sigma_r_px, **kw):
-    """Cramer-Rao covariance for ``(cx, cy, a, b, theta)``; ``None`` if singular."""
+    """
+    Cramer-Rao covariance for ``(cx, cy, a, b, theta)``; ``None`` if singular.
+    """
+
     j = ellipse_fisher(centre, semi_axes, angle_rad, n_points, sigma_r_px, **kw)
     if np.linalg.cond(j) > 1e12:
         return None
@@ -284,26 +306,28 @@ def ellipse_crlb(centre, semi_axes, angle_rad, n_points, sigma_r_px, **kw):
 
 
 def circle_crlb_closed_form(radius_px, n_points, sigma_r_px):
-    """Analytic CRLB for a circle -- the case where the algebra closes.
-
-    With ``x(phi) = c + r (cos phi, sin phi)`` the normal is ``(cos phi, sin phi)``
-    and the three gradients are ``(-cos phi, -sin phi, -1)`` for ``(cx, cy, r)``.
-    Averaging ``cos^2 = sin^2 = 1/2`` and ``cos sin = 0`` over a full turn,
-
-        J = (N/sigma_r^2) diag(1/2, 1/2, 1)
-
-    so
-
-        sigma_cx = sigma_cy = sigma_r sqrt(2/N),      sigma_radius = sigma_r / sqrt(N).
-
-    **The centre is measured sqrt(2) times WORSE than the radius, per axis.**
-    That is the opposite of the intuition that a centre, being an average of
-    opposed points, should be the better-determined quantity: each point
-    constrains the centre only along its own normal, so the information about cx
-    is diluted by cos^2 phi, while every point constrains the radius fully.
-    Returned as ``(sigma_centre_px, sigma_radius_px)``; exercised against
-    `ellipse_fisher` in `test_bounds.py`.
     """
+    Analytic CRLB for a circle -- the case where the algebra closes.
+
+        With ``x(phi) = c + r (cos phi, sin phi)`` the normal is ``(cos phi, sin phi)``
+        and the three gradients are ``(-cos phi, -sin phi, -1)`` for ``(cx, cy, r)``.
+        Averaging ``cos^2 = sin^2 = 1/2`` and ``cos sin = 0`` over a full turn,
+
+            J = (N/sigma_r^2) diag(1/2, 1/2, 1)
+
+        so
+
+            sigma_cx = sigma_cy = sigma_r sqrt(2/N),      sigma_radius = sigma_r / sqrt(N).
+
+        **The centre is measured sqrt(2) times WORSE than the radius, per axis.**
+        That is the opposite of the intuition that a centre, being an average of
+        opposed points, should be the better-determined quantity: each point
+        constrains the centre only along its own normal, so the information about cx
+        is diluted by cos^2 phi, while every point constrains the radius fully.
+        Returned as ``(sigma_centre_px, sigma_radius_px)``; exercised against
+        `ellipse_fisher` in `test_bounds.py`.
+    """
+
     n = float(n_points)
     return (float(sigma_r_px) * math.sqrt(2.0 / n), float(sigma_r_px) / math.sqrt(n))
 
@@ -314,35 +338,44 @@ def circle_crlb_closed_form(radius_px, n_points, sigma_r_px):
 
 
 def _pose_vector(pose):
-    return np.concatenate([np.asarray(pose.center, dtype=np.float64),
-                           np.asarray(pose.normal, dtype=np.float64)])
+    return np.concatenate(
+        [
+            np.asarray(pose.center, dtype=np.float64),
+            np.asarray(pose.normal, dtype=np.float64),
+        ]
+    )
 
 
 def _pick_branch(poses, reference):
-    """Back-projection returns two branches; follow the one nearest ``reference``."""
+    """
+    Back-projection returns two branches; follow the one nearest ``reference``.
+    """
+
     best, best_d = None, math.inf
     for p in poses:
         v = _pose_vector(p)
         d = float(np.linalg.norm(v[:3] - reference[:3])) + 50.0 * float(
-            np.linalg.norm(v[3:] - reference[3:]))
+            np.linalg.norm(v[3:] - reference[3:])
+        )
         if d < best_d:
             best, best_d = v, d
     return best
 
 
-def pose_jacobian(centre, semi_axes, angle_rad, camera_matrix, radius_mm,
-                  step=1e-4):
-    """``d(pose)/d(cx, cy, a, b, theta)``: 6x5, by central differences.
-
-    Differentiating the *real* `conic.backproject_ellipse` rather than a
-    hand-linearised model. That is deliberate: an analytic Jacobian of the
-    eigen-decomposition would be a second implementation to keep in sync, and the
-    thing we want bounded is the pipeline that ships.
-
-    The branch is re-selected at every perturbed point by proximity to the
-    nominal pose, so the derivative does not jump between the two ambiguity
-    solutions and report a spurious infinity.
+def pose_jacobian(centre, semi_axes, angle_rad, camera_matrix, radius_mm, step=1e-4):
     """
+    ``d(pose)/d(cx, cy, a, b, theta)``: 6x5, by central differences.
+
+        Differentiating the *real* `conic.backproject_ellipse` rather than a
+        hand-linearised model. That is deliberate: an analytic Jacobian of the
+        eigen-decomposition would be a second implementation to keep in sync, and the
+        thing we want bounded is the pipeline that ships.
+
+        The branch is re-selected at every perturbed point by proximity to the
+        nominal pose, so the derivative does not jump between the two ambiguity
+        solutions and report a spurious infinity.
+    """
+
     import conic as _conic
 
     def solve(p):
@@ -352,8 +385,9 @@ def pose_jacobian(centre, semi_axes, angle_rad, camera_matrix, radius_mm,
             return None
         return poses
 
-    p0 = np.array([centre[0], centre[1], semi_axes[0], semi_axes[1], angle_rad],
-                  dtype=np.float64)
+    p0 = np.array(
+        [centre[0], centre[1], semi_axes[0], semi_axes[1], angle_rad], dtype=np.float64
+    )
     base = solve(p0)
     if not base:
         return None, None
@@ -372,16 +406,19 @@ def pose_jacobian(centre, semi_axes, angle_rad, camera_matrix, radius_mm,
     return jac, ref
 
 
-def pose_crlb(centre, semi_axes, angle_rad, camera_matrix, radius_mm,
-              n_points, sigma_r_px, **kw):
-    """Covariance of ``(Cx, Cy, Cz, nx, ny, nz)`` in mm and unit-vector units.
-
-    Composition of (C) and (D): ``Sigma_pose = G Sigma_ellipse G^T``. This is the
-    delta-method push-forward of the Cramer-Rao bound, which is itself the CRLB
-    for the transformed parameters whenever G has full column rank -- and G
-    cannot have rank more than 5, which is the formal statement that roll is
-    unobservable.
+def pose_crlb(
+    centre, semi_axes, angle_rad, camera_matrix, radius_mm, n_points, sigma_r_px, **kw
+):
     """
+    Covariance of ``(Cx, Cy, Cz, nx, ny, nz)`` in mm and unit-vector units.
+
+        Composition of (C) and (D): ``Sigma_pose = G Sigma_ellipse G^T``. This is the
+        delta-method push-forward of the Cramer-Rao bound, which is itself the CRLB
+        for the transformed parameters whenever G has full column rank -- and G
+        cannot have rank more than 5, which is the formal statement that roll is
+        unobservable.
+    """
+
     sig = ellipse_crlb(centre, semi_axes, angle_rad, n_points, sigma_r_px, **kw)
     if sig is None:
         return None, None
@@ -395,30 +432,47 @@ def pose_crlb(centre, semi_axes, angle_rad, camera_matrix, radius_mm,
 #: the Fisher matrix in the weak-perspective limit (see `depth_lateral_ratio`).
 #: ``g(0) = sqrt(3)`` analytically; the rest is a slow, bounded, monotone rise.
 _TILT_FACTOR_DEG = np.array([0, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 90], float)
-_TILT_FACTOR = np.array([1.7321, 1.7278, 1.7395, 1.7514, 1.7671, 1.8114,
-                         1.8730, 1.9503, 2.0384, 2.1250, 2.1800, 2.2000], float)
+_TILT_FACTOR = np.array(
+    [
+        1.7321,
+        1.7278,
+        1.7395,
+        1.7514,
+        1.7671,
+        1.8114,
+        1.8730,
+        1.9503,
+        2.0384,
+        2.1250,
+        2.1800,
+        2.2000,
+    ],
+    float,
+)
 
 
 def depth_lateral_ratio(z_mm, radius_mm, tilt_deg=0.0, per_axis=False):
-    """CRLB ratio ``sigma_depth / sigma_lateral`` = ``g(tilt) * z / (2R)``.
-
-    Derivation in lecture notes S13.4. In short: with the tilt *known* the ratio
-    is exactly ``z/2R``, range over diameter. With it estimated from the same
-    ellipse -- which is what ships -- the semi-axis must be disentangled from
-    ``b`` and ``theta``, the ``(a,b)`` Fisher block is
-    ``(N/8 sigma^2)[[3,1],[1,3]]``, and ``sigma_a`` gains a factor ``sqrt(3)``:
-
-        sigma_depth / |sigma_lat| = g(theta) * z / (2R),   g(0) = sqrt(3)
-
-    ``g`` rises slowly and stays in [1.73, 2.2] (``_TILT_FACTOR``), so a working
-    form is ``sigma_depth ~ (z/R) sigma_lat``, range over *radius*, good to 15%
-    at any tilt.
-
-    Noise level, point count, focal length and resolution all cancel -- this is
-    perspective projection, not the sensor or the algorithm. Exact in the
-    weak-perspective limit and good to 2% inside the operating envelope
-    (z 150-400 mm, tilt >= 30 deg); ``per_axis`` divides by sqrt(2).
     """
+    CRLB ratio ``sigma_depth / sigma_lateral`` = ``g(tilt) * z / (2R)``.
+
+        Derivation in lecture notes S13.4. In short: with the tilt *known* the ratio
+        is exactly ``z/2R``, range over diameter. With it estimated from the same
+        ellipse -- which is what ships -- the semi-axis must be disentangled from
+        ``b`` and ``theta``, the ``(a,b)`` Fisher block is
+        ``(N/8 sigma^2)[[3,1],[1,3]]``, and ``sigma_a`` gains a factor ``sqrt(3)``:
+
+            sigma_depth / |sigma_lat| = g(theta) * z / (2R),   g(0) = sqrt(3)
+
+        ``g`` rises slowly and stays in [1.73, 2.2] (``_TILT_FACTOR``), so a working
+        form is ``sigma_depth ~ (z/R) sigma_lat``, range over *radius*, good to 15%
+        at any tilt.
+
+        Noise level, point count, focal length and resolution all cancel -- this is
+        perspective projection, not the sensor or the algorithm. Exact in the
+        weak-perspective limit and good to 2% inside the operating envelope
+        (z 150-400 mm, tilt >= 30 deg); ``per_axis`` divides by sqrt(2).
+    """
+
     g = float(np.interp(abs(float(tilt_deg)), _TILT_FACTOR_DEG, _TILT_FACTOR))
     denom = 2.0 * radius_mm
     if per_axis:
@@ -426,20 +480,24 @@ def depth_lateral_ratio(z_mm, radius_mm, tilt_deg=0.0, per_axis=False):
     return g * float(z_mm) / denom
 
 
-def depth_lateral_ratio_numeric(z_mm, radius_mm, camera_matrix, tilt_deg,
-                                n_points=4000, sigma_r_px=0.01):
-    """The same ratio, evaluated from the full Fisher matrix rather than the fit.
-
-    Slower and exact (no interpolation, no weak-perspective assumption). Used by
-    `test_bounds.py` to certify `depth_lateral_ratio` and to regenerate
-    ``_TILT_FACTOR`` if the parametrisation ever changes.
+def depth_lateral_ratio_numeric(
+    z_mm, radius_mm, camera_matrix, tilt_deg, n_points=4000, sigma_r_px=0.01
+):
     """
+    The same ratio, evaluated from the full Fisher matrix rather than the fit.
+
+        Slower and exact (no interpolation, no weak-perspective assumption). Used by
+        `test_bounds.py` to certify `depth_lateral_ratio` and to regenerate
+        ``_TILT_FACTOR`` if the parametrisation ever changes.
+    """
+
     f = 0.5 * (camera_matrix[0, 0] + camera_matrix[1, 1])
     a_px = f * radius_mm / z_mm
     b_px = a_px * math.cos(math.radians(tilt_deg))
     centre = (float(camera_matrix[0, 2]), float(camera_matrix[1, 2]))
-    cov, _ = pose_crlb(centre, (a_px, b_px), 0.0, camera_matrix, radius_mm,
-                       n_points, sigma_r_px)
+    cov, _ = pose_crlb(
+        centre, (a_px, b_px), 0.0, camera_matrix, radius_mm, n_points, sigma_r_px
+    )
     if cov is None:
         return None
     sd = np.sqrt(np.clip(np.diag(cov), 0.0, None))
@@ -447,26 +505,28 @@ def depth_lateral_ratio_numeric(z_mm, radius_mm, camera_matrix, tilt_deg,
 
 
 def tilt_from_ratio_sigma(theta_rad, sigma_ratio):
-    """Propagated tilt uncertainty from noise on the axis ratio ``b/a``.
-
-    ``theta = arccos(b/a)`` gives ``dtheta/d(b/a) = -1/sin theta``, so away from
-    face-on
-
-        sigma_theta = sigma_ratio / sin theta.
-
-    That expression diverges at ``theta = 0``, and the divergence is real but the
-    formula is not: at exactly face-on the linearisation fails because ``theta``
-    is at the boundary of its domain (``b <= a`` always). Expanding instead,
-    ``cos theta ~ 1 - theta^2/2`` gives ``theta ~ sqrt(2 delta)`` for a ratio
-    deficit ``delta``, so the error goes as the SQUARE ROOT of the ratio noise
-    and the estimator is biased *away* from zero:
-
-        E[theta_hat] ~ 0.8225 sqrt(2 sigma_ratio)      at theta = 0
-
-    (the constant is ``E|u|^{1/2}`` for a standard normal). Both regimes are
-    checked against Monte Carlo in `test_bounds.py`; the crossover is near
-    ``theta ~ sqrt(sigma_ratio)``.
     """
+    Propagated tilt uncertainty from noise on the axis ratio ``b/a``.
+
+        ``theta = arccos(b/a)`` gives ``dtheta/d(b/a) = -1/sin theta``, so away from
+        face-on
+
+            sigma_theta = sigma_ratio / sin theta.
+
+        That expression diverges at ``theta = 0``, and the divergence is real but the
+        formula is not: at exactly face-on the linearisation fails because ``theta``
+        is at the boundary of its domain (``b <= a`` always). Expanding instead,
+        ``cos theta ~ 1 - theta^2/2`` gives ``theta ~ sqrt(2 delta)`` for a ratio
+        deficit ``delta``, so the error goes as the SQUARE ROOT of the ratio noise
+        and the estimator is biased *away* from zero:
+
+            E[theta_hat] ~ 0.8225 sqrt(2 sigma_ratio)      at theta = 0
+
+        (the constant is ``E|u|^{1/2}`` for a standard normal). Both regimes are
+        checked against Monte Carlo in `test_bounds.py`; the crossover is near
+        ``theta ~ sqrt(sigma_ratio)``.
+    """
+
     s = math.sin(theta_rad)
     if s < 1e-12:
         return math.inf
@@ -474,9 +534,12 @@ def tilt_from_ratio_sigma(theta_rad, sigma_ratio):
 
 
 def tilt_bias_at_face_on(sigma_ratio):
-    """Expected apparent tilt of a genuinely face-on circle. See above."""
+    """
+    Expected apparent tilt of a genuinely face-on circle. See above.
+    """
+
     # E|u|^{1/2} for u ~ N(0,1) = 2^{1/4} Gamma(3/4)/sqrt(pi)
-    k = (2.0 ** 0.25) * math.gamma(0.75) / math.sqrt(math.pi)
+    k = (2.0**0.25) * math.gamma(0.75) / math.sqrt(math.pi)
     return k * math.sqrt(2.0 * float(sigma_ratio))
 
 
@@ -486,14 +549,16 @@ def tilt_bias_at_face_on(sigma_ratio):
 
 
 def roll_null_space(centre_mm, normal, radius_mm, camera_matrix, n_probe=64):
-    """Largest image displacement produced by spinning the circle about its axis.
-
-    Rotating the rim about its own normal maps the circle onto itself, so the
-    projected conic is *identical* and the derivative of the image with respect
-    to roll is exactly zero. Returned in pixels; anything above float noise would
-    mean the parametrisation had smuggled in an orientation the geometry does not
-    have. This is the formal version of "the estimator is 5-DOF, not 6".
     """
+    Largest image displacement produced by spinning the circle about its axis.
+
+        Rotating the rim about its own normal maps the circle onto itself, so the
+        projected conic is *identical* and the derivative of the image with respect
+        to roll is exactly zero. Returned in pixels; anything above float noise would
+        mean the parametrisation had smuggled in an orientation the geometry does not
+        have. This is the formal version of "the estimator is 5-DOF, not 6".
+    """
+
     import conic as _conic
 
     n = np.asarray(normal, dtype=np.float64)
@@ -516,7 +581,9 @@ def roll_null_space(centre_mm, normal, radius_mm, camera_matrix, n_probe=64):
         vv = -math.sin(psi) * u + math.cos(psi) * v
         pts = []
         for t in np.linspace(0.0, 2.0 * math.pi, 32, endpoint=False):
-            p = np.asarray(centre_mm) + radius_mm * (math.cos(t) * uu + math.sin(t) * vv)
+            p = np.asarray(centre_mm) + radius_mm * (
+                math.cos(t) * uu + math.sin(t) * vv
+            )
             q = camera_matrix @ p
             pts.append(q[:2] / q[2])
         pts = np.asarray(pts)
@@ -530,16 +597,18 @@ def roll_null_space(centre_mm, normal, radius_mm, camera_matrix, n_probe=64):
 
 
 def ambiguity_is_exact(centre_mm, normal, radius_mm, camera_matrix):
-    """How far apart the two ambiguity branches' *images* are, in pixels.
-
-    The two back-projected poses are physically distinct -- their normals differ
-    by the ambiguity margin, tens of degrees -- yet they must reproject to the
-    same ellipse to machine precision. If they do, no single-view estimator can
-    prefer one on evidence: the likelihood has two exactly equal maxima, and the
-    choice is made by prior or by a second view, never by data from this one.
-
-    Returns ``(image_gap_px, margin_deg, n_branches)``.
     """
+    How far apart the two ambiguity branches' *images* are, in pixels.
+
+        The two back-projected poses are physically distinct -- their normals differ
+        by the ambiguity margin, tens of degrees -- yet they must reproject to the
+        same ellipse to machine precision. If they do, no single-view estimator can
+        prefer one on evidence: the likelihood has two exactly equal maxima, and the
+        choice is made by prior or by a second view, never by data from this one.
+
+        Returns ``(image_gap_px, margin_deg, n_branches)``.
+    """
+
     import conic as _conic
 
     e = _conic.project_circle(centre_mm, normal, radius_mm, camera_matrix)
@@ -552,7 +621,10 @@ def ambiguity_is_exact(centre_mm, normal, radius_mm, camera_matrix):
 
 
 def _ellipse_gap_px(e1, e2, n=180):
-    """Max distance between two ellipses' boundaries, sampled."""
+    """
+    Max distance between two ellipses' boundaries, sampled.
+    """
+
     def pts(e):
         (cx, cy), (ma, mi), ang = e
         t = np.linspace(0.0, 2.0 * math.pi, n, endpoint=False)
@@ -571,17 +643,27 @@ def _ellipse_gap_px(e1, e2, n=180):
 # ---------------------------------------------------------------------------
 
 
-def budget(z_mm, radius_mm, camera_matrix, tilt_deg=30.0,
-           sigma_r_px=None, contrast=200.0, sigma_noise=6.0, psf_px=1.0,
-           correlation_px=1.0):
-    """End-to-end error budget at one operating point.
-
-    Runs (A) -> (B) -> (C) -> (D) and returns a dict of every intermediate, so a
-    report can show where each factor of ten comes from rather than presenting a
-    single number. ``sigma_r_px`` overrides (A) with a *measured* boundary
-    scatter, which is how `validation/limits.py` demonstrates that the real error
-    is nowhere near the photon bound.
+def budget(
+    z_mm,
+    radius_mm,
+    camera_matrix,
+    tilt_deg=30.0,
+    sigma_r_px=None,
+    contrast=200.0,
+    sigma_noise=6.0,
+    psf_px=1.0,
+    correlation_px=1.0,
+):
     """
+    End-to-end error budget at one operating point.
+
+        Runs (A) -> (B) -> (C) -> (D) and returns a dict of every intermediate, so a
+        report can show where each factor of ten comes from rather than presenting a
+        single number. ``sigma_r_px`` overrides (A) with a *measured* boundary
+        scatter, which is how `validation/limits.py` demonstrates that the real error
+        is nowhere near the photon bound.
+    """
+
     photon = edge_crlb_discrete(contrast, sigma_noise, psf_px)
     sigma_r = float(sigma_r_px) if sigma_r_px is not None else photon
 
@@ -589,30 +671,38 @@ def budget(z_mm, radius_mm, camera_matrix, tilt_deg=30.0,
     theta = math.radians(tilt_deg)
     a_px = f * radius_mm / z_mm
     b_px = a_px * math.cos(theta)
-    perim = math.pi * (3.0 * (a_px + b_px)
-                       - math.sqrt((3.0 * a_px + b_px) * (a_px + 3.0 * b_px)))
+    perim = math.pi * (
+        3.0 * (a_px + b_px) - math.sqrt((3.0 * a_px + b_px) * (a_px + 3.0 * b_px))
+    )
     n_eff = effective_point_count(perim, correlation_px)
 
     centre = (float(camera_matrix[0, 2]), float(camera_matrix[1, 2]))
-    cov, ref = pose_crlb(centre, (a_px, b_px), 0.0, camera_matrix, radius_mm,
-                         n_eff, sigma_r)
+    cov, ref = pose_crlb(
+        centre, (a_px, b_px), 0.0, camera_matrix, radius_mm, n_eff, sigma_r
+    )
     out = {
-        "z_mm": z_mm, "tilt_deg": tilt_deg,
+        "z_mm": z_mm,
+        "tilt_deg": tilt_deg,
         "photon_sigma_px": photon,
         "quantisation_sigma_px": QUANTISATION_SIGMA_PX,
         "sigma_r_px": sigma_r,
-        "semi_major_px": a_px, "semi_minor_px": b_px,
-        "perimeter_px": perim, "n_effective": n_eff,
+        "semi_major_px": a_px,
+        "semi_minor_px": b_px,
+        "perimeter_px": perim,
+        "n_effective": n_eff,
         "depth_lateral_ratio": depth_lateral_ratio(z_mm, radius_mm, tilt_deg),
     }
     if cov is not None:
         sd = np.sqrt(np.clip(np.diag(cov), 0.0, None))
-        out.update({
-            "sigma_x_mm": float(sd[0]), "sigma_y_mm": float(sd[1]),
-            "sigma_z_mm": float(sd[2]),
-            "sigma_lateral_mm": float(math.hypot(sd[0], sd[1])),
-            # The normal is a unit vector, so the standard deviations of its
-            # three components combine to a small-angle error directly.
-            "sigma_normal_deg": float(math.degrees(np.linalg.norm(sd[3:]))),
-        })
+        out.update(
+            {
+                "sigma_x_mm": float(sd[0]),
+                "sigma_y_mm": float(sd[1]),
+                "sigma_z_mm": float(sd[2]),
+                "sigma_lateral_mm": float(math.hypot(sd[0], sd[1])),
+                # The normal is a unit vector, so the standard deviations of its
+                # three components combine to a small-angle error directly.
+                "sigma_normal_deg": float(math.degrees(np.linalg.norm(sd[3:]))),
+            }
+        )
     return out

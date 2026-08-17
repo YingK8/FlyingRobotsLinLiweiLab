@@ -1,6 +1,7 @@
-"""Run every `test_*.py` suite in this package and summarise.
+"""
+Run every `test_*.py` suite in this package and summarise.
 
-    uv run python controller/pose/run_tests.py [-v] [name ...]
+    uv run python ai/tests/run_tests.py [-v] [name ...]
 
 Each suite stays its own file. They are not merged into one, and that is a
 choice: they are ~2000 lines covering six unrelated subjects (conic algebra,
@@ -48,8 +49,9 @@ def run(name, verbose=False):
     if not path.exists():
         return name, None, 0.0, f"missing: {path.name}"
     t0 = time.monotonic()
-    proc = subprocess.run([sys.executable, str(path)], capture_output=not verbose,
-                          text=True)
+    proc = subprocess.run(
+        [sys.executable, str(path)], capture_output=not verbose, text=True
+    )
     dt = time.monotonic() - t0
     tail = ""
     if proc.returncode != 0 and not verbose:
@@ -61,16 +63,22 @@ def run(name, verbose=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("names", nargs="*", help="suites to run (default: all)")
-    ap.add_argument("-v", "--verbose", action="store_true",
-                    help="stream each suite's own output instead of capturing it")
+    ap.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="stream each suite's own output instead of capturing it",
+    )
     args = ap.parse_args(argv)
 
     wanted = args.names or [n for n, _ in SUITES]
     known = dict(SUITES)
     unknown = [n for n in wanted if n not in known]
     if unknown:
-        ap.error(f"unknown suite(s): {', '.join(unknown)}. "
-                 f"choose from: {', '.join(known)}")
+        ap.error(
+            f"unknown suite(s): {', '.join(unknown)}. "
+            f"choose from: {', '.join(known)}"
+        )
 
     print(f"running {len(wanted)} suite(s)\n")
     failed, skipped, total = [], [], 0.0
@@ -89,14 +97,17 @@ def main(argv=None):
                 print(tail + "\n")
 
     print("=" * 68)
-    print(f"{len(wanted) - len(failed) - len(skipped)}/{len(wanted)} passed "
-          f"in {total:.1f}s")
+    print(
+        f"{len(wanted) - len(failed) - len(skipped)}/{len(wanted)} passed "
+        f"in {total:.1f}s"
+    )
     if skipped:
         print(f"skipped: {', '.join(skipped)}")
     if failed:
         print(f"FAILED:  {', '.join(failed)}")
-        print(f"rerun one with:  uv run python {Path(__file__).name} "
-              f"-v {failed[0]}")
+        print(
+            f"rerun one with:  uv run python {Path(__file__).name} " f"-v {failed[0]}"
+        )
         return 1
     return 0
 

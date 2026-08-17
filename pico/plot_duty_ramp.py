@@ -1,4 +1,5 @@
-"""Plot calibrated per-channel current from a duty-ramp capture three ways.
+"""
+Plot calibrated per-channel current from a duty-ramp capture three ways.
 
 The capture comes from the `test_current` firmware (main_test_current.cpp):
 carrier duty ramps 0->100% in three arrangements with off-gaps, then shutdown:
@@ -12,6 +13,7 @@ Produces three figures next to the CSV:
 
 Usage:  python3 plot_duty_ramp.py <capture.csv>
 """
+
 import os
 import sys
 import numpy as np
@@ -25,8 +27,14 @@ W = 41
 
 
 def env(y):
-    return (pd.Series(y).rolling(W, center=True, min_periods=1).max()
-            .rolling(W, center=True, min_periods=1).mean().values)
+    return (
+        pd.Series(y)
+        .rolling(W, center=True, min_periods=1)
+        .max()
+        .rolling(W, center=True, min_periods=1)
+        .mean()
+        .values
+    )
 
 
 def main():
@@ -50,8 +58,10 @@ def main():
     name = os.path.basename(csv)
 
     # 1) Individual — 2x2 grid, raw trace under bold envelope.
-    raw = {ch: G[ch] * (df[ch].values - float(np.percentile(df[ch].values, 5)))
-           for ch in CH}
+    raw = {
+        ch: G[ch] * (df[ch].values - float(np.percentile(df[ch].values, 5)))
+        for ch in CH
+    }
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True, sharey=True)
     for ax, ch in zip(axes.flat, CH):
         ax.plot(t, raw[ch], color=COL[ch], lw=0.4, alpha=0.2)
@@ -70,8 +80,10 @@ def main():
     print("saved", out)
 
     # 2) Pairs — board 1 (A&C) | board 2 (B&D).
-    pairs = [("board 1", ["Channel A", "Channel C"]),
-             ("board 2", ["Channel B", "Channel D"])]
+    pairs = [
+        ("board 1", ["Channel A", "Channel C"]),
+        ("board 2", ["Channel B", "Channel D"]),
+    ]
     fig, axes = plt.subplots(1, 2, figsize=(13, 6), sharey=True)
     for ax, (title, chs) in zip(axes, pairs):
         for ch in chs:

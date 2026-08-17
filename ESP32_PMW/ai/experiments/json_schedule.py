@@ -1,5 +1,8 @@
-"""Compact writer for JsonPhaseSequencer files: config keys indented, scalar
-arrays inline, one schedule step per line."""
+"""
+Compact writer for JsonPhaseSequencer files: config keys indented, scalar
+arrays inline, one schedule step per line.
+"""
+
 import json
 
 

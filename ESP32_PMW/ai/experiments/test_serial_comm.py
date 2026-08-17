@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Self-check for serial_comm.SerialComm's line-framing, using pyserial's
+"""
+Self-check for serial_comm.SerialComm's line-framing, using pyserial's
 built-in loop:// loopback -- no hardware, no mocking library needed.
 """
+
 import sys
 
 import serial

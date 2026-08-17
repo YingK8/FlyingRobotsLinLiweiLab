@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Calibrate the VNH5019 current-sense chain against the FNIRSI DPS-150 as a
+"""
+Calibrate the VNH5019 current-sense chain against the FNIRSI DPS-150 as a
 reference ammeter. Produces corrected SENS[] values for src/drive_common.h.
 
 Under test: i_meas[i] = SENS[i] * (mV_i - zeroMv_i) / 1000
@@ -60,6 +61,7 @@ Usage:
   uv run python ai/cs_calibration.py --mode duty --channel A --voltage 12.0 \
       --out data/cs_cal/duty_A.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -92,10 +94,12 @@ _TELEMETRY_RE = re.compile(
 
 
 class TelemetryReader:
-    """Non-blocking line reader. Accumulates raw bytes across polls and only
-    returns complete lines -- a blocking readline() with a short timeout was
-    confirmed on this hardware to split lines and desync the parser (see
-    ai/record_serial.py)."""
+    """
+    Non-blocking line reader. Accumulates raw bytes across polls and only
+        returns complete lines -- a blocking readline() with a short timeout was
+        confirmed on this hardware to split lines and desync the parser (see
+        ai/record_serial.py).
+    """
 
     def __init__(self, port: str, baud: int = 115200):
         self.ser = serial.Serial(port, baud, timeout=0)
@@ -128,8 +132,11 @@ class TelemetryReader:
             }
 
     def drain(self, seconds: float) -> None:
-        """Discard buffered telemetry so a sample reflects the new setpoint
-        rather than whatever was in flight from the previous one."""
+        """
+        Discard buffered telemetry so a sample reflects the new setpoint
+                rather than whatever was in flight from the previous one.
+        """
+
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             self.poll()
@@ -140,9 +147,12 @@ class TelemetryReader:
 
 
 async def sample(dev: DPS150, tel: TelemetryReader, n: int, gap: float) -> dict:
-    """Average n paired (DPS, telemetry) reads. get_all() sleeps 100ms
-    internally, giving ~10Hz -- well matched to the 2Hz telemetry and to the
-    50ms CS filter."""
+    """
+    Average n paired (DPS, telemetry) reads. get_all() sleeps 100ms
+        internally, giving ~10Hz -- well matched to the 2Hz telemetry and to the
+        50ms CS filter.
+    """
+
     dps_i, dps_v, dps_p = [], [], []
     meas = {c: [] for c in CHANNELS}
     duty = {c: [] for c in CHANNELS}
@@ -180,9 +190,12 @@ async def sample(dev: DPS150, tel: TelemetryReader, n: int, gap: float) -> dict:
 
 
 async def measure_quiescent(dev: DPS150, tel: TelemetryReader, args) -> float:
-    """Board current with every channel off. The DPS-150 sees TOTAL board draw,
-    so this baseline must come off every reading before it can be compared to a
-    single channel's i_meas."""
+    """
+    Board current with every channel off. The DPS-150 sees TOTAL board draw,
+        so this baseline must come off every reading before it can be compared to a
+        single channel's i_meas.
+    """
+
     await dev.set_voltage(args.quiescent_voltage)
     await asyncio.sleep(args.dwell)
     s = await sample(dev, tel, args.samples, args.sample_gap)
@@ -197,7 +210,10 @@ async def measure_quiescent(dev: DPS150, tel: TelemetryReader, args) -> float:
 
 
 async def run_zero_drift(dev: DPS150, tel: TelemetryReader, args) -> dict:
-    """Test 1: is the boot-time zero seed still valid minutes later?"""
+    """
+    Test 1: is the boot-time zero seed still valid minutes later?
+    """
+
     await dev.set_voltage(args.quiescent_voltage)
     await dev.enable_output()
     print(f"logging zero drift for {args.duration:.0f}s (coils must be OFF)")
@@ -227,8 +243,11 @@ async def run_zero_drift(dev: DPS150, tel: TelemetryReader, args) -> dict:
 
 
 async def run_voltage_sweep(dev: DPS150, tel: TelemetryReader, args) -> dict:
-    """Test 2: pure-DC gain and linearity. Carrier is parked at 100% by the
-    firmware, so nothing is chopping and the only variable is supply voltage."""
+    """
+    Test 2: pure-DC gain and linearity. Carrier is parked at 100% by the
+        firmware, so nothing is chopping and the only variable is supply voltage.
+    """
+
     await dev.enable_output()
     quiescent = await measure_quiescent(dev, tel, args)
 
@@ -261,9 +280,12 @@ async def run_voltage_sweep(dev: DPS150, tel: TelemetryReader, args) -> dict:
 
 
 async def run_duty_sweep(dev: DPS150, tel: TelemetryReader, args) -> dict:
-    """Test 3: fixed supply voltage, firmware steps the carrier duty. Segments
-    on the reported duty[%] rather than on wall-clock, so no firmware change and
-    no clock alignment is needed."""
+    """
+    Test 3: fixed supply voltage, firmware steps the carrier duty. Segments
+        on the reported duty[%] rather than on wall-clock, so no firmware change and
+        no clock alignment is needed.
+    """
+
     await dev.set_voltage(args.voltage)
     await dev.enable_output()
     quiescent = await measure_quiescent(dev, tel, args)
@@ -295,16 +317,18 @@ async def run_duty_sweep(dev: DPS150, tel: TelemetryReader, args) -> dict:
         grp = bins[d]
         if len(grp) < args.min_per_bin:
             continue  # transient between steps, not a settled plateau
-        keep = grp[len(grp) // 2:]  # drop the leading edge of each plateau
-        points.append({
-            "duty": d,
-            "n": len(keep),
-            "i_true": float(np.mean([p["i_true"] for p in keep])),
-            "v_dps": float(np.mean([p["v_dps"] for p in keep])),
-            "i_meas": {
-                c: float(np.mean([p["i_meas"][c] for p in keep])) for c in CHANNELS
-            },
-        })
+        keep = grp[len(grp) // 2 :]  # drop the leading edge of each plateau
+        points.append(
+            {
+                "duty": d,
+                "n": len(keep),
+                "i_true": float(np.mean([p["i_true"] for p in keep])),
+                "v_dps": float(np.mean([p["v_dps"] for p in keep])),
+                "i_meas": {
+                    c: float(np.mean([p["i_meas"][c] for p in keep])) for c in CHANNELS
+                },
+            }
+        )
         print(
             f"  duty={d:5.1f}%  I_dps={points[-1]['i_true']:6.3f}A  "
             f"i_meas[{args.channel}]={points[-1]['i_meas'][args.channel]:+6.3f}A"
@@ -319,11 +343,22 @@ async def run_duty_sweep(dev: DPS150, tel: TelemetryReader, args) -> dict:
 
 
 def fit_gain(points: list[dict], channel: str, i_min: float) -> dict | None:
-    """Fit i_meas = a*I_true + b. The firmware already applies SENS[channel], so
-    a == 1.0 means the existing calibration is correct and the corrected value is
-    SENS_old / a. b is residual zero-offset error in amps."""
-    xs = [p["i_true"] for p in points if p["i_meas"][channel] is not None and p["i_true"] >= i_min]
-    ys = [p["i_meas"][channel] for p in points if p["i_meas"][channel] is not None and p["i_true"] >= i_min]
+    """
+    Fit i_meas = a*I_true + b. The firmware already applies SENS[channel], so
+        a == 1.0 means the existing calibration is correct and the corrected value is
+        SENS_old / a. b is residual zero-offset error in amps.
+    """
+
+    xs = [
+        p["i_true"]
+        for p in points
+        if p["i_meas"][channel] is not None and p["i_true"] >= i_min
+    ]
+    ys = [
+        p["i_meas"][channel]
+        for p in points
+        if p["i_meas"][channel] is not None and p["i_true"] >= i_min
+    ]
     if len(xs) < 2:
         return None
     x, y = np.asarray(xs), np.asarray(ys)
@@ -340,8 +375,11 @@ def fit_gain(points: list[dict], channel: str, i_min: float) -> dict | None:
 
 
 def crosstalk(points: list[dict], driven: str) -> dict:
-    """Test 4: max |i_meas| on every undriven channel. Should be ~0; anything
-    that tracks the driven channel is mux settling or shared-ground pickup."""
+    """
+    Test 4: max |i_meas| on every undriven channel. Should be ~0; anything
+        that tracks the driven channel is mux settling or shared-ground pickup.
+    """
+
     out = {}
     for c in CHANNELS:
         if c == driven:
@@ -417,13 +455,21 @@ async def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--mode", required=True, choices=["zero-drift", "voltage", "duty"])
-    ap.add_argument("--channel", default="A", choices=CHANNELS,
-                    help="the ONE channel being driven (others must be off)")
+    ap.add_argument(
+        "--channel",
+        default="A",
+        choices=CHANNELS,
+        help="the ONE channel being driven (others must be off)",
+    )
     ap.add_argument("--dps-port", help="DPS-150 serial port (auto-detect if omitted)")
     ap.add_argument("--esp-port", required=True, help="ESP32 serial port")
-    ap.add_argument("--sens-old", type=float, default=15.26,
-                    help="the SENS[] value currently flashed for this channel "
-                         "(src/drive_common.h:19), used to report the correction")
+    ap.add_argument(
+        "--sens-old",
+        type=float,
+        default=15.26,
+        help="the SENS[] value currently flashed for this channel "
+        "(src/drive_common.h:19), used to report the correction",
+    )
 
     ap.add_argument("--v-min", type=float, default=2.0, help="voltage mode: min V")
     ap.add_argument("--v-max", type=float, default=12.0, help="voltage mode: max V")
@@ -432,29 +478,65 @@ async def main() -> int:
     ap.add_argument("--no-updown", dest="updown", action="store_false")
 
     ap.add_argument("--voltage", type=float, default=12.0, help="duty mode: fixed V")
-    ap.add_argument("--duty-bin", type=float, default=2.5, help="duty mode: bin width, %%")
-    ap.add_argument("--min-per-bin", type=int, default=3,
-                    help="duty mode: samples needed before a bin counts as settled")
+    ap.add_argument(
+        "--duty-bin", type=float, default=2.5, help="duty mode: bin width, %%"
+    )
+    ap.add_argument(
+        "--min-per-bin",
+        type=int,
+        default=3,
+        help="duty mode: samples needed before a bin counts as settled",
+    )
 
-    ap.add_argument("--duration", type=float, default=900.0,
-                    help="zero-drift/duty mode: seconds to log")
-    ap.add_argument("--drift-interval", type=float, default=20.0,
-                    help="zero-drift mode: seconds between samples")
+    ap.add_argument(
+        "--duration",
+        type=float,
+        default=900.0,
+        help="zero-drift/duty mode: seconds to log",
+    )
+    ap.add_argument(
+        "--drift-interval",
+        type=float,
+        default=20.0,
+        help="zero-drift mode: seconds between samples",
+    )
 
-    ap.add_argument("--quiescent-voltage", type=float, default=12.0,
-                    help="voltage at which board quiescent current is measured")
-    ap.add_argument("--dwell", type=float, default=1.5, help="settle time per setpoint, s")
-    ap.add_argument("--drain", type=float, default=0.6,
-                    help="telemetry discarded after a setpoint change, s "
-                         "(must exceed the 50ms CS filter and the 500ms print period)")
+    ap.add_argument(
+        "--quiescent-voltage",
+        type=float,
+        default=12.0,
+        help="voltage at which board quiescent current is measured",
+    )
+    ap.add_argument(
+        "--dwell", type=float, default=1.5, help="settle time per setpoint, s"
+    )
+    ap.add_argument(
+        "--drain",
+        type=float,
+        default=0.6,
+        help="telemetry discarded after a setpoint change, s "
+        "(must exceed the 50ms CS filter and the 500ms print period)",
+    )
     ap.add_argument("--samples", type=int, default=8, help="paired reads averaged")
-    ap.add_argument("--sample-gap", type=float, default=0.05, help="delay between reads, s")
+    ap.add_argument(
+        "--sample-gap", type=float, default=0.05, help="delay between reads, s"
+    )
 
-    ap.add_argument("--fit-from", type=float, default=0.0, help="ignore below this current, A")
-    ap.add_argument("--drift-tol", type=float, default=0.15, help="zero-drift pass threshold, A")
-    ap.add_argument("--crosstalk-tol", type=float, default=0.10, help="crosstalk threshold, A")
-    ap.add_argument("--i-limit", type=float, default=4.5,
-                    help="DPS-150 current limit, A (hardware max 5A)")
+    ap.add_argument(
+        "--fit-from", type=float, default=0.0, help="ignore below this current, A"
+    )
+    ap.add_argument(
+        "--drift-tol", type=float, default=0.15, help="zero-drift pass threshold, A"
+    )
+    ap.add_argument(
+        "--crosstalk-tol", type=float, default=0.10, help="crosstalk threshold, A"
+    )
+    ap.add_argument(
+        "--i-limit",
+        type=float,
+        default=4.5,
+        help="DPS-150 current limit, A (hardware max 5A)",
+    )
     ap.add_argument("--out", help="write results JSON here")
     args = ap.parse_args()
 

@@ -1,58 +1,32 @@
-"""Constant-velocity Kalman filter over the 5-DOF pose.
+"""
+Constant-velocity Kalman filter over the 5-DOF pose.
 
-**This filter does not reduce the position residual, and it is not meant to.**
-That was the original motivation and measurement killed it, so the reasoning is
-recorded here to stop anyone re-deriving it.
+**Take velocity from here, not position.** The filtered position is 1.4% worse
+than the raw measurement, because per-frame error is not white noise: depth error
+autocorrelates at r = 0.966 after one frame and stays above 0.5 for 408 ms. It is
+a smooth function of pose, and averaging does not remove a persistent bias. Use
+`estimator.Pose.xyz_mm` for position unless you need the coasting or prediction.
 
-The hypothesis was that per-frame error is white noise, and that with motion at
-sub-Hz against a 240-420 fps camera there would be enormous averaging available.
-The error is not white.  Measured along a rendered trajectory, the depth error
-autocorrelates at **r = 0.966 after one frame** and stays above 0.5 for
-**408 ms** -- it is a smooth function of pose, not measurement noise, and no
-amount of averaging removes a bias that persists.  Filtering position was tried
-across process noise from 15 to 4000 mm/s^2 and never beat the raw measurement:
-the best result was 1.01x, and tighter settings made it monotonically worse.
+What it is for:
 
-Blade phase does not rescue it either.  Re-rendering with the rotor spinning at
-330 Hz -- so blade phase is fully aliased, as on the real robot -- only moved the
-one-frame autocorrelation from 0.966 to 0.886.  The reason is geometric: the
-segmenter takes a convex hull, the hull is set by the outermost features, and
-the outermost feature is the **rotationally symmetric duct rim**.  Spinning the
-blades inside the ring barely changes the silhouette.
+    velocity     a raw finite difference gives 64.0 mm/s RMSE on a trajectory whose
+                 true speed is 7.6-24.4 mm/s; this gives **3.5 mm/s**. Position
+                 error being correlated is exactly why differencing it is so bad.
+    coasting     through dropouts, instead of freezing on the last fix
+    latency      `predict_ahead` hands a controller a current estimate rather than
+                 one ~2.5 ms stale
 
-What the filter is genuinely for:
+Two independent filters:
 
-* **Velocity.**  This is the real justification.  The LQR in
-  `ai/simulate_hover.py` consumes velocity, and a raw finite difference is
-  hopeless: measured against analytic truth it gives **64.0 mm/s RMSE** on a
-  trajectory whose true speed is only 7.6-24.4 mm/s -- the noise is several times
-  the signal.  The 5 Hz IIR that `simulate_hover.py` uses gets that to 6.8 mm/s;
-  this filter gets **3.5 mm/s**, twice better again and 18x better than the bare
-  difference.  Position error being correlated is precisely why differencing it
-  is so bad and why a model-based rate estimate is so much better.
-* **Coasting through dropouts**, instead of freezing on the last fix.
-* **Latency compensation**, via `predict_ahead` -- see below.
+    position     6-state [x, y, z, vx, vy, vz]
+    orientation  6-state on the normal vector and its rate. Filtering the normal
+                 as a 3-vector and renormalising avoids the wrap and singularity
+                 that (theta, phi) would hit -- phi is undefined at zero tilt.
 
-Two independent constant-velocity filters:
-
-* **position** -- a 6-state ``[x, y, z, vx, vy, vz]``.  Take the *velocity* from
-  here.  The filtered position is 1.4% worse than the raw measurement (see
-  above), so use `estimator.Pose.xyz_mm` for position unless you specifically
-  need the coasting or prediction behaviour.
-* **orientation** -- a 6-state on the normal vector and its rate.  Filtering the
-  normal as a 3-vector and renormalising avoids the wrap and the singularity
-  that filtering (theta, phi) would hit: phi is undefined at zero tilt, and no
-  amount of filtering fixes a coordinate that does not exist there.
-
-Measurement noise defaults come from `validation/tune.py` on held-out data --
-0.13 mm lateral, 0.36% of range in depth, 1.24 degrees on the normal -- so the
-gains are set by measurement rather than by taste.  Depth noise is range
-dependent and is rebuilt each update, which matters: a fixed value would
-over-trust depth far away and under-trust it up close.
-
-`predict(dt)` extrapolates forward, which is how the measured ~2.5 ms of
-grab-to-pose latency gets handed to a controller as a current estimate rather
-than a stale one.
+Measurement noise defaults are held-out measurements, not taste: 0.13 mm lateral,
+0.36% of range in depth, 1.24 deg on the normal. Depth noise is range dependent and
+rebuilt each update; a fixed value would over-trust depth far away and under-trust
+it up close.
 """
 
 from __future__ import annotations
@@ -75,11 +49,12 @@ ACCEL_NORMAL = 5.0  # unit-vector components per s^2, scaled the same way
 
 
 class _ConstantVelocity:
-    """A 3-channel constant-velocity Kalman filter, state ``[p(3), v(3)]``.
+    """
+    A 3-channel constant-velocity Kalman filter, state ``[p(3), v(3)]``.
 
-    Channels are kept independent (block-diagonal), which is exact here: the
-    measurement errors in x, y and z come from different parts of the ellipse
-    fit -- centroid for lateral, size for depth -- and are uncorrelated.
+        Channels are kept independent (block-diagonal), which is exact here: the
+        measurement errors in x, y and z come from different parts of the ellipse
+        fit -- centroid for lateral, size for depth -- and are uncorrelated.
     """
 
     def __init__(self, accel, p0_pos, p0_vel):
@@ -98,11 +73,11 @@ class _ConstantVelocity:
         f[:3, 3:] = np.eye(3) * dt
         # Continuous white-noise acceleration, discretised exactly.
         q = np.zeros((6, 6))
-        s = self.accel ** 2
-        q[:3, :3] = np.eye(3) * (dt ** 4 / 4.0) * s
-        q[:3, 3:] = np.eye(3) * (dt ** 3 / 2.0) * s
-        q[3:, :3] = np.eye(3) * (dt ** 3 / 2.0) * s
-        q[3:, 3:] = np.eye(3) * (dt ** 2) * s
+        s = self.accel**2
+        q[:3, :3] = np.eye(3) * (dt**4 / 4.0) * s
+        q[:3, 3:] = np.eye(3) * (dt**3 / 2.0) * s
+        q[3:, :3] = np.eye(3) * (dt**3 / 2.0) * s
+        q[3:, 3:] = np.eye(3) * (dt**2) * s
         return f, q
 
     def predict(self, dt):
@@ -113,7 +88,10 @@ class _ConstantVelocity:
         self.P = f @ self.P @ f.T + q
 
     def update(self, z, sigma):
-        """Fuse a measurement with per-channel standard deviations ``sigma``."""
+        """
+        Fuse a measurement with per-channel standard deviations ``sigma``.
+        """
+
         z = np.asarray(z, dtype=np.float64)
         r = np.diag(np.asarray(sigma, dtype=np.float64) ** 2)
 
@@ -144,29 +122,39 @@ class _ConstantVelocity:
         return self.x[3:].copy()
 
     def peek(self, dt):
-        """Where the state will be in ``dt`` seconds, without mutating it."""
+        """
+        Where the state will be in ``dt`` seconds, without mutating it.
+        """
+
         f, _ = self._predict_matrices(dt)
         return (f @ self.x)[:3].copy()
 
 
 class PoseFilter:
-    """Filters `estimator.Pose` measurements into a smoothed state.
+    """
+    Filters `estimator.Pose` measurements into a smoothed state.
 
-    Usage is one call per frame::
+        Usage is one call per frame::
 
-        filt = PoseFilter()
-        state = filt.update(pose)        # None until the first detection
+            filt = PoseFilter()
+            state = filt.update(pose)        # None until the first detection
 
-    Dropouts are handled by continuing to predict: `update(None)` still advances
-    the state, so a brief occlusion coasts on velocity instead of freezing. After
-    ``max_coast_s`` the filter gives up and re-seeds on the next detection,
-    because extrapolating a constant velocity indefinitely is how an estimator
-    ends up confidently wrong.
+        Dropouts are handled by continuing to predict: `update(None)` still advances
+        the state, so a brief occlusion coasts on velocity instead of freezing. After
+        ``max_coast_s`` the filter gives up and re-seeds on the next detection,
+        because extrapolating a constant velocity indefinitely is how an estimator
+        ends up confidently wrong.
     """
 
-    def __init__(self, accel_mm_s2=ACCEL_MM_S2, accel_normal=ACCEL_NORMAL,
-                 sigma_lateral_mm=SIGMA_LATERAL_MM, sigma_depth_frac=SIGMA_DEPTH_FRAC,
-                 sigma_normal=SIGMA_NORMAL, max_coast_s=0.15):
+    def __init__(
+        self,
+        accel_mm_s2=ACCEL_MM_S2,
+        accel_normal=ACCEL_NORMAL,
+        sigma_lateral_mm=SIGMA_LATERAL_MM,
+        sigma_depth_frac=SIGMA_DEPTH_FRAC,
+        sigma_normal=SIGMA_NORMAL,
+        max_coast_s=0.15,
+    ):
         self.pos = _ConstantVelocity(accel_mm_s2, p0_pos=100.0, p0_vel=1e4)
         self.nrm = _ConstantVelocity(accel_normal, p0_pos=1.0, p0_vel=100.0)
         self.sigma_lateral_mm = sigma_lateral_mm
@@ -183,12 +171,18 @@ class PoseFilter:
         self._last_seen = None
 
     def update(self, pose, t=None):
-        """Fuse one frame. ``pose`` may be ``None`` for a lost frame.
-
-        Returns ``(xyz, velocity, normal)`` or ``None`` if nothing is tracked
-        yet.
         """
-        now = (pose.t if pose is not None else t) if (pose is not None or t is not None) else None
+        Fuse one frame. ``pose`` may be ``None`` for a lost frame.
+
+                Returns ``(xyz, velocity, normal)`` or ``None`` if nothing is tracked
+                yet.
+        """
+
+        now = (
+            (pose.t if pose is not None else t)
+            if (pose is not None or t is not None)
+            else None
+        )
         if now is None:
             return None
 
@@ -208,7 +202,11 @@ class PoseFilter:
 
         # Depth noise scales with range; lateral noise does not.
         z = max(1.0, abs(float(pose.xyz_mm[2])))
-        sigma_pos = (self.sigma_lateral_mm, self.sigma_lateral_mm, self.sigma_depth_frac * z)
+        sigma_pos = (
+            self.sigma_lateral_mm,
+            self.sigma_lateral_mm,
+            self.sigma_depth_frac * z,
+        )
 
         self.pos.update(np.asarray(pose.xyz_mm, dtype=np.float64), sigma_pos)
         n = np.asarray(pose.normal, dtype=np.float64)
@@ -230,12 +228,14 @@ class PoseFilter:
         return self.pos.value, self.pos.rate, (n / norm if norm > 1e-9 else n)
 
     def predict_ahead(self, dt):
-        """State extrapolated ``dt`` seconds forward, for latency compensation.
-
-        The measured grab-to-pose latency is ~2.5 ms at 640x480; handing a
-        controller ``predict_ahead(latency)`` gives it an estimate for now rather
-        than for when the shutter closed.
         """
+        State extrapolated ``dt`` seconds forward, for latency compensation.
+
+                The measured grab-to-pose latency is ~2.5 ms at 640x480; handing a
+                controller ``predict_ahead(latency)`` gives it an estimate for now rather
+                than for when the shutter closed.
+        """
+
         if not self.pos.initialised:
             return None
         n = self.nrm.peek(dt)

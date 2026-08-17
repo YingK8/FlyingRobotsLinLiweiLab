@@ -1,4 +1,5 @@
-"""Non-blocking, newline-framed serial link -- Python mirror of the ESP32
+"""
+Non-blocking, newline-framed serial link -- Python mirror of the ESP32
 SerialComm library (lib/SerialComm). Call handle_serial_comm() once per tick;
 it never blocks.
 
@@ -7,6 +8,7 @@ firmware protocol (main_tilt.cpp) and PC-side tools (run_experiment.py,
 trigger_reset_log.py), which this module's find_port()/reset pulse are
 lifted from.
 """
+
 from __future__ import annotations
 
 import glob
@@ -15,10 +17,11 @@ import time
 
 import serial
 
-
 PORT_PATTERNS = (
-    "/dev/ttyUSB*", "/dev/ttyACM*",            # Linux
-    "/dev/tty.usbserial*", "/dev/tty.usbmodem*",  # macOS: CP210x/FTDI, then native CDC
+    "/dev/ttyUSB*",
+    "/dev/ttyACM*",  # Linux
+    "/dev/tty.usbserial*",
+    "/dev/tty.usbmodem*",  # macOS: CP210x/FTDI, then native CDC
 )
 
 
@@ -46,17 +49,23 @@ class SerialComm:
         self._rxbuf = ""
 
     def reset_device(self, pulse_s=0.15):
-        """EN-pulse reset via RTS -- same timing as trigger_reset_log.py."""
+        """
+        EN-pulse reset via RTS -- same timing as trigger_reset_log.py.
+        """
+
         self.ser.reset_input_buffer()
         self.ser.rts = True
         time.sleep(pulse_s)
         self.ser.rts = False
 
     def handle_serial_comm(self, outgoing=""):
-        """Non-blocking. Sends `outgoing` (if any) plus '\\n'. Returns the
-        first complete incoming line, or None if none finished yet. If
-        multiple lines are waiting, only one is returned per call -- the
-        rest stay buffered for the next call."""
+        """
+        Non-blocking. Sends `outgoing` (if any) plus '\\n'. Returns the
+                first complete incoming line, or None if none finished yet. If
+                multiple lines are waiting, only one is returned per call -- the
+                rest stay buffered for the next call.
+        """
+
         if outgoing:
             self.ser.write((outgoing + "\n").encode())
 

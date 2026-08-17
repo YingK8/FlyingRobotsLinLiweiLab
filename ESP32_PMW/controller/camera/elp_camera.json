@@ -20,6 +20,5 @@
   ],
   "created": "2026-08-15",
   "source": "planning sweep: MJPG fourcc, 10-frame warmup, 100 timed reads per mode, single process",
-  "n_samples": 100,
-  "caveat": "These are the numbers modes.py exists to re-measure properly. The 10-frame warmup is 16 ms at 640 fps -- nothing has settled -- and the reads ran with grayscale=True, so a cvtColor is inside the timing. Treat measured_fps as provisional until modes.py has written over it."
+  "n_samples": 100
 }

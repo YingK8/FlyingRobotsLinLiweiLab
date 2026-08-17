@@ -1,4 +1,5 @@
-"""The stereo geometry, drawn in 3-D: cameras, back-projection cones, pose.
+"""
+The stereo geometry, drawn in 3-D: cameras, back-projection cones, pose.
 
 Everything else in this package looks at the problem through a camera, in
 pixels.  This is the one view from outside it -- where the cameras actually are,
@@ -49,8 +50,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 COL_TRUTH = "#000000"
 COL_EST = "#C8930A"
@@ -70,44 +76,59 @@ IMAGE_PLANE_MM = 45.0  # where to draw each camera's image quad along its axis
 
 
 def _circle_points(center, normal, radius, n=N_DISK):
-    """``n`` points on the circle of given centre, normal and radius."""
+    """
+    ``n`` points on the circle of given centre, normal and radius.
+    """
+
     n_hat = np.asarray(normal, dtype=np.float64)
     n_hat = n_hat / np.linalg.norm(n_hat)
-    seed = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    seed = (
+        np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    )
     u = np.cross(n_hat, seed)
     u /= np.linalg.norm(u)
     v = np.cross(n_hat, u)
     t = np.linspace(0.0, 2.0 * np.pi, n)
-    return (np.asarray(center, dtype=np.float64)[None, :]
-            + radius * (np.cos(t)[:, None] * u + np.sin(t)[:, None] * v))
+    return np.asarray(center, dtype=np.float64)[None, :] + radius * (
+        np.cos(t)[:, None] * u + np.sin(t)[:, None] * v
+    )
 
 
 def _ellipse_pixels(ellipse, n=N_RAYS):
-    """``n`` evenly spaced points around an OpenCV ellipse, in pixels."""
+    """
+    ``n`` evenly spaced points around an OpenCV ellipse, in pixels.
+    """
+
     (cx, cy), (major, minor), ang = ellipse
     t = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
     a, b, th = major / 2.0, minor / 2.0, math.radians(ang)
-    return np.column_stack([
-        cx + a * np.cos(t) * math.cos(th) - b * np.sin(t) * math.sin(th),
-        cy + a * np.cos(t) * math.sin(th) + b * np.sin(t) * math.cos(th),
-    ])
+    return np.column_stack(
+        [
+            cx + a * np.cos(t) * math.cos(th) - b * np.sin(t) * math.sin(th),
+            cy + a * np.cos(t) * math.sin(th) + b * np.sin(t) * math.cos(th),
+        ]
+    )
 
 
 def _rays_to_plane(cam, pixels, plane_point, plane_normal, max_mm=1e4):
-    """Where each pixel's viewing ray meets a plane, in world coordinates.
-
-    ``K^-1 [u, v, 1]`` is the ray direction in camera coordinates (a point at
-    unit depth), rotated into the world by the camera's ``R``.  The ray is then
-    cut at the plane, which is what makes the endpoints meaningful: they are the
-    observed rim back-projected onto the estimated disk's own plane, so their
-    distance from the drawn circle is the reprojection residual in millimetres.
-
-    Rays running nearly parallel to the plane are dropped rather than drawn to
-    infinity; that only happens when the fit has already failed.
     """
+    Where each pixel's viewing ray meets a plane, in world coordinates.
+
+        ``K^-1 [u, v, 1]`` is the ray direction in camera coordinates (a point at
+        unit depth), rotated into the world by the camera's ``R``.  The ray is then
+        cut at the plane, which is what makes the endpoints meaningful: they are the
+        observed rim back-projected onto the estimated disk's own plane, so their
+        distance from the drawn circle is the reprojection residual in millimetres.
+
+        Rays running nearly parallel to the plane are dropped rather than drawn to
+        infinity; that only happens when the fit has already failed.
+    """
+
     eye = cam.position
-    dirs = np.hstack([np.asarray(pixels, dtype=np.float64),
-                      np.ones((len(pixels), 1))]) @ cam.K_inv.T
+    dirs = (
+        np.hstack([np.asarray(pixels, dtype=np.float64), np.ones((len(pixels), 1))])
+        @ cam.K_inv.T
+    )
     dirs = dirs @ cam.R.T
     dirs /= np.linalg.norm(dirs, axis=1, keepdims=True)
 
@@ -122,34 +143,45 @@ def _rays_to_plane(cam, pixels, plane_point, plane_normal, max_mm=1e4):
 
 
 def _image_quad(cam, width, height, depth_mm=IMAGE_PLANE_MM):
-    """The camera's image rectangle, placed in world space at ``depth_mm``."""
-    corners = np.array([[0, 0], [width, 0], [width, height], [0, height], [0, 0]],
-                       dtype=np.float64)
+    """
+    The camera's image rectangle, placed in world space at ``depth_mm``.
+    """
+
+    corners = np.array(
+        [[0, 0], [width, 0], [width, height], [0, height], [0, 0]], dtype=np.float64
+    )
     d = np.hstack([corners, np.ones((5, 1))]) @ cam.K_inv.T
     return (d * depth_mm) @ cam.R.T + cam.position
 
 
 def _pixels_to_world(cam, pixels, depth_mm=IMAGE_PLANE_MM):
-    """Pixels placed on the camera's image quad, in world space."""
-    d = np.hstack([np.asarray(pixels, dtype=np.float64),
-                   np.ones((len(pixels), 1))]) @ cam.K_inv.T
+    """
+    Pixels placed on the camera's image quad, in world space.
+    """
+
+    d = (
+        np.hstack([np.asarray(pixels, dtype=np.float64), np.ones((len(pixels), 1))])
+        @ cam.K_inv.T
+    )
     return (d * depth_mm) @ cam.R.T + cam.position
 
 
 def _view_for(normal, off_axis_deg=48.0, swing_deg=28.0):
-    """A viewpoint that never looks down the disk's own plane.
-
-    A fixed camera angle is fine until a pose happens to align with it, at which
-    point the disk projects to a line and the panel shows nothing at all.  This
-    places the viewer a fixed angle off the rotor axis instead, so the disk
-    always presents as a reasonably open ellipse whatever the robot is doing.
-
-    `matplotlib`'s ``view_init(elev, azim)`` positions the viewer on a sphere, so
-    the viewing direction is that spherical point; taking the normal's own
-    elevation and stepping ``off_axis_deg`` away from it gives the wanted angle
-    between viewer and disk plane.  ``swing_deg`` rotates around the axis so the
-    result is not accidentally aligned with a coordinate plane either.
     """
+    A viewpoint that never looks down the disk's own plane.
+
+        A fixed camera angle is fine until a pose happens to align with it, at which
+        point the disk projects to a line and the panel shows nothing at all.  This
+        places the viewer a fixed angle off the rotor axis instead, so the disk
+        always presents as a reasonably open ellipse whatever the robot is doing.
+
+        `matplotlib`'s ``view_init(elev, azim)`` positions the viewer on a sphere, so
+        the viewing direction is that spherical point; taking the normal's own
+        elevation and stepping ``off_axis_deg`` away from it gives the wanted angle
+        between viewer and disk plane.  ``swing_deg`` rotates around the axis so the
+        result is not accidentally aligned with a coordinate plane either.
+    """
+
     n = np.asarray(normal, dtype=np.float64)
     n = n / np.linalg.norm(n)
     elev_n = math.degrees(math.asin(float(np.clip(n[2], -1.0, 1.0))))
@@ -158,30 +190,57 @@ def _view_for(normal, off_axis_deg=48.0, swing_deg=28.0):
 
 
 def _pose_artists(ax, center, normal, radius_mm, colour, label, lw, zorder):
-    """One disk plus its rotation axis."""
+    """
+    One disk plus its rotation axis.
+    """
+
     pts = _circle_points(center, normal, radius_mm)
-    ax.plot(pts[:, 0], pts[:, 1], pts[:, 2], color=colour, lw=lw,
-            zorder=zorder, label=label, solid_capstyle="round")
+    ax.plot(
+        pts[:, 0],
+        pts[:, 1],
+        pts[:, 2],
+        color=colour,
+        lw=lw,
+        zorder=zorder,
+        label=label,
+        solid_capstyle="round",
+    )
 
     n_hat = np.asarray(normal, dtype=np.float64)
     n_hat = n_hat / np.linalg.norm(n_hat)
     c = np.asarray(center, dtype=np.float64)
     axis = np.array([c - AXIS_LEN_MM * n_hat, c + AXIS_LEN_MM * n_hat])
-    ax.plot(axis[:, 0], axis[:, 1], axis[:, 2], color=colour, lw=lw * 0.8,
-            zorder=zorder, solid_capstyle="round")
+    ax.plot(
+        axis[:, 0],
+        axis[:, 1],
+        axis[:, 2],
+        color=colour,
+        lw=lw * 0.8,
+        zorder=zorder,
+        solid_capstyle="round",
+    )
     # A dot on the +n end, so the axis reads as directed rather than as a bar.
     tip = c + AXIS_LEN_MM * n_hat
-    ax.scatter([tip[0]], [tip[1]], [tip[2]], color=colour, s=14, zorder=zorder,
-               depthshade=False)
+    ax.scatter(
+        [tip[0]],
+        [tip[1]],
+        [tip[2]],
+        color=colour,
+        s=14,
+        zorder=zorder,
+        depthshade=False,
+    )
 
 
 def _equalise(ax, pts, margin=0.52):
-    """Isotropic axes around ``pts``.
-
-    Without this the box is stretched to whatever range each axis happens to
-    span, and a perfectly circular disk renders as an ellipse -- which in a
-    figure about pose error is not a cosmetic problem, it is a wrong answer.
     """
+    Isotropic axes around ``pts``.
+
+        Without this the box is stretched to whatever range each axis happens to
+        span, and a perfectly circular disk renders as an ellipse -- which in a
+        figure about pose error is not a cosmetic problem, it is a wrong answer.
+    """
+
     pts = np.asarray(pts, dtype=np.float64).reshape(-1, 3)
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     mid = 0.5 * (lo + hi)
@@ -208,23 +267,37 @@ def _style(ax, title):
         ax.set_title(title, color=COL_INK, fontsize=10, pad=2)
 
 
-def render(rig, truth_center, truth_normal, est_center, est_normal, radius_mm,
-           ellipses=None, image_size=None, zoom=False, view=None,
-           size=(6.4, 5.2), dpi=150, title=None):
-    """Draw one case and return PNG bytes.
-
-    ``ellipses`` are the per-view fitted ellipses in ideal pinhole pixels, one
-    per camera; omit them to draw the poses and cameras without the cones.
-    ``image_size`` is ``(width, height)``, needed only for the image quads.
-
-    ``zoom`` swaps the framing: the context view spans both cameras and their
-    cones, the zoom view spans the disk alone at true scale, which is the only
-    place a 0.2 mm difference has any chance of being visible.
-
-    ``view`` defaults to a fixed angle for the context panel -- which is about
-    the rig, and the rig does not move -- and to `_view_for` on the zoom panel,
-    which follows the pose so the disk is never caught edge-on.
+def render(
+    rig,
+    truth_center,
+    truth_normal,
+    est_center,
+    est_normal,
+    radius_mm,
+    ellipses=None,
+    image_size=None,
+    zoom=False,
+    view=None,
+    size=(6.4, 5.2),
+    dpi=150,
+    title=None,
+):
     """
+    Draw one case and return PNG bytes.
+
+        ``ellipses`` are the per-view fitted ellipses in ideal pinhole pixels, one
+        per camera; omit them to draw the poses and cameras without the cones.
+        ``image_size`` is ``(width, height)``, needed only for the image quads.
+
+        ``zoom`` swaps the framing: the context view spans both cameras and their
+        cones, the zoom view spans the disk alone at true scale, which is the only
+        place a 0.2 mm difference has any chance of being visible.
+
+        ``view`` defaults to a fixed angle for the context panel -- which is about
+        the rig, and the rig does not move -- and to `_view_for` on the zoom panel,
+        which follows the pose so the disk is never caught edge-on.
+    """
+
     fig = plt.figure(figsize=size, dpi=dpi, facecolor=PANEL_BG)
     ax = fig.add_subplot(111, projection="3d", facecolor=PANEL_BG)
 
@@ -246,38 +319,79 @@ def render(rig, truth_center, truth_normal, est_center, est_normal, radius_mm,
             # disk's plane *is* the reprojection residual, and at this scale it
             # is the one thing you can actually read off the figure.
             if ok.any():
-                ax.scatter(hits[ok, 0], hits[ok, 1], hits[ok, 2], color=colour,
-                           s=9 if zoom else 4, alpha=0.9, zorder=8 if zoom else 2,
-                           depthshade=False,
-                           label=f"rim seen by {cam.name or i}" if zoom else None)
+                ax.scatter(
+                    hits[ok, 0],
+                    hits[ok, 1],
+                    hits[ok, 2],
+                    color=colour,
+                    s=9 if zoom else 4,
+                    alpha=0.9,
+                    zorder=8 if zoom else 2,
+                    depthshade=False,
+                    label=f"rim seen by {cam.name or i}" if zoom else None,
+                )
             if zoom:
                 continue
 
             for hit in hits[ok]:
-                ax.plot([eye[0], hit[0]], [eye[1], hit[1]], [eye[2], hit[2]],
-                        color=colour, lw=0.6, alpha=0.35, zorder=1)
+                ax.plot(
+                    [eye[0], hit[0]],
+                    [eye[1], hit[1]],
+                    [eye[2], hit[2]],
+                    color=colour,
+                    lw=0.6,
+                    alpha=0.35,
+                    zorder=1,
+                )
 
             if image_size is not None:
                 quad = _image_quad(cam, *image_size)
-                ax.plot(quad[:, 0], quad[:, 1], quad[:, 2], color=colour, lw=0.8,
-                        alpha=0.7, zorder=2)
+                ax.plot(
+                    quad[:, 0],
+                    quad[:, 1],
+                    quad[:, 2],
+                    color=colour,
+                    lw=0.8,
+                    alpha=0.7,
+                    zorder=2,
+                )
                 on_plane = _pixels_to_world(cam, _ellipse_pixels(ellipse, N_DISK))
-                ax.plot(on_plane[:, 0], on_plane[:, 1], on_plane[:, 2],
-                        color=colour, lw=1.2, zorder=3)
+                ax.plot(
+                    on_plane[:, 0],
+                    on_plane[:, 1],
+                    on_plane[:, 2],
+                    color=colour,
+                    lw=1.2,
+                    zorder=3,
+                )
                 extent.append(quad)
 
-            ax.scatter([eye[0]], [eye[1]], [eye[2]], color=colour, s=34,
-                       zorder=4, depthshade=False,
-                       label=f"camera {cam.name or i}")
-            ax.text(eye[0], eye[1], eye[2], f"  cam {cam.name or i}",
-                    color=colour, fontsize=8, zorder=5)
+            ax.scatter(
+                [eye[0]],
+                [eye[1]],
+                [eye[2]],
+                color=colour,
+                s=34,
+                zorder=4,
+                depthshade=False,
+                label=f"camera {cam.name or i}",
+            )
+            ax.text(
+                eye[0],
+                eye[1],
+                eye[2],
+                f"  cam {cam.name or i}",
+                color=colour,
+                fontsize=8,
+                zorder=5,
+            )
             extent.append(eye[None, :])
 
     # --- the two poses, last and opaque -------------------------------------
-    _pose_artists(ax, truth_center, truth_normal, radius_mm, COL_TRUTH,
-                  "ground truth", 2.0, 6)
-    _pose_artists(ax, est_center, est_normal, radius_mm, COL_EST,
-                  "estimate", 1.6, 7)
+    _pose_artists(
+        ax, truth_center, truth_normal, radius_mm, COL_TRUTH, "ground truth", 2.0, 6
+    )
+    _pose_artists(ax, est_center, est_normal, radius_mm, COL_EST, "estimate", 1.6, 7)
 
     if zoom:
         # Framed on the axis, which is the widest thing here, with a little air.
@@ -291,8 +405,14 @@ def render(rig, truth_center, truth_normal, est_center, est_normal, radius_mm,
     ax.view_init(elev=view[0], azim=view[1])
     _style(ax, title)
 
-    leg = ax.legend(loc="upper left", fontsize=8, frameon=True, framealpha=1.0,
-                    edgecolor=COL_LINE, facecolor=PANEL_BG)
+    leg = ax.legend(
+        loc="upper left",
+        fontsize=8,
+        frameon=True,
+        framealpha=1.0,
+        edgecolor=COL_LINE,
+        facecolor=PANEL_BG,
+    )
     for text in leg.get_texts():
         text.set_color(COL_INK)
 
@@ -308,26 +428,28 @@ def render(rig, truth_center, truth_normal, est_center, est_normal, radius_mm,
 
 
 def _deviation_profile(hull, ellipse):
-    """Signed radial deviation of hull points from an ellipse, and where.
-
-    Returns ``(t_deg, dev_px)``.  ``t`` is the ellipse parameter measured from
-    the **major-axis tip**, so 0 and 180 are the ends of the long axis and +-90
-    are the ends of the short one.  ``dev`` is positive outside the ellipse.
-
-    That parameterisation is the whole point: it turns "the fit is bad at high
-    tilt" into a statement about *where* on the silhouette the model fails, and
-    the answer is not uniform. Measured against the true rim ellipse, the
-    deviation is positive almost everywhere -- which it must be, since the rim's
-    projection is convex and contained in the silhouette's convex hull, so the
-    hull can only ever lie outside it.
     """
+    Signed radial deviation of hull points from an ellipse, and where.
+
+        Returns ``(t_deg, dev_px)``.  ``t`` is the ellipse parameter measured from
+        the **major-axis tip**, so 0 and 180 are the ends of the long axis and +-90
+        are the ends of the short one.  ``dev`` is positive outside the ellipse.
+
+        That parameterisation is the whole point: it turns "the fit is bad at high
+        tilt" into a statement about *where* on the silhouette the model fails, and
+        the answer is not uniform. Measured against the true rim ellipse, the
+        deviation is positive almost everywhere -- which it must be, since the rim's
+        projection is convex and contained in the silhouette's convex hull, so the
+        hull can only ever lie outside it.
+    """
+
     (cx, cy), (major, minor), ang = ellipse
     a, b, th = major / 2.0, minor / 2.0, math.radians(ang)
     c, s = math.cos(th), math.sin(th)
     x = np.asarray(hull, dtype=np.float64)[:, 0] - cx
     y = np.asarray(hull, dtype=np.float64)[:, 1] - cy
-    u = c * x + s * y      # along the major axis
-    v = -s * x + c * y     # along the minor axis
+    u = c * x + s * y  # along the major axis
+    v = -s * x + c * y  # along the minor axis
     t = np.degrees(np.arctan2(v / max(b, 1e-9), u / max(a, 1e-9)))
     k = np.sqrt((u / max(a, 1e-9)) ** 2 + (v / max(b, 1e-9)) ** 2)
     r = np.hypot(a * np.cos(np.radians(t)), b * np.sin(np.radians(t)))
@@ -335,17 +457,19 @@ def _deviation_profile(hull, ellipse):
 
 
 def deviation_panel(views, size=(6.4, 3.0), dpi=150, title=None):
-    """Where the silhouette departs from the rim ellipse, per view.
-
-    ``views`` is a list of ``(name, hull, true_ellipse)``.
-
-    Read it as follows. Contamination concentrated near ``t = +-90`` is
-    out-of-plane structure -- the rim wall's own height, and past ~57 degrees of
-    tilt the mast -- pushing the short direction outward. Contamination near
-    ``t = 0, 180`` would be something wrong with the *long* direction, which is
-    the axis depth is measured from; measured, there is essentially none, and
-    that is why position survives tilts that destroy orientation.
     """
+    Where the silhouette departs from the rim ellipse, per view.
+
+        ``views`` is a list of ``(name, hull, true_ellipse)``.
+
+        Read it as follows. Contamination concentrated near ``t = +-90`` is
+        out-of-plane structure -- the rim wall's own height, and past ~57 degrees of
+        tilt the mast -- pushing the short direction outward. Contamination near
+        ``t = 0, 180`` would be something wrong with the *long* direction, which is
+        the axis depth is measured from; measured, there is essentially none, and
+        that is why position survives tilts that destroy orientation.
+    """
+
     fig, ax = plt.subplots(figsize=size, dpi=dpi, facecolor=PANEL_BG)
     ax.set_facecolor(PANEL_BG)
 
@@ -355,20 +479,37 @@ def deviation_panel(views, size=(6.4, 3.0), dpi=150, title=None):
         t, dev = _deviation_profile(hull, ellipse)
         order = np.argsort(t)
         colour = COL_CAM[i % len(COL_CAM)]
-        ax.plot(t[order], dev[order], "o-", color=colour, ms=2.6, lw=1.0,
-                alpha=0.85, label=f"camera {name}")
+        ax.plot(
+            t[order],
+            dev[order],
+            "o-",
+            color=colour,
+            ms=2.6,
+            lw=1.0,
+            alpha=0.85,
+            label=f"camera {name}",
+        )
 
     ax.axhline(0.0, color=COL_TRUTH, lw=1.0, zorder=1)
     for x in (-90, 90):
         ax.axvline(x, color=COL_LINE, lw=1.0, ls="--", zorder=0)
-    ax.text(90, ax.get_ylim()[1], " minor axis\n (short direction)", fontsize=7,
-            color=COL_INK_3, va="top")
+    ax.text(
+        90,
+        ax.get_ylim()[1],
+        " minor axis\n (short direction)",
+        fontsize=7,
+        color=COL_INK_3,
+        va="top",
+    )
     ax.text(0, ax.get_ylim()[1], " major axis", fontsize=7, color=COL_INK_3, va="top")
 
     ax.set_xlim(-180, 180)
     ax.set_xticks(range(-180, 181, 45))
-    ax.set_xlabel("position around the rim, degrees from the major-axis tip",
-                  color=COL_INK_3, fontsize=8)
+    ax.set_xlabel(
+        "position around the rim, degrees from the major-axis tip",
+        color=COL_INK_3,
+        fontsize=8,
+    )
     ax.set_ylabel("outward deviation (px)", color=COL_INK_3, fontsize=8)
     ax.tick_params(colors=COL_INK_3, labelsize=7)
     for spine in ax.spines.values():
@@ -376,8 +517,15 @@ def deviation_panel(views, size=(6.4, 3.0), dpi=150, title=None):
     ax.grid(True, color=COL_LINE, lw=0.5, alpha=0.6)
     if title:
         ax.set_title(title, color=COL_INK, fontsize=10, pad=4)
-    leg = ax.legend(fontsize=7.5, frameon=True, framealpha=1.0,
-                    edgecolor=COL_LINE, facecolor=PANEL_BG, loc="lower center", ncol=2)
+    leg = ax.legend(
+        fontsize=7.5,
+        frameon=True,
+        framealpha=1.0,
+        edgecolor=COL_LINE,
+        facecolor=PANEL_BG,
+        loc="lower center",
+        ncol=2,
+    )
     for txt in leg.get_texts():
         txt.set_color(COL_INK)
 

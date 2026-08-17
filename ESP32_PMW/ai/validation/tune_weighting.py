@@ -1,4 +1,5 @@
-"""Does re-weighting the hull beat fitting it plainly?
+"""
+Does re-weighting the hull beat fitting it plainly?
 
 Three ellipse fits on identical hulls, scored against render ground truth:
 
@@ -45,8 +46,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import conic  # noqa: E402
 import render as rendermod  # noqa: E402
@@ -57,14 +63,16 @@ N_IRLS = 4
 
 
 def _fit_weighted(pts, w):
-    """Weighted direct ellipse fit, by replicating points in proportion to w.
-
-    `cv2.fitEllipseDirect` takes no weights.  Rather than reimplement Fitzgibbon
-    -- and inherit its conditioning problems -- weights are applied by
-    resampling: a point with twice the weight appears twice.  Quantised, but the
-    quantisation is far below the effect being measured and it keeps the
-    numerics identical to the shipped path, which is the point of the comparison.
     """
+    Weighted direct ellipse fit, by replicating points in proportion to w.
+
+        `cv2.fitEllipseDirect` takes no weights.  Rather than reimplement Fitzgibbon
+        -- and inherit its conditioning problems -- weights are applied by
+        resampling: a point with twice the weight appears twice.  Quantised, but the
+        quantisation is far below the effect being measured and it keeps the
+        numerics identical to the shipped path, which is the point of the comparison.
+    """
+
     w = np.clip(np.asarray(w, dtype=np.float64), 0.0, None)
     if w.sum() <= 0:
         return None
@@ -79,7 +87,10 @@ def _fit_weighted(pts, w):
 
 
 def _params(pts, ellipse):
-    """Ellipse parameter t (deg from the major tip) and signed radial deviation."""
+    """
+    Ellipse parameter t (deg from the major tip) and signed radial deviation.
+    """
+
     (cx, cy), (major, minor), ang = ellipse
     a, b, th = major / 2.0, minor / 2.0, math.radians(ang)
     c, s = math.cos(th), math.sin(th)
@@ -97,7 +108,10 @@ def fit_plain(pts):
 
 
 def fit_symmetric(pts, power=2.0):
-    """B: weight by |cos t| -- full weight at the major tips, zero at the minor."""
+    """
+    B: weight by |cos t| -- full weight at the major tips, zero at the minor.
+    """
+
     ell = fit_plain(pts)
     for _ in range(N_IRLS):
         if ell is None:
@@ -112,13 +126,15 @@ def fit_symmetric(pts, power=2.0):
 
 
 def fit_one_sided(pts, scale_px=0.6):
-    """C: points inside the current estimate keep full weight; outside saturate.
-
-    ``scale_px`` is the deviation at which an outward point is half-weighted.
-    Set from the measured sub-pixel boundary precision, so genuine rim points
-    (which scatter by a few tenths of a pixel) are untouched and contamination
-    (which reaches tens of pixels) is suppressed.
     """
+    C: points inside the current estimate keep full weight; outside saturate.
+
+        ``scale_px`` is the deviation at which an outward point is half-weighted.
+        Set from the measured sub-pixel boundary precision, so genuine rim points
+        (which scatter by a few tenths of a pixel) are untouched and contamination
+        (which reaches tens of pixels) is suppressed.
+    """
+
     ell = fit_plain(pts)
     for _ in range(N_IRLS):
         if ell is None:
@@ -132,11 +148,18 @@ def fit_one_sided(pts, scale_px=0.6):
     return ell
 
 
-SCHEMES = {"A plain": fit_plain, "B symmetric": fit_symmetric, "C one-sided": fit_one_sided}
+SCHEMES = {
+    "A plain": fit_plain,
+    "B symmetric": fit_symmetric,
+    "C one-sided": fit_one_sided,
+}
 
 
 def build(n, seed, width=1024, height=768):
-    """Render poses and keep the hull plus the analytic truth for each."""
+    """
+    Render poses and keep the hull plus the analytic truth for each.
+    """
+
     rng = np.random.default_rng(seed)
     cos_lo = math.cos(math.radians(70.0))
     tilt = np.degrees(np.arccos(rng.uniform(cos_lo, 1.0, n)))
@@ -145,18 +168,36 @@ def build(n, seed, width=1024, height=768):
     out = []
     with rendermod.Renderer(width, height) as r:
         for i in range(n):
-            light = rendermod.LightRig(dome=((rng.uniform(35, 80), rng.uniform(0, 360)),),
-                                       ambient=rng.uniform(0.3, 0.6),
-                                       intensity=rng.uniform(8, 18))
-            s = r.render(float(tilt[i]), float(az[i]), [0.0, 0.0, float(z[i])],
-                         light=light, bg_level=0.0)
+            light = rendermod.LightRig(
+                dome=((rng.uniform(35, 80), rng.uniform(0, 360)),),
+                ambient=rng.uniform(0.3, 0.6),
+                intensity=rng.uniform(8, 18),
+            )
+            s = r.render(
+                float(tilt[i]),
+                float(az[i]),
+                [0.0, 0.0, float(z[i])],
+                light=light,
+                bg_level=0.0,
+            )
             seg = segmod.segment(s.image)
             if seg is None:
                 continue
-            truth = conic.normalise_ellipse(conic.project_circle(
-                s.center_mm, s.normal, rendermod.RIM_RADIUS_MM, r.K))
-            out.append({"hull": seg.contour, "truth": truth, "tilt": float(tilt[i]),
-                        "K": r.K, "centre": s.center_mm, "normal": s.normal})
+            truth = conic.normalise_ellipse(
+                conic.project_circle(
+                    s.center_mm, s.normal, rendermod.RIM_RADIUS_MM, r.K
+                )
+            )
+            out.append(
+                {
+                    "hull": seg.contour,
+                    "truth": truth,
+                    "tilt": float(tilt[i]),
+                    "K": r.K,
+                    "centre": s.center_mm,
+                    "normal": s.normal,
+                }
+            )
             if (i + 1) % 40 == 0:
                 print(f"    {i + 1}/{n}", flush=True)
     return out
@@ -188,10 +229,12 @@ def main(argv=None):
             # what actually ships rather than against a raw ratio nobody uses
             ratio = min(1.0, max(0.0, ell[1][1] / max(ell[1][0], 1e-9)))
             est = cal.tilt(math.degrees(math.acos(ratio)))
-            rows[name][band].append((
-                est - d["tilt"],
-                ell[1][0] / d["truth"][1][0] - 1.0,
-            ))
+            rows[name][band].append(
+                (
+                    est - d["tilt"],
+                    ell[1][0] / d["truth"][1][0] - 1.0,
+                )
+            )
 
     print(f"{'scheme':<12}" + "".join(f"{f'{a}-{b} deg':>22}" for a, b in bands))
     print(f"{'':12}" + "".join(f"{'|tilt err| / bias':>22}" for _ in bands))
@@ -199,8 +242,11 @@ def main(argv=None):
         line = f"{name:<12}"
         for b in bands:
             v = np.array(rows[name][b])
-            line += (f"{np.median(np.abs(v[:, 0])):9.2f} /{np.median(v[:, 0]):+7.2f}   "
-                     if len(v) else f"{'--':>22}")
+            line += (
+                f"{np.median(np.abs(v[:, 0])):9.2f} /{np.median(v[:, 0]):+7.2f}   "
+                if len(v)
+                else f"{'--':>22}"
+            )
         print(line)
 
     print()
@@ -210,8 +256,11 @@ def main(argv=None):
         line = f"{name:<12}"
         for b in bands:
             v = np.array(rows[name][b])
-            line += (f"{np.median(v[:, 1]) * 100:9.2f} +-{np.std(v[:, 1]) * 100:6.2f}   "
-                     if len(v) else f"{'--':>22}")
+            line += (
+                f"{np.median(v[:, 1]) * 100:9.2f} +-{np.std(v[:, 1]) * 100:6.2f}   "
+                if len(v)
+                else f"{'--':>22}"
+            )
         print(line)
     return 0
 

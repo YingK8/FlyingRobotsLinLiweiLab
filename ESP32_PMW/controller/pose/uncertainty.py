@@ -1,81 +1,39 @@
-"""Predict this frame's error, so the estimator can decline when it cannot meet spec.
+"""
+Predict this frame's error, so the estimator can decline when it cannot meet spec.
 
-The target is ±1° and ±0.5 mm on **100%** of reported frames.  No amount of
-accuracy work reaches that on its own, because some frames carry no usable
-information: a rotor near face-on has no measurable tilt, and a rim broken into
-two short arcs has no measurable size.  The only way to be right every time you
-answer is to sometimes not answer.
+The target is +-1 deg and +-0.5 mm on **100% of reported frames**. Some frames
+carry no usable information -- a rotor near face-on has no measurable tilt, a rim
+broken into two arcs has no measurable size -- so the only way to be right every
+time you answer is to sometimes not answer.
 
-So the question stops being "how large is the error on average" and becomes
-"how large is it *on this frame*, before I know the truth".
+Two stages, because they answer different questions:
 
-## What is being estimated
+1. **Scale.** Least squares of log error against log features gives the typical
+   error at ``x``. Log space is required, not convenient: the derivations below
+   make error a *product* of factors, so the relationship is a power law. A fit on
+   raw error is dominated by the frames that failed outright and returns negative
+   coefficients.
+2. **Quantile.** The typical error would admit every frame predicted just under
+   the limit whose actual lands above -- about half. The scale is multiplied by a
+   high quantile of ``actual / predicted`` measured on the training split.
 
-Not a probability, and not the error itself -- a **conditional scale**.  For a
-frame with observables `x`, we want a number `s(x)` such that the actual error is
-almost always below it, then reject when `s(x)` exceeds the specification.  Two
-stages, because they answer different questions:
+Features are derived, not tried. ``M`` major axis (px), ``e`` boundary residual
+(px), ``z`` range, ``f`` focal length, ``R`` rim radius:
 
-1. **Scale.**  A least-squares fit of **log error against log features** gives
-   the typical error at `x`.  Log space is not a convenience: the derivations
-   below produce error as a *product* of scaling factors, so the relationship is
-   a power law and taking logs is what makes it linear.  It also fixes two
-   things that break a fit on raw error, both observed rather than anticipated:
-   residuals span four decades, so squared loss on raw values is dominated
-   entirely by the frames that failed outright; and an unconstrained linear fit
-   returns negative coefficients, predicts a negative error for easy frames, and
-   -- once clamped at zero -- sends the actual/predicted ratio to 2.4e9.
-   Exponentiating a log-space fit is positive by construction.
+    position  e / M^2          from z = 2fR/M, so dz = -2fR dM/M^2
+    angle     e / (M sin θ)    from θ = arccos(b/a), so dθ = -d(b/a)/sin θ
+    stereo    d                two views disagreeing by d mm bound the error at
+                               roughly d, whatever the resolution
 
-   The fitted exponents are also a check on the derivation. Physics says error
-   scales as the first power of `e/M²`, so a fitted exponent near 1 is
-   corroboration and one far from it says the model is missing something.
-2. **Quantile.**  Rejecting at the typical error would let through every frame
-   whose predicted error sits just under the limit but whose actual error lands
-   above it -- about half of them.  So the fitted scale is multiplied by the
-   high quantile of the observed ratio `actual / predicted`, measured on the
-   training split.  Fitting the quantile directly (quantile regression) would
-   estimate a tail from far fewer effective samples; separating the two lets the
-   plentiful data set the shape and the tail set only one number.
+The ``1/M^2`` is the part that matters: halving resolution quadruples position
+error at fixed boundary quality. The angle term diverges face-on, correctly -- that
+is a real degeneracy. A fitted exponent far from the derived one says the model is
+missing something.
 
-## The features, and why these
-
-Derived rather than tried.  Let `M` be the major axis in pixels, `e` the fitted
-boundary residual in pixels, `z` the range, `f` the focal length and `R` the rim
-radius.
-
-**Position.**  Depth comes from the ellipse's size, `z = 2fR/M`, so
-`dz = -2fR·dM/M²`.  A boundary error `e` propagates into `dM` roughly in
-proportion, giving
-
-    position error  ∝  e / M²     (times the constant 2fR)
-
-That `1/M²` is the important part: halving the resolution quadruples the
-position error at fixed boundary quality, which is why the feature is `e/M²`
-and not `e/M`.
-
-**Angle.**  Tilt is `θ = arccos(b/a)`, so `dθ = -d(b/a)/sin θ`.  A boundary
-error perturbs both axes, `d(b/a) ≈ (e/M)(1 + b/a)`, hence
-
-    angle error  ∝  e / (M · sin θ)
-
-which diverges as the rotor turns face-on -- correctly, because that is a real
-degeneracy and not a modelling artefact.
-
-**Cross-view disagreement** enters both linearly and with no scaling: two views
-that disagree by `d` millimetres about the same object bound the error at
-roughly `d`, whatever the resolution.
-
-## What it assumes
-
-- That the training conditions cover the deployment ones.  A frame unlike
-  anything in the fit gets an unreliable prediction, and the gate is then no
-  safer than the observables it is built from.
-- That the observables are computed identically at fit and at run time -- they
-  are, because both go through `features()` here.
-- That the relationship is monotone in each feature.  It is, by the derivations
-  above, which is what lets a linear fit in the derived quantities work rather
-  than needing a general regressor.
+Assumes the training conditions cover the deployment ones, that observables are
+computed identically at fit and run time (both go through `features`), and that
+the relationship is monotone in each feature -- which the derivations give, and
+which is what lets a linear fit work instead of a general regressor.
 """
 
 from __future__ import annotations
@@ -114,15 +72,11 @@ RATIO_QUANTILE = 0.999
 
 # Fraction of the specification the gate enforces.
 #
-# The operating point is calibrated on finite data, so it holds *in expectation*
-# on new data rather than with certainty: on the sample set the threshold was
-# chosen from every mode reports 100% coverage, yet on a fresh seed 640x480
-# admitted a frame at 0.519 mm. Certifying against a fraction of the
-# specification absorbs a prediction that is off, the way a rated load is derated.
+# The operating point is fitted on finite data, so it holds in expectation, not
+# with certainty: on a fresh seed 640x480 admitted a frame at 0.519 mm. Derating
+# absorbs a prediction that is off.
 #
-# The value is set by a measured cost curve, not by taste. On a held-out sweep,
-# with the offending frame predicted at 0.3826 mm against an actual 0.5190 mm --
-# a 1.36x under-prediction, poor but not a blunder:
+# Set from a measured cost curve on a held-out sweep:
 #
 #   margin   core frames kept   coverage
 #   1.00        183 / 228        98.91%
@@ -130,16 +84,14 @@ RATIO_QUANTILE = 0.999
 #   0.80        107 / 228        98.13%
 #   0.75         61 / 228       100.00%
 #
-# Coverage is nearly flat from 1.00 to 0.80 -- those margins refuse frames that
-# were fine -- and the last failure clears between 0.80 and 0.75, taking two
-# thirds of the accepted population with it. The frames near the specification
-# limit are not the frames the model is worst about, so the last 1.1% of coverage
-# costs more than the first 98.9%.
+# Coverage is flat from 1.00 to 0.80, so those margins refuse frames that were
+# fine; the last failure clears between 0.80 and 0.75 and takes two thirds of the
+# accepted population with it. Frames near the limit are not the ones the model is
+# worst about, so the last 1.1% of coverage costs more than the first 98.9%.
 #
-# 0.75 is set because the specification is 100% of reported frames and coverage
-# is the requirement detection is spent on. Anything looser reports a number
-# known to be out of specification. If the deployment would rather have three
-# times the frames and 98.9% coverage, this is the one constant to change.
+# 0.75 because the specification is 100% of *reported* frames. Anything looser
+# reports a number known to be out of specification. To trade coverage for three
+# times the frames, this is the one constant to change.
 GATE_MARGIN = 0.75
 
 # Features enter as logs; `one` is the intercept. Kept deliberately few: with a
@@ -154,19 +106,27 @@ FEATURES_POS = ("log_e_over_m2", "log1p_disc", "log1p_refine_rms", "one")
 # below the 10th percentile of the accepted population, exactly where the
 # 1/sin(theta) amplification bites. Split, each can take the weight the data and
 # the derivation agree on.
-FEATURES_ANG = ("log_e_over_m", "log_inv_sin", "log1p_disc", "log_inv_margin",
-                "log1p_refine_rms", "one")
+FEATURES_ANG = (
+    "log_e_over_m",
+    "log_inv_sin",
+    "log1p_disc",
+    "log_inv_margin",
+    "log1p_refine_rms",
+    "one",
+)
 
 _EPS = 1e-9
 
 
 def features(pose, radius_mm, reference=(0.0, 0.0, 1.0)):
-    """Observable features for one `stereo.StereoPose`. Returns a dict.
-
-    Everything here is available at run time with no ground truth and no extra
-    computation -- these are quantities the estimator already produced on its way
-    to the answer.
     """
+    Observable features for one `stereo.StereoPose`. Returns a dict.
+
+        Everything here is available at run time with no ground truth and no extra
+        computation -- these are quantities the estimator already produced on its way
+        to the answer.
+    """
+
     segs = [s for s in pose.per_view if s is not None]
     if not segs:
         return None
@@ -186,25 +146,17 @@ def features(pose, radius_mm, reference=(0.0, 0.0, 1.0)):
     disc = float(pose.discrepancy_mm) if np.isfinite(pose.discrepancy_mm) else 0.0
     margin = float(pose.margin) if np.isfinite(pose.margin) else 0.0
 
-    # The refinement's own residual, and how close the two conic branches were.
+    # Both were already computed and neither was used. At 1280x800 that cost a
+    # 7.1x gap: 42.5% of frames are within specification, 6.0% could be certified.
     #
-    # Both were computed on the way to the answer and neither was being used. The
-    # omission mattered: measured at 1280x800, 42.5% of frames are genuinely
-    # within specification but only 6.0% could be certified -- a 7.1x gap that is
-    # the predictor's ignorance rather than the estimator's error.
+    # `refine_rms_px` is how far the outline sits from the best circle-projection
+    # the solver found, so it measures the silhouette model's fit on *this* frame --
+    # the systematic error that dominates the residual, which `fit_rms_px` (an
+    # ellipse-fit residual) cannot see.
     #
-    # `refine_rms_px` is the most direct evidence available about *this* frame:
-    # it is how far the observed outline sits from the best circle-projection the
-    # solver could find, so it measures the silhouette model's fit on this frame
-    # specifically -- exactly the systematic error that dominates the residual
-    # (lecture notes 12.9) and that `fit_rms_px`, an ellipse-fit residual, cannot
-    # see. A frame whose outline is well described by a projected circle is one
-    # whose pose can be trusted; one where the mast or a broken rim pushes the
-    # refinement's residual up is not, however cleanly an ellipse fitted it.
-    #
-    # `ambiguity_margin_deg` says how nearly the two back-projection branches
-    # coincided. When they do, the branch choice is a coin toss and the normal
-    # can be badly wrong while every other observable looks ordinary.
+    # `ambiguity_margin_deg` is how nearly the two branches coincided. When they
+    # do, the branch choice is a coin toss and the normal can be badly wrong while
+    # every other observable looks ordinary.
     rrms = getattr(pose, "refine_rms_px", None)
     rrms = float(rrms) if rrms is not None and np.isfinite(rrms) else 0.0
     ambig = getattr(pose, "ambiguity_margin_deg", None)
@@ -241,10 +193,11 @@ def _design(rows, names):
 
 @dataclass
 class ErrorModel:
-    """Fitted scale plus quantile inflation, for position and angle.
+    """
+    Fitted scale plus quantile inflation, for position and angle.
 
-    ``coef_*`` are the least-squares coefficients on the named features;
-    ``k_*`` is the ratio quantile that turns the fitted scale into a bound.
+        ``coef_*`` are the least-squares coefficients on the named features;
+        ``k_*`` is the ratio quantile that turns the fitted scale into a bound.
     """
 
     coef_pos: tuple = ()
@@ -258,7 +211,10 @@ class ErrorModel:
         return not self.coef_pos or not self.coef_ang
 
     def predict(self, feat):
-        """``(pos_mm, angle_deg)`` bounds for one feature dict."""
+        """
+        ``(pos_mm, angle_deg)`` bounds for one feature dict.
+        """
+
         if self.is_identity or feat is None:
             return float("inf"), float("inf")
         x_p = np.array([feat[n] for n in FEATURES_POS])
@@ -268,26 +224,31 @@ class ErrorModel:
         ang = math.exp(float(np.dot(self.coef_ang, x_a))) * self.k_ang
         return pos, ang
 
-    def accepts(self, feat, target_pos=TARGET_POS_MM, target_ang=TARGET_ANGLE_DEG,
-                margin=None):
-        """Accept only if the predicted error clears ``margin`` x the target.
-
-        See `GATE_MARGIN`: the shortfall being covered is the gate's own
-        generalisation error, not the estimator's.
+    def accepts(
+        self, feat, target_pos=TARGET_POS_MM, target_ang=TARGET_ANGLE_DEG, margin=None
+    ):
         """
+        Accept only if the predicted error clears ``margin`` x the target.
+
+                See `GATE_MARGIN`: the shortfall being covered is the gate's own
+                generalisation error, not the estimator's.
+        """
+
         margin = GATE_MARGIN if margin is None else margin
         pos, ang = self.predict(feat)
         return pos <= margin * target_pos and ang <= margin * target_ang
 
     @classmethod
     def fit(cls, rows, pos_err, ang_err, quantile=RATIO_QUANTILE, meta=None):
-        """Fit on ``rows`` of feature dicts against measured errors.
-
-        Both stages run in log space. The scale fit is ordinary least squares on
-        ``log(error)``, and the quantile is taken on ``log(actual) -
-        log(predicted)`` -- equivalently the quantile of the *ratio*, which is
-        the scale-free way to state "how much worse than typical does this get".
         """
+        Fit on ``rows`` of feature dicts against measured errors.
+
+                Both stages run in log space. The scale fit is ordinary least squares on
+                ``log(error)``, and the quantile is taken on ``log(actual) -
+                log(predicted)`` -- equivalently the quantile of the *ratio*, which is
+                the scale-free way to state "how much worse than typical does this get".
+        """
+
         pos_err = np.asarray(pos_err, dtype=np.float64)
         ang_err = np.asarray(ang_err, dtype=np.float64)
         keep = np.isfinite(pos_err) & np.isfinite(ang_err)
@@ -299,10 +260,12 @@ class ErrorModel:
         # Floor the targets before taking logs: an error of exactly zero is a
         # rounding artefact, not information, and log(0) would remove the sample.
         Xp, Xa = _design(rows, FEATURES_POS), _design(rows, FEATURES_ANG)
-        coef_pos, *_ = np.linalg.lstsq(Xp, np.log(np.maximum(pos_err, 1e-4)),
-                                       rcond=None)
-        coef_ang, *_ = np.linalg.lstsq(Xa, np.log(np.maximum(ang_err, 1e-4)),
-                                       rcond=None)
+        coef_pos, *_ = np.linalg.lstsq(
+            Xp, np.log(np.maximum(pos_err, 1e-4)), rcond=None
+        )
+        coef_ang, *_ = np.linalg.lstsq(
+            Xa, np.log(np.maximum(ang_err, 1e-4)), rcond=None
+        )
 
         pred_p = np.exp(Xp @ coef_pos)
         pred_a = np.exp(Xa @ coef_ang)
@@ -312,31 +275,45 @@ class ErrorModel:
         return cls(
             coef_pos=tuple(float(c) for c in coef_pos),
             coef_ang=tuple(float(c) for c in coef_ang),
-            k_pos=k_pos, k_ang=k_ang,
+            k_pos=k_pos,
+            k_ang=k_ang,
             meta=dict(meta or {}, n_samples=int(len(rows)), quantile=float(quantile)),
         )
 
     def save(self, path=DEFAULT_PATH):
         path = Path(path)
-        path.write_text(json.dumps({
-            "coef_pos": list(self.coef_pos), "features_pos": list(FEATURES_POS),
-            "coef_ang": list(self.coef_ang), "features_ang": list(FEATURES_ANG),
-            "k_pos": self.k_pos, "k_ang": self.k_ang,
-            "model": ("least-squares scale on derived features, inflated by the "
-                      "high quantile of actual/predicted"),
-            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            **self.meta,
-        }, indent=2) + "\n")
+        path.write_text(
+            json.dumps(
+                {
+                    "coef_pos": list(self.coef_pos),
+                    "features_pos": list(FEATURES_POS),
+                    "coef_ang": list(self.coef_ang),
+                    "features_ang": list(FEATURES_ANG),
+                    "k_pos": self.k_pos,
+                    "k_ang": self.k_ang,
+                    "model": (
+                        "least-squares scale on derived features, inflated by the "
+                        "high quantile of actual/predicted"
+                    ),
+                    "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    **self.meta,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         return path
 
     @classmethod
     def load(cls, path=DEFAULT_PATH):
-        """Load a model; a missing file means no gate, not an error.
-
-        Running without one is legitimate -- it is how the baseline is measured
-        -- and forcing a fit before the first run would make the baseline
-        impossible to obtain.
         """
+        Load a model; a missing file means no gate, not an error.
+
+                Running without one is legitimate -- it is how the baseline is measured
+                -- and forcing a fit before the first run would make the baseline
+                impossible to obtain.
+        """
+
         path = Path(path)
         if not path.exists():
             return cls()
@@ -350,19 +327,32 @@ class ErrorModel:
         # all, rather than crashing the estimator.
         saved_pos = tuple(d.get("features_pos", ()))
         saved_ang = tuple(d.get("features_ang", ()))
-        if (saved_pos and saved_pos != FEATURES_POS) or \
-           (saved_ang and saved_ang != FEATURES_ANG):
+        if (saved_pos and saved_pos != FEATURES_POS) or (
+            saved_ang and saved_ang != FEATURES_ANG
+        ):
             import warnings
+
             warnings.warn(
                 f"ignoring {path.name}: it was fitted with features "
                 f"{saved_pos} / {saved_ang}, but this build uses "
                 f"{FEATURES_POS} / {FEATURES_ANG}. Refit with "
-                f"validation/fit_error_model.py --write.", stacklevel=2)
+                f"validation/fit_error_model.py --write.",
+                stacklevel=2,
+            )
             return cls()
-        known = {"coef_pos", "coef_ang", "k_pos", "k_ang", "features_pos",
-                 "features_ang", "model"}
+        known = {
+            "coef_pos",
+            "coef_ang",
+            "k_pos",
+            "k_ang",
+            "features_pos",
+            "features_ang",
+            "model",
+        }
         return cls(
-            coef_pos=tuple(d["coef_pos"]), coef_ang=tuple(d["coef_ang"]),
-            k_pos=float(d["k_pos"]), k_ang=float(d["k_ang"]),
+            coef_pos=tuple(d["coef_pos"]),
+            coef_ang=tuple(d["coef_ang"]),
+            k_pos=float(d["k_pos"]),
+            k_ang=float(d["k_ang"]),
             meta={k: v for k, v in d.items() if k not in known},
         )

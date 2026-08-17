@@ -1,4 +1,5 @@
-"""Render the robot across appearance and pose conditions, score the estimator.
+"""
+Render the robot across appearance and pose conditions, score the estimator.
 
     uv run python controller/pose/validation/sweep.py --quick
     uv run python controller/pose/validation/sweep.py
@@ -56,8 +57,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import render as rendermod  # noqa: E402
 import segment as segmod  # noqa: E402
@@ -65,27 +71,51 @@ from estimator import PoseEstimator  # noqa: E402
 from recorder import write_metadata  # noqa: E402
 
 COLUMNS = [
-    "alpha", "bg_level", "light", "ambient", "intensity",
-    "exposure", "exposure_s", "sigma",
-    "tilt_deg", "azimuth_deg", "x_mm", "y_mm", "z_mm",
+    "alpha",
+    "bg_level",
+    "light",
+    "ambient",
+    "intensity",
+    "exposure",
+    "exposure_s",
+    "sigma",
+    "tilt_deg",
+    "azimuth_deg",
+    "x_mm",
+    "y_mm",
+    "z_mm",
     "detected",
-    "pos_err_mm", "dx_mm", "dy_mm", "dz_mm",
-    "normal_err_deg", "normal_err_best_deg", "tilt_err_deg",
-    "ambiguity_margin_deg", "branch_wrong",
-    "seg_iou", "area_px", "fit_rms_px", "major_px", "minor_px",
-    "t_seg_ms", "t_est_ms", "t_total_ms",
+    "pos_err_mm",
+    "dx_mm",
+    "dy_mm",
+    "dz_mm",
+    "normal_err_deg",
+    "normal_err_best_deg",
+    "tilt_err_deg",
+    "ambiguity_margin_deg",
+    "branch_wrong",
+    "seg_iou",
+    "area_px",
+    "fit_rms_px",
+    "major_px",
+    "minor_px",
+    "t_seg_ms",
+    "t_est_ms",
+    "t_total_ms",
 ]
 
 
 def light_rigs(quick=False):
-    """The lighting conditions to sweep.
-
-    Ambient is swept alongside the directional terms because it is the knob that
-    decides whether the silhouette exists at all -- the duct's outer wall is
-    nearly edge-on face-on, so at ambient 0.05 only ~21% of the true silhouette
-    clears the threshold, against ~89% at 0.30. Directional light sets contrast;
-    ambient sets visibility.
     """
+    The lighting conditions to sweep.
+
+        Ambient is swept alongside the directional terms because it is the knob that
+        decides whether the silhouette exists at all -- the duct's outer wall is
+        nearly edge-on face-on, so at ambient 0.05 only ~21% of the true silhouette
+        clears the threshold, against ~89% at 0.30. Directional light sets contrast;
+        ambient sets visibility.
+    """
+
     if quick:
         return [
             rendermod.LightRig(dome=((60.0, 0.0),), ambient=0.35, intensity=10.0),
@@ -97,7 +127,10 @@ def light_rigs(quick=False):
     for bearing in (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0):
         rigs.append(
             rendermod.LightRig(
-                lateral_deg=(bearing,), ambient=0.15, intensity=20.0, key_from_camera=False
+                lateral_deg=(bearing,),
+                ambient=0.15,
+                intensity=20.0,
+                key_from_camera=False,
             )
         )
     # Azimuthal dome: overhead diffuse at three elevations.
@@ -112,23 +145,27 @@ def light_rigs(quick=False):
         )
     # Ambient-dominant and ambient-starved extremes, with a lens-side key.
     for amb in (0.05, 0.35, 0.60):
-        rigs.append(rendermod.LightRig(dome=((60.0, 0.0),), ambient=amb, intensity=10.0))
+        rigs.append(
+            rendermod.LightRig(dome=((60.0, 0.0),), ambient=amb, intensity=10.0)
+        )
     return rigs
 
 
 def exposure_grid(quick=False, sensor=False, subframes=7):
-    """Sensor conditions: clean, noisy, blurred, and both.
-
-    Kept small on purpose.  Measured separately, read noise is negligible below
-    about sigma 20 and rotor blur does not move the pose estimate at all (the
-    hull is bounded by the rotationally symmetric rim, which spinning cannot
-    smear).  A fine grid over either would spend a lot of rendering to
-    re-establish that, so this samples the corners and lets the poses and
-    lighting carry the resolution.
-
-    Blurred cells cost `subframes` times as much to render, which is the other
-    reason to keep this coarse.
     """
+    Sensor conditions: clean, noisy, blurred, and both.
+
+        Kept small on purpose.  Measured separately, read noise is negligible below
+        about sigma 20 and rotor blur does not move the pose estimate at all (the
+        hull is bounded by the rotationally symmetric rim, which spinning cannot
+        smear).  A fine grid over either would spend a lot of rendering to
+        re-establish that, so this samples the corners and lets the poses and
+        lighting carry the resolution.
+
+        Blurred cells cost `subframes` times as much to render, which is the other
+        reason to keep this coarse.
+    """
+
     spin = 330.0
     if not sensor:
         # Default: read noise, but no motion blur. Not a shortcut -- blur is
@@ -142,33 +179,57 @@ def exposure_grid(quick=False, sensor=False, subframes=7):
     if quick:
         return [
             ("clean", None),
-            ("noisy+blurred", rendermod.Exposure(
-                exposure_s=1 / 2000, subframes=5, spin_hz=spin, sigma=12.0,
-                velocity_mm_s=(60.0, 0.0, 0.0))),
+            (
+                "noisy+blurred",
+                rendermod.Exposure(
+                    exposure_s=1 / 2000,
+                    subframes=5,
+                    spin_hz=spin,
+                    sigma=12.0,
+                    velocity_mm_s=(60.0, 0.0, 0.0),
+                ),
+            ),
         ]
     return [
         ("clean", None),
         ("noise s10", rendermod.Exposure(sigma=10.0)),
         ("noise s25", rendermod.Exposure(sigma=25.0)),
-        ("blur 1/2000", rendermod.Exposure(
-            exposure_s=1 / 2000, subframes=subframes, spin_hz=spin,
-            velocity_mm_s=(60.0, 0.0, 0.0), tilt_rate_deg_s=40.0)),
-        ("blur 1/1000 + noise", rendermod.Exposure(
-            exposure_s=1 / 1000, subframes=subframes, spin_hz=spin,
-            velocity_mm_s=(60.0, 0.0, 0.0), tilt_rate_deg_s=40.0, sigma=8.0)),
+        (
+            "blur 1/2000",
+            rendermod.Exposure(
+                exposure_s=1 / 2000,
+                subframes=subframes,
+                spin_hz=spin,
+                velocity_mm_s=(60.0, 0.0, 0.0),
+                tilt_rate_deg_s=40.0,
+            ),
+        ),
+        (
+            "blur 1/1000 + noise",
+            rendermod.Exposure(
+                exposure_s=1 / 1000,
+                subframes=subframes,
+                spin_hz=spin,
+                velocity_mm_s=(60.0, 0.0, 0.0),
+                tilt_rate_deg_s=40.0,
+                sigma=8.0,
+            ),
+        ),
     ]
 
 
 def pose_grid(quick=False, reduced=False):
-    """(tilt, azimuth, centre) triples.
-
-    Depth is varied along with tilt because the conic's conditioning goes as
-    (r/z)^2 -- accuracy at 150 mm and at 350 mm are different questions.
-
-    ``reduced`` trims azimuth and depth when the sensor axis is being swept, to
-    keep the total render count sane: blurred cells cost `subframes` times a
-    clean one, so the full product would run for hours.
     """
+    (tilt, azimuth, centre) triples.
+
+        Depth is varied along with tilt because the conic's conditioning goes as
+        (r/z)^2 -- accuracy at 150 mm and at 350 mm are different questions.
+
+        ``reduced`` trims azimuth and depth when the sensor axis is being swept, to
+        keep the total render count sane: blurred cells cost `subframes` times a
+        clean one, so the full product would run for hours.
+    """
+
     if quick:
         tilts = (0.0, 20.0, 40.0)
         azis = (0.0, 180.0)
@@ -185,7 +246,10 @@ def pose_grid(quick=False, reduced=False):
 
 
 def score(sample, pose, seg, exposure_label=""):
-    """Metrics for one cell. ``pose``/``seg`` may be ``None`` if detection failed."""
+    """
+    Metrics for one cell. ``pose``/``seg`` may be ``None`` if detection failed.
+    """
+
     row = {
         "alpha": sample.alpha,
         "bg_level": sample.bg_level,
@@ -210,7 +274,9 @@ def score(sample, pose, seg, exposure_label=""):
     d = pose.xyz_mm - sample.center_mm
     cands = pose.extra.get("candidates") or []
     errs = [
-        math.degrees(math.acos(float(np.clip(abs(c.normal @ sample.normal), -1.0, 1.0))))
+        math.degrees(
+            math.acos(float(np.clip(abs(c.normal @ sample.normal), -1.0, 1.0)))
+        )
         for c in cands
     ]
     chosen_err = math.degrees(
@@ -228,7 +294,9 @@ def score(sample, pose, seg, exposure_label=""):
     row.update(
         {
             "pos_err_mm": float(np.linalg.norm(d)),
-            "dx_mm": float(d[0]), "dy_mm": float(d[1]), "dz_mm": float(d[2]),
+            "dx_mm": float(d[0]),
+            "dy_mm": float(d[1]),
+            "dz_mm": float(d[2]),
             "normal_err_deg": chosen_err,
             "normal_err_best_deg": best_err,
             "tilt_err_deg": tilt_est - sample.tilt_deg,
@@ -257,8 +325,10 @@ def run(out_path, quick=False, sensor=False, width=1024, height=768, progress_ev
         rigs = rigs[:1] + rigs[8:11] + rigs[-2:]  # one lateral, the domes, two ambients
 
     total = len(alphas) * len(bgs) * len(rigs) * len(poses) * len(exps)
-    print(f"sweep: {len(alphas)} alpha x {len(bgs)} background x {len(rigs)} lighting "
-          f"x {len(poses)} poses x {len(exps)} sensor = {total} renders")
+    print(
+        f"sweep: {len(alphas)} alpha x {len(bgs)} background x {len(rigs)} lighting "
+        f"x {len(poses)} poses x {len(exps)} sensor = {total} renders"
+    )
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,8 +347,11 @@ def run(out_path, quick=False, sensor=False, width=1024, height=768, progress_ev
                 "mesh": rendermod.MESH_PATH.name,
                 "mesh_rim_radius_mm": f"{rendermod.RIM_RADIUS_MM:.4f}",
                 "estimator_radius_mm": f"{est.radius_mm:.4f}",
-                "tilt_calibration": "identity" if est.tilt_cal.is_identity
-                else f"a={est.tilt_cal.a:.5f} b={est.tilt_cal.b:.6f}",
+                "tilt_calibration": (
+                    "identity"
+                    if est.tilt_cal.is_identity
+                    else f"a={est.tilt_cal.a:.5f} b={est.tilt_cal.b:.6f}"
+                ),
                 "resolution": f"{width}x{height}",
                 "intrinsics": rendermod.INTRINSICS_PATH.name,
                 "cells": total,
@@ -291,9 +364,11 @@ def run(out_path, quick=False, sensor=False, width=1024, height=768, progress_ev
         w.writeheader()
 
         for alpha, bg, rig, (exp_label, exp), (tilt, az, ctr) in itertools.product(
-                alphas, bgs, rigs, exps, poses):
-            sample = r.render(tilt, az, ctr, alpha=alpha, light=rig, bg_level=bg,
-                              exposure=exp)
+            alphas, bgs, rigs, exps, poses
+        ):
+            sample = r.render(
+                tilt, az, ctr, alpha=alpha, light=rig, bg_level=bg, exposure=exp
+            )
 
             # Reset per cell: cells are independent conditions, not a trajectory,
             # so carrying branch history between them would let an earlier cell
@@ -308,7 +383,10 @@ def run(out_path, quick=False, sensor=False, width=1024, height=768, progress_ev
             if done % progress_every == 0 or done == total:
                 el = time.monotonic() - t_start
                 eta = el / done * (total - done)
-                print(f"  {done:5d}/{total}  {el:6.1f}s elapsed, {eta:6.1f}s left", flush=True)
+                print(
+                    f"  {done:5d}/{total}  {el:6.1f}s elapsed, {eta:6.1f}s left",
+                    flush=True,
+                )
 
     print(f"wrote {out_path}")
     return out_path
@@ -317,9 +395,12 @@ def run(out_path, quick=False, sensor=False, width=1024, height=768, progress_ev
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--quick", action="store_true", help="small grid, for a smoke test")
-    ap.add_argument("--sensor", action="store_true",
-                    help="sweep noise and motion-blur conditions (reduces the pose and "
-                         "lighting grids to keep the render count sane)")
+    ap.add_argument(
+        "--sensor",
+        action="store_true",
+        help="sweep noise and motion-blur conditions (reduces the pose and "
+        "lighting grids to keep the render count sane)",
+    )
     ap.add_argument("--out", default=None, help="output CSV")
     ap.add_argument("--width", type=int, default=1024)
     ap.add_argument("--height", type=int, default=768)
@@ -328,12 +409,17 @@ def main(argv=None):
     # Results land in ESP32_PMW/results/, alongside the rest of the project's run
     # artifacts, rather than next to the code -- a full sweep CSV is ~8 MB.
     results = HERE.parents[2] / "results" / "pose_validation"
-    name = ("validation_results_quick.csv" if args.quick
-            else "validation_results_sensor.csv" if args.sensor
-            else "validation_results.csv")
+    name = (
+        "validation_results_quick.csv"
+        if args.quick
+        else (
+            "validation_results_sensor.csv" if args.sensor else "validation_results.csv"
+        )
+    )
     out = args.out or str(results / name)
-    path = run(out, quick=args.quick, sensor=args.sensor,
-               width=args.width, height=args.height)
+    path = run(
+        out, quick=args.quick, sensor=args.sensor, width=args.width, height=args.height
+    )
 
     try:
         import report

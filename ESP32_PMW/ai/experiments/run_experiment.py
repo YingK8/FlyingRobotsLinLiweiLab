@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build, flash, and capture a main_experiment.cpp JSON-driven run (env
+"""
+Build, flash, and capture a main_experiment.cpp JSON-driven run (env
 `experiment`) -- e.g. ai/gen_solo_sweep_experiment.py's or
 ai/gen_coupling_experiment.py's output.
 
@@ -19,6 +20,7 @@ Usage:
       --timeout-s 300 --log solo_sweep_run.log
   uv run python ai/run_experiment.py --skip-build --log rerun.log   # already flashed
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,7 +35,9 @@ from serial_comm import SerialComm, find_port
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.join(HERE, "..")
-DEFAULT_PIO = os.path.expanduser("~/.platformio/penv/bin/pio")  # system `pio` (apt) is broken -- see project memory
+DEFAULT_PIO = os.path.expanduser(
+    "~/.platformio/penv/bin/pio"
+)  # system `pio` (apt) is broken -- see project memory
 ENV_NAME = "experiment"
 POLL_S = 0.02
 
@@ -60,12 +64,17 @@ def run_pio(pio: str, upload_speed: int, targets: list[str]) -> None:
     print(f"[pc] running: {' '.join(cmd)} (PLATFORMIO_UPLOAD_SPEED={upload_speed})")
     result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
     if result.returncode != 0:
-        raise SystemExit(f"pio command failed (exit {result.returncode}): {' '.join(cmd)}")
+        raise SystemExit(
+            f"pio command failed (exit {result.returncode}): {' '.join(cmd)}"
+        )
 
 
 def capture(port, baud, timeout_s, log_path) -> bool:
-    """EN-reset, then log serial until a DONE_MARKERS line appears or
-    timeout_s elapses. Returns True if a completion banner was seen."""
+    """
+    EN-reset, then log serial until a DONE_MARKERS line appears or
+        timeout_s elapses. Returns True if a completion banner was seen.
+    """
+
     comm = SerialComm(port=port, baud=baud)
     saw_done = False
     try:
@@ -89,28 +98,49 @@ def capture(port, baud, timeout_s, log_path) -> bool:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--json",
-                     help="experiment JSON to stage as spiffs_data/experiment.json "
-                          "before building (omit with --skip-build to just capture "
-                          "an already-flashed run)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--json",
+        help="experiment JSON to stage as spiffs_data/experiment.json "
+        "before building (omit with --skip-build to just capture "
+        "an already-flashed run)",
+    )
     ap.add_argument("--port", help="ESP32 serial port (default: first ttyUSB/ttyACM)")
     ap.add_argument("--baud", type=int, default=115200)
-    ap.add_argument("--skip-build", action="store_true",
-                     help="don't build/uploadfs/upload -- board is already flashed")
-    ap.add_argument("--pio", default=DEFAULT_PIO,
-                     help="path to the pio binary (default: %(default)s -- the "
-                          "apt-packaged system `pio` is known broken on this rig)")
-    ap.add_argument("--upload-speed", type=int, default=115200,
-                     help="460800 (platformio default) fails 'Unable to verify "
-                          "flash chip' on this rig (default: %(default)s)")
-    ap.add_argument("--timeout-s", type=float, default=300.0,
-                     help="max time to wait for the firmware's completion banner "
-                          "-- size this to the sweep generator's printed total "
-                          "runtime + margin (default: %(default)s)")
+    ap.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="don't build/uploadfs/upload -- board is already flashed",
+    )
+    ap.add_argument(
+        "--pio",
+        default=DEFAULT_PIO,
+        help="path to the pio binary (default: %(default)s -- the "
+        "apt-packaged system `pio` is known broken on this rig)",
+    )
+    ap.add_argument(
+        "--upload-speed",
+        type=int,
+        default=115200,
+        help="460800 (platformio default) fails 'Unable to verify "
+        "flash chip' on this rig (default: %(default)s)",
+    )
+    ap.add_argument(
+        "--timeout-s",
+        type=float,
+        default=300.0,
+        help="max time to wait for the firmware's completion banner "
+        "-- size this to the sweep generator's printed total "
+        "runtime + margin (default: %(default)s)",
+    )
     ap.add_argument("--log", help="serial log path (default: timestamped)")
-    ap.add_argument("--self-test", action="store_true", help="check command construction, no hardware")
+    ap.add_argument(
+        "--self-test",
+        action="store_true",
+        help="check command construction, no hardware",
+    )
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -119,8 +149,10 @@ def main(argv=None) -> int:
     if args.json:
         stage_json(args.json)
     elif not args.skip_build:
-        raise SystemExit("--json is required unless --skip-build is given "
-                          "(nothing to flash otherwise)")
+        raise SystemExit(
+            "--json is required unless --skip-build is given "
+            "(nothing to flash otherwise)"
+        )
 
     if not args.skip_build:
         run_pio(args.pio, args.upload_speed, ["uploadfs"])
@@ -128,18 +160,25 @@ def main(argv=None) -> int:
 
     port = find_port(args.port)
     log_path = args.log or f"experiment_run_{time.strftime('%Y%m%d_%H%M%S')}.log"
-    print(f"[pc] capturing on {port} @ {args.baud}, log -> {log_path} "
-          f"(timeout {args.timeout_s:.0f}s)")
+    print(
+        f"[pc] capturing on {port} @ {args.baud}, log -> {log_path} "
+        f"(timeout {args.timeout_s:.0f}s)"
+    )
     saw_done = capture(port, args.baud, args.timeout_s, log_path)
     if not saw_done:
-        print(f"[pc] WARNING: timed out after {args.timeout_s:.0f}s without seeing "
-              "a completion banner -- log may be incomplete, or --timeout-s is too short")
+        print(
+            f"[pc] WARNING: timed out after {args.timeout_s:.0f}s without seeing "
+            "a completion banner -- log may be incomplete, or --timeout-s is too short"
+        )
     print(f"[pc] log saved -> {log_path}")
     return 0 if saw_done else 1
 
 
 def self_test() -> int:
-    """Command construction only, no hardware."""
+    """
+    Command construction only, no hardware.
+    """
+
     assert find_port("/dev/ttyXYZ") == "/dev/ttyXYZ"
     cmd = build_cmd("pio", 115200, ["uploadfs"])
     assert cmd == ["pio", "run", "-e", "experiment", "-t", "uploadfs"]

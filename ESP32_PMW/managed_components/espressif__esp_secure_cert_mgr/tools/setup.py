@@ -6,7 +6,7 @@ import sys
 
 
 def get_install_requires():
-    with open('requirements.txt') as f:
+    with open("requirements.txt") as f:
         required = f.read().splitlines()
         return required
 
@@ -24,6 +24,7 @@ except ImportError:
 VERSION = "2.5.1"
 
 long_description = """
+
 ====================
 esp_secure_cert_tool
 ====================
@@ -49,21 +50,21 @@ The License for the project can be found
 blob/main/tools/LICENSE>`_
 """
 
+
 setup(
     name="esp_secure_cert_tool",
     version=VERSION,
     description="A python utility which helps to configure and provision"
-                "the ESP platform with PKI credentials "
-                "into the esp_secure_cert partition",
+    "the ESP platform with PKI credentials "
+    "into the esp_secure_cert partition",
     long_description=long_description,
-    long_description_content_type='text/x-rst',
-    url="https://github.com/espressif/"
-        "esp_secure_cert_mgr/blob/main/tools",
+    long_description_content_type="text/x-rst",
+    url="https://github.com/espressif/" "esp_secure_cert_mgr/blob/main/tools",
     project_urls={
         "Documentation": "https://github.com/espressif/"
-                         "esp_secure_cert_mgr/blob/main/tools/README.md",
+        "esp_secure_cert_mgr/blob/main/tools/README.md",
         "Source": "https://github.com/espressif/esp_secure_cert_mgr/"
-                  "blob/main/tools/configure_esp_secure_cert.py",
+        "blob/main/tools/configure_esp_secure_cert.py",
     },
     author="Espressif Systems",
     author_email="",

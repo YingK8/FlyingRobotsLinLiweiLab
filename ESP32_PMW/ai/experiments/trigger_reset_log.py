@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""EN-pulse reset the ESP32 into a clean APP boot, then log its serial output.
+"""
+EN-pulse reset the ESP32 into a clean APP boot, then log its serial output.
 
 This is the reliable way to sync a boot-relative firmware sweep to a PicoScope
 recording: start picoscope_record.py in the background, run this ~4 s in, and
@@ -24,6 +25,7 @@ Usage:
                                 # to begin once main_current_pid.cpp's boot/
                                 # sanity-check sequence has reached IDLE)
 """
+
 import argparse
 import glob
 import sys
@@ -44,20 +46,35 @@ def find_port(explicit):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--port", default=None,
-                   help="default: first /dev/ttyUSB*|ttyACM* found (port "
-                        "numbering shifts across replugs/other USB devices)")
+    p.add_argument(
+        "--port",
+        default=None,
+        help="default: first /dev/ttyUSB*|ttyACM* found (port "
+        "numbering shifts across replugs/other USB devices)",
+    )
     p.add_argument("--baud", type=int, default=115200)
-    p.add_argument("--delay", type=float, default=0.0,
-                   help="seconds to wait before pulsing reset")
-    p.add_argument("--log-seconds", type=float, default=60.0,
-                   help="how long to log serial after the reset")
+    p.add_argument(
+        "--delay", type=float, default=0.0, help="seconds to wait before pulsing reset"
+    )
+    p.add_argument(
+        "--log-seconds",
+        type=float,
+        default=60.0,
+        help="how long to log serial after the reset",
+    )
     p.add_argument("--out", default=None, help="log file (default: stdout only)")
-    p.add_argument("--cmd", default=None,
-                   help="one-line serial command to send after the reset "
-                        "(e.g. 'b' to begin) -- sent once, --cmd-delay seconds in")
-    p.add_argument("--cmd-delay", type=float, default=7.0,
-                   help="seconds after the reset pulse to send --cmd")
+    p.add_argument(
+        "--cmd",
+        default=None,
+        help="one-line serial command to send after the reset "
+        "(e.g. 'b' to begin) -- sent once, --cmd-delay seconds in",
+    )
+    p.add_argument(
+        "--cmd-delay",
+        type=float,
+        default=7.0,
+        help="seconds after the reset pulse to send --cmd",
+    )
     args = p.parse_args()
     port = find_port(args.port)
 
@@ -69,13 +86,13 @@ def main():
     print(f"[trigger] using port {port}", flush=True)
     s.baudrate = args.baud
     s.timeout = 0.5
-    s.dtr = False   # IO0 stays high -> APP boot, not bootloader
+    s.dtr = False  # IO0 stays high -> APP boot, not bootloader
     s.rts = False
     s.open()
     s.reset_input_buffer()
-    s.rts = True    # EN low: hold in reset
+    s.rts = True  # EN low: hold in reset
     time.sleep(0.15)
-    s.rts = False   # release -> clean app boot
+    s.rts = False  # release -> clean app boot
     t0 = time.time()
     print(f"[trigger] EN pulse done at {time.strftime('%H:%M:%S')}", flush=True)
 
@@ -86,7 +103,10 @@ def main():
             if not cmd_sent and time.time() - t0 >= args.cmd_delay:
                 s.write((args.cmd + "\n").encode())
                 cmd_sent = True
-                print(f"[trigger] sent {args.cmd!r} at t={time.time()-t0:.2f}s", flush=True)
+                print(
+                    f"[trigger] sent {args.cmd!r} at t={time.time()-t0:.2f}s",
+                    flush=True,
+                )
             line = s.readline()
             if not line:
                 continue
@@ -106,8 +126,11 @@ def main():
             time.sleep(0.3)
             print("[trigger] sent 's' (e-stop) -- coils de-energized", flush=True)
         except Exception as e:
-            print(f"[trigger] WARNING: failed to send e-stop ({e}) -- "
-                  f"verify coils are off by hand", flush=True)
+            print(
+                f"[trigger] WARNING: failed to send e-stop ({e}) -- "
+                f"verify coils are off by hand",
+                flush=True,
+            )
         if f:
             f.close()
         s.close()

@@ -1,6 +1,7 @@
-"""Tests for the pose filter.
+"""
+Tests for the pose filter.
 
-Run: uv run python controller/pose/test_filter.py
+Run: uv run python ai/tests/test_filter.py
 
 Checks the behaviours the filter is actually kept for -- velocity, coasting
 through dropouts, latency compensation -- rather than position smoothing, which
@@ -20,14 +21,21 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 from filter import PoseFilter  # noqa: E402
 
 
 class FakePose:
-    """Minimal stand-in for `estimator.Pose` -- the filter only reads three fields."""
+    """
+    Minimal stand-in for `estimator.Pose` -- the filter only reads three fields.
+    """
 
     def __init__(self, t, xyz, normal):
         self.t = t
@@ -56,7 +64,10 @@ def test_returns_none_before_first_detection():
 
 
 def test_seeds_on_first_measurement():
-    """It must jump to the first fix, not slide in from the origin."""
+    """
+    It must jump to the first fix, not slide in from the origin.
+    """
+
     f = PoseFilter()
     xyz, vel, n = f.update(FakePose(0.0, [5.0, -3.0, 210.0], [0, 0, -1.0]))
     assert np.allclose(xyz, [5.0, -3.0, 210.0], atol=1e-9), xyz
@@ -65,24 +76,31 @@ def test_seeds_on_first_measurement():
 
 
 def test_tracks_constant_velocity_exactly():
-    """With clean measurements the constant-velocity model should be exact."""
+    """
+    With clean measurements the constant-velocity model should be exact.
+    """
+
     data, dt, v = _straight_line(noise=0.0)
     f = PoseFilter()
     for t, true, meas in data:
         f.update(FakePose(t, meas, [0, 0, -1.0]))
-    xyz, vel, _ = f.update(FakePose(data[-1][0] + dt, data[-1][2] + v * dt, [0, 0, -1.0]))
+    xyz, vel, _ = f.update(
+        FakePose(data[-1][0] + dt, data[-1][2] + v * dt, [0, 0, -1.0])
+    )
     assert np.allclose(vel, v, atol=0.5), f"velocity {vel} vs {v}"
     print(f"  constant velocity   recovered {np.round(vel, 2)} against truth {v}")
 
 
 def test_velocity_beats_finite_difference_on_noise():
-    """The whole reason the filter exists, on synthetic noise.
-
-    Uses white noise here deliberately -- this is a property of differencing, not
-    of the correlated real residual, and it holds either way. The correlated
-    case is measured for real in validation/trajectory.py, where finite
-    differencing is worse still.
     """
+    The whole reason the filter exists, on synthetic noise.
+
+        Uses white noise here deliberately -- this is a property of differencing, not
+        of the correlated real residual, and it holds either way. The correlated
+        case is measured for real in validation/trajectory.py, where finite
+        differencing is worse still.
+    """
+
     data, dt, v = _straight_line(noise=0.4, seed=7)
     f = PoseFilter()
     kal, fd, prev = [], [], None
@@ -95,13 +113,18 @@ def test_velocity_beats_finite_difference_on_noise():
     warm = len(data) // 4
     k_err = float(np.sqrt(np.mean(np.sum((np.array(kal[warm:]) - v) ** 2, axis=1))))
     f_err = float(np.sqrt(np.mean(np.sum((np.array(fd[warm:]) - v) ** 2, axis=1))))
-    print(f"  velocity vs diff    Kalman {k_err:.2f} mm/s vs finite difference {f_err:.1f} mm/s "
-          f"({f_err/max(k_err,1e-9):.0f}x better)")
+    print(
+        f"  velocity vs diff    Kalman {k_err:.2f} mm/s vs finite difference {f_err:.1f} mm/s "
+        f"({f_err/max(k_err,1e-9):.0f}x better)"
+    )
     assert k_err < f_err / 5.0, (k_err, f_err)
 
 
 def test_coasts_through_a_dropout():
-    """A brief loss should extrapolate, not freeze."""
+    """
+    A brief loss should extrapolate, not freeze.
+    """
+
     data, dt, v = _straight_line(n=200, noise=0.0)
     f = PoseFilter()
     for t, true, meas in data:
@@ -122,7 +145,10 @@ def test_coasts_through_a_dropout():
 
 
 def test_gives_up_after_a_long_dropout():
-    """Extrapolating forever is how an estimator becomes confidently wrong."""
+    """
+    Extrapolating forever is how an estimator becomes confidently wrong.
+    """
+
     data, dt, _ = _straight_line(n=100, noise=0.0)
     f = PoseFilter(max_coast_s=0.05)
     for t, _, meas in data:
@@ -152,12 +178,17 @@ def test_predict_ahead_leads_the_state():
     assert np.allclose(ahead - now, v * 0.0025, atol=0.05), (ahead - now, v * 0.0025)
     # And it must not have mutated the filter.
     assert np.allclose(f.update(None, t=data[-1][0] + dt)[0], now, atol=0.5)
-    print(f"  predict_ahead       leads by {np.linalg.norm(ahead-now):.3f} mm at 2.5 ms, "
-          f"non-mutating")
+    print(
+        f"  predict_ahead       leads by {np.linalg.norm(ahead-now):.3f} mm at 2.5 ms, "
+        f"non-mutating"
+    )
 
 
 def test_normal_sign_flip_does_not_destabilise():
-    """The normal's sign is unobservable; a flipped measurement must not knock it over."""
+    """
+    The normal's sign is unobservable; a flipped measurement must not knock it over.
+    """
+
     f = PoseFilter()
     n = np.array([0.3, 0.1, -0.948])
     n = n / np.linalg.norm(n)
@@ -183,15 +214,20 @@ def test_normal_stays_unit():
 
 
 def test_depth_noise_scales_with_range():
-    """Depth uncertainty is a fraction of range, so far measurements get less trust."""
+    """
+    Depth uncertainty is a fraction of range, so far measurements get less trust.
+    """
+
     near, far = PoseFilter(), PoseFilter()
     for i in range(60):
         t = i / 240.0
         near.update(FakePose(t, [0.0, 0.0, 150.0], [0, 0, -1.0]))
         far.update(FakePose(t, [0.0, 0.0, 350.0], [0, 0, -1.0]))
     assert far.pos.P[2, 2] > near.pos.P[2, 2], (far.pos.P[2, 2], near.pos.P[2, 2])
-    print(f"  range-scaled noise  depth variance {near.pos.P[2,2]:.4f} at 150 mm vs "
-          f"{far.pos.P[2,2]:.4f} at 350 mm")
+    print(
+        f"  range-scaled noise  depth variance {near.pos.P[2,2]:.4f} at 150 mm vs "
+        f"{far.pos.P[2,2]:.4f} at 350 mm"
+    )
 
 
 if __name__ == "__main__":

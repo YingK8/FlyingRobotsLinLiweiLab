@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Real-time hover-controller runner -- closes the position loop around
+"""
+Real-time hover-controller runner -- closes the position loop around
 src/main_flight.cpp using the state-space controller designed by
 controller/control/design_hover_lqr.py (gains: controller/control/hover_controller.json).
 
@@ -22,15 +23,16 @@ Safety: measurement watchdog (no fix for --timeout s -> "hover" then
 unhandled exception.
 
 Usage:
-  uv run python controller/control/hover_controller_runner.py --source stub --dry-run
-  uv run python controller/control/hover_controller_runner.py --source replay --replay-csv run.csv \
-      --port /dev/ttyUSB0 --log hover_run.log
+  hover_controller_runner.fly(dry_run=True)                    # stub source, no serial
+  hover_controller_runner.fly(source="replay", replay_csv="run.csv",
+                              port="/dev/ttyUSB0", log="hover_run.log")
 """
+
 from __future__ import annotations
 
-import argparse
 import csv
 import json
+from dataclasses import dataclass
 import math
 import os
 import signal
@@ -47,8 +49,10 @@ from simulate_hover import DiscreteHoverController, Scenario, simulate
 
 
 class PositionSource(ABC):
-    """Provides drone position fixes. read() is non-blocking: returns
-    (t_monotonic_s, x_m, z_m) when a new fix is available, else None."""
+    """
+    Provides drone position fixes. read() is non-blocking: returns
+        (t_monotonic_s, x_m, z_m) when a new fix is available, else None.
+    """
 
     @abstractmethod
     def read(self) -> tuple[float, float, float] | None: ...
@@ -58,9 +62,11 @@ class PositionSource(ABC):
 
 
 class StubSource(PositionSource):
-    """Replays the measurement stream of a simulate_hover run in real time
-    (open loop -- commands do not feed back). Lets the full runner pipeline
-    execute end-to-end before the camera exists."""
+    """
+    Replays the measurement stream of a simulate_hover run in real time
+        (open loop -- commands do not feed back). Lets the full runner pipeline
+        execute end-to-end before the camera exists.
+    """
 
     def __init__(self, gains: dict, duration: float = 10.0):
         sc = Scenario("stub", x0_mm=10, z0_mm=10, duration=duration)
@@ -81,12 +87,15 @@ class StubSource(PositionSource):
 
 
 class ReplaySource(PositionSource):
-    """CSV playback (columns: t,x,z in seconds/meters), real-time paced."""
+    """
+    CSV playback (columns: t,x,z in seconds/meters), real-time paced.
+    """
 
     def __init__(self, path: str):
         with open(path) as f:
-            rows = [(float(r["t"]), float(r["x"]), float(r["z"]))
-                    for r in csv.DictReader(f)]
+            rows = [
+                (float(r["t"]), float(r["x"]), float(r["z"])) for r in csv.DictReader(f)
+            ]
         self._rows = rows
         self._i = 0
         self._t0 = time.monotonic()
@@ -103,40 +112,52 @@ class ReplaySource(PositionSource):
 
 
 class CameraSource(PositionSource):
-    """Live position from the camera: the seam where vision meets control.
+    """
+    Live position from the camera: the seam where vision meets control.
 
-    The whole of stages 1-3 sits behind this one method. `camera.sources` opens
-    the device and grabs on its own thread, `pose.estimator` turns each frame
-    into a 5-DOF pose, and `pose.filter` smooths position and supplies velocity.
-    This class does nothing but adapt that to `PositionSource`'s contract, and
-    the adaptation is two specific things, both easy to get silently wrong:
+        The whole of stages 1-3 sits behind this one method. `camera.sources` opens
+        the device and grabs on its own thread, `pose.estimator` turns each frame
+        into a 5-DOF pose, and `pose.filter` smooths position and supplies velocity.
+        This class does nothing but adapt that to `PositionSource`'s contract, and
+        the adaptation is two specific things, both easy to get silently wrong:
 
-    **Units.** The contract is metres. The pose stack is millimetres throughout
-    -- `RADIUS_MM`, `xyz_mm`, `SIGMA_LATERAL_MM`. The conversion happens here,
-    once, at the boundary. A missed factor of 1000 does not raise; it produces a
-    controller that thinks the robot is a kilometre away and commands
-    accordingly.
+        **Units.** The contract is metres. The pose stack is millimetres throughout
+        -- `RADIUS_MM`, `xyz_mm`, `SIGMA_LATERAL_MM`. The conversion happens here,
+        once, at the boundary. A missed factor of 1000 does not raise; it produces a
+        controller that thinks the robot is a kilometre away and commands
+        accordingly.
 
-    **Which axes.** The controller is planar: it wants `x` (lateral) and `z`
-    (height). The camera's frame is `x` right, `y` down, `z` along the optical
-    axis, so *the camera's z is depth, not height*. For a side-on camera looking
-    horizontally at the robot, height is **-y**: negated because the image y axis
-    points down and height points up. `axes=` makes that explicit rather than
-    assumed, because the right mapping depends on where the camera is mounted and
-    getting it wrong yields a control loop that is stable and flying the wrong
-    axis.
+        **Which axes.** The controller is planar: it wants `x` (lateral) and `z`
+        (height). The camera's frame is `x` right, `y` down, `z` along the optical
+        axis, so *the camera's z is depth, not height*. For a side-on camera looking
+        horizontally at the robot, height is **-y**: negated because the image y axis
+        points down and height points up. `axes=` makes that explicit rather than
+        assumed, because the right mapping depends on where the camera is mounted and
+        getting it wrong yields a control loop that is stable and flying the wrong
+        axis.
 
-    **Non-blocking.** `read()` must return rather than wait. A frame that has not
-    arrived, and a frame the segmenter could not use, both return ``None`` -- the
-    caller's watchdog treats a gap the same either way, and returning a stale
-    repeat instead would hide a lost robot as a stationary one.
+        **Non-blocking.** `read()` must return rather than wait. A frame that has not
+        arrived, and a frame the segmenter could not use, both return ``None`` -- the
+        caller's watchdog treats a gap the same either way, and returning a stale
+        repeat instead would hide a lost robot as a stationary one.
     """
 
-    def __init__(self, source="camera:0", width=1280, height=800,
-                 axes=("x", "-y"), intrinsics=None, use_filter=True, timeout=0.0):
+    def __init__(
+        self,
+        source="camera:0",
+        width=1280,
+        height=800,
+        axes=("x", "-y"),
+        intrinsics=None,
+        use_filter=True,
+        timeout=0.0,
+    ):
         HERE = Path(__file__).resolve().parent
-        sys.path[:0] = [str(HERE.parent / "pose"), str(HERE.parent / "calib"),
-                        str(HERE.parent / "camera")]
+        sys.path[:0] = [
+            str(HERE.parent / "pose"),
+            str(HERE.parent / "calib"),
+            str(HERE.parent / "camera"),
+        ]
         import sources
         from estimator import PoseEstimator, load_intrinsics
         from filter import PoseFilter
@@ -151,7 +172,7 @@ class CameraSource(PositionSource):
 
     def _component(self, xyz_mm, spec):
         i = {"x": 0, "y": 1, "z": 2}[spec[-1]]
-        v = float(xyz_mm[i]) / 1000.0            # mm -> m, once, here
+        v = float(xyz_mm[i]) / 1000.0  # mm -> m, once, here
         return -v if spec.startswith("-") else v
 
     def read(self):
@@ -168,15 +189,20 @@ class CameraSource(PositionSource):
             fused = self._filt.update(pose, t=t_cap)
             if fused is not None:
                 xyz = fused[0]
-        return time.monotonic(), self._component(xyz, self._axes[0]), \
-            self._component(xyz, self._axes[1])
+        return (
+            time.monotonic(),
+            self._component(xyz, self._axes[0]),
+            self._component(xyz, self._axes[1]),
+        )
 
     def close(self):
         self._src.close()
 
 
 class CommandLink:
-    """Serial link to main_flight.cpp, or a printing stand-in for --dry-run."""
+    """
+    Serial link to main_flight.cpp, or a printing stand-in for --dry-run.
+    """
 
     def __init__(self, port: str | None, dry_run: bool, log_path: str):
         self.dry = dry_run
@@ -185,9 +211,10 @@ class CommandLink:
             self.comm = None
         else:
             from link import SerialComm  # local import: pyserial only if needed
+
             self.comm = SerialComm(port=port)
             self.comm.reset_device()  # reboot firmware to IDLE
-            time.sleep(1.5)           # wait out the boot banner
+            time.sleep(1.5)  # wait out the boot banner
 
     def send(self, cmd: str) -> None:
         stamp = f"[{time.monotonic():.3f}] -> {cmd}"
@@ -197,7 +224,10 @@ class CommandLink:
             self.comm.handle_serial_comm(cmd)
 
     def drain(self) -> None:
-        """Pull pending telemetry lines into the log (non-blocking)."""
+        """
+        Pull pending telemetry lines into the log (non-blocking).
+        """
+
         if not self.comm:
             return
         while (line := self.comm.handle_serial_comm()) is not None:
@@ -209,9 +239,13 @@ class CommandLink:
             self.comm.close()
 
 
-def controller_loop(src: PositionSource, link: CommandLink,
-                    ctrl: DiscreteHoverController, args,
-                    ztrk: "z_track.ZTracker | None" = None) -> None:
+def controller_loop(
+    src: PositionSource,
+    link: CommandLink,
+    ctrl: DiscreteHoverController,
+    args,
+    ztrk: "z_track.ZTracker | None" = None,
+) -> None:
     landed = False
 
     def land(reason: str):
@@ -280,8 +314,10 @@ def controller_loop(src: PositionSource, link: CommandLink,
             if args.enable_freq_cmd:
                 link.send(f"freq={f_field:.2f}")
             else:
-                link.log.write(f"[{now:.3f}] (freq={f_field:.2f} not sent -- "
-                               f"pass --enable-freq-cmd to close the loop)\n")
+                link.log.write(
+                    f"[{now:.3f}] (freq={f_field:.2f} not sent -- "
+                    f"pass --enable-freq-cmd to close the loop)\n"
+                )
     except Exception as e:  # noqa: BLE001 -- de-energize on ANY failure
         print(f"error: {e}", file=sys.stderr)
         link.send("stop")
@@ -291,78 +327,84 @@ def controller_loop(src: PositionSource, link: CommandLink,
         link.send("stop")
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--source", choices=["stub", "replay", "camera"], default="stub")
-    ap.add_argument("--camera", default="camera:0", help="device for --source camera")
-    ap.add_argument("--width", type=int, default=1280)
-    ap.add_argument("--height", type=int, default=800)
-    ap.add_argument("--axes", default="x,-y",
-                    help="which pose axes are (lateral, height); see CameraSource")
-    ap.add_argument("--replay-csv", help="CSV (t,x,z) for --source replay")
-    ap.add_argument("--gains", default=os.path.join(os.path.dirname(__file__),
-                                                    "hover_controller.json"))
-    ap.add_argument("--profile", help="reference profile JSON "
-                                      "(reference_profiles.py schema); default: hold at origin")
-    ap.add_argument("--port", default=None)
-    ap.add_argument("--log", default="hover_run.log")
-    ap.add_argument("--az-axis-deg", type=float, default=0.0,
-                    help="lab-frame azimuth of the controlled lateral axis")
-    ap.add_argument("--timeout", type=float, default=0.5,
-                    help="watchdog: land after this long without a fix [s]")
-    ap.add_argument("--takeoff", action=argparse.BooleanOptionalAction, default=True)
-    ap.add_argument("--spinup-s", type=float, default=33.0,
-                    help="firmware SPINUP_MS + margin")
-    ap.add_argument("--throttle", type=float, default=80.0)
-    ap.add_argument("--enable-freq-cmd", action="store_true",
-                    help="actually send freq= (firmware accepts it in FLIGHT only); "
-                         "omit for a telemetry-only dress rehearsal")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="print commands instead of opening serial")
-    ap.add_argument("--waypoints", default=os.path.join(os.path.dirname(__file__),
-                                                       "waypoints_z.json"),
-                    help="z waypoint JSON [[t_s, z_m], ...]; --no-waypoints "
-                         "reverts the vertical channel to the LQR")
-    ap.add_argument("--no-waypoints", dest="waypoints", action="store_const",
-                    const=None, help=argparse.SUPPRESS)
-    args = ap.parse_args()
+@dataclass
+class RunConfig:
+    """
+    Everything `controller_loop` reads, in one place.
 
-    with open(args.gains) as f:
+        A dataclass rather than loose keyword arguments because the loop takes it
+        whole and passes it down; a namespace assembled ad hoc is how a field gets
+        read that was never set.
+    """
+
+    source: str = "stub"  # "stub" | "replay" | "camera"
+    camera: str = "camera:0"
+    width: int = 1280
+    height: int = 800
+    axes: tuple = ("x", "-y")  # which pose axes are (lateral, height)
+    replay_csv: str = None
+    profile: str = None  # reference profile JSON; None holds at origin
+    port: str = None
+    log: str = "hover_run.log"
+    az_axis_deg: float = 0.0  # lab azimuth of the controlled lateral axis
+    timeout: float = 0.5  # watchdog: land after this long without a fix
+    takeoff: bool = True
+    spinup_s: float = 33.0  # firmware SPINUP_MS + margin
+    throttle: float = 80.0
+    enable_freq_cmd: bool = False  # False = telemetry-only dress rehearsal
+    dry_run: bool = False  # print commands instead of opening serial
+    gains: str = None  # defaults to hover_controller.json beside this file
+    waypoints: str = None  # z waypoints; None reverts z to the LQR
+
+    def __post_init__(self):
+        here = os.path.dirname(__file__)
+        if self.gains is None:
+            self.gains = os.path.join(here, "hover_controller.json")
+
+
+def fly(cfg=None, **kw):
+    """
+    Run the hover controller. ``fly()`` is the stub-source dress rehearsal.
+
+        Pass a `RunConfig`, or keyword overrides of its fields. Defaults are the safe
+        ones: the stub source, no frequency commands, and the watchdog armed.
+    """
+
+    cfg = cfg or RunConfig(**kw)
+
+    with open(cfg.gains) as f:
         gains = json.load(f)
-    profile = Profile.from_json(args.profile) if args.profile else Profile.hold()
+    profile = Profile.from_json(cfg.profile) if cfg.profile else Profile.hold()
     ctrl = DiscreteHoverController(gains, profile)
 
-    if args.source == "stub":
+    if cfg.source == "stub":
         src: PositionSource = StubSource(gains)
-    elif args.source == "replay":
-        if not args.replay_csv:
-            sys.exit("--source replay requires --replay-csv")
-        src = ReplaySource(args.replay_csv)
+    elif cfg.source == "replay":
+        if not cfg.replay_csv:
+            raise ValueError("source='replay' needs replay_csv")
+        src = ReplaySource(cfg.replay_csv)
     else:
-        src = CameraSource(args.camera, args.width, args.height,
-                           axes=tuple(args.axes.split(",")))
+        src = CameraSource(cfg.camera, cfg.width, cfg.height, axes=tuple(cfg.axes))
 
     ztrk = None
-    if args.waypoints:
-        times, heights = z_track.load_waypoints(args.waypoints)
+    if cfg.waypoints:
+        times, heights = z_track.load_waypoints(cfg.waypoints)
         # Constructing ZTracker computes f_ceiling, which raises if the torque
         # calibration leaves no headroom at f_hover. Fail here, on the bench,
         # rather than after the robot is already spinning.
         ztrk = z_track.ZTracker(times, heights)
-        print(f"altitude: {len(times)} waypoints from {args.waypoints}, "
-              f"f_hover={ztrk.lim.f_hover:.0f} Hz, "
-              f"f_ceiling={ztrk.lim.f_ceiling():.1f} Hz, "
-              f"a_max={ztrk.a_ceiling:.2f} m/s^2")
+        print(
+            f"altitude: {len(times)} waypoints from {cfg.waypoints}, "
+            f"f_hover={ztrk.lim.f_hover:.0f} Hz, "
+            f"f_ceiling={ztrk.lim.f_ceiling():.1f} Hz, "
+            f"a_max={ztrk.a_ceiling:.2f} m/s^2"
+        )
 
-    link = CommandLink(args.port, args.dry_run, args.log)
+    link = CommandLink(cfg.port, cfg.dry_run, cfg.log)
     try:
-        controller_loop(src, link, ctrl, args, ztrk)
+        controller_loop(src, link, ctrl, cfg, ztrk)
     finally:
         src.close()
         link.close()
-        print(f"done -> {args.log}")
-
-
-if __name__ == "__main__":
-    main()
+        print(f"done -> {cfg.log}")
+    return cfg.log

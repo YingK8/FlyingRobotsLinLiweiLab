@@ -1,4 +1,5 @@
-"""Monochrome backgrounds: gradients and bands, always darker than the robot.
+"""
+Monochrome backgrounds: gradients and bands, always darker than the robot.
 
 The validation set used flat grey at three levels.  Real backdrops are not flat:
 they have falloff from a light, edges, and repeating structure.  This generates
@@ -43,13 +44,15 @@ MIN_SPAN = 4
 
 
 def _finish(field, peak):
-    """Clamp to ``[0, peak]`` and return uint8.
-
-    The clamp is the invariant, applied in one place rather than trusted to each
-    generator's arithmetic. ``peak`` is passed rather than assumed so the caller
-    chooses the tier, and it is itself clamped below the threshold so no caller
-    can opt out of the guarantee.
     """
+    Clamp to ``[0, peak]`` and return uint8.
+
+        The clamp is the invariant, applied in one place rather than trusted to each
+        generator's arithmetic. ``peak`` is passed rather than assumed so the caller
+        chooses the tier, and it is itself clamped below the threshold so no caller
+        can opt out of the guarantee.
+    """
+
     peak = int(min(peak, THRESHOLD - 1))
     out = np.clip(field, 0.0, float(peak))
     return out.astype(np.uint8)
@@ -62,12 +65,18 @@ def _axes(shape):
 
 
 def flat(shape, rng, peak=CORE_PEAK):
-    """A uniform field. The original behaviour, kept for comparability."""
+    """
+    A uniform field. The original behaviour, kept for comparability.
+    """
+
     return _finish(np.full(shape, rng.uniform(0.0, peak)), peak)
 
 
 def gradient(shape, rng, peak=CORE_PEAK):
-    """Linear ramp at a random orientation between two random levels."""
+    """
+    Linear ramp at a random orientation between two random levels.
+    """
+
     x, y = _axes(shape)
     ang = rng.uniform(0.0, 2.0 * math.pi)
     t = x * math.cos(ang) + y * math.sin(ang)
@@ -79,12 +88,14 @@ def gradient(shape, rng, peak=CORE_PEAK):
 
 
 def vignette(shape, rng, peak=CORE_PEAK):
-    """Radial falloff, bright at the centre or bright at the edges.
-
-    The second case is the one worth having: a backdrop lit from behind the
-    camera is brightest where the robot is *not*, which puts the strongest
-    background gradient right where the silhouette's boundary sits.
     """
+    Radial falloff, bright at the centre or bright at the edges.
+
+        The second case is the one worth having: a backdrop lit from behind the
+        camera is brightest where the robot is *not*, which puts the strongest
+        background gradient right where the silhouette's boundary sits.
+    """
+
     x, y = _axes(shape)
     cx, cy = rng.uniform(0.3, 0.7), rng.uniform(0.3, 0.7)
     r = np.hypot(x - cx, y - cy)
@@ -97,12 +108,14 @@ def vignette(shape, rng, peak=CORE_PEAK):
 
 
 def bands(shape, rng, peak=CORE_PEAK):
-    """Sinusoidal stripes at a random orientation, frequency and phase.
-
-    Frequency is drawn in cycles across the frame.  The interesting range is a
-    few cycles: much lower and it is a gradient, much higher and the morphology
-    in `segment.py` averages it away before the hull sees anything.
     """
+    Sinusoidal stripes at a random orientation, frequency and phase.
+
+        Frequency is drawn in cycles across the frame.  The interesting range is a
+        few cycles: much lower and it is a gradient, much higher and the morphology
+        in `segment.py` averages it away before the hull sees anything.
+    """
+
     x, y = _axes(shape)
     ang = rng.uniform(0.0, math.pi)
     freq = rng.uniform(1.5, 9.0)
@@ -114,18 +127,22 @@ def bands(shape, rng, peak=CORE_PEAK):
 
 
 def square_bands(shape, rng, peak=CORE_PEAK):
-    """Hard-edged stripes.
-
-    Worse than sinusoidal ones on purpose.  A step edge survives the 3x3 opening
-    and 7x7 closing in `segment.py` with its gradient intact, so it is the
-    background structure most likely to be mistaken for a real boundary.
     """
+    Hard-edged stripes.
+
+        Worse than sinusoidal ones on purpose.  A step edge survives the 3x3 opening
+        and 7x7 closing in `segment.py` with its gradient intact, so it is the
+        background structure most likely to be mistaken for a real boundary.
+    """
+
     x, y = _axes(shape)
     ang = rng.uniform(0.0, math.pi)
     freq = rng.uniform(1.0, 6.0)
     phase = rng.uniform(0.0, 1.0)
-    t = np.sin(2.0 * math.pi * freq * (x * math.cos(ang) + y * math.sin(ang))
-               + 2.0 * math.pi * phase)
+    t = np.sin(
+        2.0 * math.pi * freq * (x * math.cos(ang) + y * math.sin(ang))
+        + 2.0 * math.pi * phase
+    )
     duty = rng.uniform(0.3, 0.7)
     lo, hi = sorted(rng.uniform(0.0, peak, 2))
     if hi - lo < MIN_SPAN:
@@ -134,12 +151,14 @@ def square_bands(shape, rng, peak=CORE_PEAK):
 
 
 def mixed(shape, rng, peak=CORE_PEAK):
-    """A gradient with bands laid over it, each at reduced amplitude.
-
-    Generated at half peak each so the sum still respects the ceiling without
-    the clamp having to do the work -- a clamped field has flat regions that are
-    not representative of anything.
     """
+    A gradient with bands laid over it, each at reduced amplitude.
+
+        Generated at half peak each so the sum still respects the ceiling without
+        the clamp having to do the work -- a clamped field has flat regions that are
+        not representative of anything.
+    """
+
     g = gradient(shape, rng, peak=peak * 0.6).astype(np.float64)
     b = bands(shape, rng, peak=peak * 0.4).astype(np.float64)
     return _finish(g + b - float(b.mean()) * 0.5, peak)
@@ -156,14 +175,29 @@ GENERATORS = {
 
 # Flat is kept common because it is the condition every earlier result was
 # measured under; the structured ones share the rest between them.
-CORE_WEIGHTS = {"flat": 0.30, "gradient": 0.20, "vignette": 0.15,
-                "bands": 0.15, "square_bands": 0.10, "mixed": 0.10}
-EDGE_WEIGHTS = {"flat": 0.10, "gradient": 0.15, "vignette": 0.15,
-                "bands": 0.25, "square_bands": 0.20, "mixed": 0.15}
+CORE_WEIGHTS = {
+    "flat": 0.30,
+    "gradient": 0.20,
+    "vignette": 0.15,
+    "bands": 0.15,
+    "square_bands": 0.10,
+    "mixed": 0.10,
+}
+EDGE_WEIGHTS = {
+    "flat": 0.10,
+    "gradient": 0.15,
+    "vignette": 0.15,
+    "bands": 0.25,
+    "square_bands": 0.20,
+    "mixed": 0.15,
+}
 
 
 def sample(shape, rng, peak=CORE_PEAK, weights=None):
-    """One background, drawn from the weighted mix. Returns ``(field, name)``."""
+    """
+    One background, drawn from the weighted mix. Returns ``(field, name)``.
+    """
+
     weights = weights or CORE_WEIGHTS
     names = list(weights)
     probs = np.array([weights[n] for n in names], dtype=np.float64)
@@ -172,12 +206,14 @@ def sample(shape, rng, peak=CORE_PEAK, weights=None):
 
 
 def contact_sheet(shape=(120, 160), seed=0, peak=CORE_PEAK, cols=6, rows=3):
-    """A tiled sample of every generator, for looking at.
-
-    Worth having because these are judged by eye as much as by statistic: a
-    generator that is technically in range but visually nothing like a backdrop
-    is still the wrong generator.
     """
+    A tiled sample of every generator, for looking at.
+
+        Worth having because these are judged by eye as much as by statistic: a
+        generator that is technically in range but visually nothing like a backdrop
+        is still the wrong generator.
+    """
+
     rng = np.random.default_rng(seed)
     names = list(GENERATORS)
     tiles = []

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""VNH5019 current-sense (CS) calibration plot.
+"""
+VNH5019 current-sense (CS) calibration plot.
 
 Reads k-tuning.csv and, for each channel, plots the measured CS voltage
 (pico_voltage, mV) against the load/supply current (A) and fits a line.
@@ -13,6 +14,7 @@ With only two points per channel the "fit" is just the line through them.
 Once more points exist per channel it automatically switches to a
 least-squares fit and reports R^2.
 """
+
 import csv
 import os
 
@@ -25,7 +27,10 @@ OUT = os.path.join(HERE, "k_tuning.png")
 
 
 def load(path):
-    """Return {channel: (currents[A], cs_voltages[mV])} from the CSV."""
+    """
+    Return {channel: (currents[A], cs_voltages[mV])} from the CSV.
+    """
+
     data = {}
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
@@ -38,8 +43,10 @@ def load(path):
             except (TypeError, ValueError):
                 continue  # blank / placeholder row
             data.setdefault(ch, []).append((i_load, v_cs))
-    return {ch: (np.array([p[0] for p in pts]), np.array([p[1] for p in pts]))
-            for ch, pts in sorted(data.items())}
+    return {
+        ch: (np.array([p[0] for p in pts]), np.array([p[1] for p in pts]))
+        for ch, pts in sorted(data.items())
+    }
 
 
 def main():
@@ -48,8 +55,7 @@ def main():
         raise SystemExit("No usable data points found in " + CSV)
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    colors = {"A": "tab:blue", "B": "tab:orange",
-              "C": "tab:green", "D": "tab:red"}
+    colors = {"A": "tab:blue", "B": "tab:orange", "C": "tab:green", "D": "tab:red"}
 
     for ch, (i_load, v_cs) in data.items():
         if len(i_load) < 2:
@@ -59,19 +65,26 @@ def main():
 
         # R^2 (only meaningful with >2 points; trivially 1.0 for two)
         resid = v_cs - (slope * i_load + intercept)
-        ss_res = float(np.sum(resid ** 2))
+        ss_res = float(np.sum(resid**2))
         ss_tot = float(np.sum((v_cs - v_cs.mean()) ** 2))
         r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
         # fit line, extended down toward 0 A to show the offset
         x_lo = min(0.0, i_load.min())
         xs = np.linspace(x_lo, i_load.max() * 1.05, 100)
-        ax.scatter(i_load, v_cs, color=color, zorder=3,
-                   label=f"Ch {ch} data")
-        ax.plot(xs, slope * xs + intercept, color=color, lw=1.5, alpha=0.8,
-                label=(f"Ch {ch} fit: K={slope:.1f} mV/A, "
-                       f"off={intercept:+.0f} mV"
-                       + (f", R²={r2:.3f}" if len(i_load) > 2 else "")))
+        ax.scatter(i_load, v_cs, color=color, zorder=3, label=f"Ch {ch} data")
+        ax.plot(
+            xs,
+            slope * xs + intercept,
+            color=color,
+            lw=1.5,
+            alpha=0.8,
+            label=(
+                f"Ch {ch} fit: K={slope:.1f} mV/A, "
+                f"off={intercept:+.0f} mV"
+                + (f", R²={r2:.3f}" if len(i_load) > 2 else "")
+            ),
+        )
 
     ax.set_xlabel("Load current  I$_{OUT}$  (A)")
     ax.set_ylabel("Current-sense voltage  V$_{CS}$  (mV)")
@@ -87,8 +100,10 @@ def main():
         if len(i_load) < 2:
             continue
         slope, intercept = np.polyfit(i_load, v_cs, 1)
-        print(f"Ch {ch}: K = {slope:.2f} mV/A  ({1000.0/slope:.2f} A/V), "
-              f"offset = {intercept:+.1f} mV, n = {len(i_load)}")
+        print(
+            f"Ch {ch}: K = {slope:.2f} mV/A  ({1000.0/slope:.2f} A/V), "
+            f"offset = {intercept:+.1f} mV, n = {len(i_load)}"
+        )
 
 
 if __name__ == "__main__":

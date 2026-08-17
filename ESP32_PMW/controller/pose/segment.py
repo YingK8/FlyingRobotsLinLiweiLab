@@ -1,94 +1,40 @@
-"""Segment the robot from its background and fit the rim ellipse.
+"""
+Segment the robot from its background and fit the rim ellipse.
 
-Two rig appearances are supported, selected by `APPEARANCE` / `score_channel`:
-a bright robot on a dark ground (the original bench setup, and the one every
-calibration constant here was fitted on), and **dark**, a black robot on a white
-backdrop with the drive coils and the room beyond the backdrop in frame.
-Everything below the first paragraph of `segment` is appearance-agnostic: it
-operates on whichever single channel makes the robot bright.
+Two rig appearances, selected by `APPEARANCE` / `score_channel`:
 
-Both are **monochrome**: the high-speed cameras are mono sensors, so brightness
-and smoothness are the only separations available.
+    bright  white robot on a dark ground; every calibration constant here was
+            fitted on it
+    dark    black robot on a white backdrop, coils and room in frame
 
-`dark` is the only one that cannot be reduced to a channel and a level. Inverting
-the threshold finds the robot and also the coils, the wires and the room, all of
-which are darker still; and with a mono sensor there is no chroma to tell them
-apart. So it adds two things, and only for this appearance: a **valid region**
-(`valid_region`), which is where the robot may be at all, and a **spread limit**
-(`silhouette_hull`), which decides which blobs inside that region belong to the
-same object. See `score_channel` for what each is measured against.
+Both are monochrome, so brightness and smoothness are the only separations
+available. Everything after `score_channel` is appearance-agnostic: it works on
+whichever single channel makes the robot bright.
 
-A fixed threshold is enough and is what `visual_servo/servo.py` already uses.
-Deliberately *not* Otsu -- as that file's own comment records, with the robot out
-of frame Otsu will happily threshold sensor noise into a confident "detection".
-A fixed level simply returns nothing, which is the correct answer.
+`dark` needs more than a channel and a level, because the coils, wires and room
+are all darker than the backdrop too. It adds `valid_region` (where the robot may
+be at all) and a spread limit in `silhouette_hull` (which blobs inside that region
+are one object).
 
-What this adds over `servo.py`'s `detect()` is that `conic.py` needs the **duct
-rim**, and getting it is harder than "largest contour".  The duct is a thin
-ring, not a disc: face-on, its outer wall is nearly parallel to the view, so
-lighting routinely breaks it into disconnected arcs and the largest connected
-blob becomes the four-blade cross in the middle.  Measured on a face-on render,
-largest-contour fits a 83 px ellipse where the true rim is 131 px -- a 37%
-underestimate, which lands directly on the depth estimate.
+**Hull, not largest contour.** `conic.py` needs the duct *rim*, and the duct is a
+thin ring: face-on its outer wall is nearly edge-on, so lighting breaks it into
+arcs and the largest blob becomes the blade cross. Measured face-on,
+largest-contour fits 83 px where the rim is 131 -- a 37% underestimate landing
+straight on depth. Pooling every real blob and hulling gives 129.9 px against
+130.7 analytic.
 
-So instead: keep every blob big enough to be real, pool their boundary points,
-and take the **convex hull**.  The rim is the outermost feature of the robot, so
-its hull is the rim, and broken arcs still hull to the same circle.  Same
-face-on render, hull fit: 129.9 px against 130.7 px analytic.
+**Axial weighting is what makes high tilt work.** The rod and magnet stick out
+along the rotor axis, so tilt pushes them outward in the silhouette's *short*
+direction, near the middle of the major axis. Weighting each hull point by
+``w = |proj| / a`` (`AXIAL_WEIGHT_POWER`) suppresses them: at 70 deg tilt the
+minor axis goes 75.6 -> 54.4 px against 45.0 true. The floor must be **zero** --
+at 0.05 the rod points still dominate (68.1 px).
 
-The hull is then fitted with **axial weighting**, and that is what makes high
-tilt work.  The rod and magnet stick out along the rotor axis, so as the robot
-tilts they push the silhouette outward in its *short* direction -- and because
-they lie on the axis, they land near the **middle of the major axis**.  Traced at
-70 degrees tilt, the two worst hull vertices are rod tips (17.2 px off the true
-rim, against the magnet's 7.0 px), both at |projection|/semi-major < 0.04.
+Threshold, not Otsu: with the robot out of frame Otsu thresholds noise into a
+confident detection, where a fixed level returns nothing.
 
-So each hull point is weighted by how far along the major axis it sits,
-``w = |proj| / a`` (see `AXIAL_WEIGHT_POWER`), which is near zero exactly where
-the protrusions appear
-and near one at the major-axis ends where the rim is trustworthy.  Two
-reweighted refits.  At 70 degrees this pulls the minor axis from 75.6 px to
-54.4 px against 45.0 px true.
-
-The weight floor must be **zero**.  A floor of even 0.05 restores most of the
-error (68.1 px instead of 54.4), because the rod points are extreme enough to
-dominate a fit that gives them any weight at all.
-
-Making the weighting tilt-adaptive was tried and does not work, for a reason
-worth recording: the blend has to read tilt from the provisional ellipse, but
-that ellipse is the contaminated one, so it under-reads tilt and under-applies
-the very correction that would fix it.  Every adaptive variant landed at
-12-13 degrees of normal error at high tilt where unconditional weighting gives
-0.46.  Apply it always.
-
-Weighting appears to cost accuracy at moderate tilt until the tilt calibration
-is refitted for it; the apparent cost is pure systematic bias.  Compared
-calibrated-against-calibrated on a held-out split, unconditional axial weighting
-is better everywhere: normal error 1.95 -> 0.52 degrees, position 1.17 ->
-0.89 mm, relative depth 0.477 -> 0.380%.
-
-That also retires a limit this file used to claim.  The ">45 degrees the
-flat-circle model breaks" note was largely a **fitting artefact, not geometry**.
-With the protrusions weighted out, calibrated normal error is 0.53 degrees over
-tilt 10-55 and 0.46 above 60 -- essentially flat, where before it tripled across
-the same span.  The residual minor-axis excess at 70 degrees falls from +69% to
-+22%, and what is left is the duct's own wall thickness projecting, which is
-genuine geometry.
-
-Plain outlier *trimming* by residual was tried earlier and did fail -- the hull
-carries only 20-60 points, so discarding any meaningful fraction destabilises
-the fit.  Weighting by *position along the major axis* works where trimming by
-residual did not, because it targets where the contamination is known to be
-rather than trying to discover it from the residuals it has already corrupted.
-
-Sub-pixel edge refinement was implemented and rejected.  Walking each hull
-vertex along its outward normal to the interpolated threshold crossing changed
-depth scatter by nothing at all -- 0.661% against 0.662% -- and made lateral
-error slightly worse.  The reason is that the hull already averages 30 to 60
-points, so pixel quantisation has averaged away before the fit sees it.  The
-residual scatter is not measurement precision; it is the 3-D silhouette varying
-with blade phase and lighting, which a 2-D ellipse cannot represent at all.
-Anything aimed at that floor has to add information, not sharpen the edge.
+Approaches tried and rejected (tilt-adaptive weighting, residual trimming,
+sub-pixel refinement), with the numbers: `ai/notes/pose_appearance.md`.
 """
 
 from __future__ import annotations
@@ -119,14 +65,12 @@ import shape  # noqa: E402  (calib/: owns APPEARANCE)
 #   thresh 112 -> bias -0.53%, scatter 0.52%
 #   thresh 128 -> bias -0.27%, scatter 0.64%
 #   thresh 144 -> bias +0.01%, scatter 0.70%
-# A lower level includes more of the dim rim edge and localises it better.  It is
-# NOT retuned here: those renders have one particular brightness, and on real
-# hardware the useful level depends on exposure, so a number fitted to synthetic
-# images would not transfer.  128 is what is already validated on the bench.
+# A lower level catches more of the dim rim edge and localises it better, but is
+# NOT retuned here: the renders have one brightness and on real hardware the
+# useful level follows exposure, so a synthetic number would not transfer.
 #
-# If you change this (or the exposure), refit the effective radius -- the bias
-# column above moves by 0.75% across this range, which is larger than the entire
-# depth residual. See validation/tune.py.
+# Change this (or the exposure) and refit the effective radius: the bias column
+# moves 0.75% across this range, more than the whole depth residual.
 THRESH = 128
 MIN_BLOB_AREA_PX = 30
 
@@ -147,16 +91,10 @@ _CLOSE_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
 # Fractional rather than absolute so it holds across resolutions and distances.
 _BLOB_KEEP_FRACTION = 0.02
 
-# A contrast-relative threshold (level scaled to the frame's own peak) was tried
-# and dropped. It was aimed at the one real segmentation failure the sweep finds
-# -- face-on under a hard side light, where the ring's outer wall is barely lit,
-# the hull collapses onto the blade cross, and position error hits 63 mm. It
-# does not fix it (58 mm instead of 64 mm), because in that geometry the rim is
-# not dim, it is genuinely unlit: no threshold recovers a signal that is not
-# there. Meanwhile it made every well-lit case slightly worse, by pulling dim
-# fringe pixels into the hull and inflating the rim (0.45 -> 0.65 mm face-on,
-# 1.59 -> 2.16 mm at 40 degrees). The fix for that failure is lighting, not
-# thresholding.
+# A contrast-relative level (scaled to the frame's peak) was tried and dropped:
+# 58 mm instead of 64 on the face-on hard-side-light failure it targeted, because
+# there the rim is not dim but unlit, and it made every well-lit case worse by
+# pulling fringe pixels into the hull. That failure is fixed by lighting.
 
 # fitEllipse needs 5 points for 5 ellipse parameters.
 _MIN_CONTOUR_PTS = 5
@@ -185,36 +123,25 @@ _MIN_CONTOUR_PTS = 5
 # mid-range evidence is thrown away with it.
 AXIAL_WEIGHT_POWER = 1.0
 
-# Axial weighting is ON. Measured against the unweighted fit on a controlled A/B
-# -- same seed, same 400 poses, same gate, same constants, `POSE_AXIAL` the only
-# difference -- it costs no gate coverage (59 certified frames against 61) and
-# improves both error metrics in every sensor mode (1280x800: position 0.268 ->
-# 0.186 mm, angle 0.294 -> 0.178 deg; modes at 100% in spec 5/8 -> 6/8).
+# Axial weighting is ON. Controlled A/B (same seed, 400 poses, same gate and
+# constants): no gate coverage lost, both error metrics better in every sensor
+# mode -- 1280x800 position 0.268 -> 0.186 mm, angle 0.294 -> 0.178 deg.
 #
-# **It costs latency, and that is an open trade rather than a settled one.**
-# Measured end to end over a 1000x720 sequence: 2.31 ms/frame unweighted against
-# 3.53 ms weighted, i.e. 433 Hz -> 283 Hz. The fit itself goes 0.04 -> 1.02 ms,
-# and the breakdown says the axial weighting is the cheap part:
+# **It costs latency, and that trade is open.** End to end, 2.31 -> 3.53 ms/frame,
+# i.e. 433 -> 283 Hz. Two thirds of that is the two later robustness stages, not
+# the weighting:
 #
-#   base fit                     0.039 ms
-#   + axial re-weighting (x2)    0.19 ms
-#   + one-sided pass (x3)        0.375 ms      POSE_ONE_SIDED=0 disables
-#   + trim pass (x3)             0.42 ms       TRIM_FRACTION=0 disables
+#   base fit                    0.039 ms
+#   + axial re-weighting (x2)   0.19 ms
+#   + one-sided pass (x3)       0.375 ms     POSE_ONE_SIDED=0 disables
+#   + trim pass (x3)            0.42 ms      TRIM_FRACTION=0 disables
 #
-# So two thirds of the cost is the two later robustness stages, whose accuracy
-# contribution has never been A/B'd on its own. `test_stereo.py::test_speed`
-# currently FAILS because of this: the full two-view solve is 3.40 ms against a
-# 4.17 ms budget at 240 Hz, and segmentation needs the rest. That failure is left
-# visible on purpose.
+# `test_stereo::test_speed` fails on this: the two-view solve is 3.40 ms against
+# 4.17 ms at 240 Hz. Left visible on purpose. The cameras deliver 15-28 fps, so
+# it binds only at the aspirational rate.
 #
-# Whether it matters depends on the target rate, and the rate the cameras on this
-# rig actually deliver is 15-28 fps -- 10x slower than the budget the test
-# asserts. At 240 Hz this still fits monocular; at 420 Hz it does not.
-#
-# ``POSE_AXIAL=1``/``=0`` overrides this for one process, matching the
-# ``POSE_ONE_SIDED`` convention below, so an A/B runs as two subprocesses rather
-# than by editing this line -- which is how two arms end up differing in more
-# than one thing.
+# ``POSE_AXIAL=1``/``=0`` overrides per process, so an A/B runs as two
+# subprocesses rather than by editing this line.
 AXIAL_DEFAULT = os.environ.get("POSE_AXIAL", "1") not in ("0", "", "false", "False")
 AXIAL_WEIGHT_ITERS = 2
 
@@ -239,20 +166,14 @@ AXIAL_WEIGHT_FLOOR = 0.0
 
 # Weight given to boundary points that fall **outside** the current fit.
 #
-# The silhouette's contamination is one-sided by construction.
-# `silhouette_hull` takes a convex hull, so the extracted boundary is a superset
-# of the projected rim: the rod, the magnet mount and any thresholding spill can
-# only push the outline *outward*, never inward. A symmetric loss therefore does
-# not average the contamination away -- it splits the difference with it, and
-# the fit settles outside the true rim by roughly half the excursion.
+# Contamination is one-sided by construction: the hull is a superset of the
+# projected rim, so the rod, mount and threshold spill push the outline outward
+# only. A symmetric loss splits the difference with it and settles outside the rim
+# by about half the excursion; weighting outward points down pulls the fit onto the
+# inner envelope, where the rim is. The asymmetry matters more than the value.
 #
-# Weighting outward points below inward ones pulls the fit onto the inner
-# envelope, which is where the rim actually is. The value matters less than the
-# asymmetry; 0.15 was the best of those measured.
-#
-# What this buys is **spread**, not bias. `TiltCalibration` already removes the
-# mean of the ratio error, so a mean improvement would be absorbed and invisible.
-# Measured over 120 poses with tilt and contamination amplitude both varied:
+# This buys **spread**, not bias -- `TiltCalibration` already removes the mean.
+# Over 120 poses with tilt and contamination amplitude varied:
 #
 #             ratio-error mean     ratio-error std
 #   off            +0.01825            0.00479
@@ -270,12 +191,10 @@ ONE_SIDED_WEIGHT = float(os.environ.get("POSE_ONE_SIDED", "0.15"))
 # Fraction of the outline discarded outright once the rim is well covered, and
 # the coverage required before discarding anything.
 #
-# Down-weighting a contaminated point still lets it pull the fit. Discarding it
-# does not, and the mast's contribution is a *localised lobe* rather than a
-# spread-out error, so selection suits it better than weighting. Measured on
-# silhouettes with a randomly placed, randomly sized lobe -- the case where the
-# presented shape genuinely varies -- the ratio-error scatter falls from 0.03586
-# to 0.02266, a **37%** reduction.
+# A down-weighted point still pulls the fit; a discarded one does not. The mast is
+# a *localised lobe* rather than spread-out error, so selection suits it better
+# than weighting: on silhouettes with a randomly placed lobe the ratio-error
+# scatter falls 0.03586 -> 0.02266, a **37%** reduction.
 #
 # The guard is not optional. Discarding a quarter of the boundary is safe only
 # when there is redundancy left, and with a rim broken into arcs there is not:
@@ -306,18 +225,19 @@ AXIAL_SKIP_RATIO = 0.995
 
 @dataclass
 class Segmentation:
-    """One frame's segmentation result.
+    """
+    One frame's segmentation result.
 
-    ``ellipse`` is in OpenCV's ``((cx, cy), (major, minor), angle_deg)`` form,
-    major-axis first, and is what `conic.backproject_ellipse` consumes.
-    ``contour`` is the convex hull, not a raw contour.  ``fit_rms_px`` is the
-    Sampson distance of the hull points to the fitted ellipse -- a direct
-    measure of how circular the silhouette really was, and the best single
-    number for spotting a frame where segmentation grabbed the wrong thing.
-    ``area_px`` is a true pixel count of the kept blobs.  ``valid`` is the region
-    the segmenter was allowed to look in (``None`` for appearances that look
-    everywhere) -- carried so the overlay can shade what was ignored without
-    recomputing it, which for the backdrop finder costs 2.4 ms a frame.
+        ``ellipse`` is in OpenCV's ``((cx, cy), (major, minor), angle_deg)`` form,
+        major-axis first, and is what `conic.backproject_ellipse` consumes.
+        ``contour`` is the convex hull, not a raw contour.  ``fit_rms_px`` is the
+        Sampson distance of the hull points to the fitted ellipse -- a direct
+        measure of how circular the silhouette really was, and the best single
+        number for spotting a frame where segmentation grabbed the wrong thing.
+        ``area_px`` is a true pixel count of the kept blobs.  ``valid`` is the region
+        the segmenter was allowed to look in (``None`` for appearances that look
+        everywhere) -- carried so the overlay can shade what was ignored without
+        recomputing it, which for the backdrop finder costs 2.4 ms a frame.
     """
 
     mask: np.ndarray
@@ -332,35 +252,41 @@ class Segmentation:
 
 
 def fit_ellipse_direct(pts):
-    """Fitzgibbon direct fit of ``pts``, axes ordered major-first.
-
-    Pairing `cv2.fitEllipseDirect` with `conic.normalise_ellipse` is not
-    optional: an unnormalised result reports its angle against whichever axis
-    OpenCV happened to call ``width``, so the angle jumps 90 degrees on a nearly
-    circular silhouette. That pairing was written out four separate times;
-    separating the two calls is the mistake this exists to make impossible.
-
-    It lives here rather than in `conic.py` because that module is deliberately
-    OpenCV-free -- pure geometry over numpy -- and this is the OpenCV side.
     """
-    return conic.normalise_ellipse(cv2.fitEllipseDirect(np.asarray(pts, dtype=np.float32)))
+    Fitzgibbon direct fit of ``pts``, axes ordered major-first.
+
+        Pairing `cv2.fitEllipseDirect` with `conic.normalise_ellipse` is not
+        optional: an unnormalised result reports its angle against whichever axis
+        OpenCV happened to call ``width``, so the angle jumps 90 degrees on a nearly
+        circular silhouette. That pairing was written out four separate times;
+        separating the two calls is the mistake this exists to make impossible.
+
+        It lives here rather than in `conic.py` because that module is deliberately
+        OpenCV-free -- pure geometry over numpy -- and this is the OpenCV side.
+    """
+
+    return conic.normalise_ellipse(
+        cv2.fitEllipseDirect(np.asarray(pts, dtype=np.float32))
+    )
 
 
 def sampson_distance_conic(c, pts):
-    """First-order geometric distance from points to a conic, in pixels.
-
-    The algebraic residual ``p'Cp`` is scale-dependent and biased toward the
-    ellipse's flat sides; dividing by the gradient magnitude (Sampson's
-    approximation) turns it into something that reads in pixels and is fair
-    around the whole perimeter.  Good enough to rank outliers, and far cheaper
-    than a true orthogonal distance.
-
-    Takes the conic directly rather than an ellipse because the stereo solver
-    predicts a conic (``K^-T Q K^-1`` for a hypothesised circle pose) and
-    converting it to axis form only to convert it straight back would be waste
-    inside a least-squares inner loop.  `_sampson_distance` is the ellipse-taking
-    wrapper the segmenter uses.
     """
+    First-order geometric distance from points to a conic, in pixels.
+
+        The algebraic residual ``p'Cp`` is scale-dependent and biased toward the
+        ellipse's flat sides; dividing by the gradient magnitude (Sampson's
+        approximation) turns it into something that reads in pixels and is fair
+        around the whole perimeter.  Good enough to rank outliers, and far cheaper
+        than a true orthogonal distance.
+
+        Takes the conic directly rather than an ellipse because the stereo solver
+        predicts a conic (``K^-T Q K^-1`` for a hypothesised circle pose) and
+        converting it to axis form only to convert it straight back would be waste
+        inside a least-squares inner loop.  `_sampson_distance` is the ellipse-taking
+        wrapper the segmenter uses.
+    """
+
     pts = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
     ph = np.hstack([pts, np.ones((len(pts), 1))])
     num = np.abs(np.einsum("ij,jk,ik->i", ph, c, ph))
@@ -370,37 +296,45 @@ def sampson_distance_conic(c, pts):
 
 
 def _sampson_distance(ellipse, pts):
-    """`sampson_distance_conic`, starting from an OpenCV ellipse."""
+    """
+    `sampson_distance_conic`, starting from an OpenCV ellipse.
+    """
+
     return sampson_distance_conic(conic.conic_from_ellipse(ellipse), pts)
 
 
-def axial_weights(pts, ellipse, power=AXIAL_WEIGHT_POWER,
-                  floor=AXIAL_WEIGHT_FLOOR):
-    """Weight each point by how far along the major axis it lies.
-
-    ``floor`` at the centre of the major axis, where the rod and magnet project,
-    and one at the ends, where the silhouette is the rim and can be trusted.
-
-    The floor is not cosmetic -- see `AXIAL_WEIGHT_FLOOR`. A weight of exactly
-    zero removes a contiguous arc rather than distrusting it, and what is left
-    cannot pin the ellipse's rotation.
+def axial_weights(pts, ellipse, power=AXIAL_WEIGHT_POWER, floor=AXIAL_WEIGHT_FLOOR):
     """
+    Weight each point by how far along the major axis it lies.
+
+        ``floor`` at the centre of the major axis, where the rod and magnet project,
+        and one at the ends, where the silhouette is the rim and can be trusted.
+
+        The floor is not cosmetic -- see `AXIAL_WEIGHT_FLOOR`. A weight of exactly
+        zero removes a contiguous arc rather than distrusting it, and what is left
+        cannot pin the ellipse's rotation.
+    """
+
     (cx, cy), (major, _), ang = ellipse
     if major <= 0:
         return None
     t = np.radians(ang)
     u = np.array([np.cos(t), np.sin(t)])
-    s = np.abs((np.asarray(pts, dtype=np.float64) - np.array([cx, cy])) @ u) / (major / 2.0)
+    s = np.abs((np.asarray(pts, dtype=np.float64) - np.array([cx, cy])) @ u) / (
+        major / 2.0
+    )
     return floor + (1.0 - floor) * np.clip(s, 0.0, 1.0) ** power
 
 
 def angular_coverage(ellipse, pts, bins=TRIM_COVERAGE_BINS):
-    """Fraction of the ellipse's perimeter that has points near it.
-
-    Computed in the ellipse's own frame so it measures coverage of the *shape*
-    rather than of the image. This is the redundancy test that decides whether
-    discarding points is safe -- see `TRIM_FRACTION`.
     """
+    Fraction of the ellipse's perimeter that has points near it.
+
+        Computed in the ellipse's own frame so it measures coverage of the *shape*
+        rather than of the image. This is the redundancy test that decides whether
+        discarding points is safe -- see `TRIM_FRACTION`.
+    """
+
     (cx, cy), _, ang = ellipse
     t = math.radians(ang)
     d = np.asarray(pts, dtype=np.float64).reshape(-1, 2) - np.array([cx, cy])
@@ -411,23 +345,28 @@ def angular_coverage(ellipse, pts, bins=TRIM_COVERAGE_BINS):
 
 
 def _signed_sampson(ellipse, pts):
-    """Sampson distance keeping its sign: positive is outside the ellipse."""
+    """
+    Sampson distance keeping its sign: positive is outside the ellipse.
+    """
+
     c = conic.conic_from_ellipse(ellipse)
-    ph = np.hstack([np.asarray(pts, dtype=np.float64).reshape(-1, 2),
-                    np.ones((len(pts), 1))])
+    ph = np.hstack(
+        [np.asarray(pts, dtype=np.float64).reshape(-1, 2), np.ones((len(pts), 1))]
+    )
     alg = np.einsum("ij,jk,ik->i", ph, c, ph)
     grad = 2.0 * (ph @ c.T)[:, :2]
     return alg / np.maximum(np.linalg.norm(grad, axis=1), 1e-12)
 
 
-def _outward_weights(pts, ellipse, w_out=ONE_SIDED_WEIGHT,
-                     power=AXIAL_WEIGHT_POWER):
-    """Axial weights, further reduced for points lying outside ``ellipse``.
-
-    The sign comes from the algebraic conic residual scaled by its gradient --
-    the same Sampson quantity `sampson_distance_conic` returns, kept signed
-    rather than absolute, so positive means outside.
+def _outward_weights(pts, ellipse, w_out=ONE_SIDED_WEIGHT, power=AXIAL_WEIGHT_POWER):
     """
+    Axial weights, further reduced for points lying outside ``ellipse``.
+
+        The sign comes from the algebraic conic residual scaled by its gradient --
+        the same Sampson quantity `sampson_distance_conic` returns, kept signed
+        rather than absolute, so positive means outside.
+    """
+
     (cx, cy), (major, _), ang = ellipse
     if major <= 0:
         return None
@@ -449,25 +388,27 @@ def _outward_weights(pts, ellipse, w_out=ONE_SIDED_WEIGHT,
 
 
 def fit_ellipse(pts, axial=None, power=None, iters=None):
-    """Direct ellipse fit, normalised to major-axis-first.
-
-    With ``axial`` (the default) the fit is reweighted twice to suppress the
-    axial protrusions -- see the module docstring for why this is unconditional
-    rather than tilt-adaptive. ``axial=False`` recovers the plain fit, which is
-    what `validation/tune.py` compares against.
-
-    ``power`` and ``iters`` read the module constants at *call* time rather than
-    binding them as default arguments. That matters: as defaults they are
-    captured when the function is defined, so a test that reassigns
-    ``AXIAL_WEIGHT_ITERS`` to compare weighted against unweighted silently
-    measures the weighted path twice. Pass ``axial=False`` to disable it.
-
-    ``cv2.fitEllipseDirect`` rather than plain ``fitEllipse``: it stays stable on
-    the short, nearly-straight arcs you get when the disc is close to edge-on,
-    where the ordinary fit can return a degenerate result.
-
-    Returns ``(ellipse, rms_px)`` or ``None``.
     """
+    Direct ellipse fit, normalised to major-axis-first.
+
+        With ``axial`` (the default) the fit is reweighted twice to suppress the
+        axial protrusions -- see the module docstring for why this is unconditional
+        rather than tilt-adaptive. ``axial=False`` recovers the plain fit, which is
+        what `validation/tune.py` compares against.
+
+        ``power`` and ``iters`` read the module constants at *call* time rather than
+        binding them as default arguments. That matters: as defaults they are
+        captured when the function is defined, so a test that reassigns
+        ``AXIAL_WEIGHT_ITERS`` to compare weighted against unweighted silently
+        measures the weighted path twice. Pass ``axial=False`` to disable it.
+
+        ``cv2.fitEllipseDirect`` rather than plain ``fitEllipse``: it stays stable on
+        the short, nearly-straight arcs you get when the disc is close to edge-on,
+        where the ordinary fit can return a degenerate result.
+
+        Returns ``(ellipse, rms_px)`` or ``None``.
+    """
+
     pts = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
     if len(pts) < _MIN_CONTOUR_PTS:
         return None
@@ -569,43 +510,31 @@ SUBPIX_SEARCH_PX = 3.0
 SUBPIX_SAMPLES = 13
 
 
-def subpixel_boundary(gray, pts, centre=None, search_px=SUBPIX_SEARCH_PX,
-                      n_samples=SUBPIX_SAMPLES):
-    """Move each boundary point onto the intensity edge, at sub-pixel precision.
-
-    A threshold-and-hull outline is quantised to the pixel grid, and where it
-    falls depends on how the threshold happens to slice a smoothly shaded,
-    motion-blurred edge. Measured, that injects a **2.597 deg** standard
-    deviation into the per-view tilt at 40-50 deg -- scatter that correlates with
-    nothing recorded (pose, lighting, exposure, opacity, spin), so no calibration
-    removes it, no gate feature predicts it, and no pose-dependent silhouette
-    model corrects it. See lecture notes 12.12.
-
-    Along the outward normal the intensity falls from robot to background through
-    a smooth ramp whose **half-height** crossing is where the geometric edge is,
-    independently of the threshold that found it approximately. Locating that
-    crossing by interpolation is sub-pixel and is a property of the image rather
-    than of a constant.
-
-    **It does not fix the problem it was written for, and the gap is the lesson.**
-    On a synthetic soft-edged disc of known radius it is decisively better --
-    radius bias -0.0858 -> -0.0012 px, scatter 0.0550 -> 0.0030 px, an 18x
-    improvement. Carried through to the real pipeline it reduced the per-view
-    tilt residual scatter by **1-4%** (2.597 -> 2.537 deg at 40-50 deg tilt).
-    The synthetic test measured how precisely a *known* edge can be located; the
-    real variability is *which shape presents itself* -- the mast and rod
-    projecting differently with pose, rim arcs vanishing under grazing light,
-    spin smearing the boundary across the exposure. Locating the wrong shape more
-    precisely gains almost nothing.
-
-    So this is off by default: 0.5 ms/frame is not worth 2% against a 2.4 ms
-    budget at 420 Hz. It is kept because the code is correct and the comparison
-    should be repeatable.
-
-    ``pts`` are the coarse boundary points; ``centre`` fixes the outward
-    direction and defaults to their mean. Points whose profile is not a clean
-    monotone fall are left where they were rather than moved onto noise.
+def subpixel_boundary(
+    gray, pts, centre=None, search_px=SUBPIX_SEARCH_PX, n_samples=SUBPIX_SAMPLES
+):
     """
+    Move each boundary point onto the intensity edge, at sub-pixel precision.
+
+        A threshold-and-hull outline is quantised to the pixel grid, and where it
+        lands depends on how the threshold happened to slice a shaded, blurred edge.
+        Along the outward normal the intensity ramps from robot to background, and its
+        half-height crossing is the geometric edge whatever threshold found it
+        approximately. Interpolating that crossing is sub-pixel and is a property of
+        the image rather than of a constant.
+
+        **Off by default: it does not fix what it was written for.** On a synthetic
+        disc it is 18x better (scatter 0.0550 -> 0.0030 px); in the real pipeline it
+        buys 1-4% of the tilt residual, for 0.5 ms/frame against a 2.4 ms budget at
+        420 Hz. The synthetic test measures how precisely a *known* edge can be
+        located; the real variability is *which shape presents itself*. Kept because
+        the comparison should stay repeatable. `ai/notes/pose_appearance.md`.
+
+        ``pts`` are the coarse boundary points; ``centre`` fixes the outward
+        direction and defaults to their mean. Points whose profile is not a clean
+        monotone fall are left where they were rather than moved onto noise.
+    """
+
     pts = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
     if len(pts) < 3:
         return pts
@@ -616,15 +545,19 @@ def subpixel_boundary(gray, pts, centre=None, search_px=SUBPIX_SEARCH_PX,
     c = np.asarray(centre, dtype=np.float64) if centre is not None else pts.mean(0)
     d = pts - c
     n = np.linalg.norm(d, axis=1, keepdims=True)
-    u = d / np.maximum(n, 1e-9)                      # outward unit normals
+    u = d / np.maximum(n, 1e-9)  # outward unit normals
 
     # Sample the profile along each normal in one batched remap.
     t = np.linspace(-search_px, search_px, n_samples, dtype=np.float64)
     xs = pts[:, None, 0] + u[:, None, 0] * t[None, :]
     ys = pts[:, None, 1] + u[:, None, 1] * t[None, :]
-    prof = cv2.remap(g, xs.astype(np.float32), ys.astype(np.float32),
-                     interpolation=cv2.INTER_LINEAR,
-                     borderMode=cv2.BORDER_REPLICATE)
+    prof = cv2.remap(
+        g,
+        xs.astype(np.float32),
+        ys.astype(np.float32),
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
 
     inner = prof[:, 0]
     outer = prof[:, -1]
@@ -653,31 +586,24 @@ def subpixel_boundary(gray, pts, centre=None, search_px=SUBPIX_SEARCH_PX,
 
 
 def silhouette_points(mask, keep_fraction=_BLOB_KEEP_FRACTION):
-    """Every boundary pixel of the kept blobs, as an (N, 2) array.
-
-    `silhouette_hull` returns the convex hull's **vertices**, which is 9-31
-    points on the real captures in `pose/assets/captures/` -- against
-    192-3072 in the contour they came from, a factor of 21-134 discarded before
-    anything is fitted. Two reductions do it: `CHAIN_APPROX_SIMPLE` drops
-    collinear runs, then `convexHull` keeps only extreme vertices.
-
-    That loss is not free. Robust estimation needs redundancy: measured across
-    boundary densities, discarding half the points to suppress the mast improves
-    the fit above ~32 points and **degrades** it below, because five conic
-    parameters fitted to six survivors are worse than five fitted to twelve
-    contaminated ones. At hull density the real captures sit on the wrong side of
-    that line; at contour density they do not.
-
-    The one-sidedness that the hull provided is kept, and does not depend on the
-    hull. The silhouette is the rim *union* the rod and mount, so its outer
-    contour follows the rim except where those protrude, and never falls inside
-    it. Contamination therefore remains strictly outward -- the property the
-    robust step relies on -- while the count rises by two orders of magnitude.
-
-    Returns ``(points, area_px)`` or ``(None, 0.0)``, matching
-    `silhouette_hull`. The hull is still the right answer when a *closed* shape
-    is needed; this is for fitting, where it is not.
     """
+    Every boundary pixel of the kept blobs, as an (N, 2) array.
+
+        `silhouette_hull` keeps only hull *vertices* -- 9-31 points on the real
+        captures against 192-3072 in the contour they came from. That costs the
+        redundancy robust estimation needs: measured across densities, trimming half
+        the points to suppress the mast helps above ~32 points and **hurts** below,
+        and hull density sits on the wrong side of that line.
+
+        One-sidedness survives without the hull. The silhouette is the rim *union* the
+        rod and mount, so its outer contour follows the rim except where those
+        protrude and never falls inside it -- which is the property the robust step
+        relies on.
+
+        @return: ``(points, area_px)``, or ``(None, 0.0)``. Use `silhouette_hull` when
+            a closed shape is needed; this is for fitting, where it is not.
+    """
+
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n <= 1:
         return None, 0.0
@@ -694,8 +620,7 @@ def silhouette_points(mask, keep_fraction=_BLOB_KEEP_FRACTION):
 
     # NONE, not SIMPLE: the collinear runs SIMPLE discards are exactly the
     # redundancy the robust step needs.
-    contours, _ = cv2.findContours(kept_mask, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_NONE)
+    contours, _ = cv2.findContours(kept_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours:
         return None, 0.0
     pts = np.vstack([c.reshape(-1, 2) for c in contours]).astype(np.float64)
@@ -722,10 +647,15 @@ SHAPE_TOL = 0.05
 
 
 def _group_hull(labels, members, n):
-    """Convex hull of a set of labels, as float64 (N, 2), or ``None``."""
+    """
+    Convex hull of a set of labels, as float64 (N, 2), or ``None``.
+    """
+
     lut = np.zeros(n, dtype=np.uint8)
     lut[members] = 255
-    contours, _ = cv2.findContours(lut[labels], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        lut[labels], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     if not contours:
         return None
     pts = np.vstack([c.reshape(-1, 2) for c in contours]).astype(np.float32)
@@ -736,38 +666,40 @@ def _group_hull(labels, members, n):
 
 
 def _best_group(keep, labels, stats, centroids, n, max_spread):
-    """Which blobs belong to the robot, by which grouping is most elliptical.
-
-    Each candidate anchor gathers the blobs within ``max_spread`` of its own
-    radius, and the group is scored by the **plain** fit's Sampson rms relative to
-    its own size. Relative and not absolute because a large ellipse tolerates more
-    pixels of residual than a small one, and an absolute score would systematically
-    prefer whichever group is smallest -- which is the clutter.
-
-    The plain fit, not `fit_ellipse`: the weighted refits exist to remove the
-    rod and magnet from a silhouette already known to be the robot's, and running
-    them here would cost about 1 ms per candidate to answer a question they were
-    not built for. Scoring is a shape test, and `cv2.fitEllipseDirect` is the
-    cheap honest one.
-
-    **Shape decides which groups are admissible; size decides between them.**
-    Ranking on shape alone does not work, and the reason is worth keeping: a
-    solid disc is a *perfect* ellipse, so a round piece of clutter scores better
-    than the robot ever can. Measured on the synthetic clutter scene, ranking by
-    shape returns a 64 px coil in place of the 125 px robot. Every real candidate
-    clears the shape tolerance comfortably -- the robot fits at rms/major 0.006 on
-    both ELP captures -- so the tolerance is there to reject groups that span two
-    objects, and among what survives, the robot is simply the biggest thing in
-    frame that is an ellipse at all.
     """
+    Which blobs belong to the robot, by which grouping is most elliptical.
+
+        Each candidate anchor gathers the blobs within ``max_spread`` of its own
+        radius, and the group is scored by the **plain** fit's Sampson rms relative to
+        its own size. Relative and not absolute because a large ellipse tolerates more
+        pixels of residual than a small one, and an absolute score would systematically
+        prefer whichever group is smallest -- which is the clutter.
+
+        The plain fit, not `fit_ellipse`: the weighted refits exist to remove the
+        rod and magnet from a silhouette already known to be the robot's, and running
+        them here would cost about 1 ms per candidate to answer a question they were
+        not built for. Scoring is a shape test, and `cv2.fitEllipseDirect` is the
+        cheap honest one.
+
+        **Shape decides which groups are admissible; size decides between them.**
+        Ranking on shape alone fails because a solid disc is a *perfect* ellipse, so
+        round clutter outscores the robot: on the synthetic scene it returns a 64 px
+        coil over the 125 px robot. Real candidates clear the tolerance easily (the
+        robot fits at rms/major 0.006 on both ELP captures), so the tolerance rejects
+        groups spanning two objects and size picks among the survivors.
+    """
+
     order = keep[np.argsort(stats[keep, cv2.CC_STAT_AREA])[::-1]][:_MAX_ANCHORS]
     admissible = []
     best, best_score = None, np.inf
     for anchor in order:
         # The anchor's own half-diagonal, so the scale comes from the object
         # rather than a pixel constant that would not survive a resolution change.
-        radius = 0.5 * float(np.hypot(stats[anchor, cv2.CC_STAT_WIDTH],
-                                      stats[anchor, cv2.CC_STAT_HEIGHT]))
+        radius = 0.5 * float(
+            np.hypot(
+                stats[anchor, cv2.CC_STAT_WIDTH], stats[anchor, cv2.CC_STAT_HEIGHT]
+            )
+        )
         if radius <= 0:
             continue
         d = np.hypot(*(centroids[keep] - centroids[anchor]).T)
@@ -793,31 +725,30 @@ def _best_group(keep, labels, stats, centroids, n, max_spread):
 
 
 def silhouette_hull(mask, keep_fraction=_BLOB_KEEP_FRACTION, max_spread=None):
-    """Convex hull of every blob worth keeping, as an (N, 2) array.
-
-    Blobs are sized by their true pixel count via `connectedComponentsWithStats`,
-    not by `contourArea` -- a broken ring arc is a thin sliver whose polygon area
-    is near zero, so an area filter would throw away exactly the pieces we most
-    need to keep.
-
-    ``max_spread`` additionally requires a blob to be *near* an anchor blob, in
-    multiples of that anchor's own radius, and chooses the anchor by which
-    grouping actually fits an ellipse. Area alone cannot separate the robot from
-    clutter that survives the region gate: measured on the face-on ELP capture,
-    the robot is 17480 px and the largest stray is 4231 px, only 4x smaller, so
-    any area fraction that drops the stray is one bad frame away from dropping a
-    rim arc.
-
-    Distance separates them with room to spare -- those strays sit 1.76-2.5 robot
-    radii from its centroid, while a genuine rim arc cannot be further than one
-    radius by definition. **But the anchor cannot be "the largest blob".** The rim
-    is a thin ring and therefore hollow, so a solid piece of clutter can outweigh
-    it: on the synthetic clutter scene the robot ring is 1783 px against 3225 px
-    for a coil, and anchoring on area picks the coil and returns a confident fit
-    to the wrong object. Anchoring on shape instead is what the robot uniquely
-    has -- it is the thing in frame that *is* an ellipse. Off by default, because
-    the bright rig's constants were all fitted without any of this.
     """
+    Convex hull of every blob worth keeping, as an (N, 2) array.
+
+        Blobs are sized by their true pixel count via `connectedComponentsWithStats`,
+        not by `contourArea` -- a broken ring arc is a thin sliver whose polygon area
+        is near zero, so an area filter would throw away exactly the pieces we most
+        need to keep.
+
+        ``max_spread`` additionally requires a blob to be *near* an anchor blob, in
+        multiples of that anchor's own radius, and chooses the anchor by which
+        grouping actually fits an ellipse. Area alone cannot separate the robot from
+        clutter that survives the region gate: measured on the face-on ELP capture,
+        the robot is 17480 px and the largest stray is 4231 px, only 4x smaller, so
+        any area fraction that drops the stray is one bad frame away from dropping a
+        rim arc.
+
+        Distance separates them with room to spare: strays sit 1.76-2.5 robot radii
+        from the centroid, while a rim arc cannot exceed one radius by definition.
+        **But the anchor cannot be the largest blob** -- the rim is hollow, so solid
+        clutter outweighs it (1783 px ring against 3225 px coil), and anchoring on
+        area returns a confident fit to the wrong object. Anchor on shape instead.
+        Off by default: the bright rig's constants were fitted without any of this.
+    """
+
     n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
     if n <= 1:
         return None, 0.0
@@ -844,7 +775,9 @@ def silhouette_hull(mask, keep_fraction=_BLOB_KEEP_FRACTION, max_spread=None):
         lut[keep] = 255
         kept_mask = lut[labels]
 
-    contours, _ = cv2.findContours(kept_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        kept_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     if not contours:
         return None, 0.0
 
@@ -858,13 +791,12 @@ def silhouette_hull(mask, keep_fraction=_BLOB_KEEP_FRACTION, max_spread=None):
 
 # --- "dark": a black body on a white ground, with clutter in frame ---
 #
-# Inverting the threshold is most of it, but not all of it. The rig has bronze
-# drive coils, wires and a dark ambient beyond the backdrop, and against a white
-# ground **all of it is dark too**. `silhouette_hull` pools every blob and takes
-# one convex hull, so clutter anywhere in frame does not add a stray contour, it
-# swallows the rim: the hull spans both and the fitted ellipse is meaningless.
+# Inverting the threshold is most of it, not all. Coils, wires and the room beyond
+# the backdrop are all dark against a white ground, and `silhouette_hull` pools
+# every blob into one hull -- so clutter does not add a stray contour, it swallows
+# the rim.
 #
-# Measured on those frames, which is what the constants below are fitted to:
+# Measured on the real captures, which is what the constants below are fitted to:
 #
 #                      p5    median   p95     local sd (15x15)
 #     white backdrop   176     181    193       0.8
@@ -907,21 +839,15 @@ BACKDROP_ERODE = 15
 # body must read below **80** counts. Note the inversion when changing it -- a
 # *larger* number here is a *stricter*, darker cut.
 #
-# **Raised from 110 on the rod**, i.e. the cut moved from "below 145" to "below
-# 80". The rod's p5 is 83, so 145 admits it; the drone's median is 42-78, so 80
-# keeps the drone and drops the rod. Measured on the edge-on capture, the major
-# axis goes from +130% at the old level to +1% at this one. The
-# old value came from a sweep on 80 rendered frames against analytic truth
-# (median / p90 error in the fitted major axis):
+# **Raised from 110 on the rod**: the cut moved from "below 145" to "below 80".
+# The rod's p5 is 83, so 145 admits it; the drone's median is 42-78, so 80 keeps
+# the drone and drops the rod. On the edge-on capture the major axis goes from
+# +130% to +1%.
 #
-#     DARK_THRESH   80     100    110    120    140    150    180
-#     median      0.68%   0.46%   --    0.45%  1.03%  1.36%  5.36%
-#     p90         1.55%   1.14%   --    1.93% 14.29% 30.08% 43.57%
-#
-# That sweep is kept for its shape -- the threshold fails by eating rim arcs, not
-# by losing the robot, so detection stayed 80/80 at every level while the p90 ran
-# to 30% -- but it was rendered without a rod in frame and so cannot speak to the
-# choice actually being made here.
+# The old value came from a render sweep with no rod in frame, so it cannot speak
+# to this choice. Its shape is still worth knowing: the threshold fails by eating
+# rim arcs, not by losing the robot, so detection stayed 80/80 at every level while
+# p90 ran to 30% (`ai/notes/pose_appearance.md`).
 #
 # **The margin is the result, not the working point.** Swept against both real
 # captures, this passes over **170-215** and fails either side, so 190 is the
@@ -965,11 +891,13 @@ _BACKGROUND_CACHE = {}
 
 
 def load_background(path=None):
-    """The empty-rig frame, or ``None`` if one has never been captured.
-
-    Cached by path and mtime: `valid_region` runs every frame and re-reading a
-    PNG at 120 Hz would cost more than the subtraction it feeds.
     """
+    The empty-rig frame, or ``None`` if one has never been captured.
+
+        Cached by path and mtime: `valid_region` runs every frame and re-reading a
+        PNG at 120 Hz would cost more than the subtraction it feeds.
+    """
+
     path = Path(path or BACKGROUND_PATH)
     try:
         stamp = path.stat().st_mtime
@@ -983,20 +911,22 @@ def load_background(path=None):
 
 
 def background_mask(gray, bg=None, thresh=None):
-    """Everything that differs from the empty-rig frame.
-
-    The coils, the wires, the dark ambient, the support box and the backdrop are
-    all **fixed to the rig**, so one subtraction removes every one of them at
-    once -- which is why this is preferred over any amount of cleverness about
-    what the clutter looks like. Measured at 0.056 ms on a 1280x800 frame,
-    against 2.43 ms for `backdrop_mask` and 48.4 ms for a full-resolution
-    version of it, so it is the only option that leaves the loop camera-bound at
-    121 fps.
-
-    Returns ``None`` if no background frame exists or it does not match the
-    frame size -- a resolution change invalidates it as surely as moving the
-    camera does.
     """
+    Everything that differs from the empty-rig frame.
+
+        The coils, the wires, the dark ambient, the support box and the backdrop are
+        all **fixed to the rig**, so one subtraction removes every one of them at
+        once -- which is why this is preferred over any amount of cleverness about
+        what the clutter looks like. Measured at 0.056 ms on a 1280x800 frame,
+        against 2.43 ms for `backdrop_mask` and 48.4 ms for a full-resolution
+        version of it, so it is the only option that leaves the loop camera-bound at
+        121 fps.
+
+        Returns ``None`` if no background frame exists or it does not match the
+        frame size -- a resolution change invalidates it as surely as moving the
+        camera does.
+    """
+
     bg = load_background() if bg is None else bg
     if bg is None or bg.shape != gray.shape:
         return None
@@ -1005,22 +935,24 @@ def background_mask(gray, bg=None, thresh=None):
 
 
 def backdrop_mask(gray, lum=None, sd_max=None, scale=None, erode=None):
-    """The white backdrop: the one bright, smooth region, convex-hulled.
-
-    The fallback for when no background frame has been captured. It finds where
-    to *look* rather than what to reject, which is the only formulation that
-    survives the measurements: the drone and the coils overlap in brightness,
-    but nothing else in frame is both bright and smooth.
-
-    **Convex hull, not hole filling.** Filling enclosed holes is the obvious way
-    to re-admit the drone, which punches a dark hole in the backdrop, and it does
-    not work here: the drone touches the rod, and the rod runs off the bottom of
-    the frame, so drone-hole and rod-notch are one region open to the border and
-    therefore not enclosed. Both `MORPH_CLOSE` and a border flood-fill return
-    nothing on the face-on capture. The hull has no such failure -- and it
-    re-admits the rod too, which is why `DARK_THRESH` rather than geometry is
-    what removes it.
     """
+    The white backdrop: the one bright, smooth region, convex-hulled.
+
+        The fallback for when no background frame has been captured. It finds where
+        to *look* rather than what to reject, which is the only formulation that
+        survives the measurements: the drone and the coils overlap in brightness,
+        but nothing else in frame is both bright and smooth.
+
+        **Convex hull, not hole filling.** Filling enclosed holes is the obvious way
+        to re-admit the drone, which punches a dark hole in the backdrop, and it does
+        not work here: the drone touches the rod, and the rod runs off the bottom of
+        the frame, so drone-hole and rod-notch are one region open to the border and
+        therefore not enclosed. Both `MORPH_CLOSE` and a border flood-fill return
+        nothing on the face-on capture. The hull has no such failure -- and it
+        re-admits the rod too, which is why `DARK_THRESH` rather than geometry is
+        what removes it.
+    """
+
     lum = BACKDROP_LUM if lum is None else lum
     sd_max = BACKDROP_SD if sd_max is None else sd_max
     scale = BACKDROP_SCALE if scale is None else scale
@@ -1035,7 +967,9 @@ def backdrop_mask(gray, lum=None, sd_max=None, scale=None, erode=None):
     m = ((mu > lum) & (sd < sd_max)).astype(np.uint8) * 255
     # Open before taking components: a coil's specular highlight is momentarily
     # both bright and locally flat, and would otherwise merge with the backdrop.
-    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    m = cv2.morphologyEx(
+        m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    )
 
     n, labels, stats, _ = cv2.connectedComponentsWithStats(m, 8)
     if n <= 1:
@@ -1050,36 +984,42 @@ def backdrop_mask(gray, lum=None, sd_max=None, scale=None, erode=None):
     cv2.fillConvexPoly(out, cv2.convexHull(pts), 255)
     e = max(1, int(round(erode * scale)))
     out = cv2.erode(out, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (e, e)))
-    return cv2.resize(out, (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return cv2.resize(
+        out, (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_NEAREST
+    )
 
 
 def valid_region(gray):
-    """Where the robot may be, as a uint8 mask, or ``None`` if it cannot be told.
-
-    Background subtraction when a background frame exists, the backdrop finder
-    otherwise. ``None`` is a real answer and callers must honour it: with no
-    valid region the alternative is an ungated threshold over the whole frame,
-    and the dark ambient beyond the backdrop is *darker than the robot* and
-    reaches the frame edge, so the hull spans the image and the fit is confident
-    and wrong. The module docstring rejects Otsu for the same reason -- returning
-    nothing is the correct answer, not a failure to produce one.
     """
+    Where the robot may be, as a uint8 mask, or ``None`` if it cannot be told.
+
+        Background subtraction when a background frame exists, the backdrop finder
+        otherwise. ``None`` is a real answer and callers must honour it: with no
+        valid region the alternative is an ungated threshold over the whole frame,
+        and the dark ambient beyond the backdrop is *darker than the robot* and
+        reaches the frame edge, so the hull spans the image and the fit is confident
+        and wrong. The module docstring rejects Otsu for the same reason -- returning
+        nothing is the correct answer, not a failure to produce one.
+    """
+
     m = background_mask(gray)
     return m if m is not None else backdrop_mask(gray)
 
 
 def score_channel(frame, appearance=None, thresh=None, region=None):
-    """``(single_channel, level)`` where the robot is bright above ``level``.
-
-    The one place the rig's appearance enters. Everything downstream -- morphology,
-    hull, ellipse fit, sub-pixel refinement -- works on the returned channel and
-    neither knows nor cares which appearance produced it.
-
-    The channel is ``None`` when the appearance needs a valid region and none can
-    be found; callers must treat that as "no detection" rather than thresholding
-    anyway. ``region`` supplies one that has already been computed, so `segment`
-    can keep it for the overlay without paying for `backdrop_mask` twice.
     """
+    ``(single_channel, level)`` where the robot is bright above ``level``.
+
+        The one place the rig's appearance enters. Everything downstream -- morphology,
+        hull, ellipse fit, sub-pixel refinement -- works on the returned channel and
+        neither knows nor cares which appearance produced it.
+
+        The channel is ``None`` when the appearance needs a valid region and none can
+        be found; callers must treat that as "no detection" rather than thresholding
+        anyway. ``region`` supplies one that has already been computed, so `segment`
+        can keep it for the overlay without paying for `backdrop_mask` twice.
+    """
+
     appearance = APPEARANCE if appearance is None else appearance
 
     if appearance == "bright":
@@ -1101,18 +1041,20 @@ def score_channel(frame, appearance=None, thresh=None, region=None):
 
 
 def clutter_mask(frame):
-    """Everything the segmenter will ignore -- the complement of `valid_region`.
-
-    Exposed on its own because the rejected area is worth having as an object
-    rather than only as something to remove. It is what the live overlay shades,
-    so a wrong pose and a wrong *rejection* can be told apart at a glance -- in a
-    plain ellipse overlay they look identical. It is also a direct check on
-    whether the camera has moved, since every source of clutter here is fixed to
-    the rig.
-
-    Returns an all-255 mask when no valid region can be found, because in that
-    case everything is being ignored, which is exactly what should be displayed.
     """
+    Everything the segmenter will ignore -- the complement of `valid_region`.
+
+        Exposed on its own because the rejected area is worth having as an object
+        rather than only as something to remove. It is what the live overlay shades,
+        so a wrong pose and a wrong *rejection* can be told apart at a glance -- in a
+        plain ellipse overlay they look identical. It is also a direct check on
+        whether the camera has moved, since every source of clutter here is fixed to
+        the rig.
+
+        Returns an all-255 mask when no valid region can be found, because in that
+        case everything is being ignored, which is exactly what should be displayed.
+    """
+
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
     region = valid_region(gray)
     if region is None:
@@ -1120,27 +1062,35 @@ def clutter_mask(frame):
     return cv2.bitwise_not(region)
 
 
-def segment(frame, thresh=None, min_area=MIN_BLOB_AREA_PX, subpixel=False,
-            axial=None, appearance=None):
-    """Threshold, clean up, hull the silhouette, fit the rim ellipse.
-
-    ``frame`` may be grayscale or BGR.  Returns a `Segmentation`, or ``None``
-    when nothing plausible is present -- callers must handle ``None`` rather
-    than assume a detection, since a lost frame is normal in flight.
-
-    ``subpixel`` re-locates the hull onto the intensity edge before fitting; see
-    `subpixel_boundary`. Pass ``False`` to recover the previous behaviour, which
-    is how the A/B in the journal was run.
-
-    ``axial=False`` disables the weighted refit in `fit_ellipse`. It is a real
-    parameter rather than a module flag on purpose: `AXIAL_WEIGHT_ITERS` used to
-    be a default argument, so reassigning it in a test changed nothing and the
-    A/B silently measured the weighted path twice.
-
-    ``appearance`` selects how the robot is told apart from its background; see
-    `score_channel`. ``thresh=None`` takes that appearance's own default level,
-    since 128 is meaningful for luminance and meaningless for chroma.
+def segment(
+    frame,
+    thresh=None,
+    min_area=MIN_BLOB_AREA_PX,
+    subpixel=False,
+    axial=None,
+    appearance=None,
+):
     """
+    Threshold, clean up, hull the silhouette, fit the rim ellipse.
+
+        ``frame`` may be grayscale or BGR.  Returns a `Segmentation`, or ``None``
+        when nothing plausible is present -- callers must handle ``None`` rather
+        than assume a detection, since a lost frame is normal in flight.
+
+        ``subpixel`` re-locates the hull onto the intensity edge before fitting; see
+        `subpixel_boundary`. Pass ``False`` to recover the previous behaviour, which
+        is how the A/B in the journal was run.
+
+        ``axial=False`` disables the weighted refit in `fit_ellipse`. It is a real
+        parameter rather than a module flag on purpose: `AXIAL_WEIGHT_ITERS` used to
+        be a default argument, so reassigning it in a test changed nothing and the
+        A/B silently measured the weighted path twice.
+
+        ``appearance`` selects how the robot is told apart from its background; see
+        `score_channel`. ``thresh=None`` takes that appearance's own default level,
+        since 128 is meaningful for luminance and meaningless for chroma.
+    """
+
     t0 = time.perf_counter()
 
     # Computed here rather than inside `score_channel` so it can be kept on the
@@ -1196,18 +1146,20 @@ def segment(frame, thresh=None, min_area=MIN_BLOB_AREA_PX, subpixel=False,
 
 
 def undistort_ellipse(ellipse, camera_matrix, dist_coeffs, n_samples=180):
-    """Re-fit an ellipse after removing lens distortion.
-
-    `conic.py` assumes an ideal pinhole, but the measured intrinsics carry real
-    distortion (k1 = 0.136 on this camera, which moves rim pixels by a couple of
-    px near the edges -- small, but it biases the recovered tilt systematically
-    rather than randomly, so it is worth removing).
-
-    Distortion does not map an ellipse to an ellipse, so the honest thing is to
-    sample the perimeter, undistort the samples, and refit.  Sampling the fitted
-    ellipse rather than the raw contour keeps this independent of how many
-    contour points there were.
     """
+    Re-fit an ellipse after removing lens distortion.
+
+        `conic.py` assumes an ideal pinhole, but the measured intrinsics carry real
+        distortion (k1 = 0.136 on this camera, which moves rim pixels by a couple of
+        px near the edges -- small, but it biases the recovered tilt systematically
+        rather than randomly, so it is worth removing).
+
+        Distortion does not map an ellipse to an ellipse, so the honest thing is to
+        sample the perimeter, undistort the samples, and refit.  Sampling the fitted
+        ellipse rather than the raw contour keeps this independent of how many
+        contour points there were.
+    """
+
     if dist_coeffs is None or not np.any(dist_coeffs):
         return ellipse
 
@@ -1230,35 +1182,43 @@ REJECT_BGR = (0, 0, 255)
 
 
 def shade_rejected(out, region, alpha=REJECT_ALPHA, colour=REJECT_BGR):
-    """Tint everything outside ``region`` in place, and return ``out``.
-
-    A wrong pose and a wrong *rejection* look identical in a plain ellipse
-    overlay -- both show an ellipse in the wrong place -- and they have opposite
-    fixes. Shading what was ignored separates them at a glance, which is the only
-    reason the region is carried on `Segmentation` rather than recomputed.
     """
+    Tint everything outside ``region`` in place, and return ``out``.
+
+        A wrong pose and a wrong *rejection* look identical in a plain ellipse
+        overlay -- both show an ellipse in the wrong place -- and they have opposite
+        fixes. Shading what was ignored separates them at a glance, which is the only
+        reason the region is carried on `Segmentation` rather than recomputed.
+    """
+
     if region is None:
         return out
     off = region == 0
     if not off.any():
         return out
-    out[off] = (out[off] * (1.0 - alpha) + np.array(colour, np.float32) * alpha).astype(np.uint8)
+    out[off] = (out[off] * (1.0 - alpha) + np.array(colour, np.float32) * alpha).astype(
+        np.uint8
+    )
     return out
 
 
 def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
-    """Overlay the fitted ellipse, its axes and the ignored area on a copy.
-
-    Converts grayscale to BGR first so the overlay survives -- the same trap
-    `servo.py:199` documents.  Returns a new image; the input is untouched.
-
-    ``rejected`` shades the area outside the valid region; ``normal_px`` draws the
-    rotor axis as an image-space segment ``((x0, y0), (x1, y1))``, which only the
-    caller can compute since it needs the camera matrix and the 3-D pose.
     """
+    Overlay the fitted ellipse, its axes and the ignored area on a copy.
+
+        Converts grayscale to BGR first so the overlay survives -- the same trap
+        `servo.py:199` documents.  Returns a new image; the input is untouched.
+
+        ``rejected`` shades the area outside the valid region; ``normal_px`` draws the
+        rotor axis as an image-space segment ``((x0, y0), (x1, y1))``, which only the
+        caller can compute since it needs the camera matrix and the 3-D pose.
+    """
+
     out = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
     if seg is None:
-        cv2.putText(out, "no detection", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(
+            out, "no detection", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
+        )
         return out
 
     if rejected:
@@ -1267,15 +1227,23 @@ def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
     cv2.ellipse(out, seg.ellipse, colour, 1)
     (cx, cy), (major, minor), ang = seg.ellipse
     th = np.radians(ang)
-    for half, c, col in ((major / 2, (np.cos(th), np.sin(th)), colour),
-                         (minor / 2, (-np.sin(th), np.cos(th)), (255, 160, 0))):
+    for half, c, col in (
+        (major / 2, (np.cos(th), np.sin(th)), colour),
+        (minor / 2, (-np.sin(th), np.cos(th)), (255, 160, 0)),
+    ):
         p0 = (int(cx - half * c[0]), int(cy - half * c[1]))
         p1 = (int(cx + half * c[0]), int(cy + half * c[1]))
         cv2.line(out, p0, p1, col, 1)
     if normal_px is not None:
         (nx0, ny0), (nx1, ny1) = normal_px
-        cv2.arrowedLine(out, (int(nx0), int(ny0)), (int(nx1), int(ny1)),
-                        (255, 255, 0), 2, tipLength=0.15)
+        cv2.arrowedLine(
+            out,
+            (int(nx0), int(ny0)),
+            (int(nx1), int(ny1)),
+            (255, 255, 0),
+            2,
+            tipLength=0.15,
+        )
     cv2.circle(out, (int(cx), int(cy)), 3, (0, 0, 255), -1)
     cv2.putText(
         out,

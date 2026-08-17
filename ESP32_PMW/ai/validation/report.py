@@ -1,4 +1,5 @@
-"""Turn a sweep CSV into a text summary and figures.
+"""
+Turn a sweep CSV into a text summary and figures.
 
     uv run python controller/pose/validation/report.py controller/pose/validation_results.csv
 
@@ -31,11 +32,18 @@ def load(path):
 
 
 def _fmt(v, unit="", nd=2):
-    return "n/a" if v is None or (isinstance(v, float) and not np.isfinite(v)) else f"{v:.{nd}f}{unit}"
+    return (
+        "n/a"
+        if v is None or (isinstance(v, float) and not np.isfinite(v))
+        else f"{v:.{nd}f}{unit}"
+    )
 
 
 def summarise(path, tilt_limit=40.0):
-    """Print the summary. ``tilt_limit`` marks where the flat-circle model holds."""
+    """
+    Print the summary. ``tilt_limit`` marks where the flat-circle model holds.
+    """
+
     df = load(path)
     n = len(df)
     det = df[df["detected"] == 1].copy()
@@ -44,8 +52,10 @@ def summarise(path, tilt_limit=40.0):
     print("=" * 78)
     print(f"pose validation summary  --  {Path(path).name}")
     print("=" * 78)
-    print(f"cells {n} | detected {len(det)} ({len(det)/max(1,n):.1%}) | "
-          f"missed {n - len(det)}")
+    print(
+        f"cells {n} | detected {len(det)} ({len(det)/max(1,n):.1%}) | "
+        f"missed {n - len(det)}"
+    )
 
     if det.empty:
         print("nothing detected; no metrics to report")
@@ -55,38 +65,58 @@ def summarise(path, tilt_limit=40.0):
     outside = det[det["tilt_deg"] > tilt_limit]
 
     print()
-    print(f"-- accuracy within the flat-circle envelope (tilt <= {tilt_limit:g} deg, "
-          f"{len(inside)} cells)")
+    print(
+        f"-- accuracy within the flat-circle envelope (tilt <= {tilt_limit:g} deg, "
+        f"{len(inside)} cells)"
+    )
     _accuracy_block(inside)
 
     if not outside.empty:
         print()
-        print(f"-- outside the envelope (tilt > {tilt_limit:g} deg, {len(outside)} cells)")
-        print("   the mast and magnet dominate the silhouette here; expected to degrade")
+        print(
+            f"-- outside the envelope (tilt > {tilt_limit:g} deg, {len(outside)} cells)"
+        )
+        print(
+            "   the mast and magnet dominate the silhouette here; expected to degrade"
+        )
         _accuracy_block(outside)
 
     print()
     print("-- ambiguity (two back-projection branches; one frame cannot choose)")
     wrong = det["branch_wrong"].sum()
     print(f"   wrong branch chosen in {wrong}/{len(det)} cells ({wrong/len(det):.1%})")
-    print(f"   median normal error, chosen branch : {_fmt(det['normal_err_deg'].median(), ' deg')}")
-    print(f"   median normal error, best branch   : {_fmt(det['normal_err_best_deg'].median(), ' deg')}")
-    print(f"   median ambiguity margin            : {_fmt(det['ambiguity_margin_deg'].median(), ' deg')}")
+    print(
+        f"   median normal error, chosen branch : {_fmt(det['normal_err_deg'].median(), ' deg')}"
+    )
+    print(
+        f"   median normal error, best branch   : {_fmt(det['normal_err_best_deg'].median(), ' deg')}"
+    )
+    print(
+        f"   median ambiguity margin            : {_fmt(det['ambiguity_margin_deg'].median(), ' deg')}"
+    )
 
     print()
     print("-- compute time")
     tot = det["t_total_ms"]
-    print(f"   median {_fmt(tot.median(), ' ms', 3)} | p95 {_fmt(tot.quantile(0.95), ' ms', 3)} "
-          f"| max {_fmt(tot.max(), ' ms', 3)}")
-    print(f"   segmentation {_fmt(det['t_seg_ms'].median(), ' ms', 3)} | "
-          f"back-projection {_fmt(det['t_est_ms'].median(), ' ms', 3)}")
-    print(f"   sustainable {1e3/tot.median():.0f} Hz at the median, "
-          f"{1e3/tot.quantile(0.95):.0f} Hz at p95")
+    print(
+        f"   median {_fmt(tot.median(), ' ms', 3)} | p95 {_fmt(tot.quantile(0.95), ' ms', 3)} "
+        f"| max {_fmt(tot.max(), ' ms', 3)}"
+    )
+    print(
+        f"   segmentation {_fmt(det['t_seg_ms'].median(), ' ms', 3)} | "
+        f"back-projection {_fmt(det['t_est_ms'].median(), ' ms', 3)}"
+    )
+    print(
+        f"   sustainable {1e3/tot.median():.0f} Hz at the median, "
+        f"{1e3/tot.quantile(0.95):.0f} Hz at p95"
+    )
     for fps in FPS_BUDGETS:
         budget = 1e3 / fps
         over = (tot > budget).mean()
-        print(f"   vs {fps} fps ({budget:.2f} ms): {over:6.2%} of cells over budget"
-              f"   [{'OK' if over < 0.01 else 'OVER'}]")
+        print(
+            f"   vs {fps} fps ({budget:.2f} ms): {over:6.2%} of cells over budget"
+            f"   [{'OK' if over < 0.01 else 'OVER'}]"
+        )
 
     print()
     print("-- detection rate by condition (share of cells with any detection)")
@@ -104,14 +134,20 @@ def summarise(path, tilt_limit=40.0):
 
     print()
     print("-- worst lighting rigs by median position error")
-    by_light = det.groupby("light").agg(
-        n=("pos_err_mm", "size"),
-        pos=("pos_err_mm", "median"),
-        normal=("normal_err_best_deg", "median"),
-        detect=("detected", "mean"),
-    ).sort_values("pos", ascending=False)
+    by_light = (
+        det.groupby("light")
+        .agg(
+            n=("pos_err_mm", "size"),
+            pos=("pos_err_mm", "median"),
+            normal=("normal_err_best_deg", "median"),
+            detect=("detected", "mean"),
+        )
+        .sort_values("pos", ascending=False)
+    )
     for name, row in by_light.head(4).iterrows():
-        print(f"   {name[:44]:44s} pos {row['pos']:6.2f} mm  normal {row['normal']:5.2f} deg")
+        print(
+            f"   {name[:44]:44s} pos {row['pos']:6.2f} mm  normal {row['normal']:5.2f} deg"
+        )
 
     print()
     _verdict(inside)
@@ -131,8 +167,10 @@ def _accuracy_block(d):
         ("segmentation IoU", "seg_iou", ""),
     ):
         v = d[col].abs() if col == "dz_mm" else d[col]
-        print(f"   {label} median {_fmt(v.median(), unit)} | p95 {_fmt(v.quantile(0.95), unit)}"
-              f" | max {_fmt(v.max(), unit)}")
+        print(
+            f"   {label} median {_fmt(v.median(), unit)} | p95 {_fmt(v.quantile(0.95), unit)}"
+            f" | max {_fmt(v.max(), unit)}"
+        )
 
 
 def _verdict(inside):
@@ -143,14 +181,21 @@ def _verdict(inside):
     ok_pos = pos < TARGET_POS_MM
     ok_nrm = nrm < TARGET_NORMAL_DEG
     print(f"-- verdict against plan targets (median, within envelope)")
-    print(f"   position  {_fmt(pos, ' mm')} vs target {TARGET_POS_MM} mm   "
-          f"[{'PASS' if ok_pos else 'MISS'}]")
-    print(f"   normal    {_fmt(nrm, ' deg')} vs target {TARGET_NORMAL_DEG} deg  "
-          f"[{'PASS' if ok_nrm else 'MISS'}]")
+    print(
+        f"   position  {_fmt(pos, ' mm')} vs target {TARGET_POS_MM} mm   "
+        f"[{'PASS' if ok_pos else 'MISS'}]"
+    )
+    print(
+        f"   normal    {_fmt(nrm, ' deg')} vs target {TARGET_NORMAL_DEG} deg  "
+        f"[{'PASS' if ok_nrm else 'MISS'}]"
+    )
 
 
 def figures(path, outdir=None):
-    """Heatmaps, a timing histogram and an error-vs-tilt curve."""
+    """
+    Heatmaps, a timing histogram and an error-vs-tilt curve.
+    """
+
     import matplotlib
 
     matplotlib.use("Agg")
@@ -165,10 +210,24 @@ def figures(path, outdir=None):
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
 
-    _heatmap(axes[0, 0], det, "alpha", "bg_level", "pos_err_mm",
-             "median position error (mm)", plt)
-    _heatmap(axes[0, 1], det, "tilt_deg", "ambient", "normal_err_best_deg",
-             "median normal error, best branch (deg)", plt)
+    _heatmap(
+        axes[0, 0],
+        det,
+        "alpha",
+        "bg_level",
+        "pos_err_mm",
+        "median position error (mm)",
+        plt,
+    )
+    _heatmap(
+        axes[0, 1],
+        det,
+        "tilt_deg",
+        "ambient",
+        "normal_err_best_deg",
+        "median normal error, best branch (deg)",
+        plt,
+    )
 
     ax = axes[1, 0]
     curve = det.groupby("tilt_deg").agg(
@@ -221,8 +280,15 @@ def _heatmap(ax, det, xcol, ycol, vcol, title, plt):
         for j in range(piv.shape[1]):
             v = piv.values[i, j]
             if np.isfinite(v):
-                ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7,
-                        color="w" if v < np.nanmedian(piv.values) else "k")
+                ax.text(
+                    j,
+                    i,
+                    f"{v:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="w" if v < np.nanmedian(piv.values) else "k",
+                )
     plt.colorbar(im, ax=ax, fraction=0.046)
 
 

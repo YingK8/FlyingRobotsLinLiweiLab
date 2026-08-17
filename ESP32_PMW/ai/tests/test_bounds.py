@@ -1,6 +1,7 @@
-"""Monte-Carlo verification of every bound in `bounds.py`.
+"""
+Monte-Carlo verification of every bound in `bounds.py`.
 
-Run: uv run python controller/pose/test_bounds.py
+Run: uv run python ai/tests/test_bounds.py
 
 A derivation that is never checked against a simulation is a conjecture. Each
 test here generates data from the *same* model the bound assumes, runs the real
@@ -32,8 +33,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import bounds  # noqa: E402
 import conic  # noqa: E402
@@ -72,13 +78,15 @@ def band(name, value, lo, hi, fmt="{:.4g}"):
 
 
 def test_edge_crlb():
-    """ML edge fitting on synthetic 1-D profiles must approach `edge_crlb_*`.
-
-    The estimator here is exact maximum likelihood for the model (grid search
-    refined by parabolic interpolation on the likelihood), so it should be
-    efficient to within the sampling error, and any discrepancy indicts the
-    Fisher-information algebra rather than the fitter.
     """
+    ML edge fitting on synthetic 1-D profiles must approach `edge_crlb_*`.
+
+        The estimator here is exact maximum likelihood for the model (grid search
+        refined by parabolic interpolation on the likelihood), so it should be
+        efficient to within the sampling error, and any discrepancy indicts the
+        Fisher-information algebra rather than the fitter.
+    """
+
     print("\n(A) edge localisation CRLB")
     contrast, sigma_n, psf = 200.0, 6.0, 1.0
     half = 8
@@ -87,8 +95,9 @@ def test_edge_crlb():
     def profile(x0):
         up = (idx + 0.5 - x0) / psf
         lo = (idx - 0.5 - x0) / psf
-        return contrast * (bounds._Phi(up) - bounds._Phi(lo)).cumsum() * 0.0 + \
-            contrast * bounds._Phi((idx - x0) / psf)
+        return contrast * (
+            bounds._Phi(up) - bounds._Phi(lo)
+        ).cumsum() * 0.0 + contrast * bounds._Phi((idx - x0) / psf)
 
     # Box-integrated step, matching bounds.edge_crlb_discrete(box_pixel=True).
     def box_profile(x0):
@@ -97,6 +106,7 @@ def test_edge_crlb():
         def anti(x):
             u = (x - x0) / psf
             return psf * (u * bounds._Phi(u) + bounds._phi(u))
+
         return contrast * (anti(idx + 0.5) - anti(idx - 0.5))
 
     grid = np.linspace(-1.5, 1.5, 3001)
@@ -124,48 +134,69 @@ def test_edge_crlb():
     # physical content of the box-pixel result. Compare worst sub-pixel phase,
     # which is where point sampling actually fails: an edge midway between two
     # samples moves no sample at all.
-    sharp_point = bounds.edge_crlb_discrete(contrast, sigma_n, 0.15,
-                                            box_pixel=False, reduce="worst")
-    sharp_box = bounds.edge_crlb_discrete(contrast, sigma_n, 0.15,
-                                          box_pixel=True, reduce="worst")
-    check("point sampling loses a sharp edge, box pixels do not",
-          sharp_point > 5.0 * sharp_box,
-          f"point {sharp_point:.4g} px vs box {sharp_box:.4g} px")
+    sharp_point = bounds.edge_crlb_discrete(
+        contrast, sigma_n, 0.15, box_pixel=False, reduce="worst"
+    )
+    sharp_box = bounds.edge_crlb_discrete(
+        contrast, sigma_n, 0.15, box_pixel=True, reduce="worst"
+    )
+    check(
+        "point sampling loses a sharp edge, box pixels do not",
+        sharp_point > 5.0 * sharp_box,
+        f"point {sharp_point:.4g} px vs box {sharp_box:.4g} px",
+    )
     # The sharp-edge box bound is bracketed by [1, sqrt(2)] * sigma_n/C.
     unit = sigma_n / contrast
-    band("sharp box bound, best phase -> sigma_n/C",
-         bounds.edge_crlb_discrete(contrast, sigma_n, 0.05, reduce="best") / unit,
-         0.98, 1.02)
-    band("sharp box bound, worst phase -> sqrt(2) sigma_n/C",
-         bounds.edge_crlb_discrete(contrast, sigma_n, 0.05, reduce="worst") / unit,
-         1.39, 1.43)
+    band(
+        "sharp box bound, best phase -> sigma_n/C",
+        bounds.edge_crlb_discrete(contrast, sigma_n, 0.05, reduce="best") / unit,
+        0.98,
+        1.02,
+    )
+    band(
+        "sharp box bound, worst phase -> sqrt(2) sigma_n/C",
+        bounds.edge_crlb_discrete(contrast, sigma_n, 0.05, reduce="worst") / unit,
+        1.39,
+        1.43,
+    )
     # Point sampling has an interior optimum in blur; box pixels do not.
     grid = np.linspace(0.05, 3.0, 60)
-    pt = [bounds.edge_crlb_discrete(contrast, sigma_n, s, box_pixel=False,
-                                    reduce="worst") for s in grid]
-    bx = [bounds.edge_crlb_discrete(contrast, sigma_n, s, box_pixel=True,
-                                    reduce="worst") for s in grid]
-    check("point sampling has an interior optimum in blur",
-          0 < int(np.argmin(pt)) < len(grid) - 1,
-          f"best at s = {grid[int(np.argmin(pt))]:.2f} px")
-    check("box pixels are monotone in blur (sharper is better)",
-          int(np.argmin(bx)) == 0, f"best at s = {grid[int(np.argmin(bx))]:.2f} px")
+    pt = [
+        bounds.edge_crlb_discrete(contrast, sigma_n, s, box_pixel=False, reduce="worst")
+        for s in grid
+    ]
+    bx = [
+        bounds.edge_crlb_discrete(contrast, sigma_n, s, box_pixel=True, reduce="worst")
+        for s in grid
+    ]
+    check(
+        "point sampling has an interior optimum in blur",
+        0 < int(np.argmin(pt)) < len(grid) - 1,
+        f"best at s = {grid[int(np.argmin(pt))]:.2f} px",
+    )
+    check(
+        "box pixels are monotone in blur (sharper is better)",
+        int(np.argmin(bx)) == 0,
+        f"best at s = {grid[int(np.argmin(bx))]:.2f} px",
+    )
 
 
 def test_shipped_subpixel_against_the_bound():
-    """`segment.subpixel_boundary` on a synthetic disc, against the edge CRLB.
-
-    This is the test that decides whether sub-pixel refinement is worth more
-    effort. The disc has a known radius and a smoothly shaded edge, so every
-    boundary point has an exact answer; the scatter of the refined points about
-    the true circle is compared against `edge_crlb_discrete` for the same
-    contrast, noise and blur.
-
-    If the shipped refinement is near the bound, then better interpolation
-    cannot help and §12.12's negative result (18x better edge localisation
-    bought 2% of the outcome) is explained rather than merely observed: the
-    boundary being located is not the rim.
     """
+    `segment.subpixel_boundary` on a synthetic disc, against the edge CRLB.
+
+        This is the test that decides whether sub-pixel refinement is worth more
+        effort. The disc has a known radius and a smoothly shaded edge, so every
+        boundary point has an exact answer; the scatter of the refined points about
+        the true circle is compared against `edge_crlb_discrete` for the same
+        contrast, noise and blur.
+
+        If the shipped refinement is near the bound, then better interpolation
+        cannot help and §12.12's negative result (18x better edge localisation
+        bought 2% of the outcome) is explained rather than merely observed: the
+        boundary being located is not the rim.
+    """
+
     print("\n(A'') shipped sub-pixel refinement vs the edge CRLB")
     import cv2
 
@@ -174,12 +205,14 @@ def test_shipped_subpixel_against_the_bound():
     contrast, sigma_n, psf = 200.0, 5.0, 1.2
 
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
-    sdf = rad - np.hypot(xx - cx, yy - cy)          # >0 inside
-    disc = contrast * bounds._Phi(sdf / psf)        # soft edge of width psf
+    sdf = rad - np.hypot(xx - cx, yy - cy)  # >0 inside
+    disc = contrast * bounds._Phi(sdf / psf)  # soft edge of width psf
 
     quant, refined = [], []
     for _ in range(24):
-        img = np.clip(disc + RNG.normal(0.0, sigma_n, disc.shape), 0, 255).astype(np.uint8)
+        img = np.clip(disc + RNG.normal(0.0, sigma_n, disc.shape), 0, 255).astype(
+            np.uint8
+        )
         _, mask = cv2.threshold(img, int(contrast / 2), 255, cv2.THRESH_BINARY)
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         if not cnts:
@@ -196,25 +229,43 @@ def test_shipped_subpixel_against_the_bound():
     print(f"        refined       bias {r.mean():+.4f} px   scatter {r.std():.4f} px")
     print(f"        edge CRLB                          {crlb:.4f} px")
 
-    check("sub-pixel refinement reduces the scatter", r.std() < q.std(),
-          f"{q.std():.4f} -> {r.std():.4f} px")
-    check("sub-pixel refinement reduces the bias", abs(r.mean()) < abs(q.mean()),
-          f"{q.mean():+.4f} -> {r.mean():+.4f} px")
-    check("refined scatter does not beat the CRLB", r.std() >= crlb * 0.9,
-          f"{r.std() / crlb:.2f}x the bound")
+    check(
+        "sub-pixel refinement reduces the scatter",
+        r.std() < q.std(),
+        f"{q.std():.4f} -> {r.std():.4f} px",
+    )
+    check(
+        "sub-pixel refinement reduces the bias",
+        abs(r.mean()) < abs(q.mean()),
+        f"{q.mean():+.4f} -> {r.mean():+.4f} px",
+    )
+    check(
+        "refined scatter does not beat the CRLB",
+        r.std() >= crlb * 0.9,
+        f"{r.std() / crlb:.2f}x the bound",
+    )
     eff = (crlb / r.std()) ** 2
-    print(f"        efficiency {eff:.2f} -- headroom in edge localisation is "
-          f"{'small' if eff > 0.25 else 'real'}")
+    print(
+        f"        efficiency {eff:.2f} -- headroom in edge localisation is "
+        f"{'small' if eff > 0.25 else 'real'}"
+    )
     check("scatter is within an order of magnitude of the bound", r.std() < 10 * crlb)
 
 
 def test_quantisation():
-    """A pixel-quantised boundary point has sigma = 1/sqrt(12), by construction."""
+    """
+    A pixel-quantised boundary point has sigma = 1/sqrt(12), by construction.
+    """
+
     print("\n(A') quantisation floor")
     x = RNG.uniform(-50, 50, size=200000)
     err = np.round(x) - x
-    band("thresholded boundary sigma", float(np.std(err)),
-         0.985 * bounds.QUANTISATION_SIGMA_PX, 1.015 * bounds.QUANTISATION_SIGMA_PX)
+    band(
+        "thresholded boundary sigma",
+        float(np.std(err)),
+        0.985 * bounds.QUANTISATION_SIGMA_PX,
+        1.015 * bounds.QUANTISATION_SIGMA_PX,
+    )
     snr = bounds.subpixel_breakeven_snr(psf_px=1.0)
     print(f"        sub-pixel refinement beats rounding above C/sigma_n = {snr:.2f}")
     check("break-even SNR is modest (sub-pixel is worth doing)", snr < 20.0)
@@ -226,39 +277,56 @@ def test_quantisation():
 
 
 def test_circle_closed_form():
-    """`circle_crlb_closed_form` must equal the numerical Fisher inverse."""
+    """
+    `circle_crlb_closed_form` must equal the numerical Fisher inverse.
+    """
+
     print("\n(C) circle CRLB: closed form vs numerical Fisher")
     r, n, e = 70.0, 400, 0.1
     j = bounds.ellipse_fisher((300.0, 250.0), (r, r), 0.0, n, e)
     # theta is unobservable for a circle: the Fisher matrix must be rank 4.
     sv = np.linalg.svd(j, compute_uv=False)
-    check("orientation of a circle is unobservable (Fisher rank 4)",
-          sv[-1] / sv[0] < 1e-12, f"cond^-1 = {sv[-1] / sv[0]:.2e}")
+    check(
+        "orientation of a circle is unobservable (Fisher rank 4)",
+        sv[-1] / sv[0] < 1e-12,
+        f"cond^-1 = {sv[-1] / sv[0]:.2e}",
+    )
 
     sub = np.linalg.inv(j[np.ix_([0, 1, 2], [0, 1, 2])])
     sc, sr = bounds.circle_crlb_closed_form(r, n, e)
     band("sigma_centre closed form vs numerical", math.sqrt(sub[0, 0]) / sc, 0.98, 1.02)
     # The (a, b) block of an a==b ellipse splits the radius information in two,
     # so compare the derived radius bound against a 3-parameter (cx,cy,r) fit.
-    j3 = np.array([[j[0, 0], j[0, 1], j[0, 2] + j[0, 3]],
-                   [j[1, 0], j[1, 1], j[1, 2] + j[1, 3]],
-                   [j[2, 0] + j[3, 0], j[2, 1] + j[3, 1],
-                    j[2, 2] + j[2, 3] + j[3, 2] + j[3, 3]]])
+    j3 = np.array(
+        [
+            [j[0, 0], j[0, 1], j[0, 2] + j[0, 3]],
+            [j[1, 0], j[1, 1], j[1, 2] + j[1, 3]],
+            [
+                j[2, 0] + j[3, 0],
+                j[2, 1] + j[3, 1],
+                j[2, 2] + j[2, 3] + j[3, 2] + j[3, 3],
+            ],
+        ]
+    )
     s3 = np.linalg.inv(j3)
     band("sigma_radius closed form vs numerical", math.sqrt(s3[2, 2]) / sr, 0.98, 1.02)
-    print(f"        sigma_centre {sc:.5f} px, sigma_radius {sr:.5f} px "
-          f"(ratio {sc / sr:.4f}, predicted sqrt(2) = 1.4142)")
+    print(
+        f"        sigma_centre {sc:.5f} px, sigma_radius {sr:.5f} px "
+        f"(ratio {sc / sr:.4f}, predicted sqrt(2) = 1.4142)"
+    )
 
 
 def test_ellipse_fit_efficiency():
-    """The shipped `segment.fit_ellipse` against the ellipse CRLB.
-
-    Points are generated on an exact ellipse with Gaussian noise along the
-    normal only -- the model the Fisher matrix assumes -- so the only thing under
-    test is the fitter. ``axial=False`` because that is the shipped default and
-    because the weighted path deliberately discards points, which would make an
-    efficiency comparison against an all-points bound meaningless.
     """
+    The shipped `segment.fit_ellipse` against the ellipse CRLB.
+
+        Points are generated on an exact ellipse with Gaussian noise along the
+        normal only -- the model the Fisher matrix assumes -- so the only thing under
+        test is the fitter. ``axial=False`` because that is the shipped default and
+        because the weighted path deliberately discards points, which would make an
+        efficiency comparison against an all-points bound meaningless.
+    """
+
     print("\n(C') ellipse-fit efficiency vs CRLB")
     centre, axes, ang = (497.0, 355.0), (70.0, 52.0), math.radians(23.0)
     n, e = 380, 0.08
@@ -289,8 +357,10 @@ def test_ellipse_fit_efficiency():
     print("        param    CRLB        empirical   efficiency   bias/sigma")
     for i, nm in enumerate(names):
         eta = (pred[i] / emp[i]) ** 2
-        print(f"        {nm:<7}{pred[i]:<12.5g}{emp[i]:<12.5g}"
-              f"{eta:<13.3f}{bias[i] / emp[i]:+.3f}")
+        print(
+            f"        {nm:<7}{pred[i]:<12.5g}{emp[i]:<12.5g}"
+            f"{eta:<13.3f}{bias[i] / emp[i]:+.3f}"
+        )
         check(f"{nm}: efficiency in (0.5, 1.05]", 0.5 < eta <= 1.05, f"eta={eta:.3f}")
 
     # The direct algebraic fit is known to be biased toward smaller ellipses;
@@ -304,8 +374,7 @@ def test_ellipse_fit_efficiency():
     # -- this is the quantitative version of "a partly occluded rim is unusable".
     short = bounds.ellipse_crlb(centre, axes, ang, n, e, arc_fraction=0.4)
     ratio = math.sqrt(short[2, 2] / cov[2, 2])
-    check("40% arc inflates the semi-major bound", ratio > 3.0,
-          f"{ratio:.2f}x")
+    check("40% arc inflates the semi-major bound", ratio > 3.0, f"{ratio:.2f}x")
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +383,10 @@ def test_ellipse_fit_efficiency():
 
 
 def test_pose_efficiency():
-    """Full chain: noisy boundary -> `fit_ellipse` -> `backproject_ellipse`."""
+    """
+    Full chain: noisy boundary -> `fit_ellipse` -> `backproject_ellipse`.
+    """
+
     print("\n(D) pose efficiency vs CRLB")
     z, tilt = 250.0, math.radians(35.0)
     f = 0.5 * (K[0, 0] + K[1, 1])
@@ -322,8 +394,15 @@ def test_pose_efficiency():
     b_px = a_px * math.cos(tilt)
     centre = (K[0, 2], K[1, 2])
     axes, ang = (a_px, b_px), math.radians(11.0)
-    n, e = int(round(math.pi * (3 * (a_px + b_px)
-                                - math.sqrt((3 * a_px + b_px) * (a_px + 3 * b_px))))), 0.05
+    n, e = (
+        int(
+            round(
+                math.pi
+                * (3 * (a_px + b_px) - math.sqrt((3 * a_px + b_px) * (a_px + 3 * b_px)))
+            )
+        ),
+        0.05,
+    )
 
     phis = bounds.arclength_phis(axes, n)
     truth, nrm = bounds.ellipse_points(centre, axes, ang, phis)
@@ -350,18 +429,24 @@ def test_pose_efficiency():
             continue
         eta = (pred[i] / emp[i]) ** 2
         print(f"        {nm:<9}{pred[i]:<12.5g}{emp[i]:<12.5g}{eta:<13.3f}")
-        check(f"pose {nm}: efficiency in (0.5, 1.10]", 0.5 < eta <= 1.10,
-              f"eta={eta:.3f}")
+        check(
+            f"pose {nm}: efficiency in (0.5, 1.10]", 0.5 < eta <= 1.10, f"eta={eta:.3f}"
+        )
 
     got = emp[2] / math.hypot(emp[0], emp[1])
     want = bounds.depth_lateral_ratio(z, RADIUS_MM, math.degrees(tilt))
     band("Monte-Carlo depth/lateral vs predicted", got / want, 0.85, 1.15)
-    print(f"        empirical {got:.2f} vs sqrt(3)-corrected law {want:.2f} "
-          f"(naive z/2R would say {z / (2 * RADIUS_MM):.2f})")
+    print(
+        f"        empirical {got:.2f} vs sqrt(3)-corrected law {want:.2f} "
+        f"(naive z/2R would say {z / (2 * RADIUS_MM):.2f})"
+    )
 
 
 def test_depth_lateral_law():
-    """sigma_z/|sigma_lat| = g(tilt) * z/(2R), with g(0) = sqrt(3) analytically."""
+    """
+    sigma_z/|sigma_lat| = g(tilt) * z/(2R), with g(0) = sqrt(3) analytically.
+    """
+
     print("\n(D') the depth/lateral law")
     f = 0.5 * (K[0, 0] + K[1, 1])
     centre = (K[0, 2], K[1, 2])
@@ -371,36 +456,51 @@ def test_depth_lateral_law():
     # docstring claims is (N/8 sigma^2) [[3,1],[1,3]].
     r, n, e = 60.0, 4000, 0.01
     j = bounds.ellipse_fisher(centre, (r, r), 0.0, n, e)
-    blk = j[np.ix_([2, 3], [2, 3])] * (8.0 * e ** 2 / n)
+    blk = j[np.ix_([2, 3], [2, 3])] * (8.0 * e**2 / n)
     band("Fisher (a,b) block diag == 3", blk[0, 0], 2.94, 3.06)
     band("Fisher (a,b) block off-diag == 1", blk[0, 1], 0.94, 1.06)
     sigma_a = math.sqrt(np.linalg.inv(j[np.ix_([2, 3], [2, 3])])[0, 0])
-    band("sigma_a == sqrt(3) e / sqrt(N)", sigma_a / (math.sqrt(3.0) * e / math.sqrt(n)),
-         0.97, 1.03)
+    band(
+        "sigma_a == sqrt(3) e / sqrt(N)",
+        sigma_a / (math.sqrt(3.0) * e / math.sqrt(n)),
+        0.97,
+        1.03,
+    )
 
     # The law is exact in the WEAK-PERSPECTIVE limit. Assert it tightly there.
     rows = []
     for z in (1200.0, 3000.0):
         for tilt in (10.0, 30.0, 60.0, 80.0):
             for e in (0.02, 0.10):
-                got = bounds.depth_lateral_ratio_numeric(z, RADIUS_MM, K, tilt,
-                                                         n_points=2000, sigma_r_px=e)
-                rows.append((z, tilt, e, got,
-                             bounds.depth_lateral_ratio(z, RADIUS_MM, tilt)))
+                got = bounds.depth_lateral_ratio_numeric(
+                    z, RADIUS_MM, K, tilt, n_points=2000, sigma_r_px=e
+                )
+                rows.append(
+                    (z, tilt, e, got, bounds.depth_lateral_ratio(z, RADIUS_MM, tilt))
+                )
     worst = max(abs(r[3] / r[4] - 1.0) for r in rows)
-    check(f"weak-perspective law exact over {len(rows)} (z, tilt, noise) points",
-          worst < 0.01, f"worst deviation {worst * 100:.2f}%")
+    check(
+        f"weak-perspective law exact over {len(rows)} (z, tilt, noise) points",
+        worst < 0.01,
+        f"worst deviation {worst * 100:.2f}%",
+    )
 
     # The sharp claim: the ratio depends on NOTHING but z and tilt -- not the
     # noise level, not the point count, not the resolution.
-    bad = [(r[0], r[1]) for r in rows
-           if abs(r[3] / [q[3] for q in rows
-                          if q[0] == r[0] and q[1] == r[1]][0] - 1.0) > 1e-3]
+    bad = [
+        (r[0], r[1])
+        for r in rows
+        if abs(r[3] / [q[3] for q in rows if q[0] == r[0] and q[1] == r[1]][0] - 1.0)
+        > 1e-3
+    ]
     check("ratio is independent of the noise level", not bad, f"{len(bad)} outliers")
     n_a = bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, 30.0, n_points=500)
     n_b = bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, 30.0, n_points=8000)
-    check("ratio is independent of the point count", abs(n_a / n_b - 1.0) < 1e-3,
-          f"N=500 -> {n_a:.3f}, N=8000 -> {n_b:.3f}")
+    check(
+        "ratio is independent of the point count",
+        abs(n_a / n_b - 1.0) < 1e-3,
+        f"N=500 -> {n_a:.3f}, N=8000 -> {n_b:.3f}",
+    )
 
     # Finite range is a real correction, not a rounding error. It scales roughly
     # as (R/z)^2 / sin^2(tilt): negligible for a tilted rim, severe for a
@@ -409,44 +509,58 @@ def test_depth_lateral_law():
     print("        z mm     R/z      tilt 10    tilt 30    tilt 60")
     env = []
     for z in (100.0, 150.0, 250.0, 400.0, 700.0):
-        vals = [bounds.depth_lateral_ratio_numeric(z, RADIUS_MM, K, t,
-                                                   n_points=2000, sigma_r_px=0.02)
-                / bounds.depth_lateral_ratio(z, RADIUS_MM, t)
-                for t in (10.0, 30.0, 60.0)]
-        print(f"        {z:<9.0f}{RADIUS_MM / z:<9.4f}"
-              + "".join(f"{v:<11.4f}" for v in vals))
+        vals = [
+            bounds.depth_lateral_ratio_numeric(
+                z, RADIUS_MM, K, t, n_points=2000, sigma_r_px=0.02
+            )
+            / bounds.depth_lateral_ratio(z, RADIUS_MM, t)
+            for t in (10.0, 30.0, 60.0)
+        ]
+        print(
+            f"        {z:<9.0f}{RADIUS_MM / z:<9.4f}"
+            + "".join(f"{v:<11.4f}" for v in vals)
+        )
         if 150.0 <= z <= 400.0:
             env.extend(vals[1:])  # operating envelope: tilt >= 30 deg
-    check("law holds to 2% inside the operating envelope (z 150-400, tilt >= 30)",
-          all(abs(v - 1.0) < 0.02 for v in env),
-          f"worst {max(abs(v - 1.0) for v in env) * 100:.2f}%")
+    check(
+        "law holds to 2% inside the operating envelope (z 150-400, tilt >= 30)",
+        all(abs(v - 1.0) < 0.02 for v in env),
+        f"worst {max(abs(v - 1.0) for v in env) * 100:.2f}%",
+    )
 
     # At EXACTLY face-on there is no finite bound on the 5-parameter fit: theta
     # is unobservable, the Fisher matrix drops rank, and the CRLB is undefined
     # rather than large. The ratio still has a limit, approached from above.
-    check("no finite bound at exactly face-on (Fisher drops rank)",
-          bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, 0.0) is None)
+    check(
+        "no finite bound at exactly face-on (Fisher drops rank)",
+        bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, 0.0) is None,
+    )
 
     print("        tilt   g(tilt) table   g measured at z=3000mm")
     for tilt in (0.5, 10.0, 30.0, 60.0, 80.0):
         got = bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, tilt)
-        print(f"        {tilt:<7.1f}{bounds.depth_lateral_ratio(1.0, 0.5, tilt):<16.4f}"
-              f"{got / (3000.0 / (2 * RADIUS_MM)):.4f}")
+        print(
+            f"        {tilt:<7.1f}{bounds.depth_lateral_ratio(1.0, 0.5, tilt):<16.4f}"
+            f"{got / (3000.0 / (2 * RADIUS_MM)):.4f}"
+        )
     g0 = bounds.depth_lateral_ratio_numeric(3000.0, RADIUS_MM, K, 0.5) / (
-        3000.0 / (2 * RADIUS_MM))
+        3000.0 / (2 * RADIUS_MM)
+    )
     band("g -> sqrt(3) as tilt -> 0", g0 / math.sqrt(3.0), 0.98, 1.02)
 
 
 def test_face_on_lateral_collapse():
-    """Near face-on, the tilt degeneracy contaminates LATERAL position too.
-
-    This is not in the textbook statement of the problem and it is worth
-    isolating: at 2 deg of tilt the recovered centre is seven times worse than at
-    10 deg, at identical range, resolution and noise. The mechanism is that an
-    eccentricity error indistinguishable from noise gets interpreted as a tilt of
-    the circle's *plane*, and tilting the plane slides the recovered centre. So
-    "face-on is bad for tilt" understates it -- face-on is bad for everything.
     """
+    Near face-on, the tilt degeneracy contaminates LATERAL position too.
+
+        This is not in the textbook statement of the problem and it is worth
+        isolating: at 2 deg of tilt the recovered centre is seven times worse than at
+        10 deg, at identical range, resolution and noise. The mechanism is that an
+        eccentricity error indistinguishable from noise gets interpreted as a tilt of
+        the circle's *plane*, and tilting the plane slides the recovered centre. So
+        "face-on is bad for tilt" understates it -- face-on is bad for everything.
+    """
+
     print("\n(D'') face-on contaminates lateral position")
     f = 0.5 * (K[0, 0] + K[1, 1])
     centre = (K[0, 2], K[1, 2])
@@ -465,16 +579,23 @@ def test_face_on_lateral_collapse():
         lat = lat_at(tilt)
         print(f"        {tilt:<7.0f}{lat:<15.5f}{lat / ref:.2f}x")
 
-    check("lateral error inflates below ~5 deg of tilt",
-          lat_at(2.0) / lat_at(20.0) > 4.0,
-          f"{lat_at(2.0) / lat_at(20.0):.1f}x worse at 2 deg than 20 deg")
-    check("lateral error is flat above ~20 deg",
-          0.8 < lat_at(20.0) / lat_at(40.0) < 1.25,
-          f"{lat_at(20.0) / lat_at(40.0):.2f}x")
+    check(
+        "lateral error inflates below ~5 deg of tilt",
+        lat_at(2.0) / lat_at(20.0) > 4.0,
+        f"{lat_at(2.0) / lat_at(20.0):.1f}x worse at 2 deg than 20 deg",
+    )
+    check(
+        "lateral error is flat above ~20 deg",
+        0.8 < lat_at(20.0) / lat_at(40.0) < 1.25,
+        f"{lat_at(20.0) / lat_at(40.0):.2f}x",
+    )
 
 
 def test_tilt_laws():
-    """Both tilt regimes: 1/sin(theta) away from face-on, sqrt() at face-on."""
+    """
+    Both tilt regimes: 1/sin(theta) away from face-on, sqrt() at face-on.
+    """
+
     print("\n(D''') tilt conditioning")
     a = 70.0
     sigma_ratio = 0.004
@@ -490,8 +611,10 @@ def test_tilt_laws():
     emp = float(np.mean(np.degrees(np.arccos(np.clip(ratios, -1.0, 1.0)))))
     pred = math.degrees(bounds.tilt_bias_at_face_on(sigma_ratio))
     band("face-on apparent tilt (sqrt law)", emp / pred, 0.95, 1.05)
-    print(f"        a genuinely face-on rim reads {emp:.2f} deg of tilt "
-          f"at sigma_ratio={sigma_ratio}")
+    print(
+        f"        a genuinely face-on rim reads {emp:.2f} deg of tilt "
+        f"at sigma_ratio={sigma_ratio}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -511,21 +634,29 @@ def test_structural():
     gap, margin, nb = bounds.ambiguity_is_exact(c, nrm, RADIUS_MM, K)
     check("two branches exist", nb == 2, f"{nb} branches")
     check("branches are physically distinct", margin > 5.0, f"margin {margin:.2f} deg")
-    check("branches are photometrically identical", gap < 1e-6,
-          f"image gap {gap:.3e} px")
-    print("        -> the single-view likelihood has two exactly equal maxima;"
-          " no data from this view can choose")
+    check(
+        "branches are photometrically identical", gap < 1e-6, f"image gap {gap:.3e} px"
+    )
+    print(
+        "        -> the single-view likelihood has two exactly equal maxima;"
+        " no data from this view can choose"
+    )
 
 
 def test_budget_table():
-    """Print the composed budget; not an assertion, the evidence for the report."""
+    """
+    Print the composed budget; not an assertion, the evidence for the report.
+    """
+
     print("\n(E) composed error budget, 1280x800, C=200 sigma_n=6 s=1.0 px")
     print("        z mm   a px   N_eff   sigma_r    sigma_lat   sigma_z    z/2R")
     for z in (150.0, 250.0, 400.0):
         b = bounds.budget(z, RADIUS_MM, K, tilt_deg=30.0, correlation_px=2.0)
-        print(f"        {z:<7.0f}{b['semi_major_px']:<7.1f}{b['n_effective']:<8.0f}"
-              f"{b['sigma_r_px']:<11.4f}{b['sigma_lateral_mm']:<12.5f}"
-              f"{b['sigma_z_mm']:<11.5f}{b['depth_lateral_ratio']:.1f}")
+        print(
+            f"        {z:<7.0f}{b['semi_major_px']:<7.1f}{b['n_effective']:<8.0f}"
+            f"{b['sigma_r_px']:<11.4f}{b['sigma_lateral_mm']:<12.5f}"
+            f"{b['sigma_z_mm']:<11.5f}{b['depth_lateral_ratio']:.1f}"
+        )
 
 
 def main():

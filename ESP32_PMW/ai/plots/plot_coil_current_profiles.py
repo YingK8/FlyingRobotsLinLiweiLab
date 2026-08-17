@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Single-coil vs two-coil vs all-four-coil current profile (including the
+"""
+Single-coil vs two-coil vs all-four-coil current profile (including the
 on/off current ramps), from a real coupling-sweep capture
 (data/2026-07-04a_coupling-matrix/coupling_pairwise_20260704_143320.csv).
 
@@ -16,20 +17,27 @@ voltage) with a solid rolling-RMS envelope on top.
 Usage:
   uv run python ai/plot_coil_current_profiles.py
 """
+
 import os
 
 import numpy as np
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.join(HERE, "..")
-CSV = os.path.join(REPO_ROOT, "data", "2026-07-04a_coupling-matrix",
-                    "coupling_pairwise_20260704_143320.csv")
-OUT = os.path.join(REPO_ROOT, "results", "single_vs_multi_coil",
-                    "coil_current_profile_matrix.png")
+CSV = os.path.join(
+    REPO_ROOT,
+    "data",
+    "2026-07-04a_coupling-matrix",
+    "coupling_pairwise_20260704_143320.csv",
+)
+OUT = os.path.join(
+    REPO_ROOT, "results", "single_vs_multi_coil", "coil_current_profile_matrix.png"
+)
 
 # fixed 4-slot categorical order (blue/aqua/yellow/red) -- dataviz skill palette
 CHAN_COLOR = {"A": "#2a78d6", "B": "#1baf7a", "C": "#eda100", "D": "#e34948"}
@@ -50,12 +58,12 @@ ROW2 = [  # two-coil / all-four
     ("All four coils", 62.0),
 ]
 HALF_WINDOW_S = 2.0  # +/- margin around center -- covers the ~3s active
-                      # window plus the abrupt on/off current ramps at its edges
+# window plus the abrupt on/off current ramps at its edges
 
 
 def envelope(x_v: np.ndarray, win: int) -> np.ndarray:
     s = pd.Series(x_v)
-    return np.sqrt((s ** 2).rolling(win, center=True, min_periods=1).mean()).to_numpy()
+    return np.sqrt((s**2).rolling(win, center=True, min_periods=1).mean()).to_numpy()
 
 
 def draw_panel(ax, df, t, title, center, y_max_box):
@@ -65,8 +73,14 @@ def draw_panel(ax, df, t, title, center, y_max_box):
         raw_mv = df[ch].to_numpy()[m] * 1000.0
         env_mv = envelope(raw_mv, ENV_WIN_MS)
         ax.plot(t_win, raw_mv, color=CHAN_COLOR[ch], alpha=0.25, linewidth=0.6)
-        ax.plot(t_win, env_mv, color=CHAN_COLOR[ch], alpha=1.0, linewidth=2.0,
-                label=f"channel {ch}")
+        ax.plot(
+            t_win,
+            env_mv,
+            color=CHAN_COLOR[ch],
+            alpha=1.0,
+            linewidth=2.0,
+            label=f"channel {ch}",
+        )
         y_max_box[0] = max(y_max_box[0], np.nanmax(np.abs(raw_mv)))
     ax.set_title(title, fontsize=12, pad=8)
     ax.set_xlabel("time relative to segment center [ms]")
@@ -81,21 +95,24 @@ def main() -> None:
 
     fig = plt.figure(figsize=(22, 11))
     gs = fig.add_gridspec(2, 12, hspace=0.55, wspace=0.35)
-    fig.suptitle("Coil current profile, including turn-on/turn-off current ramps:\n"
-                 "single coil vs two coils vs all four coils\n"
-                 "source: coupling_pairwise_20260704_143320.csv (CW, one current level)",
-                 fontsize=15, y=1.01)
+    fig.suptitle(
+        "Coil current profile, including turn-on/turn-off current ramps:\n"
+        "single coil vs two coils vs all four coils\n"
+        "source: coupling_pairwise_20260704_143320.csv (CW, one current level)",
+        fontsize=15,
+        y=1.01,
+    )
 
     y_max = [0.0]
     row1_axes = []
     for i, (title, center) in enumerate(ROW1):
-        ax = fig.add_subplot(gs[0, i * 3:(i + 1) * 3])
+        ax = fig.add_subplot(gs[0, i * 3 : (i + 1) * 3])
         draw_panel(ax, df, t, title, center, y_max)
         row1_axes.append(ax)
 
     row2_axes = []
     for i, (title, center) in enumerate(ROW2):
-        ax = fig.add_subplot(gs[1, i * 4:(i + 1) * 4])
+        ax = fig.add_subplot(gs[1, i * 4 : (i + 1) * 4])
         draw_panel(ax, df, t, title, center, y_max)
         row2_axes.append(ax)
 
@@ -107,8 +124,14 @@ def main() -> None:
     row2_axes[0].set_ylabel("CS voltage [mV]  (proxy for coil current)")
 
     handles, labels = row1_axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False,
-               bbox_to_anchor=(0.5, -0.02))
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        frameon=False,
+        bbox_to_anchor=(0.5, -0.02),
+    )
 
     fig.tight_layout(rect=(0, 0.03, 1, 0.90))
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

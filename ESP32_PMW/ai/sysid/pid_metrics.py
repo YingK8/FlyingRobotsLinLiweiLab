@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Shared telemetry parsing + tuning-metric computations for
+"""
+Shared telemetry parsing + tuning-metric computations for
 main_current_pid.cpp serial logs, used by both ai/plot_pid_log.py
 (plotting + report) and ai/pid_autotune.py (machine-parsable METRICS line,
 scored across trials) so there's one parser/metrics implementation, not two.
@@ -9,6 +10,7 @@ dir=1 kp=2.20 ki=0.10 kd=0.15"; the trailing dir=/kp=/ki=/kd= fields are
 optional (older logs predate runtime-tunable gains), parse_log() still works
 without them.
 """
+
 from __future__ import annotations
 
 import re
@@ -45,9 +47,12 @@ _METRICS_LINE = re.compile(
 
 
 def parse_log(path: str) -> dict:
-    """Parse a main_current_pid.cpp serial log into a dict of numpy arrays
-    (t, state, freq, i_a..i_d, d_a..d_d, spread, and dir/kp/ki/kd if every
-    parsed line carried them). Raises SystemExit if no telemetry found."""
+    """
+    Parse a main_current_pid.cpp serial log into a dict of numpy arrays
+        (t, state, freq, i_a..i_d, d_a..d_d, spread, and dir/kp/ki/kd if every
+        parsed line carried them). Raises SystemExit if no telemetry found.
+    """
+
     rows = []
     t_rel = []
     trailer_rows = []
@@ -92,10 +97,13 @@ def parse_log(path: str) -> dict:
 
 
 def parse_experiment_log(path: str) -> dict:
-    """Parse a main_experiment.cpp serial log ("t=.. label=.. | I[A]: ... |
-    duty[%]: ...", both the on-label-change print and the periodic print) into
-    a dict of numpy arrays (t, label [object array of str], i_a..i_d, d_a..d_d).
-    Raises SystemExit if no telemetry found."""
+    """
+    Parse a main_experiment.cpp serial log ("t=.. label=.. | I[A]: ... |
+        duty[%]: ...", both the on-label-change print and the periodic print) into
+        a dict of numpy arrays (t, label [object array of str], i_a..i_d, d_a..d_d).
+        Raises SystemExit if no telemetry found.
+    """
+
     rows = []
     for line in open(path):
         m = _EXP_CORE.search(line)
@@ -124,9 +132,12 @@ def parse_experiment_log(path: str) -> dict:
 
 
 def _first_settle_time(hold_t, below, settle_hold_s: float):
-    """First hold_t[i] (relative) where `below` stays True for a full
-    settle_hold_s window starting at i, confirmed against real data (not
-    just "ran out of samples") -- returns hold_t[i]-hold_t[0], or None."""
+    """
+    First hold_t[i] (relative) where `below` stays True for a full
+        settle_hold_s window starting at i, confirmed against real data (not
+        just "ran out of samples") -- returns hold_t[i]-hold_t[0], or None.
+    """
+
     n = len(hold_t)
     for i in range(n):
         if not below[i]:
@@ -135,34 +146,42 @@ def _first_settle_time(hold_t, below, settle_hold_s: float):
         end_idx = int(np.searchsorted(hold_t, window_end, side="right")) - 1
         if end_idx >= n or hold_t[end_idx] < window_end:
             continue  # data doesn't reach far enough to confirm this window
-        if below[i:end_idx + 1].all():
+        if below[i : end_idx + 1].all():
             return float(hold_t[i] - hold_t[0])
     return None
 
 
-def compute_metrics(data: dict, spread_limit: float = 0.4,
-                     settle_hold_s: float = 2.0) -> dict:
-    """Tuning metrics from parsed telemetry; any that can't be computed (e.g.
-    no HOLD samples) is None.
-    hold_spread     max spread during the full HOLD phase
-    ss_err          |mean(i_meas) - i_min_target| over the last 10s of HOLD;
-                    i_min_target is the settled-window mean of the argmin
-                    channel, derived from the log, not hardcoded
-    settle_s        first HOLD-relative time spread stays continuously below
-                    spread_limit for >= settle_hold_s, confirmed against data
-    resonance_peak  max spread during RAMP_UP in the 90-190Hz L/R-corner
-                    band, the historically hardest failure mode a HOLD-only
-                    metric would miss
-    resonance_peak_freq_hz  the drive frequency at which resonance_peak
-                    occurred -- used by validate_resonance_model.py to check
-                    the fitted RLC model's predicted resonance location
-                    against where the real controller actually struggled
+def compute_metrics(
+    data: dict, spread_limit: float = 0.4, settle_hold_s: float = 2.0
+) -> dict:
     """
+    Tuning metrics from parsed telemetry; any that can't be computed (e.g.
+        no HOLD samples) is None.
+        hold_spread     max spread during the full HOLD phase
+        ss_err          |mean(i_meas) - i_min_target| over the last 10s of HOLD;
+                        i_min_target is the settled-window mean of the argmin
+                        channel, derived from the log, not hardcoded
+        settle_s        first HOLD-relative time spread stays continuously below
+                        spread_limit for >= settle_hold_s, confirmed against data
+        resonance_peak  max spread during RAMP_UP in the 90-190Hz L/R-corner
+                        band, the historically hardest failure mode a HOLD-only
+                        metric would miss
+        resonance_peak_freq_hz  the drive frequency at which resonance_peak
+                        occurred -- used by validate_resonance_model.py to check
+                        the fitted RLC model's predicted resonance location
+                        against where the real controller actually struggled
+    """
+
     t, state, freq, spread = data["t"], data["state"], data["freq"], data["spread"]
     currents = np.stack([data["i_a"], data["i_b"], data["i_c"], data["i_d"]], axis=1)
 
-    metrics = {"hold_spread": None, "ss_err": None, "settle_s": None,
-               "resonance_peak": None, "resonance_peak_freq_hz": None}
+    metrics = {
+        "hold_spread": None,
+        "ss_err": None,
+        "settle_s": None,
+        "resonance_peak": None,
+        "resonance_peak_freq_hz": None,
+    }
 
     hold_mask = state == HOLD_PHASE
     if hold_mask.any():
@@ -186,28 +205,38 @@ def compute_metrics(data: dict, spread_limit: float = 0.4,
     if ramp_mask.any():
         ramp_spread = spread[ramp_mask]
         metrics["resonance_peak"] = float(ramp_spread.max())
-        metrics["resonance_peak_freq_hz"] = float(freq[ramp_mask][np.argmax(ramp_spread)])
+        metrics["resonance_peak_freq_hz"] = float(
+            freq[ramp_mask][np.argmax(ramp_spread)]
+        )
 
     return metrics
 
 
 def format_metrics_line(metrics: dict) -> str:
-    """Machine-parsable one-line summary, e.g.:
-      METRICS hold_spread=0.090 ss_err=0.042 settle_s=12.3 resonance_peak=0.310
-    Missing metrics print as 'nan' (parse_metrics_line round-trips them)."""
+    """
+    Machine-parsable one-line summary, e.g.:
+          METRICS hold_spread=0.090 ss_err=0.042 settle_s=12.3 resonance_peak=0.310
+        Missing metrics print as 'nan' (parse_metrics_line round-trips them).
+    """
+
     def fmt(v, prec):
         return f"{v:.{prec}f}" if v is not None else "nan"
 
-    return (f"METRICS hold_spread={fmt(metrics['hold_spread'], 3)} "
-            f"ss_err={fmt(metrics['ss_err'], 3)} "
-            f"settle_s={fmt(metrics['settle_s'], 1)} "
-            f"resonance_peak={fmt(metrics['resonance_peak'], 3)}")
+    return (
+        f"METRICS hold_spread={fmt(metrics['hold_spread'], 3)} "
+        f"ss_err={fmt(metrics['ss_err'], 3)} "
+        f"settle_s={fmt(metrics['settle_s'], 1)} "
+        f"resonance_peak={fmt(metrics['resonance_peak'], 3)}"
+    )
 
 
 def parse_metrics_line(text: str) -> dict | None:
-    """Inverse of format_metrics_line -- parses a METRICS line (or any text
-    containing one) back into a dict of floats (nan for missing), or None
-    if no METRICS line is present."""
+    """
+    Inverse of format_metrics_line -- parses a METRICS line (or any text
+        containing one) back into a dict of floats (nan for missing), or None
+        if no METRICS line is present.
+    """
+
     m = _METRICS_LINE.search(text)
     if not m:
         return None

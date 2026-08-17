@@ -1,6 +1,7 @@
-"""Round-trip tests for `conic.py`.
+"""
+Round-trip tests for `conic.py`.
 
-Run: uv run python controller/pose/test_conic.py
+Run: uv run python ai/tests/test_conic.py
 
 These are the gate for the whole pipeline.  Everything downstream -- the
 estimator, the zeroing, the synthetic sweep -- assumes the back-projection is
@@ -24,8 +25,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import conic  # noqa: E402
 
@@ -53,12 +59,14 @@ def _unit(v):
 
 
 def _match(poses, center, normal):
-    """Best (position error mm, normal error deg) over the candidate solutions.
-
-    The two-fold ambiguity is inherent, so a correct solver is one where *one*
-    of its candidates is the truth.  Picking between them is the estimator's
-    problem, tested separately.
     """
+    Best (position error mm, normal error deg) over the candidate solutions.
+
+        The two-fold ambiguity is inherent, so a correct solver is one where *one*
+        of its candidates is the truth.  Picking between them is the estimator's
+        problem, tested separately.
+    """
+
     best = (np.inf, np.inf)
     for p in poses:
         pos = float(np.linalg.norm(p.center - center))
@@ -70,7 +78,10 @@ def _match(poses, center, normal):
 
 
 def test_cone_roundtrip():
-    """circle -> cone -> circle, over a spread of tilts, depths and offsets."""
+    """
+    circle -> cone -> circle, over a spread of tilts, depths and offsets.
+    """
+
     rng = np.random.default_rng(0xC01C)
     worst_pos = worst_ang = 0.0
     n_two = 0
@@ -79,9 +90,16 @@ def test_cone_roundtrip():
     for _ in range(trials):
         tilt = math.radians(rng.uniform(0.0, 70.0))
         az = rng.uniform(0.0, 2 * math.pi)
-        normal = _unit([math.sin(tilt) * math.cos(az), math.sin(tilt) * math.sin(az), math.cos(tilt)])
+        normal = _unit(
+            [
+                math.sin(tilt) * math.cos(az),
+                math.sin(tilt) * math.sin(az),
+                math.cos(tilt),
+            ]
+        )
         center = np.array(
-            [rng.uniform(-30, 30), rng.uniform(-30, 30), rng.uniform(80, 400)], dtype=np.float64
+            [rng.uniform(-30, 30), rng.uniform(-30, 30), rng.uniform(80, 400)],
+            dtype=np.float64,
         )
 
         cone = conic.cone_from_circle(center, normal, RADIUS_MM)
@@ -101,12 +119,14 @@ def test_cone_roundtrip():
 
 
 def test_ellipse_conic_roundtrip():
-    """conic <-> ellipse conversions agree, and the conic fits its own points.
-
-    This is what makes the OpenCV angle convention a non-issue: rather than
-    reasoning about y-down axes, we check numerically that points sampled on the
-    ellipse satisfy p^T C p = 0.
     """
+    conic <-> ellipse conversions agree, and the conic fits its own points.
+
+        This is what makes the OpenCV angle convention a non-issue: rather than
+        reasoning about y-down axes, we check numerically that points sampled on the
+        ellipse satisfy p^T C p = 0.
+    """
+
     rng = np.random.default_rng(7)
     worst_geo = worst_res = 0.0
 
@@ -132,25 +152,36 @@ def test_ellipse_conic_roundtrip():
 
     assert worst_geo < 1e-6, f"ellipse geometry drift {worst_geo:.3e} px"
     assert worst_res < 1e-9, f"points do not lie on their own conic: {worst_res:.3e}"
-    print(f"  ellipse <-> conic   worst geom {worst_geo:.2e} px, point residual {worst_res:.2e}")
+    print(
+        f"  ellipse <-> conic   worst geom {worst_geo:.2e} px, point residual {worst_res:.2e}"
+    )
 
 
 def test_full_pixel_pipeline():
-    """The path the estimator actually walks: circle -> pixels -> ellipse -> pose.
-
-    Points are projected through K by hand (no cv2), fitted back to a conic
-    analytically, then back-projected.  Exercises `backproject_ellipse`, i.e.
-    the K^T C K step, which the cone-only test skips.
     """
+    The path the estimator actually walks: circle -> pixels -> ellipse -> pose.
+
+        Points are projected through K by hand (no cv2), fitted back to a conic
+        analytically, then back-projected.  Exercises `backproject_ellipse`, i.e.
+        the K^T C K step, which the cone-only test skips.
+    """
+
     rng = np.random.default_rng(99)
     worst_pos = worst_ang = 0.0
 
     for _ in range(200):
         tilt = math.radians(rng.uniform(0.0, 65.0))
         az = rng.uniform(0.0, 2 * math.pi)
-        normal = _unit([math.sin(tilt) * math.cos(az), math.sin(tilt) * math.sin(az), math.cos(tilt)])
+        normal = _unit(
+            [
+                math.sin(tilt) * math.cos(az),
+                math.sin(tilt) * math.sin(az),
+                math.cos(tilt),
+            ]
+        )
         center = np.array(
-            [rng.uniform(-20, 20), rng.uniform(-20, 20), rng.uniform(100, 350)], dtype=np.float64
+            [rng.uniform(-20, 20), rng.uniform(-20, 20), rng.uniform(100, 350)],
+            dtype=np.float64,
         )
 
         # Analytic image ellipse of that circle, then straight back through the
@@ -164,11 +195,16 @@ def test_full_pixel_pipeline():
 
     assert worst_pos < TOL_POS_MM, f"position error {worst_pos:.3e} mm"
     assert worst_ang < TOL_ANG_DEG, f"normal error {worst_ang:.3e} deg"
-    print(f"  pixel pipeline      worst pos {worst_pos:.2e} mm, normal {worst_ang:.2e} deg")
+    print(
+        f"  pixel pipeline      worst pos {worst_pos:.2e} mm, normal {worst_ang:.2e} deg"
+    )
 
 
 def test_ambiguity_margin_shrinks_head_on():
-    """The two solutions must merge as the circle turns to face the camera."""
+    """
+    The two solutions must merge as the circle turns to face the camera.
+    """
+
     margins = []
     for tilt_deg in (40.0, 20.0, 5.0, 0.5):
         t = math.radians(tilt_deg)
@@ -181,15 +217,24 @@ def test_ambiguity_margin_shrinks_head_on():
     assert all(
         margins[i] > margins[i + 1] for i in range(len(margins) - 1)
     ), f"margin not monotonic: {margins}"
-    assert margins[-1] < 2.0, f"near head-on margin should collapse, got {margins[-1]:.2f} deg"
-    print(f"  ambiguity margin    tilt 40/20/5/0.5 deg -> {[f'{m:.2f}' for m in margins]}")
+    assert (
+        margins[-1] < 2.0
+    ), f"near head-on margin should collapse, got {margins[-1]:.2f} deg"
+    print(
+        f"  ambiguity margin    tilt 40/20/5/0.5 deg -> {[f'{m:.2f}' for m in margins]}"
+    )
 
 
 def test_speed():
-    """Timing headroom: the solve must be irrelevant against a 420 fps budget."""
+    """
+    Timing headroom: the solve must be irrelevant against a 420 fps budget.
+    """
+
     import time
 
-    ellipse = conic.project_circle([5.0, -3.0, 180.0], _unit([0.3, 0.2, 1.0]), RADIUS_MM, K)
+    ellipse = conic.project_circle(
+        [5.0, -3.0, 180.0], _unit([0.3, 0.2, 1.0]), RADIUS_MM, K
+    )
     n = 3000
 
     for label, tol in (("verified", 1e-6), ("fast", None)):
@@ -198,7 +243,9 @@ def test_speed():
         for _ in range(n):
             conic.backproject_ellipse(ellipse, K, RADIUS_MM, verify_tol=tol)
         us = (time.perf_counter() - t0) / n * 1e6
-        print(f"  solve speed         {label:8s} {us:7.1f} us/frame  ({1e6/us:8.0f} Hz)")
+        print(
+            f"  solve speed         {label:8s} {us:7.1f} us/frame  ({1e6/us:8.0f} Hz)"
+        )
 
 
 if __name__ == "__main__":

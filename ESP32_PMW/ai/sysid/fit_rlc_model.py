@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Joint fit of per-channel R_i, L_i, C_i (series coil resistance,
+"""
+Joint fit of per-channel R_i, L_i, C_i (series coil resistance,
 inductance, and the PCB's series coil capacitor -- see
 docs/PCB_Design_Documentation.md sec.6) from a solo-channel frequency sweep
 (ai/gen_solo_sweep_experiment.py + a main_experiment.cpp telemetry log).
@@ -17,6 +18,7 @@ Usage:
   uv run python ai/fit_rlc_model.py serial.log --v-supply 11.9 --duty 30 \
       --channels A B C D --out ai/rlc_fit.json --plot
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,9 +37,12 @@ _LABEL_RE = re.compile(r"SWEEP_([ABCD])_F([\d.]+)")
 
 
 def extract_sweep_points(data: dict, channel: str, settle_frac: float = 0.5):
-    """For labels 'SWEEP_{channel}_F{freq}', keep the LAST settle_frac of each
-    contiguous label run (post-transient, closer to steady state) and return
-    (freqs_hz, i_mean, duty_mean) arrays sorted by frequency."""
+    """
+    For labels 'SWEEP_{channel}_F{freq}', keep the LAST settle_frac of each
+        contiguous label run (post-transient, closer to steady state) and return
+        (freqs_hz, i_mean, duty_mean) arrays sorted by frequency.
+    """
+
     labels = data["label"]
     i_col = data[f"i_{channel.lower()}"]
     d_col = data[f"d_{channel.lower()}"]
@@ -64,7 +69,7 @@ def extract_sweep_points(data: dict, channel: str, settle_frac: float = 0.5):
 
 
 def z_model(omega, R, L, C):
-    return np.sqrt(R ** 2 + (omega * L - 1.0 / (omega * C)) ** 2)
+    return np.sqrt(R**2 + (omega * L - 1.0 / (omega * C)) ** 2)
 
 
 def _i_model(xdata, R, L, C):
@@ -72,32 +77,44 @@ def _i_model(xdata, R, L, C):
     return v_fund / z_model(omega, R, L, C)
 
 
-def fit_channel(freqs_hz, i_meas_a, duty_pct, v_supply,
-                 p0=(1.5, 0.02, 30e-6)):
-    """Fit R, L, C directly against MEASURED CURRENT (not impedance
-    Z=V/I). Fitting Z blows up the low-frequency/high-impedance corner
-    (tiny, ADC-noise-dominated currents there get divided into huge Z
-    values) and an unweighted least-squares fit ends up dominated by
-    exactly the noisiest, least-relevant points -- while the near-resonance
-    region (largest, best-measured currents, and the thing this model
-    actually needs to get right) gets swamped. Fitting current directly
-    keeps the residual scale tied to what's actually measured, so the
-    largest-magnitude (best-SNR, near-resonance) points naturally dominate
-    the unweighted fit instead."""
+def fit_channel(freqs_hz, i_meas_a, duty_pct, v_supply, p0=(1.5, 0.02, 30e-6)):
+    """
+    Fit R, L, C directly against MEASURED CURRENT (not impedance
+        Z=V/I). Fitting Z blows up the low-frequency/high-impedance corner
+        (tiny, ADC-noise-dominated currents there get divided into huge Z
+        values) and an unweighted least-squares fit ends up dominated by
+        exactly the noisiest, least-relevant points -- while the near-resonance
+        region (largest, best-measured currents, and the thing this model
+        actually needs to get right) gets swamped. Fitting current directly
+        keeps the residual scale tied to what's actually measured, so the
+        largest-magnitude (best-SNR, near-resonance) points naturally dominate
+        the unweighted fit instead.
+    """
+
     omega = 2 * np.pi * np.asarray(freqs_hz)
     v_fund = (4.0 / np.pi) * (np.asarray(duty_pct) / 100.0) * v_supply
     i_meas_a = np.asarray(i_meas_a)
-    popt, _pcov = curve_fit(_i_model, (omega, v_fund), i_meas_a, p0=p0,
-                             bounds=(0, np.inf), maxfev=20000)
+    popt, _pcov = curve_fit(
+        _i_model, (omega, v_fund), i_meas_a, p0=p0, bounds=(0, np.inf), maxfev=20000
+    )
     R, L, C = popt
     f0 = 1.0 / (2 * np.pi * np.sqrt(L * C))
-    resid_rms = float(np.sqrt(np.mean((_i_model((omega, v_fund), *popt) - i_meas_a) ** 2)))
-    return {"R": float(R), "L": float(L), "C": float(C), "f0_hz": float(f0),
-            "resid_rms_a": resid_rms, "n_points": int(len(freqs_hz))}
+    resid_rms = float(
+        np.sqrt(np.mean((_i_model((omega, v_fund), *popt) - i_meas_a) ** 2))
+    )
+    return {
+        "R": float(R),
+        "L": float(L),
+        "C": float(C),
+        "f0_hz": float(f0),
+        "resid_rms_a": resid_rms,
+        "n_points": int(len(freqs_hz)),
+    }
 
 
 def _plot_channel(ch, freqs, i_meas, duty, v_supply, fit, out_path):
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -110,11 +127,15 @@ def _plot_channel(ch, freqs, i_meas, duty, v_supply, fit, out_path):
     fig, ax = plt.subplots(figsize=(7, 4.5))
     ax.plot(freqs, z_meas, "o", label="measured |Z|")
     ax.plot(omega_fine / (2 * np.pi), z_fit, "-", label="fit")
-    ax.axvline(fit["f0_hz"], color="r", linestyle="--", label=f"f0={fit['f0_hz']:.1f}Hz")
+    ax.axvline(
+        fit["f0_hz"], color="r", linestyle="--", label=f"f0={fit['f0_hz']:.1f}Hz"
+    )
     ax.set_xlabel("frequency [Hz]")
     ax.set_ylabel("|Z| [ohm]")
-    ax.set_title(f"channel {ch}: R={fit['R']:.3f} L={fit['L']*1e3:.2f}mH "
-                 f"C={fit['C']*1e6:.2f}uF")
+    ax.set_title(
+        f"channel {ch}: R={fit['R']:.3f} L={fit['L']*1e3:.2f}mH "
+        f"C={fit['C']*1e6:.2f}uF"
+    )
     ax.legend()
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
@@ -122,17 +143,27 @@ def _plot_channel(ch, freqs, i_meas, duty, v_supply, fit, out_path):
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("log")
-    ap.add_argument("--v-supply", type=float, required=True,
-                     help="bench supply voltage AT TEST TIME -- log it, don't "
-                          "assume the 12V nominal design spec")
+    ap.add_argument(
+        "--v-supply",
+        type=float,
+        required=True,
+        help="bench supply voltage AT TEST TIME -- log it, don't "
+        "assume the 12V nominal design spec",
+    )
     ap.add_argument("--channels", nargs="+", default=list("ABCD"), choices=list("ABCD"))
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "rlc_fit.json"))
-    ap.add_argument("--plot", action="store_true",
-                     help="write <log>_rlc_<channel>.png per channel -- a bad "
-                          "fit should be visually obvious before it's trusted")
+    ap.add_argument(
+        "--out", default=os.path.join(os.path.dirname(__file__), "rlc_fit.json")
+    )
+    ap.add_argument(
+        "--plot",
+        action="store_true",
+        help="write <log>_rlc_<channel>.png per channel -- a bad "
+        "fit should be visually obvious before it's trusted",
+    )
     args = ap.parse_args()
 
     data = parse_experiment_log(args.log)
@@ -146,25 +177,31 @@ def main() -> None:
         results[ch] = fit
         lo, hi = RESONANCE_BAND_HZ
         in_band = lo <= fit["f0_hz"] <= hi
-        print(f"{ch}: R={fit['R']:.3f} ohm  L={fit['L']*1e3:.2f} mH  "
-              f"C={fit['C']*1e6:.2f} uF  f0={fit['f0_hz']:.1f} Hz "
-              f"({'IN' if in_band else 'NOT in'} the {lo:.0f}-{hi:.0f} Hz "
-              f"resonance band)  resid={fit['resid_rms_a']*1e3:.1f} mA "
-              f"(n={fit['n_points']})")
+        print(
+            f"{ch}: R={fit['R']:.3f} ohm  L={fit['L']*1e3:.2f} mH  "
+            f"C={fit['C']*1e6:.2f} uF  f0={fit['f0_hz']:.1f} Hz "
+            f"({'IN' if in_band else 'NOT in'} the {lo:.0f}-{hi:.0f} Hz "
+            f"resonance band)  resid={fit['resid_rms_a']*1e3:.1f} mA "
+            f"(n={fit['n_points']})"
+        )
         if args.plot:
             out_png = args.log.rsplit(".", 1)[0] + f"_rlc_{ch}.png"
             _plot_channel(ch, freqs, i_meas, duty, args.v_supply, fit, out_png)
             print(f"  wrote {out_png}")
 
     if not results:
-        raise SystemExit("no channel had enough sweep points to fit -- check "
-                          "the log and --channels")
+        raise SystemExit(
+            "no channel had enough sweep points to fit -- check "
+            "the log and --channels"
+        )
 
     with open(args.out, "w") as f:
         json.dump(results, f, indent=2)
     print(f"wrote {args.out}")
-    print("note: fitted R includes VNH5019 bridge drop + dead-time effects, "
-          "not pure coil copper resistance")
+    print(
+        "note: fitted R includes VNH5019 bridge drop + dead-time effects, "
+        "not pure coil copper resistance"
+    )
 
 
 if __name__ == "__main__":

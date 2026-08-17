@@ -1,10 +1,11 @@
-"""Tests for the pose datum.
+"""
+Tests for the pose datum.
 
 The contract is one sentence: estimate the reference image again after zeroing
 on it, and every channel reads zero.  If that does not hold, "relative to the
 pad" means nothing and every plot is offset by an unknown constant.
 
-Run: uv run python controller/pose/test_zeroing.py
+Run: uv run python ai/tests/test_zeroing.py
 """
 
 from __future__ import annotations
@@ -21,8 +22,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import conic  # noqa: E402
 from estimator import PoseEstimator, _angles_from_normal  # noqa: E402
@@ -42,12 +48,17 @@ def test_frame_from_normal_is_a_rotation():
             abs(float(np.linalg.det(r)) - 1.0),
             float(np.abs(r[:, 2] - n).max()),
         )
-    assert worst < 1e-12, f"not an orthonormal right-handed frame with +z = n: {worst:.2e}"
+    assert (
+        worst < 1e-12
+    ), f"not an orthonormal right-handed frame with +z = n: {worst:.2e}"
     print(f"  frame_from_normal   orthonormal, det=+1, +z=n   (worst {worst:.2e})")
 
 
 def test_in_plane_pins_azimuth():
-    """Supplying an in-plane reference must fix the spin about the normal."""
+    """
+    Supplying an in-plane reference must fix the spin about the normal.
+    """
+
     n = np.array([0.0, 0.0, 1.0])
     r = frame_from_normal(n, in_plane=np.array([0.0, 1.0, 0.0]))
     assert np.allclose(r[:, 0], [0.0, 1.0, 0.0], atol=1e-12), r[:, 0]
@@ -65,7 +76,10 @@ def test_identity_passes_through():
 
 
 def test_reference_reads_exactly_zero():
-    """The headline contract, on analytic poses across a range of references."""
+    """
+    The headline contract, on analytic poses across a range of references.
+    """
+
     worst_pos = worst_theta = worst_psi = 0.0
 
     for tilt_deg, az_deg, ctr in (
@@ -75,11 +89,15 @@ def test_reference_reads_exactly_zero():
         (60.0, 300.0, [5.0, 5.0, 300.0]),
     ):
         t, a = math.radians(tilt_deg), math.radians(az_deg)
-        normal = np.array([math.sin(t) * math.cos(a), math.sin(t) * math.sin(a), math.cos(t)])
+        normal = np.array(
+            [math.sin(t) * math.cos(a), math.sin(t) * math.sin(a), math.cos(t)]
+        )
         center = np.array(ctr, dtype=np.float64)
         psi_ref = 37.5
 
-        in_plane = np.array([math.cos(math.radians(psi_ref)), math.sin(math.radians(psi_ref)), 0.0])
+        in_plane = np.array(
+            [math.cos(math.radians(psi_ref)), math.sin(math.radians(psi_ref)), 0.0]
+        )
         z = Zero.from_pose(center, normal, psi_deg=psi_ref, in_plane=in_plane)
 
         xyz, n_rel = z.apply(center, normal)
@@ -92,12 +110,16 @@ def test_reference_reads_exactly_zero():
     assert worst_pos < 1e-9, f"position not zeroed: {worst_pos:.3e} mm"
     assert worst_theta < 1e-6, f"tilt not zeroed: {worst_theta:.3e} deg"
     assert worst_psi < 1e-9, f"psi not zeroed: {worst_psi:.3e} deg"
-    print(f"  reference reads 0   pos {worst_pos:.1e} mm, tilt {worst_theta:.1e} deg, "
-          f"psi {worst_psi:.1e} deg")
+    print(
+        f"  reference reads 0   pos {worst_pos:.1e} mm, tilt {worst_theta:.1e} deg, "
+        f"psi {worst_psi:.1e} deg"
+    )
 
 
 def test_roundtrip_through_a_file():
-    z = Zero.from_pose([1.0, 2.0, 300.0], [0.2, -0.1, 0.97], psi_deg=12.5, meta={"note": "unit"})
+    z = Zero.from_pose(
+        [1.0, 2.0, 300.0], [0.2, -0.1, 0.97], psi_deg=12.5, meta={"note": "unit"}
+    )
     with tempfile.TemporaryDirectory() as d:
         p = z.save(Path(d) / "pose_zero.json")
         back = Zero.load(p)
@@ -116,7 +138,10 @@ def test_psi_wraps():
 
 
 def test_average_poses_handles_sign_flapping():
-    """Normals from alternating branches must not average to nothing."""
+    """
+    Normals from alternating branches must not average to nothing.
+    """
+
     n = np.array([0.1, 0.0, 0.995])
     n /= np.linalg.norm(n)
     flapping = np.array([n if i % 2 == 0 else -n for i in range(10)])
@@ -128,11 +153,13 @@ def test_average_poses_handles_sign_flapping():
 
 
 def test_zeroed_estimator_on_synthetic_image():
-    """Full path: analytic conic -> estimator -> datum -> zeros.
-
-    Uses the estimator's own solver rather than a rendered image, so this test
-    stays fast and depends only on the maths, not on a GL context.
     """
+    Full path: analytic conic -> estimator -> datum -> zeros.
+
+        Uses the estimator's own solver rather than a rendered image, so this test
+        stays fast and depends only on the maths, not on a GL context.
+    """
+
     K = np.array([[1408.78, 0, 497.55], [0, 1407.69, 355.70], [0, 0, 1.0]])
     radius = 10.204
     center = np.array([8.0, -5.0, 215.0])
@@ -143,8 +170,12 @@ def test_zeroed_estimator_on_synthetic_image():
     poses = conic.backproject_ellipse(ellipse, K, radius)
     truth = min(poses, key=lambda p: np.linalg.norm(p.center - center))
 
-    in_plane = np.array([math.cos(math.radians(ellipse[2])), math.sin(math.radians(ellipse[2])), 0])
-    z = Zero.from_pose(truth.center, truth.normal, psi_deg=ellipse[2], in_plane=in_plane)
+    in_plane = np.array(
+        [math.cos(math.radians(ellipse[2])), math.sin(math.radians(ellipse[2])), 0]
+    )
+    z = Zero.from_pose(
+        truth.center, truth.normal, psi_deg=ellipse[2], in_plane=in_plane
+    )
 
     est = PoseEstimator(camera_matrix=K, dist_coeffs=None, radius_mm=radius, zero=z)
     xyz, n_rel = est.zero.apply(truth.center, truth.normal)
@@ -153,7 +184,9 @@ def test_zeroed_estimator_on_synthetic_image():
     assert np.abs(xyz).max() < 1e-9, xyz
     assert abs(theta) < 1e-6, theta
     assert abs(est.zero.apply_psi(ellipse[2])) < 1e-9
-    print(f"  estimator + datum   reads {np.abs(xyz).max():.1e} mm, {theta:.1e} deg at reference")
+    print(
+        f"  estimator + datum   reads {np.abs(xyz).max():.1e} mm, {theta:.1e} deg at reference"
+    )
 
 
 if __name__ == "__main__":

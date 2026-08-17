@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Discrete-LQR design for the state-space hover controller.
+"""
+Discrete-LQR design for the state-space hover controller.
 
 Design model: reduced 4-state double-integrator pair from ai/hover_model.py
 (linearize_reduced), ZOH-discretized at the camera rate, augmented with
@@ -37,9 +38,9 @@ phase-lock pull-out headroom at margin 5 allows
 Usage: uv run python ai/design_hover_lqr.py [--rate 30] [--k-lat 0.05] ...
 Writes ai/hover_controller.json (convention: compute_model_gains.py).
 """
+
 from __future__ import annotations
 
-import argparse
 import datetime
 import json
 import os
@@ -50,56 +51,68 @@ from scipy.linalg import solve_discrete_are
 
 from hover_model import make_params, linearize_reduced, discretize
 
-C_MEAS = np.array([[1.0, 0.0, 0.0, 0.0],
-                   [0.0, 0.0, 1.0, 0.0]])
+C_MEAS = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])
 
 
-def augment_integrators(Ad: np.ndarray, Bd: np.ndarray, C: np.ndarray,
-                        ts: float) -> tuple[np.ndarray, np.ndarray]:
-    """q(k+1) = q(k) + Ts*(C x(k) - y_ref): forward-Euler error integrators."""
+def augment_integrators(
+    Ad: np.ndarray, Bd: np.ndarray, C: np.ndarray, ts: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    q(k+1) = q(k) + Ts*(C x(k) - y_ref): forward-Euler error integrators.
+    """
+
     n, m = Ad.shape[0], Bd.shape[1]
     p = C.shape[0]
-    Aa = np.block([[Ad, np.zeros((n, p))],
-                   [C * ts, np.eye(p)]])
+    Aa = np.block([[Ad, np.zeros((n, p))], [C * ts, np.eye(p)]])
     Ba = np.vstack([Bd, np.zeros((p, m))])
     return Aa, Ba
 
 
 def dlqr(A: np.ndarray, B: np.ndarray, Q: np.ndarray, R: np.ndarray):
-    """Discrete LQR: K = (R + B'PB)^-1 B'PA with P from the discrete ARE."""
+    """
+    Discrete LQR: K = (R + B'PB)^-1 B'PA with P from the discrete ARE.
+    """
+
     P = solve_discrete_are(A, B, Q, R)
     K = np.linalg.solve(R + B.T @ P @ B, B.T @ P @ A)
     eig = np.linalg.eigvals(A - B @ K)
     return K, P, eig
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--rate", type=float, default=30.0, help="camera/controller rate Hz")
-    ap.add_argument("--f-hover", type=float, default=140.0,
-                    help="lift=weight frequency (GUI default 140; firmware HOVER_HZ=150)")
-    ap.add_argument("--k-lat", type=float, default=0.05,
-                    help="SEED GUESS tilt per unit mag -- re-identify on rig")
-    ap.add_argument("--margin", type=float, default=5.0, help="torque margin")
-    ap.add_argument("--mag-max", type=float, default=0.8)
-    ap.add_argument("--freq-delta-max", type=float, default=15.0,
-                    help="max |f_field - f_hover| Hz")
-    ap.add_argument("--freq-slew", type=float, default=200.0,
-                    help="Hz per second (see docstring for the pull-out bound)")
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__),
-                                                  "hover_controller.json"))
-    args = ap.parse_args()
+def design(
+    rate_hz=30.0,
+    f_hover=140.0,
+    k_lat=0.05,
+    margin=5.0,
+    mag_max=0.8,
+    freq_delta_max=15.0,
+    freq_slew=200.0,
+    out=None,
+):
+    """
+    Synthesise the hover LQR and write the gain file. Returns the gain dict.
 
-    ts = 1.0 / args.rate
-    p = make_params(f_hover=args.f_hover, k_lat=args.k_lat, margin=args.margin)
+    ``k_lat`` is a **seed guess** for tilt per unit magnet command and must be
+    re-identified on the rig. Raises rather than exiting if any closed-loop pole
+    exceeds ``rate_hz/6``: past that the discrete design is faster than the loop
+    that has to run it, and the gains are fiction.
+    """
+
+    ts = 1.0 / rate_hz
+    p = make_params(f_hover=f_hover, k_lat=k_lat, margin=margin)
     A, B = linearize_reduced(p)
     Ad, Bd = discretize(A, B, ts)
     Aa, Ba = augment_integrators(Ad, Bd, C_MEAS, ts)
 
     # Bryson weights (see module docstring for why NOT tighter)
-    q_diag = [1 / 0.010**2, 1 / 0.05**2, 1 / 0.030**2, 1 / 0.15**2,
-              1 / 0.010**2, 1 / 0.030**2]
+    q_diag = [
+        1 / 0.010**2,
+        1 / 0.05**2,
+        1 / 0.030**2,
+        1 / 0.15**2,
+        1 / 0.010**2,
+        1 / 0.030**2,
+    ]
     r_diag = [1 / 0.5**2, 1 / 3.0**2]
     K, _, eig = dlqr(Aa, Ba, np.diag(q_diag), np.diag(r_diag))
 
@@ -107,42 +120,58 @@ def main() -> None:
     poles_hz = np.abs(np.log(eig.astype(complex))) / ts / (2 * np.pi)
 
     np.set_printoptions(precision=3, suppress=True)
-    print(f"design @ {args.rate:.0f} Hz (Ts={ts*1000:.1f} ms), "
-          f"f_hover={args.f_hover}, k_lat={args.k_lat} (seed), margin={args.margin}")
+    print(
+        f"design @ {rate_hz:.0f} Hz (Ts={ts*1000:.1f} ms), "
+        f"f_hover={f_hover}, k_lat={k_lat} (seed), margin={margin}"
+    )
     print("K (rows: mag_signed, delta_f_hz | cols: x xd z zd int_ex int_ez):")
     print(K)
     print("closed-loop pole rates [Hz]:", np.sort(poles_hz.real))
 
-    limit_hz = args.rate / 6.0
+    limit_hz = rate_hz / 6.0
     if np.any(poles_hz > limit_hz):
-        sys.exit(f"FAIL: closed-loop pole(s) exceed {limit_hz:.1f} Hz (= rate/6) -- "
-                 f"detune Q/R or raise --rate")
+        raise ValueError(
+            f"closed-loop pole(s) exceed {limit_hz:.1f} Hz (= rate/6) -- "
+            f"detune Q/R or raise rate_hz"
+        )
 
-    out = {
+    gains = {
         "meta": {
-            "generated_by": "ai/design_hover_lqr.py",
+            "generated_by": "controller/control/design_hover_lqr.design",
             "date": datetime.date.today().isoformat(),
-            "args": vars(args),
+            "args": {
+                "rate_hz": rate_hz,
+                "f_hover": f_hover,
+                "k_lat": k_lat,
+                "margin": margin,
+                "mag_max": mag_max,
+                "freq_delta_max": freq_delta_max,
+                "freq_slew": freq_slew,
+            },
         },
         "params": {
-            "I_robot": p.I_robot, "k_drag": p.k_drag, "f_hover": p.f_hover,
-            "k_lat": p.k_lat, "margin": p.margin, "g": p.g,
-            "tau_max": p.tau_max, "delta_trim_rad": p.delta_trim,
+            "I_robot": p.I_robot,
+            "k_drag": p.k_drag,
+            "f_hover": p.f_hover,
+            "k_lat": p.k_lat,
+            "margin": p.margin,
+            "g": p.g,
+            "tau_max": p.tau_max,
+            "delta_trim_rad": p.delta_trim,
         },
-        "design": {"rate_hz": args.rate, "ts": ts,
-                   "Q_diag": q_diag, "R_diag": r_diag},
+        "design": {"rate_hz": rate_hz, "ts": ts, "Q_diag": q_diag, "R_diag": r_diag},
         "K": K.tolist(),
         "u_ff": {"mag": 0.0, "f_field_hz": p.f_hover},
-        "limits": {"mag_max": args.mag_max,
-                   "freq_min": p.f_hover - args.freq_delta_max,
-                   "freq_max": p.f_hover + args.freq_delta_max,
-                   "freq_slew_hz_per_s": args.freq_slew},
+        "limits": {
+            "mag_max": mag_max,
+            "freq_min": p.f_hover - freq_delta_max,
+            "freq_max": p.f_hover + freq_delta_max,
+            "freq_slew_hz_per_s": freq_slew,
+        },
         "closed_loop_poles_hz": sorted(float(x) for x in poles_hz.real),
     }
-    with open(args.out, "w") as f:
-        json.dump(out, f, indent=2)
-    print(f"wrote {args.out}")
-
-
-if __name__ == "__main__":
-    main()
+    path = out or os.path.join(os.path.dirname(__file__), "hover_controller.json")
+    with open(path, "w") as f:
+        json.dump(gains, f, indent=2)
+    print(f"wrote {path}")
+    return gains

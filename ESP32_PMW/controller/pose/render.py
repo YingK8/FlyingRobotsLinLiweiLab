@@ -1,4 +1,5 @@
-"""Render the robot mesh at known poses, so residuals have something to be
+"""
+Render the robot mesh at known poses, so residuals have something to be
 measured against.
 
 There is no ground truth on the bench -- nothing observes the robot but the
@@ -44,9 +45,7 @@ import pyrender  # noqa: E402
 import trimesh  # noqa: E402
 from scipy.spatial.transform import Rotation  # noqa: E402
 
-MESH_PATH = (
-    Path(__file__).resolve().parent / "assets" / "flyingrobot_rod2.STL"
-)
+MESH_PATH = Path(__file__).resolve().parent / "assets" / "flyingrobot_rod2.STL"
 INTRINSICS_PATH = (
     Path(__file__).resolve().parents[1] / "calib" / "assets" / "camera_intrinsics.npz"
 )
@@ -77,29 +76,29 @@ BLACK_BODY = (0.055, 0.058, 0.061)
 
 @dataclass
 class LightRig:
-    """A lighting configuration for one render.
+    """
+    A lighting configuration for one render.
 
-    Two families, matching the two ways light actually reaches the robot on the
-    bench:
+        Two families, matching the two ways light actually reaches the robot on the
+        bench:
 
-    ``lateral_deg`` -- directional lights on a ring in the plane normal to the
-    camera axis, i.e. lit from the side at the given bearings.  This is the
-    harsh case: a low side light leaves half the rim in shadow and the threshold
-    eats it, which is exactly the failure the sweep should surface.
+        ``lateral_deg`` -- directional lights on a ring in the plane normal to the
+        camera axis, i.e. lit from the side at the given bearings.  This is the
+        harsh case: a low side light leaves half the rim in shadow and the threshold
+        eats it, which is exactly the failure the sweep should surface.
 
-    ``dome`` -- ``(elevation_deg, azimuth_deg)`` pairs on a hemisphere above the
-    robot, the diffuse overhead case.
+        ``dome`` -- ``(elevation_deg, azimuth_deg)`` pairs on a hemisphere above the
+        robot, the diffuse overhead case.
 
-    ``ambient`` turns out to be the dominant knob, and not for a trivial reason.
-    The duct is a thin ring, so face-on its outer wall is nearly parallel to the
-    view and catches almost nothing from a directional source: measured over the
-    ground-truth silhouette, raising ``intensity`` from 3 to 80 moves the
-    fraction of lit pixels only 0.21 -> 0.39, while raising ``ambient`` from
-    0.05 to 0.3 moves it to 0.89.  Directional light controls contrast; ambient
-    controls whether the silhouette exists at all.  Both are swept.
+        ``ambient`` is the dominant knob, for a non-obvious reason: the duct is a thin
+        ring, so face-on its outer wall is nearly edge-on and catches almost nothing
+        directional. Over the ground-truth silhouette, ``intensity`` 3 -> 80 moves the
+        lit fraction 0.21 -> 0.39, while ``ambient`` 0.05 -> 0.3 moves it to 0.89.
+        Directional light sets contrast; ambient decides whether the silhouette exists
+        at all. Both are swept.
 
-    ``key_from_camera`` adds a light down the optical axis -- a lens-mounted
-    ring light, which is how you would actually illuminate this rig.
+        ``key_from_camera`` adds a light down the optical axis, i.e. a lens-mounted
+        ring light -- how you would actually illuminate this rig.
     """
 
     lateral_deg: tuple = ()
@@ -109,7 +108,10 @@ class LightRig:
     key_from_camera: bool = True
 
     def directions(self):
-        """Unit vectors the light travels *toward*, in OpenCV camera axes."""
+        """
+        Unit vectors the light travels *toward*, in OpenCV camera axes.
+        """
+
         out = []
         for a in self.lateral_deg:
             r = math.radians(a)
@@ -117,7 +119,9 @@ class LightRig:
         for elev, az in self.dome:
             e, a = math.radians(elev), math.radians(az)
             out.append(
-                np.array([math.cos(e) * math.cos(a), -math.sin(e), math.cos(e) * math.sin(a)])
+                np.array(
+                    [math.cos(e) * math.cos(a), -math.sin(e), math.cos(e) * math.sin(a)]
+                )
             )
         if self.key_from_camera or not out:
             out.append(np.array([0.0, 0.0, 1.0]))
@@ -131,27 +135,28 @@ class LightRig:
 
 @dataclass
 class Exposure:
-    """Sensor realism: finite exposure time and read noise.
+    """
+    Sensor realism: finite exposure time and read noise.
 
-    Renders are otherwise instantaneous and noise-free, which flatters the
-    estimator.  Two effects are worth simulating because they act in opposite
-    directions:
+        Renders are otherwise instantaneous and noise-free, which flatters the
+        estimator.  Two effects are worth simulating because they act in opposite
+        directions:
 
-    **Motion blur** is accumulated properly, by rendering ``subframes`` across
-    the exposure window and averaging, rather than convolving with a kernel.
-    A kernel would be wrong here: the dominant motion is the rotor *spinning*,
-    not translating, and a rotation is not a shift-invariant blur.  At 330 Hz
-    and a 1/500 s exposure the rotor turns 238 degrees within one frame, which
-    no linear kernel represents.
+        **Motion blur** is accumulated properly, by rendering ``subframes`` across
+        the exposure window and averaging, rather than convolving with a kernel.
+        A kernel would be wrong here: the dominant motion is the rotor *spinning*,
+        not translating, and a rotation is not a shift-invariant blur.  At 330 Hz
+        and a 1/500 s exposure the rotor turns 238 degrees within one frame, which
+        no linear kernel represents.
 
-    **Gaussian read noise** is added after accumulation, since it is a per-frame
-    sensor effect and does not average down with exposure the way scene motion
-    does.  ``sigma`` is in grey levels out of 255.
+        **Gaussian read noise** is added after accumulation, since it is a per-frame
+        sensor effect and does not average down with exposure the way scene motion
+        does.  ``sigma`` is in grey levels out of 255.
 
-    High frame rates make these fight each other: a 420 fps camera must use a
-    short exposure, which reduces blur but collects fewer photons and so raises
-    noise.  ``exposure_s`` and ``sigma`` should be moved together to model a real
-    camera rather than independently.
+        High frame rates make these fight each other: a 420 fps camera must use a
+        short exposure, which reduces blur but collects fewer photons and so raises
+        noise.  ``exposure_s`` and ``sigma`` should be moved together to model a real
+        camera rather than independently.
     """
 
     exposure_s: float = 0.0
@@ -164,10 +169,14 @@ class Exposure:
 
     @property
     def blurs(self):
-        return self.exposure_s > 0 and self.subframes > 1 and (
-            self.spin_hz != 0
-            or any(self.velocity_mm_s)
-            or self.tilt_rate_deg_s != 0
+        return (
+            self.exposure_s > 0
+            and self.subframes > 1
+            and (
+                self.spin_hz != 0
+                or any(self.velocity_mm_s)
+                or self.tilt_rate_deg_s != 0
+            )
         )
 
     def label(self):
@@ -176,24 +185,25 @@ class Exposure:
 
 @dataclass
 class View:
-    """A camera other than the reference one, simulated by moving the world.
+    """
+    A camera other than the reference one, simulated by moving the world.
 
-    `Renderer` holds its pyrender camera at the origin because pyglet's Cocoa
-    backend allows exactly one GL context per process -- a second `Renderer`
-    raises, and so would a second camera node with a different pose if we wanted
-    a *different image* out of the same pass.  So the second view is produced by
-    left-multiplying every object pose by ``T_this_ref``, which is
-    algebraically identical to moving the camera and costs one 4x4 product.
+        `Renderer` holds its pyrender camera at the origin because pyglet's Cocoa
+        backend allows exactly one GL context per process -- a second `Renderer`
+        raises, and so would a second camera node with a different pose if we wanted
+        a *different image* out of the same pass.  So the second view is produced by
+        left-multiplying every object pose by ``T_this_ref``, which is
+        algebraically identical to moving the camera and costs one 4x4 product.
 
-    ``T_this_ref`` maps **reference-camera coordinates into this camera's
-    coordinates**.  For a `rig.StereoRig` that is ``rig.relative(ref, this)``.
-    Identity reproduces the reference view exactly, which is what
-    `selftest_stereo.py` asserts first.
+        ``T_this_ref`` maps **reference-camera coordinates into this camera's
+        coordinates**.  For a `rig.StereoRig` that is ``rig.relative(ref, this)``.
+        Identity reproduces the reference view exactly, which is what
+        `selftest_stereo.py` asserts first.
 
-    ``occluders`` are ``(trimesh, 4x4 pose in reference-camera coords, rgb)``.
-    They are rendered but kept out of the ground-truth mask, so the mask stays
-    the robot's true silhouette and occlusion becomes something to measure
-    rather than something baked into the answer.
+        ``occluders`` are ``(trimesh, 4x4 pose in reference-camera coords, rgb)``.
+        They are rendered but kept out of the ground-truth mask, so the mask stays
+        the robot's true silhouette and occlusion becomes something to measure
+        rather than something baked into the answer.
     """
 
     T_this_ref: np.ndarray = field(default_factory=lambda: np.eye(4))
@@ -212,7 +222,9 @@ class View:
 
 @dataclass
 class Sample:
-    """One rendered frame plus the ground truth that produced it."""
+    """
+    One rendered frame plus the ground truth that produced it.
+    """
 
     image: np.ndarray  # uint8 grayscale
     mask: np.ndarray  # bool, True where the mesh is
@@ -234,12 +246,14 @@ class Sample:
 
     @property
     def ellipse_gt(self):
-        """Analytic image ellipse of the rim at this pose.
-
-        Independent of the render -- computed straight from the geometry -- so
-        comparing it against the fitted ellipse separates renderer error from
-        estimator error.
         """
+        Analytic image ellipse of the rim at this pose.
+
+                Independent of the render -- computed straight from the geometry -- so
+                comparing it against the fitted ellipse separates renderer error from
+                estimator error.
+        """
+
         import conic
 
         K = load_K() if self.K is None else self.K
@@ -256,16 +270,18 @@ def load_K(path=INTRINSICS_PATH):
 
 
 def load_mesh(path=MESH_PATH):
-    """Load the robot, recentred and axis-aligned so pose means something.
-
-    The STL sits in Fusion's assembly frame with the rotor plane in local y-z.
-    We rotate the rotor axis onto +z and translate the rim centroid to the
-    origin, so "pose" is the pose of the duct circle itself -- the very feature
-    `conic.py` recovers -- rather than of some arbitrary CAD datum.
-
-    Also measures the rim radius from the mesh instead of hardcoding it, so
-    ground truth and the estimator's radius come from one source.
     """
+    Load the robot, recentred and axis-aligned so pose means something.
+
+        The STL sits in Fusion's assembly frame with the rotor plane in local y-z.
+        We rotate the rotor axis onto +z and translate the rim centroid to the
+        origin, so "pose" is the pose of the duct circle itself -- the very feature
+        `conic.py` recovers -- rather than of some arbitrary CAD datum.
+
+        Also measures the rim radius from the mesh instead of hardcoding it, so
+        ground truth and the estimator's radius come from one source.
+    """
+
     global RIM_RADIUS_MM
     key = str(path)
     if key in _MESH_CACHE:
@@ -303,16 +319,18 @@ def load_mesh(path=MESH_PATH):
 
 
 def pose_matrix(tilt_deg, azimuth_deg, center_mm, spin_deg=0.0):
-    """4x4 model->camera transform (OpenCV axes) for a tilt/azimuth/position.
-
-    Tilt swings the rotor axis away from the camera axis; azimuth spins that
-    tilt around.  At tilt 0 the rotor faces the camera dead on.
-
-    ``spin_deg`` rotates the robot about its own rotor axis -- blade phase.  It
-    does not change the pose being estimated (the rotor axis is unmoved), only
-    which way the blades happen to point, so it is the right way to model a
-    robot turning at 310-350 Hz.
     """
+    4x4 model->camera transform (OpenCV axes) for a tilt/azimuth/position.
+
+        Tilt swings the rotor axis away from the camera axis; azimuth spins that
+        tilt around.  At tilt 0 the rotor faces the camera dead on.
+
+        ``spin_deg`` rotates the robot about its own rotor axis -- blade phase.  It
+        does not change the pose being estimated (the rotor axis is unmoved), only
+        which way the blades happen to point, so it is the right way to model a
+        robot turning at 310-350 Hz.
+    """
+
     t, a = math.radians(tilt_deg), math.radians(azimuth_deg)
     # Rotate +z by `tilt` about a unit axis in the x-y plane set by `azimuth`.
     # `k` is already normalised, so `t * k` is the rotation vector directly and
@@ -330,43 +348,50 @@ def pose_matrix(tilt_deg, azimuth_deg, center_mm, spin_deg=0.0):
 
 
 def _add_noise(image, sigma, seed=0):
-    """Additive Gaussian read noise, in grey levels.
-
-    Deliberately applied after any exposure averaging: read noise is a per-frame
-    sensor effect, so averaging sub-frames must not attenuate it the way it
-    attenuates scene motion.
     """
+    Additive Gaussian read noise, in grey levels.
+
+        Deliberately applied after any exposure averaging: read noise is a per-frame
+        sensor effect, so averaging sub-frames must not attenuate it the way it
+        attenuates scene motion.
+    """
+
     rng = np.random.default_rng(seed)
     noisy = image.astype(np.float64) + rng.normal(0.0, float(sigma), image.shape)
     return np.clip(noisy, 0, 255).astype(np.uint8)
 
 
 def normal_from_pose(model_to_cam):
-    """The rotor normal a pose implies, oriented toward the camera.
-
-    Matches how `conic.backproject` orients its normals, so ground truth and
-    estimate are directly comparable without a sign convention in between.
     """
+    The rotor normal a pose implies, oriented toward the camera.
+
+        Matches how `conic.backproject` orients its normals, so ground truth and
+        estimate are directly comparable without a sign convention in between.
+    """
+
     n = model_to_cam[:3, :3] @ np.array([0.0, 0.0, 1.0])
     n = n / np.linalg.norm(n)
     return -n if n @ model_to_cam[:3, 3] > 0 else n
 
 
 class Renderer:
-    """Offscreen renderer with a fixed camera and a swappable material/lighting.
+    """
+    Offscreen renderer with a fixed camera and a swappable material/lighting.
 
-    Held as a class because `pyrender.OffscreenRenderer` owns a GL context that
-    costs far more to create than to reuse -- rebuilding it per frame would
-    dominate a sweep of a few hundred renders.
+        Held as a class because `pyrender.OffscreenRenderer` owns a GL context that
+        costs far more to create than to reuse -- rebuilding it per frame would
+        dominate a sweep of a few hundred renders.
 
-    One per process, and only one.  pyglet's Cocoa backend cannot build a second
-    NSOpenGL pixel format after the first window exists, so constructing another
-    `Renderer` -- even after `close()` -- raises deep inside pyglet
-    (``ObjCInstance PygletDelegate has no attribute initWithAttributes_``).  To
-    compare resolutions, render once and resize the image, or use a subprocess.
+        One per process, and only one.  pyglet's Cocoa backend cannot build a second
+        NSOpenGL pixel format after the first window exists, so constructing another
+        `Renderer` -- even after `close()` -- raises deep inside pyglet
+        (``ObjCInstance PygletDelegate has no attribute initWithAttributes_``).  To
+        compare resolutions, render once and resize the image, or use a subprocess.
     """
 
-    def __init__(self, width=1024, height=768, mesh_path=MESH_PATH, intrinsics=INTRINSICS_PATH):
+    def __init__(
+        self, width=1024, height=768, mesh_path=MESH_PATH, intrinsics=INTRINSICS_PATH
+    ):
         self.width, self.height = width, height
         self.mesh = load_mesh(mesh_path)
         self.K = load_K(intrinsics)
@@ -381,52 +406,95 @@ class Renderer:
     def __exit__(self, *exc):
         self.close()
 
-    def render(self, tilt_deg, azimuth_deg, center_mm, alpha=1.0, light=None, bg_level=0.0,
-               exposure=None, spin_deg=0.0, view=None, background=None,
-               body_colour=None):
-        """Render one frame and return it with its ground truth.
-
-        ``exposure`` adds motion blur and read noise; see `Exposure`.  Ground
-        truth is taken at the **middle** of the exposure window, which is what a
-        real timestamp refers to and keeps the reported pose unbiased with
-        respect to the blur.
-
-        ``view`` is how a second camera is rendered without a second GL context
-        (see `View` and `render_stereo.py`): it left-multiplies the model pose,
-        rotates the lights to match, swaps the intrinsics, and adds occluders.
-        Leaving it ``None`` is the monocular path and behaves exactly as before.
-
-        ``body_colour`` is a linear base-colour factor; ``None`` keeps the white
-        body. The frame is always **single-channel**, because every camera this
-        package targets is a mono sensor -- see `segment`. A non-neutral factor
-        is still accepted, since it changes how the body *shades*, but its colour
-        is not recoverable from the result.
+    def render(
+        self,
+        tilt_deg,
+        azimuth_deg,
+        center_mm,
+        alpha=1.0,
+        light=None,
+        bg_level=0.0,
+        exposure=None,
+        spin_deg=0.0,
+        view=None,
+        background=None,
+        body_colour=None,
+    ):
         """
+        Render one frame and return it with its ground truth.
+
+                ``exposure`` adds motion blur and read noise; see `Exposure`.  Ground
+                truth is taken at the **middle** of the exposure window, which is what a
+                real timestamp refers to and keeps the reported pose unbiased with
+                respect to the blur.
+
+                ``view`` is how a second camera is rendered without a second GL context
+                (see `View` and `render_stereo.py`): it left-multiplies the model pose,
+                rotates the lights to match, swaps the intrinsics, and adds occluders.
+                Leaving it ``None`` is the monocular path and behaves exactly as before.
+
+                ``body_colour`` is a linear base-colour factor; ``None`` keeps the white
+                body. The frame is always **single-channel**, because every camera this
+                package targets is a mono sensor -- see `segment`. A non-neutral factor
+                is still accepted, since it changes how the body *shades*, but its colour
+                is not recoverable from the result.
+        """
+
         light = light or LightRig(dome=((60.0, 0.0),))
 
         if exposure is not None and exposure.blurs:
             return self._render_exposed(
-                tilt_deg, azimuth_deg, center_mm, alpha, light, bg_level, exposure, spin_deg,
-                view, background, body_colour,
+                tilt_deg,
+                azimuth_deg,
+                center_mm,
+                alpha,
+                light,
+                bg_level,
+                exposure,
+                spin_deg,
+                view,
+                background,
+                body_colour,
             )
 
         sample = self._render_instant(
-            tilt_deg, azimuth_deg, center_mm, alpha, light, bg_level, spin_deg, view,
-            background, body_colour
+            tilt_deg,
+            azimuth_deg,
+            center_mm,
+            alpha,
+            light,
+            bg_level,
+            spin_deg,
+            view,
+            background,
+            body_colour,
         )
         if exposure is not None and exposure.sigma > 0:
             sample.image = _add_noise(sample.image, exposure.sigma, exposure.seed)
         return sample
 
-    def _render_exposed(self, tilt_deg, azimuth_deg, center_mm, alpha, light, bg_level,
-                        exposure, spin_deg, view=None, background=None,
-                        body_colour=None):
-        """Average sub-frames across the exposure window, then add read noise.
-
-        Sub-frames are placed symmetrically about the window centre so the mean
-        pose equals the reported ground-truth pose; sampling from one edge would
-        bias every measurement by half an exposure of motion.
+    def _render_exposed(
+        self,
+        tilt_deg,
+        azimuth_deg,
+        center_mm,
+        alpha,
+        light,
+        bg_level,
+        exposure,
+        spin_deg,
+        view=None,
+        background=None,
+        body_colour=None,
+    ):
         """
+        Average sub-frames across the exposure window, then add read noise.
+
+                Sub-frames are placed symmetrically about the window centre so the mean
+                pose equals the reported ground-truth pose; sampling from one edge would
+                bias every measurement by half an exposure of motion.
+        """
+
         n = max(2, int(exposure.subframes))
         centre = np.asarray(center_mm, dtype=np.float64)
         vel = np.asarray(exposure.velocity_mm_s, dtype=np.float64)
@@ -458,18 +526,38 @@ class Renderer:
         # region is far larger than any instant, not because segmentation got
         # worse (pose error was unchanged).
         truth = self._render_instant(
-            tilt_deg, azimuth_deg, centre, alpha, light, bg_level, spin_deg, view,
-            background, body_colour
+            tilt_deg,
+            azimuth_deg,
+            centre,
+            alpha,
+            light,
+            bg_level,
+            spin_deg,
+            view,
+            background,
+            body_colour,
         )
         truth.image = (
             _add_noise(blurred, exposure.sigma, exposure.seed)
-            if exposure.sigma > 0 else blurred
+            if exposure.sigma > 0
+            else blurred
         )
         truth.exposure = exposure
         return truth
 
-    def _render_instant(self, tilt_deg, azimuth_deg, center_mm, alpha, light, bg_level,
-                        spin_deg=0.0, view=None, background=None, body_colour=None):
+    def _render_instant(
+        self,
+        tilt_deg,
+        azimuth_deg,
+        center_mm,
+        alpha,
+        light,
+        bg_level,
+        spin_deg=0.0,
+        view=None,
+        background=None,
+        body_colour=None,
+    ):
         model_to_cam = pose_matrix(tilt_deg, azimuth_deg, center_mm, spin_deg)
         K = self.K
         if view is not None:
@@ -485,8 +573,9 @@ class Renderer:
         # backdrop is composited in afterwards, because pyrender's `bg_color` is
         # a single colour and these are gradients and bands.
         scene = pyrender.Scene(
-            bg_color=[0.0, 0.0, 0.0, 0.0] if background is not None
-            else [bg, bg, bg, 1.0],
+            bg_color=(
+                [0.0, 0.0, 0.0, 0.0] if background is not None else [bg, bg, bg, 1.0]
+            ),
             ambient_light=[light.ambient] * 3,
         )
 
@@ -527,8 +616,12 @@ class Renderer:
         # The camera sits at the origin looking down +z in OpenCV axes; pyrender
         # wants the OpenGL convention, hence CV_TO_GL.
         cam = pyrender.IntrinsicsCamera(
-            fx=K[0, 0], fy=K[1, 1], cx=K[0, 2], cy=K[1, 2],
-            znear=1.0, zfar=5000.0,
+            fx=K[0, 0],
+            fy=K[1, 1],
+            cx=K[0, 2],
+            cy=K[1, 2],
+            znear=1.0,
+            zfar=5000.0,
         )
         scene.add(cam, pose=CV_TO_GL)
 
@@ -541,7 +634,9 @@ class Renderer:
         light_R = np.eye(3) if view is None else view.T_this_ref[:3, :3]
         for d in light.directions():
             scene.add(
-                pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=light.intensity),
+                pyrender.DirectionalLight(
+                    color=[1.0, 1.0, 1.0], intensity=light.intensity
+                ),
                 pose=CV_TO_GL @ _look_along(light_R @ d),
             )
 
@@ -581,7 +676,8 @@ class Renderer:
             back = np.asarray(background, dtype=np.float64)
             if back.shape != gray.shape:
                 raise ValueError(
-                    f"background {back.shape} does not match frame {gray.shape}")
+                    f"background {back.shape} does not match frame {gray.shape}"
+                )
             gray = gray.astype(np.float64) * a + (1.0 - a) * back
         gray = np.clip(gray, 0, 255).astype(np.uint8)
 
@@ -605,7 +701,10 @@ class Renderer:
         )
 
     def _silhouette(self, scene, node):
-        """Exact mesh coverage, via pyrender's flat segmentation pass."""
+        """
+        Exact mesh coverage, via pyrender's flat segmentation pass.
+        """
+
         seg = self._renderer.render(
             scene, flags=pyrender.RenderFlags.SEG, seg_node_map={node: (255, 255, 255)}
         )[0]
@@ -613,11 +712,13 @@ class Renderer:
 
 
 def _look_along(direction):
-    """4x4 whose -z axis points along ``direction`` (OpenCV axes).
-
-    pyrender's directional lights emit along their node's -z, so this is how a
-    desired travel direction becomes a light pose.
     """
+    4x4 whose -z axis points along ``direction`` (OpenCV axes).
+
+        pyrender's directional lights emit along their node's -z, so this is how a
+        desired travel direction becomes a light pose.
+    """
+
     d = np.asarray(direction, dtype=np.float64)
     d = d / np.linalg.norm(d)
     z = -d

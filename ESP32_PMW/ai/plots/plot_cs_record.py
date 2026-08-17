@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Plot recorded current-sense currents from record_serial.py's CSV.
+"""
+Plot recorded current-sense currents from record_serial.py's CSV.
 
 The CSV columns are: t_s,phase,A,B,C,D,dutyA,dutyB,dutyC,dutyD
 where A..D are the per-channel current-sense readings in amps.
 
 Usage: uv run python ai/plot_cs_record.py data/cs_YYYYMMDD_HHMMSS.csv
 """
+
 import sys
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 

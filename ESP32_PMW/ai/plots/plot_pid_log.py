@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Plot main_current_pid.cpp telemetry from a serial log (no PicoScope needed).
+"""
+Plot main_current_pid.cpp telemetry from a serial log (no PicoScope needed).
 
 Lines look like (emitted at ~2 Hz):
   t=12345 phase=3 freq=142.1 | I[A]: A=4.98 B=4.91 C=5.03 D=5.10 | duty[%]: A=55.0 B=52.0 C=54.0 D=50.0 | spread=0.190
@@ -13,22 +14,34 @@ ai/pid_metrics.py) that ai/pid_autotune.py scores across trials.
 
 Usage: uv run python ai/plot_pid_log.py LOG
 """
+
 import argparse
 import os
 import sys
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pid_metrics import STATES, HOLD_PHASE, compute_metrics, format_metrics_line, parse_log
+from pid_metrics import (
+    STATES,
+    HOLD_PHASE,
+    compute_metrics,
+    format_metrics_line,
+    parse_log,
+)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("log")
-ap.add_argument("--spread-limit", type=float, default=0.4,
-                 help="validation bar in amps (default 0.4: the balance goal is "
-                      "the four channel currents within 0.4A for any schedule)")
+ap.add_argument(
+    "--spread-limit",
+    type=float,
+    default=0.4,
+    help="validation bar in amps (default 0.4: the balance goal is "
+    "the four channel currents within 0.4A for any schedule)",
+)
 args = ap.parse_args()
 
 data = parse_log(args.log)
@@ -45,8 +58,10 @@ hold_mask = state == HOLD_PHASE
 if hold_mask.any():
     hold_max_spread = spread[hold_mask].max()
     verdict = "PASS" if hold_max_spread < args.spread_limit else "FAIL"
-    print(f"  max spread during HOLD = {hold_max_spread:.3f}A -> {verdict} "
-          f"vs {args.spread_limit}A bar (full HOLD, incl. settling transient)")
+    print(
+        f"  max spread during HOLD = {hold_max_spread:.3f}A -> {verdict} "
+        f"vs {args.spread_limit}A bar (full HOLD, incl. settling transient)"
+    )
 
     # The start of HOLD is still the tail of RAMP_UP's settling transient, not
     # steady-state -- a separate settled-window check (last 10s of HOLD) is a
@@ -56,9 +71,11 @@ if hold_mask.any():
     if settled_mask.any():
         settled_max = spread[settled_mask].max()
         settled_verdict = "PASS" if settled_max < args.spread_limit else "FAIL"
-        print(f"  max spread in LAST 10s of HOLD = {settled_max:.3f}A -> "
-              f"{settled_verdict} vs {args.spread_limit}A bar (settled, "
-              f"excludes the post-ramp settling transient)")
+        print(
+            f"  max spread in LAST 10s of HOLD = {settled_max:.3f}A -> "
+            f"{settled_verdict} vs {args.spread_limit}A bar (settled, "
+            f"excludes the post-ramp settling transient)"
+        )
 else:
     print("  no HOLD samples captured -- log too short or run didn't reach HOLD")
 
@@ -75,8 +92,13 @@ for i in range(1, len(state) + 1):
         s = state[start]
         lbl = STATES.get(s, str(s)) if s not in seen else None
         for ax in (ax1, ax2, ax3, ax4):
-            ax.axvspan(t[start], t[i - 1], color=cmap(s % 8), alpha=0.5,
-                       label=lbl if ax is ax1 else None)
+            ax.axvspan(
+                t[start],
+                t[i - 1],
+                color=cmap(s % 8),
+                alpha=0.5,
+                label=lbl if ax is ax1 else None,
+            )
         seen.add(s)
         start = i
 
@@ -98,8 +120,13 @@ ax3.grid(alpha=0.3)
 ax3.legend(loc="upper left", fontsize=8, ncol=4)
 
 ax4.plot(t, spread, color="#d62728", lw=1.6, label="spread = max-min(i_meas)")
-ax4.axhline(args.spread_limit, color="k", ls="--", lw=1.2,
-            label=f"{args.spread_limit}A validation bar")
+ax4.axhline(
+    args.spread_limit,
+    color="k",
+    ls="--",
+    lw=1.2,
+    label=f"{args.spread_limit}A validation bar",
+)
 ax4.set_ylabel("spread (A)")
 ax4.set_xlabel("time (s)")
 ax4.grid(alpha=0.3)

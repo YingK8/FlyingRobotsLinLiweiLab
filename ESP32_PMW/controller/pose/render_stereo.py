@@ -1,4 +1,5 @@
-"""Render the same robot pose through both cameras of a `rig.StereoRig`.
+"""
+Render the same robot pose through both cameras of a `rig.StereoRig`.
 
 The whole module is a consequence of one constraint documented in `render.py`:
 pyglet's Cocoa backend allows **one GL context per process**, so there is one
@@ -67,30 +68,40 @@ COIL_THICKNESS_MM = 6.0
 COIL_COLOUR = (0.05, 0.05, 0.06)
 
 
-def takeoff_stand(top_z_mm=-11.0, diameter_mm=STAND_DIAMETER_MM, length_mm=STAND_LENGTH_MM):
-    """The stand rod, as ``(mesh, pose, colour)`` in world coordinates.
-
-    ``top_z_mm`` is the world height of the rod's top face.  The default puts it
-    just under a robot at the origin (the body reaches -4.8 mm and the rim is
-    10.2 mm across), i.e. the moment of takeoff, which is the worst case for a
-    camera looking up.  Raising the robot instead of lowering the rod is the
-    same thing; this parameter exists so a sweep can walk the gap.
+def takeoff_stand(
+    top_z_mm=-11.0, diameter_mm=STAND_DIAMETER_MM, length_mm=STAND_LENGTH_MM
+):
     """
+    The stand rod, as ``(mesh, pose, colour)`` in world coordinates.
+
+        ``top_z_mm`` is the world height of the rod's top face.  The default puts it
+        just under a robot at the origin (the body reaches -4.8 mm and the rim is
+        10.2 mm across), i.e. the moment of takeoff, which is the worst case for a
+        camera looking up.  Raising the robot instead of lowering the rod is the
+        same thing; this parameter exists so a sweep can walk the gap.
+    """
+
     mesh = trimesh.creation.cylinder(radius=diameter_mm / 2.0, height=length_mm)
     pose = np.eye(4)
     pose[2, 3] = top_z_mm - length_mm / 2.0  # cylinder is centred on its own origin
     return (mesh, pose, STAND_COLOUR)
 
 
-def coil_ring(z_mm=40.0, inner_r=COIL_INNER_R_MM, outer_r=COIL_OUTER_R_MM,
-              thickness=COIL_THICKNESS_MM):
-    """A coil-assembly proxy above the robot, as ``(mesh, pose, colour)``.
-
-    An annulus, so the robot is visible through the middle from directly above
-    and progressively occluded from oblique angles -- the qualitative behaviour
-    the real assembly has.  See the module constants: the dimensions are
-    placeholders.
+def coil_ring(
+    z_mm=40.0,
+    inner_r=COIL_INNER_R_MM,
+    outer_r=COIL_OUTER_R_MM,
+    thickness=COIL_THICKNESS_MM,
+):
     """
+    A coil-assembly proxy above the robot, as ``(mesh, pose, colour)``.
+
+        An annulus, so the robot is visible through the middle from directly above
+        and progressively occluded from oblique angles -- the qualitative behaviour
+        the real assembly has.  See the module constants: the dimensions are
+        placeholders.
+    """
+
     mesh = trimesh.creation.annulus(r_min=inner_r, r_max=outer_r, height=thickness)
     pose = np.eye(4)
     pose[2, 3] = z_mm
@@ -99,12 +110,13 @@ def coil_ring(z_mm=40.0, inner_r=COIL_INNER_R_MM, outer_r=COIL_OUTER_R_MM,
 
 @dataclass
 class StereoSample:
-    """One pose rendered through every camera, with world-frame ground truth.
+    """
+    One pose rendered through every camera, with world-frame ground truth.
 
-    ``views`` are `render.Sample`s in camera order, each already carrying its own
-    ``center_mm``, ``normal`` and ``K`` in that camera's coordinates.
-    ``center_world`` and ``normal_world`` are the single truth all of them came
-    from, and are what a stereo estimate should be scored against.
+        ``views`` are `render.Sample`s in camera order, each already carrying its own
+        ``center_mm``, ``normal`` and ``K`` in that camera's coordinates.
+        ``center_world`` and ``normal_world`` are the single truth all of them came
+        from, and are what a stereo estimate should be scored against.
     """
 
     views: tuple
@@ -126,19 +138,22 @@ class StereoSample:
 
     @property
     def detected_all(self):
-        """True when every view has a non-empty ground-truth silhouette.
-
-        A pose can leave one camera's frame entirely; that is a legitimate
-        outcome for a wide-baseline rig and callers must not assume otherwise.
         """
+        True when every view has a non-empty ground-truth silhouette.
+
+                A pose can leave one camera's frame entirely; that is a legitimate
+                outcome for a wide-baseline rig and callers must not assume otherwise.
+        """
+
         return all(v.mask.any() for v in self.views)
 
 
 class StereoRenderer:
-    """One `render.Renderer`, one `rig.StereoRig`, N views per pose.
+    """
+    One `render.Renderer`, one `rig.StereoRig`, N views per pose.
 
-    Same one-per-process rule as `render.Renderer`, for the same reason -- this
-    class holds one, it does not create more.
+        Same one-per-process rule as `render.Renderer`, for the same reason -- this
+        class holds one, it does not create more.
     """
 
     def __init__(self, rig, width=1024, height=768, occluders=(), mesh_path=None):
@@ -150,26 +165,30 @@ class StereoRenderer:
         self.set_occluders(occluders)
 
     def set_rig(self, rig):
-        """Point the same GL context at a different camera arrangement.
-
-        The reason this exists rather than constructing a second
-        `StereoRenderer`: pyglet's Cocoa backend cannot build another NSOpenGL
-        pixel format once one exists, so a sweep over rig geometries that made a
-        renderer per configuration dies partway through with
-        ``ObjCInstance PygletDelegate has no attribute initWithAttributes_``.
-        Nothing about a rig change touches the context -- only the per-view
-        transforms -- so swapping is both correct and free.
         """
+        Point the same GL context at a different camera arrangement.
+
+                The reason this exists rather than constructing a second
+                `StereoRenderer`: pyglet's Cocoa backend cannot build another NSOpenGL
+                pixel format once one exists, so a sweep over rig geometries that made a
+                renderer per configuration dies partway through with
+                ``ObjCInstance PygletDelegate has no attribute initWithAttributes_``.
+                Nothing about a rig change touches the context -- only the per-view
+                transforms -- so swapping is both correct and free.
+        """
+
         self.rig = rig
         self.set_occluders(self._occluders)
         return self
 
     def set_occluders(self, occluders):
-        """Swap the occluder set without rebuilding the GL context.
-
-        Occluders are shared across views -- they are physical objects in the
-        world, and `render.View` transforms them per camera.
         """
+        Swap the occluder set without rebuilding the GL context.
+
+                Occluders are shared across views -- they are physical objects in the
+                world, and `render.View` transforms them per camera.
+        """
+
         self._occluders = tuple(occluders)
         self._views = tuple(
             rendermod.View(
@@ -194,30 +213,48 @@ class StereoRenderer:
     def mesh(self):
         return self._renderer.mesh
 
-    def render_pair(self, tilt_deg, azimuth_deg, center_world_mm, alpha=1.0, light=None,
-                    bg_level=0.0, exposure=None, spin_deg=0.0, background=None):
-        """Render one world pose through every camera.
-
-        ``tilt_deg`` is lean away from world +z and ``azimuth_deg`` the world
-        bearing it leans along -- the same parameterisation `render.pose_matrix`
-        uses, read in the world frame instead of a camera frame.  A hovering
-        robot is tilt 0.
-
-        ``exposure`` velocity and tilt rate are likewise world quantities, so
-        one motion produces consistent blur in both views.
-
-        ``background`` is a greyscale field composited behind the robot. The
-        **same** field goes to both views on purpose: two cameras pointed at one
-        scene do not see two different backdrops, and giving them independent
-        ones would let the estimator average away a nuisance that is correlated
-        in reality.
+    def render_pair(
+        self,
+        tilt_deg,
+        azimuth_deg,
+        center_world_mm,
+        alpha=1.0,
+        light=None,
+        bg_level=0.0,
+        exposure=None,
+        spin_deg=0.0,
+        background=None,
+    ):
         """
+        Render one world pose through every camera.
+
+                ``tilt_deg`` is lean away from world +z and ``azimuth_deg`` the world
+                bearing it leans along -- the same parameterisation `render.pose_matrix`
+                uses, read in the world frame instead of a camera frame.  A hovering
+                robot is tilt 0.
+
+                ``exposure`` velocity and tilt rate are likewise world quantities, so
+                one motion produces consistent blur in both views.
+
+                ``background`` is a greyscale field composited behind the robot. The
+                **same** field goes to both views on purpose: two cameras pointed at one
+                scene do not see two different backdrops, and giving them independent
+                ones would let the estimator average away a nuisance that is correlated
+                in reality.
+        """
+
         centre = np.asarray(center_world_mm, dtype=np.float64).reshape(3)
         views = tuple(
             self._renderer.render(
-                tilt_deg, azimuth_deg, centre,
-                alpha=alpha, light=light, bg_level=bg_level,
-                exposure=exposure, spin_deg=spin_deg, view=v,
+                tilt_deg,
+                azimuth_deg,
+                centre,
+                alpha=alpha,
+                light=light,
+                bg_level=bg_level,
+                exposure=exposure,
+                spin_deg=spin_deg,
+                view=v,
                 background=background,
             )
             for v in self._views
@@ -237,59 +274,55 @@ class StereoRenderer:
 
 
 def default_rig(elev_deg=(45.0, 45.0), azim_deg=(0.0, 90.0), range_mm=None, scale=1.0):
-    """The rig the plan settles on, optionally rescaled for a smaller image.
-
-    Intrinsics scale with resolution; the geometry does not.
     """
+    The rig the plan settles on, optionally rescaled for a smaller image.
+
+        Intrinsics scale with resolution; the geometry does not.
+    """
+
     kw = {} if range_mm is None else {"range_mm": range_mm}
     rig = StereoRig.from_spherical(elev_deg=elev_deg, azim_deg=azim_deg, **kw)
     return rig if scale == 1.0 else rig.scaled(scale)
 
 
-def main(argv=None):
-    """Render one pair to PNGs -- the quickest way to eyeball a rig."""
-    import argparse
+def preview(
+    elev_deg=(45.0, 45.0),
+    azim_deg=(0.0, 90.0),
+    range_mm=250.0,
+    tilt_deg=0.0,
+    robot_azim_deg=0.0,
+    z_mm=0.0,
+    width=1024,
+    height=768,
+    stand=False,
+    coils=False,
+    out=None,
+):
+    """
+    Render one pair to PNGs -- the quickest way to eyeball a rig.
+    """
 
     import cv2
 
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--elev", type=float, nargs=2, default=(45.0, 45.0))
-    ap.add_argument("--azim", type=float, nargs=2, default=(0.0, 90.0))
-    ap.add_argument("--range-mm", type=float, default=250.0)
-    ap.add_argument("--tilt", type=float, default=0.0, help="robot lean from vertical, deg")
-    ap.add_argument("--robot-azim", type=float, default=0.0, help="bearing of that lean, deg")
-    ap.add_argument("--z", type=float, default=0.0, help="robot height above the hover point, mm")
-    ap.add_argument("--width", type=int, default=1024)
-    ap.add_argument("--height", type=int, default=768)
-    ap.add_argument("--stand", action="store_true", help="add the takeoff rod")
-    ap.add_argument("--coils", action="store_true", help="add the coil-ring proxy")
-    ap.add_argument("--out", default=str(
-        HERE.parents[2] / "results" / "pose_validation" / "stereo_preview"))
-    args = ap.parse_args(argv)
-
-    rig = default_rig(args.elev, args.azim, args.range_mm)
-    occ = []
-    if args.stand:
-        occ.append(takeoff_stand())
-    if args.coils:
-        occ.append(coil_ring())
+    rig = default_rig(elev_deg, azim_deg, range_mm)
+    occ = ([takeoff_stand()] if stand else []) + ([coil_ring()] if coils else [])
 
     for k, v in rig.summary().items():
         print(f"{k:24s} {v}")
 
-    out = Path(args.out)
+    out = Path(
+        out or HERE.parents[2] / "results" / "pose_validation" / "stereo_preview"
+    )
     out.mkdir(parents=True, exist_ok=True)
-    with StereoRenderer(rig, args.width, args.height, occluders=occ) as r:
-        s = r.render_pair(args.tilt, args.robot_azim, (0.0, 0.0, args.z))
+    with StereoRenderer(rig, width, height, occluders=occ) as r:
+        s = r.render_pair(tilt_deg, robot_azim_deg, (0.0, 0.0, z_mm))
         for i, v in enumerate(s.views):
             name = rig.cameras[i].name or str(i)
             cv2.imwrite(str(out / f"view_{name}.png"), v.image)
-            print(f"view {name}: centre {np.array2string(v.center_mm, precision=2)} mm, "
-                  f"normal {np.array2string(v.normal, precision=3)}, "
-                  f"mask {v.mask.sum()} px")
+            print(
+                f"view {name}: centre {np.array2string(v.center_mm, precision=2)} mm, "
+                f"normal {np.array2string(v.normal, precision=3)}, "
+                f"mask {v.mask.sum()} px"
+            )
     print(f"wrote {out}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return s

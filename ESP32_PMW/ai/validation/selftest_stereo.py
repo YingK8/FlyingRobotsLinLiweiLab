@@ -1,4 +1,5 @@
-"""Does the stereo renderer agree with the geometry the estimator assumes?
+"""
+Does the stereo renderer agree with the geometry the estimator assumes?
 
 Same argument as `selftest.py`, one level up.  There, a flipped axis between
 pyrender and `conic.py` would have produced plausible images and silently
@@ -33,8 +34,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import conic  # noqa: E402
 import render as rendermod  # noqa: E402
@@ -88,24 +94,34 @@ def _fit(sample):
 
 
 def _line_distance(u, v):
-    """Distance between two unit vectors treated as undirected lines."""
+    """
+    Distance between two unit vectors treated as undirected lines.
+    """
+
     u, v = np.asarray(u, dtype=np.float64), np.asarray(v, dtype=np.float64)
     return float(min(np.linalg.norm(u - v), np.linalg.norm(u + v)))
 
 
 def _line_angle_deg(u, v):
-    """Angle between two unit vectors treated as undirected lines."""
-    return math.degrees(math.acos(float(np.clip(abs(np.asarray(u) @ np.asarray(v)), 0.0, 1.0))))
+    """
+    Angle between two unit vectors treated as undirected lines.
+    """
+
+    return math.degrees(
+        math.acos(float(np.clip(abs(np.asarray(u) @ np.asarray(v)), 0.0, 1.0)))
+    )
 
 
 def test_extrinsic_matches_rig(sr):
-    """Rendered ground truth must equal the rig's own world->camera transform.
-
-    Pure algebra against `rig.Camera.to_camera`, so it isolates the transform
-    from everything the rasteriser could contribute.  A transposed
-    ``T_this_ref`` fails here by tens of millimetres while every other check
-    still passes, which is precisely why it is first.
     """
+    Rendered ground truth must equal the rig's own world->camera transform.
+
+        Pure algebra against `rig.Camera.to_camera`, so it isolates the transform
+        from everything the rasteriser could contribute.  A transposed
+        ``T_this_ref`` fails here by tens of millimetres while every other check
+        still passes, which is precisely why it is first.
+    """
+
     worst_c = worst_n = 0.0
     for tilt, az, ctr in POSES:
         s = sr.render_pair(tilt, az, ctr)
@@ -117,40 +133,54 @@ def test_extrinsic_matches_rig(sr):
             # reports opposite normals for the same physical pose.
             worst_n = max(worst_n, _line_distance(view.normal, want_n))
 
-    assert worst_c < 1e-6, f"rendered centre disagrees with the rig transform by {worst_c:.3e} mm"
-    assert worst_n < TOL_VEC, f"rendered normal disagrees with the rig transform by {worst_n:.3e}"
-    print(f"  extrinsic vs rig    centre {worst_c:.2e} mm, normal {worst_n:.2e} (unit vec)")
+    assert (
+        worst_c < 1e-6
+    ), f"rendered centre disagrees with the rig transform by {worst_c:.3e} mm"
+    assert (
+        worst_n < TOL_VEC
+    ), f"rendered normal disagrees with the rig transform by {worst_n:.3e}"
+    print(
+        f"  extrinsic vs rig    centre {worst_c:.2e} mm, normal {worst_n:.2e} (unit vec)"
+    )
 
 
 def test_identity_view_reproduces_monocular(sr):
-    """A rig whose camera sits at the world origin must render the mono image.
-
-    The reduction test: if the stereo path is a generalisation rather than a
-    reimplementation, switching off the generalisation has to give back exactly
-    what was there before -- pixel for pixel, since it is the same code path
-    with an identity matrix in it.
     """
+    A rig whose camera sits at the world origin must render the mono image.
+
+        The reduction test: if the stereo path is a generalisation rather than a
+        reimplementation, switching off the generalisation has to give back exactly
+        what was there before -- pixel for pixel, since it is the same code path
+        with an identity matrix in it.
+    """
+
     mono = sr._renderer.render(18.0, 33.0, [4.0, -3.0, 210.0])
     via_view = sr._renderer.render(
         18.0, 33.0, [4.0, -3.0, 210.0], view=rendermod.View()
     )
     diff = int(np.abs(mono.image.astype(int) - via_view.image.astype(int)).max())
     assert diff == 0, f"identity view changed the image by {diff} grey levels"
-    assert np.allclose(mono.center_mm, via_view.center_mm), "identity view moved the centre"
-    print(f"  identity view       pixel-identical to the monocular path ({diff} levels)")
+    assert np.allclose(
+        mono.center_mm, via_view.center_mm
+    ), "identity view moved the centre"
+    print(
+        f"  identity view       pixel-identical to the monocular path ({diff} levels)"
+    )
 
 
 def test_views_match_analytic_projection(sr):
-    """Both rendered silhouettes vs. the analytic rim projection.
-
-    The stereo version of the check `selftest.py` runs on one view.  Each view
-    is scored through **its own** intrinsics and its own ground truth, so a rig
-    with mismatched cameras would be caught here too.
-
-    Asserts on the centre and the major axis; the minor-axis excess is reported,
-    because at the tilts a 45-degree rig produces it is the mast entering the
-    silhouette rather than anything the renderer did wrong.
     """
+    Both rendered silhouettes vs. the analytic rim projection.
+
+        The stereo version of the check `selftest.py` runs on one view.  Each view
+        is scored through **its own** intrinsics and its own ground truth, so a rig
+        with mismatched cameras would be caught here too.
+
+        Asserts on the centre and the major axis; the minor-axis excess is reported,
+        because at the tilts a 45-degree rig produces it is the mast entering the
+        silhouette rather than anything the renderer did wrong.
+    """
+
     worst_c = worst_major = 0.0
     worst_minor_excess = -1.0
     for tilt, az, ctr in POSES:
@@ -160,25 +190,31 @@ def test_views_match_analytic_projection(sr):
             want = conic.project_circle(
                 view.center_mm, view.normal, rendermod.RIM_RADIUS_MM, view.K
             )
-            worst_c = max(worst_c, math.hypot(got[0][0] - want[0][0], got[0][1] - want[0][1]))
+            worst_c = max(
+                worst_c, math.hypot(got[0][0] - want[0][0], got[0][1] - want[0][1])
+            )
             worst_major = max(worst_major, abs(got[1][0] - want[1][0]))
             worst_minor_excess = max(worst_minor_excess, got[1][1] / want[1][1] - 1.0)
 
     assert worst_c < TOL_CENTER_PX, f"centre disagrees by {worst_c:.2f} px"
     assert worst_major < TOL_MAJOR_PX, f"major axis disagrees by {worst_major:.2f} px"
-    print(f"  vs analytic proj    worst centre {worst_c:.2f} px, major {worst_major:.2f} px, "
-          f"minor excess {worst_minor_excess:+.1%}")
+    print(
+        f"  vs analytic proj    worst centre {worst_c:.2f} px, major {worst_major:.2f} px, "
+        f"minor excess {worst_minor_excess:+.1%}"
+    )
 
 
 def test_high_tilt_is_geometry_not_renderer(sr):
-    """Outside the flat-circle envelope, the major axis must still be right.
-
-    Poses that lean away from both bearings put every view past the ~52 degree
-    crossover where the mast widens the silhouette.  The point of measuring it
-    separately is to show the failure is one-sided -- the minor axis inflates,
-    the major axis does not -- because that is the signature of real geometry
-    rather than a broken transform, which would corrupt both.
     """
+    Outside the flat-circle envelope, the major axis must still be right.
+
+        Poses that lean away from both bearings put every view past the ~52 degree
+        crossover where the mast widens the silhouette.  The point of measuring it
+        separately is to show the failure is one-sided -- the minor axis inflates,
+        the major axis does not -- because that is the signature of real geometry
+        rather than a broken transform, which would corrupt both.
+    """
+
     print("  high-tilt (reported)  seen  |  major fit/true  | minor excess")
     worst_major = 0.0
     for tilt, az, ctr in HIGH_TILT_POSES:
@@ -190,26 +226,33 @@ def test_high_tilt_is_geometry_not_renderer(sr):
             )
             seen = math.degrees(math.acos(min(1.0, abs(float(view.normal[2])))))
             worst_major = max(worst_major, abs(got[1][0] - want[1][0]))
-            print(f"                        {seen:5.1f} | {got[1][0]:6.1f}/{want[1][0]:<6.1f}  |"
-                  f" {got[1][1] / want[1][1] - 1.0:+7.1%}   (view {sr.rig.cameras[i].name or i})")
-    assert worst_major < 8.0, f"major axis degraded by {worst_major:.1f} px outside the envelope"
+            print(
+                f"                        {seen:5.1f} | {got[1][0]:6.1f}/{want[1][0]:<6.1f}  |"
+                f" {got[1][1] / want[1][1] - 1.0:+7.1%}   (view {sr.rig.cameras[i].name or i})"
+            )
+    assert (
+        worst_major < 8.0
+    ), f"major axis degraded by {worst_major:.1f} px outside the envelope"
 
 
 def test_lighting_is_world_fixed(sr):
-    """Lights must be anchored to the world, not carried along with each camera.
-
-    This is the one error that changes no geometry at all, so no amount of
-    checking transforms will find it.  The signature is specific: a hard
-    lateral light and a level robot make the two views nearly identical if the
-    light rides with the camera, and clearly different if it does not.  Both
-    directions are asserted -- pure ambient is the positive control that the
-    difference really is the lighting and not the viewpoint.
     """
+    Lights must be anchored to the world, not carried along with each camera.
+
+        This is the one error that changes no geometry at all, so no amount of
+        checking transforms will find it.  The signature is specific: a hard
+        lateral light and a level robot make the two views nearly identical if the
+        light rides with the camera, and clearly different if it does not.  Both
+        directions are asserted -- pure ambient is the positive control that the
+        difference really is the lighting and not the viewpoint.
+    """
+
     lateral = rendermod.LightRig(
         lateral_deg=(0.0,), intensity=14.0, ambient=0.05, key_from_camera=False
     )
-    flat = rendermod.LightRig(lateral_deg=(), intensity=0.0, ambient=0.6,
-                              key_from_camera=False)
+    flat = rendermod.LightRig(
+        lateral_deg=(), intensity=0.0, ambient=0.6, key_from_camera=False
+    )
 
     def mean_on_mask(sample):
         m = sample.mask
@@ -229,17 +272,21 @@ def test_lighting_is_world_fixed(sr):
         f"ambient light differs more between views ({amb_delta:.1f}) than directional "
         f"({lit_delta:.1f}); the difference is not coming from the lighting"
     )
-    print(f"  world-fixed lights  lateral {lit_delta:.1f} vs ambient {amb_delta:.1f} grey levels")
+    print(
+        f"  world-fixed lights  lateral {lit_delta:.1f} vs ambient {amb_delta:.1f} grey levels"
+    )
 
 
 def _lit_inside(sample, mask):
-    """Foreground pixels the segmenter would see **within the true silhouette**.
-
-    Counting over the whole frame conflates two different things: how much of
-    the robot an occluder hides, and how much foreground the occluder itself
-    contributes.  Restricting to the robot's own mask isolates the first;
-    `_lit_outside` measures the second.
     """
+    Foreground pixels the segmenter would see **within the true silhouette**.
+
+        Counting over the whole frame conflates two different things: how much of
+        the robot an occluder hides, and how much foreground the occluder itself
+        contributes.  Restricting to the robot's own mask isolates the first;
+        `_lit_outside` measures the second.
+    """
+
     return int((sample.image > segmod.THRESH)[mask].sum())
 
 
@@ -248,16 +295,18 @@ def _lit_outside(sample, mask):
 
 
 def test_occluder_darkens_image_not_truth(sr):
-    """An occluder must change what is seen without rewriting what is true.
-
-    The ground-truth mask is the robot's silhouette; it is the reference the
-    IoU and the pose are scored against.  If an occluder edited it, occlusion
-    would score as perfect by construction and the sweep would learn nothing.
-
-    The mask is compared as a **pixel set**, not by area: equal areas with
-    different pixels is exactly what a subtle depth interaction would produce,
-    and it would pass an area check silently.
     """
+    An occluder must change what is seen without rewriting what is true.
+
+        The ground-truth mask is the robot's silhouette; it is the reference the
+        IoU and the pose are scored against.  If an occluder edited it, occlusion
+        would score as perfect by construction and the sweep would learn nothing.
+
+        The mask is compared as a **pixel set**, not by area: equal areas with
+        different pixels is exactly what a subtle depth interaction would produce,
+        and it would pass an area check silently.
+    """
+
     clear = sr.render_pair(0.0, 0.0, [0.0, 0.0, 0.0])
     masks = [v.mask.copy() for v in clear.views]
 
@@ -266,13 +315,17 @@ def test_occluder_darkens_image_not_truth(sr):
         occ = sr.render_pair(0.0, 0.0, [0.0, 0.0, 0.0])
         for i, (m, v) in enumerate(zip(masks, occ.views)):
             moved = int(np.logical_xor(m, v.mask).sum())
-            assert moved == 0, (
-                f"the occluder edited view {i}'s ground-truth mask at {moved} pixels"
-            )
-        inside = [(_lit_inside(c, m), _lit_inside(o, m))
-                  for c, o, m in zip(clear.views, occ.views, masks)]
-        outside = [(_lit_outside(c, m), _lit_outside(o, m))
-                   for c, o, m in zip(clear.views, occ.views, masks)]
+            assert (
+                moved == 0
+            ), f"the occluder edited view {i}'s ground-truth mask at {moved} pixels"
+        inside = [
+            (_lit_inside(c, m), _lit_inside(o, m))
+            for c, o, m in zip(clear.views, occ.views, masks)
+        ]
+        outside = [
+            (_lit_outside(c, m), _lit_outside(o, m))
+            for c, o, m in zip(clear.views, occ.views, masks)
+        ]
     finally:
         sr.set_occluders([])
 
@@ -284,22 +337,26 @@ def test_occluder_darkens_image_not_truth(sr):
     # blob above 2% of the largest, so a bright rod would be hulled in with the
     # robot. Recorded here so the sweep's occlusion results are read correctly.
     for i, ((ci, oi), (co, oo)) in enumerate(zip(inside, outside)):
-        print(f"  occluder view {i}     mask intact; lit inside {ci} -> {oi} "
-              f"({oi / ci - 1:+.1%}), stand adds {oo - co} px outside")
-    assert all(oi <= ci * 1.02 for ci, oi in inside), (
-        f"the occluder brightened the robot itself: {inside}"
-    )
+        print(
+            f"  occluder view {i}     mask intact; lit inside {ci} -> {oi} "
+            f"({oi / ci - 1:+.1%}), stand adds {oo - co} px outside"
+        )
+    assert all(
+        oi <= ci * 1.02 for ci, oi in inside
+    ), f"the occluder brightened the robot itself: {inside}"
 
 
 def test_stand_occludes_from_below_only(sr):
-    """The physical claim behind the rig choice, measured rather than asserted.
-
-    A black rod under the robot should remove rim pixels from a camera looking
-    up and none from one looking down.  This is what makes the mixed-hemisphere
-    rig worth its calibration cost, so it is worth a test rather than a
-    paragraph.  Measured **inside the robot's own mask**, so the rod's own
-    brightness cannot masquerade as the robot surviving.
     """
+    The physical claim behind the rig choice, measured rather than asserted.
+
+        A black rod under the robot should remove rim pixels from a camera looking
+        up and none from one looking down.  This is what makes the mixed-hemisphere
+        rig worth its calibration cost, so it is worth a test rather than a
+        paragraph.  Measured **inside the robot's own mask**, so the rod's own
+        brightness cannot masquerade as the robot surviving.
+    """
+
     original = sr.rig
     sr.rig = StereoRig.from_spherical(elev_deg=(45.0, -45.0), azim_deg=(0.0, 0.0))
     sr.set_occluders([])
@@ -316,8 +373,10 @@ def test_stand_occludes_from_below_only(sr):
 
     above_loss = 1.0 - occ_px[0] / max(clear_px[0], 1)
     below_loss = 1.0 - occ_px[1] / max(clear_px[1], 1)
-    print(f"  stand occlusion     from above {above_loss:+.1%} of the robot's lit px, "
-          f"from below {below_loss:+.1%}")
+    print(
+        f"  stand occlusion     from above {above_loss:+.1%} of the robot's lit px, "
+        f"from below {below_loss:+.1%}"
+    )
     assert above_loss < 0.02, f"the stand occluded the camera above by {above_loss:.1%}"
     assert below_loss > above_loss + 0.05, (
         f"the stand did not occlude the camera below meaningfully more than the one above "

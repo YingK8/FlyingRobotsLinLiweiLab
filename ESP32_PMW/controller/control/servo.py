@@ -1,4 +1,5 @@
-"""Visual-servo host: frame -> height -> commanded rotation frequency -> ESP32.
+"""
+Visual-servo host: frame -> height -> commanded rotation frequency -> ESP32.
 
 CAMERA-FREE BY DESIGN. Nothing here opens a VideoCapture, reads a frame or
 shows a window: the notebook (servo.ipynb) owns the camera and the loop and
@@ -35,7 +36,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. control is stage 4 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "pose"), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "pose"),
+    str(HERE.parent / "calib"),
+    str(HERE.parent / "camera"),
+]
 from link import SerialComm  # noqa: E402  (controller/control/link.py)
 from z_track import TorqueLimits  # noqa: E402  (phase-lock torque budget)
 
@@ -70,7 +76,10 @@ def clamp(v, lo, hi):
 
 
 def connect(port: str | None = None, reset: bool = True) -> SerialComm:
-    """Open the link. `reset` pulses EN so the board starts from a known state."""
+    """
+    Open the link. `reset` pulses EN so the board starts from a known state.
+    """
+
     link = SerialComm(port)
     if reset:
         link.reset_device()
@@ -79,12 +88,14 @@ def connect(port: str | None = None, reset: bool = True) -> SerialComm:
 
 
 def poll(link: SerialComm, out: str = "") -> dict | None:
-    """Send `out`, drain every pending line, return the newest telemetry.
-
-    Drains rather than taking one line per call: the firmware prints faster than
-    a single-line read consumes, so the rest backs up and what you act on goes
-    stale. Parses driveTelemetry's shared 2 Hz line; we only read freq and trip.
     """
+    Send `out`, drain every pending line, return the newest telemetry.
+
+        Drains rather than taking one line per call: the firmware prints faster than
+        a single-line read consumes, so the rest backs up and what you act on goes
+        stale. Parses driveTelemetry's shared 2 Hz line; we only read freq and trip.
+    """
+
     tel = None
     line = link.handle_serial_comm(out)
     while line is not None:
@@ -103,27 +114,35 @@ def poll(link: SerialComm, out: str = "") -> dict | None:
 
 
 def set_carriers(link: SerialComm, duty=100.0):
-    """One duty for all four coils, or a 4-list for per-coil (trim)."""
+    """
+    One duty for all four coils, or a 4-list for per-coil (trim).
+    """
+
     duties = [duty] * 4 if np.isscalar(duty) else duty
     for ch, d in enumerate(duties):
         poll(link, f"A{ch},{clamp(d, 0.0, 100.0):.1f}")
 
 
 def stop(link: SerialComm):
-    """Coils off. Always reachable, including from a finally block."""
+    """
+    Coils off. Always reachable, including from a finally block.
+    """
+
     poll(link, "S")
 
 
 @contextmanager
 def coils_on(link: SerialComm, duty=100.0):
-    """Carriers up for the body of the `with`, and unconditionally down after.
-
-    The firmware has no watchdog, so this is the only thing that brings the
-    coils down when the loop exits -- including on a kernel interrupt. The loop
-    lives in a notebook cell now, so KEEP THE WHOLE LOOP INSIDE ONE `with` IN
-    ONE CELL: split across cells, interrupting leaves the coils energised with
-    nothing driving them.
     """
+    Carriers up for the body of the `with`, and unconditionally down after.
+
+        The firmware has no watchdog, so this is the only thing that brings the
+        coils down when the loop exits -- including on a kernel interrupt. The loop
+        lives in a notebook cell now, so KEEP THE WHOLE LOOP INSIDE ONE `with` IN
+        ONE CELL: split across cells, interrupting leaves the coils energised with
+        nothing driving them.
+    """
+
     set_carriers(link, duty)
     try:
         yield
@@ -148,22 +167,26 @@ Det = namedtuple("Det", "u v axis_px p0 p1")
 _KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MORPH_KERNEL, MORPH_KERNEL))
 
 
-def detect(frame, thresh: int = THRESH, min_area: float = MIN_BLOB_AREA_PX) -> Det | None:
-    """Brightest blob on a dark ground -> Det, or None.
-
-    (u, v) is the CENTRE OF THE FITTED ELLIPSE -- the PCA mean of the contour
-    points -- not the filled-region centroid. The two differ whenever the mask
-    is asymmetric, and the ellipse centre is the one that stays put when a limb
-    of the blob is clipped by threshold or frame edge, so it is the stabler
-    thing to servo on.
-
-    axis_px is the blob's extent along the first principal component: the
-    robot's projected diameter, and the only thing that sets metric scale. It is
-    tilt-robust, since a disk tilted by theta projects to an ellipse whose major
-    axis is still the diameter and whose minor axis is diameter*cos(theta).
-
-    Colour or single-channel frames both work; mono skips the conversion.
+def detect(
+    frame, thresh: int = THRESH, min_area: float = MIN_BLOB_AREA_PX
+) -> Det | None:
     """
+    Brightest blob on a dark ground -> Det, or None.
+
+        (u, v) is the CENTRE OF THE FITTED ELLIPSE -- the PCA mean of the contour
+        points -- not the filled-region centroid. The two differ whenever the mask
+        is asymmetric, and the ellipse centre is the one that stays put when a limb
+        of the blob is clipped by threshold or frame edge, so it is the stabler
+        thing to servo on.
+
+        axis_px is the blob's extent along the first principal component: the
+        robot's projected diameter, and the only thing that sets metric scale. It is
+        tilt-robust, since a disk tilted by theta projects to an ellipse whose major
+        axis is still the diameter and whose minor axis is diameter*cos(theta).
+
+        Colour or single-channel frames both work; mono skips the conversion.
+    """
+
     gray = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, thresh, 255, cv2.THRESH_BINARY)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _KERNEL)
@@ -182,14 +205,16 @@ def detect(frame, thresh: int = THRESH, min_area: float = MIN_BLOB_AREA_PX) -> D
 
 
 def velocity(z, z_prev, dt):
-    """Finite-difference vertical velocity, straight off the image stream.
-
-    No filter and no state: every number the controller sees comes from a frame.
-    The cost is real and lands on the D term -- kd multiplies a difference OF
-    this difference, so centroid jitter enters the command squared. Measured on
-    a 0.5 px centroid noise floor, this is ~10x the D-term jitter a Kalman
-    estimate gives, so keep kd small (~0.02, not 0.15) and lean on kp/ki.
     """
+    Finite-difference vertical velocity, straight off the image stream.
+
+        No filter and no state: every number the controller sees comes from a frame.
+        The cost is real and lands on the D term -- kd multiplies a difference OF
+        this difference, so centroid jitter enters the command squared. Measured on
+        a 0.5 px centroid noise floor, this is ~10x the D-term jitter a Kalman
+        estimate gives, so keep kd small (~0.02, not 0.15) and lean on kp/ki.
+    """
+
     if z is None or z_prev is None or dt <= 0.0:
         return None
     return (z - z_prev) / dt
@@ -200,13 +225,15 @@ def _pt(p):
 
 
 def annotate(frame, d: Det | None, z=None, zdot=None):
-    """Draw the detection, its principal axis and the height readout.
-
-    USE THE RETURN VALUE: a single-channel frame is converted to BGR first, so
-    the coloured overlays survive, and that conversion is a copy -- the drawing
-    does not land on the caller's array. `d=None` returns the frame undrawn, so
-    a display loop can call this unconditionally.
     """
+    Draw the detection, its principal axis and the height readout.
+
+        USE THE RETURN VALUE: a single-channel frame is converted to BGR first, so
+        the coloured overlays survive, and that conversion is a copy -- the drawing
+        does not land on the caller's array. `d=None` returns the frame undrawn, so
+        a display loop can call this unconditionally.
+    """
+
     vis = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame
     if d is None:
         return vis
@@ -234,36 +261,36 @@ def height_controller(
     limits: "TorqueLimits" = None,
     f_start: float = F_MIN,
 ):
-    """Incremental (velocity) PID -> update(z_ref, z, zdot, dt) -> freq (Hz).
-
-    Commands frequency changes:
-
-        u += kp*(err - err_prev) + ki*err*dt - kd*(zdot - zdot_prev)
-
-    The hover frequency never appears, so nothing here has to know it -- it is
-    implicit in the accumulation and the loop walks to whatever it actually is.
-
-    TAKEOFF IS THE SAME MECHANISM. Sitting on the pad the robot has a large
-    steady positive error, ki accumulates it, and u climbs until it lifts. There
-    is no separate spin-up ramp, and no takeoff frequency to guess.
-
-    THE ONLY LIMIT IS ON RATE, and it comes from the physics rather than a
-    hand-set band: TorqueLimits.f_dot_max(f) is the fastest the field may change
-    while the magnet's spin-up torque still fits under the torque budget. Exceed
-    it and the magnet steps out of sync -- which is what an absolute frequency
-    cap was really standing in for. It vanishes at f_ceiling (167.3 Hz), so the
-    rate cap enforces the ceiling by itself: an aggressive demand ramps up and
-    then eases to a halt just underneath rather than slamming into it. The floor
-    is the one absolute that stays, and it isn't a tuning choice: the firmware
-    reads f <= 0 as DC, which stops the field and drops the robot.
-
-    ki must be non-zero -- in incremental form the other terms are pure
-    differences, so a steady error produces no correction at all without it, and
-    the robot would never leave the pad. kd is not optional either: magnetic
-    hover is lightly damped and rings without it.
-
-    A closure, not a class, so re-running a notebook cell starts from clean state.
     """
+    Incremental (velocity) PID -> update(z_ref, z, zdot, dt) -> freq (Hz).
+
+        Commands frequency changes:
+
+            u += kp*(err - err_prev) + ki*err*dt - kd*(zdot - zdot_prev)
+
+        The hover frequency never appears, so nothing here has to know it -- it is
+        implicit in the accumulation and the loop walks to whatever it actually is.
+
+        Takeoff is the same mechanism: on the pad the robot holds a large steady
+        positive error, ki accumulates it, and u climbs until it lifts. No spin-up
+        ramp, no takeoff frequency to guess.
+
+        **The only limit is on rate**, and it comes from physics rather than a hand-set
+        band. `TorqueLimits.f_dot_max(f)` is the fastest the field may change while
+        spin-up torque still fits the budget; exceed it and the magnet steps out of
+        sync, which is what an absolute frequency cap was standing in for. It vanishes
+        at f_ceiling (167.3 Hz), so the rate cap enforces the ceiling by itself. The
+        floor stays absolute, and is not a tuning choice: the firmware reads f <= 0 as
+        DC, which stops the field and drops the robot.
+
+        ki must be non-zero -- in incremental form the other terms are pure
+        differences, so a steady error produces no correction at all without it, and
+        the robot would never leave the pad. kd is not optional either: magnetic
+        hover is lightly damped and rings without it.
+
+        A closure, not a class, so re-running a notebook cell starts from clean state.
+    """
+
     lim = limits or TorqueLimits()
     ceiling = lim.f_ceiling()  # derived from the same torque budget, not hand-set
     u = clamp(f_start, F_MIN, ceiling)
@@ -303,30 +330,32 @@ def height_controller(
 # =============================================================================
 
 
-def altitude_hold(link, controller, diameter_mm: float = DRONE_DIAMETER_MM,
-                  thresh: int = THRESH):
-    """Closed loop, one frame at a time -> step(frame, z_ref_mm) -> (row, det).
-
-    No calibration pass. Scale comes from each frame -- the robot's known
-    diameter over its measured pixel extent -- and the datum latches on the
-    first detection, so z = 0 is wherever the robot was when the loop started.
-    Park it on the pad and heights read as height above the pad.
-
-    THE NOTEBOOK OWNS THE LOOP AND THE SETPOINT. This owns only what has to
-    survive between frames -- the datum, z_prev, the command clock, the run
-    clock -- which as loose notebook variables would go stale the moment a cell
-    is re-run, and silently: a wrong z_prev is a wrong velocity, not an
-    exception. Passing z_ref_mm per call is what lets you walk the target, or
-    command a step response, without rebuilding the closure and losing the PID's
-    accumulated state with it.
-
-    Drive it inside `with coils_on(link):` -- the firmware has no watchdog and
-    that context manager is the only thing that brings the coils down on a
-    kernel interrupt.
-
-    `row` is a dict ready to append to a list and hand to a DataFrame; `det` is
-    the detection, for annotate().
+def altitude_hold(
+    link, controller, diameter_mm: float = DRONE_DIAMETER_MM, thresh: int = THRESH
+):
     """
+    Closed loop, one frame at a time -> step(frame, z_ref_mm) -> (row, det).
+
+        No calibration pass. Scale comes from each frame -- the robot's known
+        diameter over its measured pixel extent -- and the datum latches on the
+        first detection, so z = 0 is wherever the robot was when the loop started.
+        Park it on the pad and heights read as height above the pad.
+
+        **The notebook owns the loop and the setpoint.** This owns only what must
+        survive between frames -- datum, z_prev, command clock, run clock -- which as
+        loose notebook variables go stale the moment a cell is re-run, and silently: a
+        wrong z_prev is a wrong velocity, not an exception. Passing z_ref_mm per call
+        is what lets you walk the target or command a step without rebuilding the
+        closure and losing the PID state with it.
+
+        Drive it inside `with coils_on(link):` -- the firmware has no watchdog and
+        that context manager is the only thing that brings the coils down on a
+        kernel interrupt.
+
+        `row` is a dict ready to append to a list and hand to a DataFrame; `det` is
+        the detection, for annotate().
+    """
+
     datum_v = None
     z_prev = None
     t0 = last_cmd = last_loop = time.monotonic()
@@ -338,7 +367,7 @@ def altitude_hold(link, controller, diameter_mm: float = DRONE_DIAMETER_MM,
 
         d = detect(frame, thresh)
         if d is not None and datum_v is None:
-            datum_v = d.v                      # first sighting defines z = 0
+            datum_v = d.v  # first sighting defines z = 0
         # px_per_mm = axis_px / diameter_mm, so dividing by it is multiplying by
         # diameter_mm / axis_px. v grows downward, so a higher robot is a
         # smaller v -- negate.

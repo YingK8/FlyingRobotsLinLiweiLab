@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Per-coil DC characterization with the FNIRSI DPS-150: series resistance R_i
+"""
+Per-coil DC characterization with the FNIRSI DPS-150: series resistance R_i
 and (optionally) the field-per-amp coefficient B/I from a gaussmeter.
 
 WIRING: unplug the coil from the PCB at its XT30 (J10 Ch1 / J5 Ch2) and wire it
@@ -31,6 +32,7 @@ Keep the gaussmeter probe in a RIGID fixture and do not move it between coils --
 B falls off steeply with distance, so probe repositioning error will swamp the
 per-coil differences you are trying to resolve.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,8 +53,11 @@ except ImportError:
 
 
 async def read_settled(dev: DPS150, n: int, gap_s: float) -> dict:
-    """Average n state reads. get_all() already sleeps 100ms internally, so the
-    effective sample rate is ~10Hz -- ample for a DC measurement."""
+    """
+    Average n state reads. get_all() already sleeps 100ms internally, so the
+        effective sample rate is ~10Hz -- ample for a DC measurement.
+    """
+
     volts, amps, watts = [], [], []
     mode = None
     for _ in range(n):
@@ -115,10 +120,13 @@ async def sweep(dev: DPS150, setpoints, args) -> list[dict]:
 
 
 def fit(points: list[dict], key: str, i_min: float) -> dict | None:
-    """Least-squares y = m*I + c over points with a usable value for `key`.
-    The intercept is reported, not forced to zero: a non-zero c on the R fit is
-    lead/contact resistance, and on the B fit it is probe offset or ambient
-    field. Both are diagnostics worth seeing."""
+    """
+    Least-squares y = m*I + c over points with a usable value for `key`.
+        The intercept is reported, not forced to zero: a non-zero c on the R fit is
+        lead/contact resistance, and on the B fit it is probe offset or ambient
+        field. Both are diagnostics worth seeing.
+    """
+
     xs = [p["i"] for p in points if p.get(key) is not None and p["i"] >= i_min]
     ys = [p[key] for p in points if p.get(key) is not None and p["i"] >= i_min]
     if len(xs) < 2:
@@ -137,18 +145,32 @@ def fit(points: list[dict], key: str, i_min: float) -> dict | None:
 
 
 def fmt_r2(value: float | None) -> str:
-    """fit() reports r2 = None when every sample shared one y value (ss_tot == 0),
-    e.g. a flat supply readback or a gaussmeter pegged/read to too few digits.
-    Formatting that as a float would crash the summary before the JSON is
-    written, losing the whole sweep."""
+    """
+    fit() reports r2 = None when every sample shared one y value (ss_tot == 0),
+        e.g. a flat supply readback or a gaussmeter pegged/read to too few digits.
+        Formatting that as a float would crash the summary before the JSON is
+        written, losing the whole sweep.
+    """
+
     return "n/a" if value is None else f"{value:.5f}"
 
 
 def hysteresis(points: list[dict], key: str) -> float | None:
-    """Max |up - down| at matched setpoints. On B this is ferromagnetic material
-    in the flux path; on V it is coil heating during the sweep (R rising with T)."""
-    up = {p["i_set"]: p[key] for p in points if p["direction"] == "up" and p.get(key) is not None}
-    dn = {p["i_set"]: p[key] for p in points if p["direction"] == "down" and p.get(key) is not None}
+    """
+    Max |up - down| at matched setpoints. On B this is ferromagnetic material
+        in the flux path; on V it is coil heating during the sweep (R rising with T).
+    """
+
+    up = {
+        p["i_set"]: p[key]
+        for p in points
+        if p["direction"] == "up" and p.get(key) is not None
+    }
+    dn = {
+        p["i_set"]: p[key]
+        for p in points
+        if p["direction"] == "down" and p.get(key) is not None
+    }
     shared = set(up) & set(dn)
     if not shared:
         return None
@@ -156,32 +178,64 @@ def hysteresis(points: list[dict], key: str) -> float | None:
 
 
 async def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--port", help="DPS-150 serial port (auto-detect if omitted)")
     ap.add_argument("--coil", required=True, help="coil label, e.g. A B C D")
-    ap.add_argument("--i-max", type=float, default=1.5,
-                    help="max sweep current, A (default 1.5; coils are rated ~2A RMS "
-                         "and this is DC with no forced cooling)")
+    ap.add_argument(
+        "--i-max",
+        type=float,
+        default=1.5,
+        help="max sweep current, A (default 1.5; coils are rated ~2A RMS "
+        "and this is DC with no forced cooling)",
+    )
     ap.add_argument("--i-min", type=float, default=0.2, help="min sweep current, A")
-    ap.add_argument("--steps", type=int, default=8, help="setpoints per sweep direction")
-    ap.add_argument("--compliance", type=float, default=12.0,
-                    help="CV voltage limit, V -- must exceed i_max*R to stay in CC")
-    ap.add_argument("--dwell", type=float, default=1.5, help="settle time per setpoint, s")
-    ap.add_argument("--samples", type=int, default=8, help="reads averaged per setpoint")
-    ap.add_argument("--sample-gap", type=float, default=0.05, help="delay between reads, s")
-    ap.add_argument("--updown", action="store_true", default=True,
-                    help="sweep up then back down (default; exposes hysteresis)")
+    ap.add_argument(
+        "--steps", type=int, default=8, help="setpoints per sweep direction"
+    )
+    ap.add_argument(
+        "--compliance",
+        type=float,
+        default=12.0,
+        help="CV voltage limit, V -- must exceed i_max*R to stay in CC",
+    )
+    ap.add_argument(
+        "--dwell", type=float, default=1.5, help="settle time per setpoint, s"
+    )
+    ap.add_argument(
+        "--samples", type=int, default=8, help="reads averaged per setpoint"
+    )
+    ap.add_argument(
+        "--sample-gap", type=float, default=0.05, help="delay between reads, s"
+    )
+    ap.add_argument(
+        "--updown",
+        action="store_true",
+        default=True,
+        help="sweep up then back down (default; exposes hysteresis)",
+    )
     ap.add_argument("--no-updown", dest="updown", action="store_false")
-    ap.add_argument("--gauss-prompt", action="store_true",
-                    help="prompt for a gaussmeter reading at each setpoint")
-    ap.add_argument("--fit-from", type=float, default=0.0,
-                    help="ignore points below this current in the fits, A")
+    ap.add_argument(
+        "--gauss-prompt",
+        action="store_true",
+        help="prompt for a gaussmeter reading at each setpoint",
+    )
+    ap.add_argument(
+        "--fit-from",
+        type=float,
+        default=0.0,
+        help="ignore points below this current in the fits, A",
+    )
     ap.add_argument("--out", help="write results JSON here")
     args = ap.parse_args()
 
     if args.i_max > 2.5:
-        print(f"refusing --i-max {args.i_max}A: coils are rated ~2A RMS "
-              f"(docs/PCB_Design_Documentation.md sec.6)", file=sys.stderr)
+        print(
+            f"refusing --i-max {args.i_max}A: coils are rated ~2A RMS "
+            f"(docs/PCB_Design_Documentation.md sec.6)",
+            file=sys.stderr,
+        )
         return 2
 
     setpoints = np.linspace(args.i_min, args.i_max, args.steps)
@@ -198,8 +252,10 @@ async def main() -> int:
         await dev.set_voltage(args.compliance)
         await dev.set_current(float(setpoints[0]))
 
-        print(f"coil {args.coil}: {args.steps} setpoints "
-              f"{args.i_min}..{args.i_max}A, compliance {args.compliance}V")
+        print(
+            f"coil {args.coil}: {args.steps} setpoints "
+            f"{args.i_min}..{args.i_max}A, compliance {args.compliance}V"
+        )
         await dev.enable_output()
         try:
             points = await sweep(dev, setpoints, args)
@@ -221,23 +277,33 @@ async def main() -> int:
 
     if result["r_fit_ohm"]:
         r = result["r_fit_ohm"]
-        print(f"\nR = {r['slope']:.4f} ohm  (intercept {r['intercept']:+.4f} V, "
-              f"r2={fmt_r2(r['r2'])}, max resid {r['max_resid']*1e3:.1f} mV)")
+        print(
+            f"\nR = {r['slope']:.4f} ohm  (intercept {r['intercept']:+.4f} V, "
+            f"r2={fmt_r2(r['r2'])}, max resid {r['max_resid']*1e3:.1f} mV)"
+        )
         if r["r2"] is not None and r["r2"] < 0.999:
-            print("  ! nonlinear V(I) -- most likely coil heating during the sweep; "
-                  "shorten --dwell or let it cool between runs")
+            print(
+                "  ! nonlinear V(I) -- most likely coil heating during the sweep; "
+                "shorten --dwell or let it cool between runs"
+            )
     if result["b_fit"]:
         b = result["b_fit"]
-        print(f"B/I = {b['slope']:.4f} /A  (intercept {b['intercept']:+.4f}, "
-              f"r2={fmt_r2(b['r2'])})")
+        print(
+            f"B/I = {b['slope']:.4f} /A  (intercept {b['intercept']:+.4f}, "
+            f"r2={fmt_r2(b['r2'])})"
+        )
         if b["r2"] is not None and b["r2"] < 0.999:
             print("  ! B is not linear in I -- ferromagnetic material in the flux path")
     if result["b_hysteresis"]:
-        print(f"B up/down hysteresis: {result['b_hysteresis']:.4f} "
-              f"(non-zero => ferromagnetic material)")
+        print(
+            f"B up/down hysteresis: {result['b_hysteresis']:.4f} "
+            f"(non-zero => ferromagnetic material)"
+        )
     if result["v_hysteresis"]:
-        print(f"V up/down hysteresis: {result['v_hysteresis']*1e3:.1f} mV "
-              f"(=> R drifted with temperature during the sweep)")
+        print(
+            f"V up/down hysteresis: {result['v_hysteresis']*1e3:.1f} mV "
+            f"(=> R drifted with temperature during the sweep)"
+        )
 
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

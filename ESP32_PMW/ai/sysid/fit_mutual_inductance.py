@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fit one M_ij entry (henries) from a PicoScope capture of the induced EMF
+"""
+Fit one M_ij entry (henries) from a PicoScope capture of the induced EMF
 on an undriven neighbor coil while another channel is driven solo at a known
 frequency (mutual-inductance tier of the RLC/coupling characterization plan).
 
@@ -28,6 +29,7 @@ Usage:
       --driven A --probed B --v-channel "Channel B" --freq-hz 150 --duty 30 \
       --v-supply 11.9 --rlc-fit ai/rlc_fit.json --out ai/m_matrix.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,31 +45,63 @@ from picoscope_capture import compute_fft, measure_fundamental
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("csv", help="PicoScope capture CSV (Time,Channel A..D header, "
-                                 "units row -- same convention as coupling_matrix.py)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "csv",
+        help="PicoScope capture CSV (Time,Channel A..D header, "
+        "units row -- same convention as coupling_matrix.py)",
+    )
     ap.add_argument("--driven", choices=list("ABCD"), required=True)
     ap.add_argument("--probed", choices=list("ABCD"), required=True)
-    ap.add_argument("--v-channel", required=True,
-                     help="PicoScope CSV column probed across the undriven "
-                          "coil's terminals, e.g. 'Channel B'")
-    ap.add_argument("--freq-hz", type=float, required=True,
-                     help="commutation frequency the driven channel was held at")
-    ap.add_argument("--duty", type=float, required=True,
-                     help="carrier duty %% the driven channel was held at")
-    ap.add_argument("--v-supply", type=float, required=True,
-                     help="bench supply voltage at test time")
-    ap.add_argument("--rlc-fit", required=True,
-                     help="ai/rlc_fit.json from ai/fit_rlc_model.py -- "
-                          "supplies the driven channel's R,L,C to compute its "
-                          "true coil current without re-measuring it")
-    ap.add_argument("--settle-s", type=float, default=1.0,
-                     help="skip this much of the capture as transient (default: %(default)s)")
-    ap.add_argument("--band-frac", type=float, default=0.1,
-                     help="fundamental search band as +/- this fraction of "
-                          "--freq-hz (default: %(default)s)")
-    ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "m_matrix.json"))
+    ap.add_argument(
+        "--v-channel",
+        required=True,
+        help="PicoScope CSV column probed across the undriven "
+        "coil's terminals, e.g. 'Channel B'",
+    )
+    ap.add_argument(
+        "--freq-hz",
+        type=float,
+        required=True,
+        help="commutation frequency the driven channel was held at",
+    )
+    ap.add_argument(
+        "--duty",
+        type=float,
+        required=True,
+        help="carrier duty %% the driven channel was held at",
+    )
+    ap.add_argument(
+        "--v-supply",
+        type=float,
+        required=True,
+        help="bench supply voltage at test time",
+    )
+    ap.add_argument(
+        "--rlc-fit",
+        required=True,
+        help="ai/rlc_fit.json from ai/fit_rlc_model.py -- "
+        "supplies the driven channel's R,L,C to compute its "
+        "true coil current without re-measuring it",
+    )
+    ap.add_argument(
+        "--settle-s",
+        type=float,
+        default=1.0,
+        help="skip this much of the capture as transient (default: %(default)s)",
+    )
+    ap.add_argument(
+        "--band-frac",
+        type=float,
+        default=0.1,
+        help="fundamental search band as +/- this fraction of "
+        "--freq-hz (default: %(default)s)",
+    )
+    ap.add_argument(
+        "--out", default=os.path.join(os.path.dirname(__file__), "m_matrix.json")
+    )
     args = ap.parse_args()
 
     if args.driven == args.probed:
@@ -77,7 +111,7 @@ def main() -> None:
         rlc = json.load(f)[args.driven]
     R, L, C = rlc["R"], rlc["L"], rlc["C"]
     omega = 2 * np.pi * args.freq_hz
-    z_driven = np.sqrt(R ** 2 + (omega * L - 1.0 / (omega * C)) ** 2)
+    z_driven = np.sqrt(R**2 + (omega * L - 1.0 / (omega * C)) ** 2)
     v_fund = (4.0 / np.pi) * (args.duty / 100.0) * args.v_supply
     i_driven = v_fund / z_driven
 
@@ -92,9 +126,11 @@ def main() -> None:
     f0_found, v_induced = measure_fundamental(freqs, mag, band=band)
 
     m_ij = v_induced / (omega * i_driven)
-    print(f"I_driven({args.driven})={i_driven:.3f}A  "
-          f"V_induced({args.probed})={v_induced * 1000:.2f}mV @ {f0_found:.1f}Hz  "
-          f"-> M_{args.driven}{args.probed} = {m_ij * 1e3:.4f} mH")
+    print(
+        f"I_driven({args.driven})={i_driven:.3f}A  "
+        f"V_induced({args.probed})={v_induced * 1000:.2f}mV @ {f0_found:.1f}Hz  "
+        f"-> M_{args.driven}{args.probed} = {m_ij * 1e3:.4f} mH"
+    )
 
     m_data = {}
     if os.path.exists(args.out):

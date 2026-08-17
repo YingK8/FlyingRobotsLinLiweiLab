@@ -11,12 +11,12 @@ device will tell you something that is not true.
 
 | # | file | what it does |
 |---|---|---|
-| 1 | `sources.py` | `FrameSource`: images, video, or a live camera behind one `read()` |
+| 1 | `sources.py` | `Capture`: images, video, or a live camera behind one `read()` |
 | 2 | `elp.py` | opens the ELP with the mode *checked*, and the device profile |
 | 3 | `elp_camera.json` | the mode table, as data rather than a list retyped per script |
 | 4 | `modes.py` | measures what each mode actually delivers, and diagnoses why |
 
-Start at `sources.CameraSource`; everything else exists because of what §1.2 and
+Start at `sources.MonoCamera`; everything else exists because of what §1.2 and
 §1.3 say about it.
 
 ## 1.1 Two rates, and why they are not the same number
@@ -24,7 +24,7 @@ Start at `sources.CameraSource`; everything else exists because of what §1.2 an
 A camera and a program that reads from it run at different speeds, and conflating
 them is the single most common way to misdiagnose a pipeline.
 
-`sources.CameraSource` runs a **dedicated grabber thread** that does nothing but
+`sources.MonoCamera` runs a **dedicated grabber thread** that does nothing but
 `cap.read()` into a single-frame slot (`sources.py:_grab_loop`). The consumer takes
 whatever is in the slot. So:
 
@@ -103,7 +103,7 @@ measurement itself.
 ## 1.4 Capture skew of a free-running pair
 
 Two USB cameras without a hardware trigger have no common clock. They free-run and
-their frames land wherever they land, so `sources.StereoSource` **measures** the
+their frames land wherever they land, so `sources.StereoCamera` **measures** the
 skew on every read rather than assuming it, and reports `skew_stats()`.
 
 Model the two phases as independent and uniform on a frame period $T$. Their
@@ -118,7 +118,7 @@ worse, and the software remedy is `filter.PoseFilter.predict_ahead`, which
 advances the earlier view to the later one's timestamp. A hardware trigger remains
 the right answer.
 
-`StereoSource` returns the **mean** capture time of the pair, not the first
+`StereoCamera` returns the **mean** capture time of the pair, not the first
 camera's. Taking the first would bias every pose by half the skew in a fixed
 direction — exactly the kind of error that survives filtering.
 
@@ -140,14 +140,14 @@ shutter**. Both properties matter downstream and neither is incidental:
 
 | Model element | Code |
 |---|---|
-| Grabber thread, drop-oldest slot (§1.1) | `sources.py` `CameraSource._grab_loop`, `read` |
-| Consumer loss vs camera loss (§1.1) | `CameraSource.n_dropped`, `n_grabbed` |
+| Grabber thread, drop-oldest slot (§1.1) | `sources.py` `MonoCamera._grab_loop`, `read` |
+| Consumer loss vs camera loss (§1.1) | `MonoCamera.n_dropped`, `n_grabbed` |
 | Granted-vs-requested mode check (§1.2) | `elp.py` `open_elp(strict=True)` |
 | Mode table as data (§1.3) | `elp_camera.json`, `elp.modes`, `elp.parse_mode` |
 | Two measured rates (§1.1, §1.3) | `modes.py` `_stats` → `fps_grabbed`, `fps_consumed` |
 | Frame-time fit (§1.3) | `modes.fit_frame_time` |
 | Per-mode verdict (§1.3) | `modes.classify` |
 | Native-mode probe (§1.3) | `elp.native_modes_ffmpeg` |
-| Skew measurement (§1.4) | `sources.py` `StereoSource.read`, `skew_stats` |
-| Mean pair timestamp (§1.4) | `StereoSource.read` |
+| Skew measurement (§1.4) | `sources.py` `StereoCamera.read`, `skew_stats` |
+| Mean pair timestamp (§1.4) | `StereoCamera.read` |
 | One camera or two, branch-free (§1.1) | `elp.open_group`, `elp.as_frames` |

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Utilization + scatter metrics for the balanced tilt/lift firmwares, as
+"""
+Utilization + scatter metrics for the balanced tilt/lift firmwares, as
 functions of drive frequency.
 
 Two inputs, both serial logs in the current-PID telemetry format emitted by
@@ -28,6 +29,7 @@ sweep. tilt.json drives current only during its step-down at ~210Hz, so its
 regulated log yields metrics at ~210Hz; for a swept curve, run a regulated
 frequency sweep (e.g. ceiling_sweep.json flashed with piEnabled=true).
 """
+
 import argparse
 import os
 import sys
@@ -35,6 +37,7 @@ import sys
 import numpy as np
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -48,20 +51,25 @@ IKEYS = ["i_a", "i_b", "i_c", "i_d"]
 
 
 def _stack(data):
-    """(freq[M], currents[M,4]) from a parsed telemetry dict."""
+    """
+    (freq[M], currents[M,4]) from a parsed telemetry dict.
+    """
+
     freq = data["freq"]
     currents = np.column_stack([data[k] for k in IKEYS])
     return freq, currents
 
 
 def bin_by_freq(freq, currents, bin_hz, fmin, fmax, min_current, settle_frac):
-    """Group samples into fixed-width frequency bins. Within each bin keep the
-    last `settle_frac` fraction of samples (post-transient, like
-    fit_rlc_model's per-label settle window) and average them. Bins whose peak
-    current never clears `min_current` (coils off / arming) are dropped.
-
-    Returns (centers[K], means[K,4]) sorted by frequency.
     """
+    Group samples into fixed-width frequency bins. Within each bin keep the
+        last `settle_frac` fraction of samples (post-transient, like
+        fit_rlc_model's per-label settle window) and average them. Bins whose peak
+        current never clears `min_current` (coils off / arming) are dropped.
+
+        Returns (centers[K], means[K,4]) sorted by frequency.
+    """
+
     keep = (freq >= fmin) & (freq <= fmax)
     freq, currents = freq[keep], currents[keep]
     if freq.size == 0:
@@ -96,7 +104,10 @@ def ceiling_curve_from_log(path, bin_hz, fmin, fmax, min_current, settle_frac):
 
 
 def ceiling_at(f, centers, ceil):
-    """Per-channel linear interpolation of the ceiling curve at frequencies f."""
+    """
+    Per-channel linear interpolation of the ceiling curve at frequencies f.
+    """
+
     out = np.empty((len(f), 4))
     for c in range(4):
         out[:, c] = np.interp(f, centers, ceil[:, c])
@@ -104,30 +115,56 @@ def ceiling_at(f, centers, ceil):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--regulated", required=True,
-                    help="PI-balanced run log (Ibar_i(f))")
-    ap.add_argument("--ceiling", required=True,
-                    help="open-loop 100%%-duty run log (Ceiling_i(f))")
-    ap.add_argument("--bin-hz", type=float, default=5.0,
-                    help="frequency bin width in Hz (default 5)")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--regulated", required=True, help="PI-balanced run log (Ibar_i(f))"
+    )
+    ap.add_argument(
+        "--ceiling", required=True, help="open-loop 100%%-duty run log (Ceiling_i(f))"
+    )
+    ap.add_argument(
+        "--bin-hz",
+        type=float,
+        default=5.0,
+        help="frequency bin width in Hz (default 5)",
+    )
     ap.add_argument("--fmin", type=float, default=1.0)
     ap.add_argument("--fmax", type=float, default=210.0)
-    ap.add_argument("--min-current", type=float, default=0.05,
-                    help="drop bins whose peak channel current is below this (A)")
-    ap.add_argument("--settle-frac", type=float, default=0.5,
-                    help="fraction of each bin's tail to average (default 0.5)")
-    ap.add_argument("--out", default=None, help="output PNG (default <regulated>_tiltmetrics.png)")
+    ap.add_argument(
+        "--min-current",
+        type=float,
+        default=0.05,
+        help="drop bins whose peak channel current is below this (A)",
+    )
+    ap.add_argument(
+        "--settle-frac",
+        type=float,
+        default=0.5,
+        help="fraction of each bin's tail to average (default 0.5)",
+    )
+    ap.add_argument(
+        "--out", default=None, help="output PNG (default <regulated>_tiltmetrics.png)"
+    )
     args = ap.parse_args()
 
     ceil_f, ceil = ceiling_curve_from_log(
-        args.ceiling, args.bin_hz, args.fmin, args.fmax, args.min_current,
-        args.settle_frac)
-    reg_f, reg = bin_by_freq(*_stack(parse_log(args.regulated)),
-                             bin_hz=args.bin_hz, fmin=args.fmin, fmax=args.fmax,
-                             min_current=args.min_current,
-                             settle_frac=args.settle_frac)
+        args.ceiling,
+        args.bin_hz,
+        args.fmin,
+        args.fmax,
+        args.min_current,
+        args.settle_frac,
+    )
+    reg_f, reg = bin_by_freq(
+        *_stack(parse_log(args.regulated)),
+        bin_hz=args.bin_hz,
+        fmin=args.fmin,
+        fmax=args.fmax,
+        min_current=args.min_current,
+        settle_frac=args.settle_frac,
+    )
     if ceil_f.size == 0:
         raise SystemExit(f"no usable ceiling samples in {args.ceiling}")
     if reg_f.size == 0:
@@ -140,40 +177,54 @@ def main():
     scatter = reg.max(axis=1) - reg.min(axis=1)  # S(f)
 
     # Table.
-    print(f"# regulated={os.path.basename(args.regulated)} "
-          f"ceiling={os.path.basename(args.ceiling)} bin={args.bin_hz}Hz")
-    print(f"# {'f_Hz':>6} | {'Ibar_A':>28} | {'U_A/B/C/D':>28} | "
-          f"{'U_mean':>7} {'U_min':>7} {'S_A':>7}")
+    print(
+        f"# regulated={os.path.basename(args.regulated)} "
+        f"ceiling={os.path.basename(args.ceiling)} bin={args.bin_hz}Hz"
+    )
+    print(
+        f"# {'f_Hz':>6} | {'Ibar_A':>28} | {'U_A/B/C/D':>28} | "
+        f"{'U_mean':>7} {'U_min':>7} {'S_A':>7}"
+    )
     for i, f in enumerate(reg_f):
         ib = " ".join(f"{reg[i, c]:6.2f}" for c in range(4))
         uu = " ".join(f"{util[i, c]:6.2f}" for c in range(4))
-        print(f"  {f:6.1f} | {ib:>28} | {uu:>28} | "
-              f"{u_mean[i]:7.2f} {u_min[i]:7.2f} {scatter[i]:7.3f}")
+        print(
+            f"  {f:6.1f} | {ib:>28} | {uu:>28} | "
+            f"{u_mean[i]:7.2f} {u_min[i]:7.2f} {scatter[i]:7.3f}"
+        )
 
     # Headline: best band = highest U_min among bins whose scatter is under the
     # 0.4A balance bar (fall back to plain argmax U_min if none qualify).
     ok = scatter <= 0.4
     pool = np.where(ok)[0] if ok.any() else np.arange(len(reg_f))
     best = pool[np.argmax(u_min[pool])]
-    print(f"METRICS best_freq_hz={reg_f[best]:.1f} "
-          f"u_min_at_best={u_min[best]:.3f} s_at_best={scatter[best]:.3f} "
-          f"u_mean_overall={np.nanmean(u_mean):.3f} s_max={scatter.max():.3f}")
+    print(
+        f"METRICS best_freq_hz={reg_f[best]:.1f} "
+        f"u_min_at_best={u_min[best]:.3f} s_at_best={scatter[best]:.3f} "
+        f"u_mean_overall={np.nanmean(u_mean):.3f} s_max={scatter.max():.3f}"
+    )
 
     # Plot: U(f) per channel + U_min, and S(f) with the 0.4A bar.
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(9, 7))
     for c, ch in enumerate(CHANNELS):
-        ax1.plot(reg_f, util[:, c], color=COLORS[ch], marker=".", lw=1.4,
-                 label=f"U_{ch}")
+        ax1.plot(
+            reg_f, util[:, c], color=COLORS[ch], marker=".", lw=1.4, label=f"U_{ch}"
+        )
     ax1.plot(reg_f, u_min, color="k", lw=1.8, ls="--", label="U_min")
     ax1.axhline(1.0, color="gray", lw=1.0, ls=":")
-    ax1.axvspan(*RESONANCE_BAND_HZ, color="0.9", zorder=0,
-                label=f"resonance {RESONANCE_BAND_HZ[0]:.0f}-{RESONANCE_BAND_HZ[1]:.0f}Hz")
+    ax1.axvspan(
+        *RESONANCE_BAND_HZ,
+        color="0.9",
+        zorder=0,
+        label=f"resonance {RESONANCE_BAND_HZ[0]:.0f}-{RESONANCE_BAND_HZ[1]:.0f}Hz",
+    )
     ax1.set_ylabel("utilization U = Ibar / Ceiling")
     ax1.grid(alpha=0.3)
     ax1.legend(ncol=3, fontsize=8)
 
-    ax2.plot(reg_f, scatter, color="#d62728", lw=1.8, marker=".",
-             label="S = max-min(Ibar)")
+    ax2.plot(
+        reg_f, scatter, color="#d62728", lw=1.8, marker=".", label="S = max-min(Ibar)"
+    )
     ax2.axhline(0.4, color="k", ls="--", lw=1.2, label="0.4A balance bar")
     ax2.axvspan(*RESONANCE_BAND_HZ, color="0.9", zorder=0)
     ax2.set_ylabel("scatter S (A)")

@@ -1,4 +1,5 @@
-r"""Measure latency, which is not the same thing as throughput.
+r"""
+Measure latency, which is not the same thing as throughput.
 
     uv run python controller/pose/validation/latency.py
     uv run python controller/pose/validation/latency.py --camera --width 640 --height 480
@@ -35,8 +36,13 @@ HERE = Path(__file__).resolve().parent
 # (This is the one direction the layering allows to be unrestricted: ai/ is not
 # a stage, it is what the stages are exercised by.)
 _C = HERE.parents[1] / "controller"
-sys.path[:0] = [str(HERE), str(HERE.parent / "validation"),
-                str(_C / "pose"), str(_C / "calib"), str(_C / "camera")]
+sys.path[:0] = [
+    str(HERE),
+    str(HERE.parent / "validation"),
+    str(_C / "pose"),
+    str(_C / "calib"),
+    str(_C / "camera"),
+]
 
 import cv2  # noqa: E402
 import sources  # noqa: E402
@@ -50,17 +56,24 @@ def percentiles(name, v_ms, indent="  "):
         print(f"{indent}{name:<26s} (no samples)")
         return
     a = np.asarray(v_ms)
-    print(f"{indent}{name:<26s} {a.mean():7.3f} {np.median(a):7.3f} "
-          f"{np.percentile(a, 95):7.3f} {np.percentile(a, 99):7.3f} {a.max():7.3f}")
+    print(
+        f"{indent}{name:<26s} {a.mean():7.3f} {np.median(a):7.3f} "
+        f"{np.percentile(a, 95):7.3f} {np.percentile(a, 99):7.3f} {a.max():7.3f}"
+    )
 
 
 def header(title):
     print(f"\n{title}")
-    print(f"  {'stage':<26s} {'mean':>7s} {'med':>7s} {'p95':>7s} {'p99':>7s} {'max':>7s}   (ms)")
+    print(
+        f"  {'stage':<26s} {'mean':>7s} {'med':>7s} {'p95':>7s} {'p99':>7s} {'max':>7s}   (ms)"
+    )
 
 
 def run(source, est, n, scale=1.0, warmup=20):
-    """Collect per-frame stage timings and end-to-end pipeline latency."""
+    """
+    Collect per-frame stage timings and end-to-end pipeline latency.
+    """
+
     seg_ms, est_ms, tot_ms, pipe_ms, gaps = [], [], [], [], []
     seen = n_lost = 0
     prev_done = None
@@ -71,7 +84,9 @@ def run(source, est, n, scale=1.0, warmup=20):
             break
         t_capture, frame = item
         if scale != 1.0:
-            frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            frame = cv2.resize(
+                frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+            )
 
         t_in = time.monotonic()
         pose = est.update(frame, t=t_capture)
@@ -93,16 +108,29 @@ def run(source, est, n, scale=1.0, warmup=20):
             gaps.append((t_done - prev_done) * 1e3)
         prev_done = t_done
 
-    return dict(seg=seg_ms, est=est_ms, total=tot_ms, pipeline=pipe_ms, gap=gaps,
-                n_seen=seen, n_lost=n_lost)
+    return dict(
+        seg=seg_ms,
+        est=est_ms,
+        total=tot_ms,
+        pipeline=pipe_ms,
+        gap=gaps,
+        n_seen=seen,
+        n_lost=n_lost,
+    )
 
 
 def report(r, label, live):
     header(f"{label}")
     if r["n_lost"] == r["n_seen"]:
-        print(f"  NO DETECTIONS in {r['n_seen']} frames -- the robot is below the minimum")
-        print("  blob size at this scale, so there is no timing to report. Not a timing")
-        print("  result: at this resolution the estimator simply cannot see the target.")
+        print(
+            f"  NO DETECTIONS in {r['n_seen']} frames -- the robot is below the minimum"
+        )
+        print(
+            "  blob size at this scale, so there is no timing to report. Not a timing"
+        )
+        print(
+            "  result: at this resolution the estimator simply cannot see the target."
+        )
         return
     percentiles("segmentation", r["seg"])
     percentiles("back-projection", r["est"])
@@ -114,32 +142,46 @@ def report(r, label, live):
     tot = np.asarray(r["total"])
     if len(tot) == 0:
         return
-    print(f"\n  sustained {1e3/np.median(tot):.0f} Hz median, "
-          f"{1e3/np.percentile(tot, 95):.0f} Hz at p95")
+    print(
+        f"\n  sustained {1e3/np.median(tot):.0f} Hz median, "
+        f"{1e3/np.percentile(tot, 95):.0f} Hz at p95"
+    )
     for fps in FPS_TARGETS:
         budget = 1e3 / fps
         over = float((tot > budget).mean())
-        print(f"  vs {fps:3d} fps ({budget:.2f} ms/frame): {over:6.2%} of frames over budget "
-              f"[{'OK' if over < 0.01 else 'OVER'}]")
+        print(
+            f"  vs {fps:3d} fps ({budget:.2f} ms/frame): {over:6.2%} of frames over budget "
+            f"[{'OK' if over < 0.01 else 'OVER'}]"
+        )
 
     if live:
         pipe = np.asarray(r["pipeline"])
-        print(f"\n  measured latency (grab -> pose): median {np.median(pipe):.2f} ms, "
-              f"p95 {np.percentile(pipe, 95):.2f} ms")
-        print("  NOT included: sensor exposure and USB transfer, which happen before the")
-        print("  driver hands over a frame and are unmeasurable without hardware timestamps.")
+        print(
+            f"\n  measured latency (grab -> pose): median {np.median(pipe):.2f} ms, "
+            f"p95 {np.percentile(pipe, 95):.2f} ms"
+        )
+        print(
+            "  NOT included: sensor exposure and USB transfer, which happen before the"
+        )
+        print(
+            "  driver hands over a frame and are unmeasurable without hardware timestamps."
+        )
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--source", default=None,
-                    help="video/dir; default is the repo's 240 fps footage")
+    ap.add_argument(
+        "--source",
+        default=None,
+        help="video/dir; default is the repo's 240 fps footage",
+    )
     ap.add_argument("--camera", action="store_true", help="use a live camera instead")
     ap.add_argument("--width", type=int, default=None)
     ap.add_argument("--height", type=int, default=None)
     ap.add_argument("--frames", type=int, default=400)
-    ap.add_argument("--scales", default="1.0,0.75,0.5",
-                    help="comma-separated frame scales to sweep")
+    ap.add_argument(
+        "--scales", default="1.0,0.75,0.5", help="comma-separated frame scales to sweep"
+    )
     args = ap.parse_args(argv)
 
     K, dist = load_intrinsics()
@@ -150,9 +192,12 @@ def main(argv=None):
     print("=" * 78)
 
     if args.camera:
-        kw = {k: v for k, v in (("width", args.width), ("height", args.height))
-              if v is not None}
-        src = sources.CameraSource(**kw)
+        kw = {
+            k: v
+            for k, v in (("width", args.width), ("height", args.height))
+            if v is not None
+        }
+        src = sources.MonoCamera(**kw)
         print(f"live camera -> {src.actual}")
         est = PoseEstimator(camera_matrix=K, dist_coeffs=dist)
         try:
@@ -160,9 +205,11 @@ def main(argv=None):
         finally:
             src.close()
         report(r, "live camera", live=True)
-        print(f"\n  grabber: {src.n_grabbed} grabbed, {src.n_dropped} dropped "
-              f"({src.n_dropped/max(1,src.n_grabbed):.1%}) -- drops mean the estimator "
-              f"is slower than the camera")
+        print(
+            f"\n  grabber: {src.n_grabbed} grabbed, {src.n_dropped} dropped "
+            f"({src.n_dropped/max(1,src.n_grabbed):.1%}) -- drops mean the estimator "
+            f"is slower than the camera"
+        )
         return 0
 
     path = args.source or str(default_video)

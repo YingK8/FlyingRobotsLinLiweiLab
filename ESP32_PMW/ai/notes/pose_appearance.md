@@ -91,3 +91,34 @@ Regenerating the whole constant chain for the weighted fit was tried and rejecte
 on measurement: it certifies **12** frames where the shipped set certifies 59, and
 its refitted error model came out ill-conditioned (`log_inv_margin` went negative
 at −1.6, intercept −5.47, held-out acceptance 3.5 % → 0.9 %).
+
+## `stereo.refine` — why `params="both"` is the default now
+
+It was `"normal"` once, chosen on a measurement that said the joint solve made
+position worse (0.242 → 0.258 mm). Three later changes moved the ground under
+that: the cylinder tilt model, the 180-degree ellipse-angle wrap fix, and
+Mahalanobis branch matching. Re-run on identical frames afterwards:
+
+    fuse only            0.397 mm   2.593 deg
+    refine normal only   0.397 mm   1.618 deg
+    refine both          0.348 mm   1.503 deg
+
+A measured default is only as current as the pipeline it was measured on.
+
+A hull-space refinement would need its own silhouette correction refitted in hull
+space. Until someone does that, `mode="ellipse"` is the form that agrees with the
+calibration it is using.
+
+## `DARK_THRESH` — the render sweep that no longer applies
+
+The pre-rod value (110) came from 80 rendered frames scored against analytic
+truth, as median / p90 error in the fitted major axis:
+
+    DARK_THRESH   80     100    110    120    140    150    180
+    median      0.68%   0.46%   --    0.45%  1.03%  1.36%  5.36%
+    p90         1.55%   1.14%   --    1.93% 14.29% 30.08% 43.57%
+
+Kept for its shape rather than its value: the threshold fails by eating rim arcs,
+not by losing the robot, so detection stayed 80/80 at every level while the p90 ran
+to 30%. Detection rate is not the metric. The sweep rendered no rod in frame, so it
+cannot speak to the shipped value (190), which was set on the real captures.

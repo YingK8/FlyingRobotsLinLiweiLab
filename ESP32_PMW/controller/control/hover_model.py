@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Hover plant model -- Python port of the physics embedded in
-model/frequency_modulation_piecewise_vertical_gui.m, extended with a lateral
-axis for the state-space hover controller.
+Hover plant: a 1-D altitude cascade, extended with a lateral axis. theory.md sections 6-8.
 
 Full nonlinear state s = [x, xd, z, zd, delta, omega]:
   x_dd     = g * k_lat * mag                      (lateral tilt authority)
@@ -10,16 +8,14 @@ Full nonlinear state s = [x, xd, z, zd, delta, omega]:
   delta_d  = 2*pi*f_field - omega                 (field-robot phase lag)
   omega_d  = (tau_max*sin(delta) - k_drag*f_r*|f_r|) / I_robot,  f_r = omega/2pi
 
-Inputs u = (mag_signed, f_field_hz). k_lat (rad of disk tilt per unit mixer
-mag) is the single parameter NOT derivable from the MATLAB model -- seed
-guess, re-identify on the rig (see design_hover_lqr.py --k-lat).
+Inputs u = (mag_signed, f_field_hz). k_lat, rad of disk tilt per unit mixer mag, is the one
+parameter not derivable from the model: seed guess, re-identify on the rig.
 
-Reduced 4-state design model (x, xd, z, zd): rotation treated as a
-phase-locked inner actuator (f_robot ~ f_field); its 15.6 Hz / zeta~0.02
-mode is above a 30 Hz camera's Nyquist so the outer loop must not try to
-shape it -- see linearize_full() eigenvalues for the justification numbers.
+The reduced 4-state design model (x, xd, z, zd) treats rotation as a phase-locked inner
+actuator, f_robot ~ f_field. Its 16.8 Hz mode is above a 30 Hz camera's Nyquist, so the outer
+loop must not try to shape it. See spatial_model.py for the 3-D plant that supersedes this one.
 
-Self-check: uv run python ai/hover_model.py
+Self-check: uv run python controller/control/hover_model.py
 """
 
 from __future__ import annotations
@@ -32,15 +28,11 @@ from scipy.signal import cont2discrete
 
 GRAVITY = 9.80665  # m/s^2 (MATLAB line 613)
 
-# Disk moment of inertia, kg m^2 -- verbatim expression from the .m file
-# lines 25-28 (hub + 2 arms + tip masses, SI).
-I_ROBOT = 3.89e-9 + 2.0 * (
-    1.0 / 12.0 * 1.17832e-5 * (3.0 * 0.79375**2 * 1e-6 + 0.79375**2 * 1e-6)
-    + 1.17832e-5 * (0.496875**2 * 1e-6)
-)
+# Polar moment about the spin axis, kg m^2. From the CAD tensor; spatial_model.robot_params()
+# recomputes it. theory.md section 3. Supersedes the older constant the *_gui.m files carry.
+I_ROBOT = 3.3578361348541667e-9
 
-# 23-point measured drag-torque table (N m, negative = opposing), 10:10:230 Hz
-# -- verbatim from the .m file lines 30-55.
+# 23 measured drag torques, N m, negative = opposing, at 10:10:230 Hz.
 DRAG_FREQ_HZ = np.arange(10.0, 231.0, 10.0)
 DRAG_TORQUE_NM = np.array(
     [
@@ -70,17 +62,15 @@ DRAG_TORQUE_NM = np.array(
     ]
 )
 
-F_HOVER_HZ_DEFAULT = (
-    140.0  # GUI default; firmware main_flight.cpp HOVER_HZ=150 -> parameterize
-)
-K_LAT_DEFAULT = 0.05  # SEED GUESS -- rad tilt per unit mag; identify on rig
-TORQUE_MARGIN_DEFAULT = 5.0  # tau_max / |drag at f_hover| (GUI default)
+F_HOVER_HZ_DEFAULT = 140.0    # Hz; firmware main_flight.cpp flies 150, so pass it explicitly
+K_LAT_DEFAULT = 0.05          # SEED GUESS: rad tilt per unit mag. Identify on the rig.
+TORQUE_MARGIN_DEFAULT = 5.0   # tau_max / |drag at f_hover|
 
 
 def fit_k_drag() -> tuple[float, float]:
     """
-    Zero-intercept least-squares fit drag = -k_drag*f^2 (MATLAB lines 57-62).
-        Returns (k_drag [N m/Hz^2], R^2).
+    Zero-intercept least-squares fit drag = -k_drag*f^2 (MATLAB lines 57-62). Returns
+    (k_drag [N m/Hz^2], R^2).
     """
 
     f2 = DRAG_FREQ_HZ**2
@@ -93,9 +83,7 @@ def fit_k_drag() -> tuple[float, float]:
 
 @dataclass
 class HoverParams:
-    """
-    Plant parameters + hover-trim derived quantities.
-    """
+    """Plant parameters + hover-trim derived quantities."""
 
     f_hover: float = F_HOVER_HZ_DEFAULT
     k_lat: float = K_LAT_DEFAULT
@@ -126,9 +114,7 @@ def make_params(
 def nonlinear_dynamics(
     t: float, s: np.ndarray, u: tuple[float, float], p: HoverParams
 ) -> np.ndarray:
-    """
-    Full 6-state truth model. s=[x,xd,z,zd,delta,omega], u=(mag_signed, f_field_hz).
-    """
+    """Full 6-state truth model. s=[x,xd,z,zd,delta,omega], u=(mag_signed, f_field_hz)."""
 
     _, xd, _, zd, delta, omega = s
     mag, f_field = u
@@ -148,10 +134,9 @@ def nonlinear_dynamics(
 
 def linearize_reduced(p: HoverParams) -> tuple[np.ndarray, np.ndarray]:
     """
-    4-state design model about hover trim. States [x, xd, z, zd],
-        inputs [mag_signed, delta_f_hz] (delta_f = f_field - f_hover).
-        Rotation assumed phase-locked: f_robot == f_field, so the vertical
-        channel sees d(z_dd)/d(delta_f) = 2 g / f_hover.
+    4-state design model about hover trim. States [x, xd, z, zd], inputs [mag_signed,
+    delta_f_hz] (delta_f = f_field - f_hover). Rotation assumed phase-locked: f_robot ==
+    f_field, so the vertical channel sees d(z_dd)/d(delta_f) = 2 g / f_hover.
     """
 
     A = np.array(
@@ -175,8 +160,8 @@ def linearize_reduced(p: HoverParams) -> tuple[np.ndarray, np.ndarray]:
 
 def linearize_full(p: HoverParams) -> tuple[np.ndarray, np.ndarray]:
     """
-    6-state Jacobian about hover trim (documentation / eigen-analysis).
-        States [x, xd, z, zd, delta, omega], inputs [mag_signed, f_field_hz].
+    6-state Jacobian about hover trim (documentation / eigen-analysis). States [x, xd,
+    z, zd, delta, omega], inputs [mag_signed, f_field_hz].
     """
 
     w0 = p.omega_trim
@@ -199,9 +184,7 @@ def linearize_full(p: HoverParams) -> tuple[np.ndarray, np.ndarray]:
 def discretize(
     A: np.ndarray, B: np.ndarray, ts: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    ZOH discretization at sample time ts [s].
-    """
+    """ZOH discretization at sample time ts [s]."""
 
     n, m = A.shape[0], B.shape[1]
     Ad, Bd, *_ = cont2discrete((A, B, np.eye(n), np.zeros((n, m))), ts, method="zoh")
@@ -209,9 +192,7 @@ def discretize(
 
 
 def summary():
-    """
-    Print the identified parameters and the linear model's modes.
-    """
+    """Print the identified parameters and the linear model's modes."""
 
     k_drag, r2 = fit_k_drag()
     p = make_params()
@@ -236,8 +217,12 @@ def summary():
 
     # Port-correctness asserts against the MATLAB-derived reference numbers.
     assert abs(k_drag - 3.908983509946592e-10) < 1e-16, k_drag
-    assert abs(p.I_robot - 3.900767435994792e-9) < 1e-15, p.I_robot
+    assert abs(p.I_robot - 3.3578361348541667e-9) < 1e-15, p.I_robot
     assert abs(math.degrees(p.delta_trim) - 11.5370) < 1e-3
     assert abs(vgain - 2 * GRAVITY / 140.0) < 1e-12
-    assert abs(rot[0].real - (-2.233)) < 0.01 and abs(abs(rot[0].imag) - 98.07) < 0.2
+    assert abs(rot[0].real - (-2.594)) < 0.01 and abs(abs(rot[0].imag) - 105.69) < 0.2
     print("self-check PASS")
+
+
+if __name__ == "__main__":
+    summary()

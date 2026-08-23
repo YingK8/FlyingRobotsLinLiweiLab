@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
 """
-Real-time hover-controller runner -- closes the position loop around
-src/main_flight.cpp using the state-space controller designed by
-controller/control/design_hover_lqr.py (gains: controller/control/hover_controller.json).
+Real-time hover-controller runner: closes the position loop around src/main_flight.cpp.
 
-Replaces the open-loop controller/control/flight_controller.py.
-Position sources are pluggable behind PositionSource: a simulation replay
-(--source stub), CSV playback (--source replay), or the live camera
-(--source camera), which runs the whole stage 1-3 pipeline behind
-CameraSource.read() and hands back (t, x_m, z_m).
+Gains come from design_hover_lqr.py via hover_controller.json. Position sources are pluggable
+behind PositionSource: a simulation replay (stub), CSV playback (replay), or the live camera,
+which runs the whole stage 1-3 pipeline behind CameraSource.read() and returns (t, x_m, z_m).
 
-Control law per frame (same DiscreteHoverController code path that passed
-the simulate_hover.py scenarios):
+Control law per frame, the same DiscreteHoverController that passed the simulate_hover.py
+scenarios:
+
     u = u_trim + u_ff(t) - K [x_hat - x_ref(t) ; q]
-Lateral output: az=<axis> (u>=0) or az=<axis+180> (u<0), mag=|u_lat|.
-Vertical output: f_field is computed and LOGGED always, but only SENT with
---enable-freq-cmd -- main_flight.cpp has no freq= command yet (deferred
-firmware step; until then the vertical channel is telemetry-only).
 
-Safety: measurement watchdog (no fix for --timeout s -> "hover" then
-"land"); first SIGINT -> "land", second -> "stop"; "stop" also sent on any
-unhandled exception.
+Lateral output is az=<axis> (u>=0) or az=<axis+180> (u<0) plus mag=|u_lat|. The vertical
+f_field is always computed and logged but only SENT with enable_freq_cmd, because
+main_flight.cpp has no freq= command yet. Until that firmware lands the vertical channel is
+telemetry-only.
+
+Safety: the measurement watchdog lands after `timeout` seconds without a fix; the first SIGINT
+lands and the second stops; "stop" also goes out on any unhandled exception.
 
 Usage:
   hover_controller_runner.fly(dry_run=True)                    # stub source, no serial
-  hover_controller_runner.fly(source="replay", replay_csv="run.csv",
-                              port="/dev/ttyUSB0", log="hover_run.log")
+  hover_controller_runner.fly(source="camera", port="/dev/ttyUSB0", log="hover_run.log")
 """
 
 from __future__ import annotations
@@ -50,8 +46,8 @@ from simulate_hover import DiscreteHoverController, Scenario, simulate
 
 class PositionSource(ABC):
     """
-    Provides drone position fixes. read() is non-blocking: returns
-        (t_monotonic_s, x_m, z_m) when a new fix is available, else None.
+    Provides drone position fixes. read() is non-blocking: returns (t_monotonic_s, x_m,
+    z_m) when a new fix is available, else None.
     """
 
     @abstractmethod
@@ -63,9 +59,9 @@ class PositionSource(ABC):
 
 class StubSource(PositionSource):
     """
-    Replays the measurement stream of a simulate_hover run in real time
-        (open loop -- commands do not feed back). Lets the full runner pipeline
-        execute end-to-end before the camera exists.
+    Replays the measurement stream of a simulate_hover run in real time (open loop --
+    commands do not feed back). Lets the full runner pipeline execute end-to-end before
+    the camera exists.
     """
 
     def __init__(self, gains: dict, duration: float = 10.0):
@@ -87,9 +83,7 @@ class StubSource(PositionSource):
 
 
 class ReplaySource(PositionSource):
-    """
-    CSV playback (columns: t,x,z in seconds/meters), real-time paced.
-    """
+    """CSV playback (columns: t,x,z in seconds/meters), real-time paced."""
 
     def __init__(self, path: str):
         with open(path) as f:
@@ -112,35 +106,7 @@ class ReplaySource(PositionSource):
 
 
 class CameraSource(PositionSource):
-    """
-    Live position from the camera: the seam where vision meets control.
-
-        The whole of stages 1-3 sits behind this one method. `camera.sources` opens
-        the device and grabs on its own thread, `pose.estimator` turns each frame
-        into a 5-DOF pose, and `pose.filter` smooths position and supplies velocity.
-        This class does nothing but adapt that to `PositionSource`'s contract, and
-        the adaptation is two specific things, both easy to get silently wrong:
-
-        **Units.** The contract is metres. The pose stack is millimetres throughout
-        -- `RADIUS_MM`, `xyz_mm`, `SIGMA_LATERAL_MM`. The conversion happens here,
-        once, at the boundary. A missed factor of 1000 does not raise; it produces a
-        controller that thinks the robot is a kilometre away and commands
-        accordingly.
-
-        **Which axes.** The controller is planar: it wants `x` (lateral) and `z`
-        (height). The camera's frame is `x` right, `y` down, `z` along the optical
-        axis, so *the camera's z is depth, not height*. For a side-on camera looking
-        horizontally at the robot, height is **-y**: negated because the image y axis
-        points down and height points up. `axes=` makes that explicit rather than
-        assumed, because the right mapping depends on where the camera is mounted and
-        getting it wrong yields a control loop that is stable and flying the wrong
-        axis.
-
-        **Non-blocking.** `read()` must return rather than wait. A frame that has not
-        arrived, and a frame the segmenter could not use, both return ``None`` -- the
-        caller's watchdog treats a gap the same either way, and returning a stale
-        repeat instead would hide a lost robot as a stationary one.
-    """
+    """Live position from the camera: the seam where vision meets control."""
 
     def __init__(
         self,
@@ -200,9 +166,7 @@ class CameraSource(PositionSource):
 
 
 class CommandLink:
-    """
-    Serial link to main_flight.cpp, or a printing stand-in for --dry-run.
-    """
+    """Serial link to main_flight.cpp, or a printing stand-in for --dry-run."""
 
     def __init__(self, port: str | None, dry_run: bool, log_path: str):
         self.dry = dry_run
@@ -224,9 +188,7 @@ class CommandLink:
             self.comm.handle_serial_comm(cmd)
 
     def drain(self) -> None:
-        """
-        Pull pending telemetry lines into the log (non-blocking).
-        """
+        """Pull pending telemetry lines into the log (non-blocking)."""
 
         if not self.comm:
             return
@@ -329,13 +291,7 @@ def controller_loop(
 
 @dataclass
 class RunConfig:
-    """
-    Everything `controller_loop` reads, in one place.
-
-        A dataclass rather than loose keyword arguments because the loop takes it
-        whole and passes it down; a namespace assembled ad hoc is how a field gets
-        read that was never set.
-    """
+    """Everything `controller_loop` reads, in one place."""
 
     source: str = "stub"  # "stub" | "replay" | "camera"
     camera: str = "camera:0"
@@ -363,12 +319,7 @@ class RunConfig:
 
 
 def fly(cfg=None, **kw):
-    """
-    Run the hover controller. ``fly()`` is the stub-source dress rehearsal.
-
-        Pass a `RunConfig`, or keyword overrides of its fields. Defaults are the safe
-        ones: the stub source, no frequency commands, and the watchdog armed.
-    """
+    """Run the hover controller. ``fly()`` is the stub-source dress rehearsal."""
 
     cfg = cfg or RunConfig(**kw)
 

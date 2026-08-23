@@ -1,42 +1,25 @@
 #!/usr/bin/env python3
 """
-Discrete-LQR design for the state-space hover controller.
+Discrete-LQR design for the hover controller. Writes hover_controller.json.
 
-Design model: reduced 4-state double-integrator pair from ai/hover_model.py
-(linearize_reduced), ZOH-discretized at the camera rate, augmented with
-integrators on the x and z position errors (6 design states):
+Design model: the reduced 4-state double-integrator pair from hover_model.linearize_reduced,
+ZOH-discretized at the camera rate, augmented with integrators on the x and z position errors:
 
-  x_a = [x, xd, z, zd, int_ex, int_ez]
-  A_a = [[Ad, 0], [C*Ts, I]],  B_a = [[Bd], [0]],  C = [[1,0,0,0],[0,0,1,0]]
+    x_a = [x, xd, z, zd, int_ex, int_ez]
+    A_a = [[Ad, 0], [C*Ts, I]],  B_a = [[Bd], [0]],  C = [[1,0,0,0],[0,0,1,0]]
 
-Gain K (2x6) from scipy.linalg.solve_discrete_are. Control law (implemented
-in simulate_hover.DiscreteHoverController, shared with the runner):
+Control law, implemented in simulate_hover.DiscreteHoverController and shared with the runner:
 
-  u(k) = u_trim + u_ff(k) - K [ x_hat(k)-x_ref(k) ; q(k) ]
+    u(k) = u_trim + u_ff(k) - K [ x_hat(k)-x_ref(k) ; q(k) ]
 
-u_trim = (mag=0, f_field=f_hover); u_ff is the analytic reference-acceleration
-feedforward from ai/reference_profiles.py. With the augmented double
-integrators u_ss = 0 for any constant setpoint, so no Nbar matrix is needed.
+With the augmented double integrators u_ss = 0 for any constant setpoint, so no Nbar is needed.
 
-Weights: Bryson's rule, tuned for LATENCY ROBUSTNESS (simulate_hover.py
-scenario b). Both axes land at ~0.78 Hz dominant poles. The obvious tighter
-choices fail in closed loop against the full nonlinear plant:
-  - 5 mm z tol / R_f=1/10^2 -> 3.9 Hz vertical pole: demands ~300 Hz/s
-    frequency slew and limit-cycles against the slew limiter;
-  - 10 mm / 1/5^2 -> 1.33 Hz: stable with clean measurements but one camera
-    frame of latency + velocity-filter lag leaves so little phase margin
-    that sensor noise sustains a ~2.2 Hz vertical limit cycle (+-13 mm);
-  - 30 mm / 0.15 m/s / 1/3^2 -> 0.78 Hz: settles ~1 mm even with 0.5 mm
-    noise + 2 frames latency (verified sweep, 2026-07-23).
-Hard-fails if any closed-loop pole is faster than rate/6 -- the loop must
-stay well below Nyquist and the 15.6 Hz phase-lock mode.
+Weights are Bryson's rule tuned for LATENCY ROBUSTNESS, not for speed: both axes land at
+~0.78 Hz. Tighter designs pass on paper and fail in closed loop, at 1.33 Hz through a ~2.2 Hz
+limit cycle from one frame of latency, and at 3.9 Hz by demanding infeasible frequency slew.
+Hard-fails if any closed-loop pole exceeds rate/6.
 
-Slew default 200 Hz/s: the 0.78 Hz loops need well under that, while
-phase-lock pull-out headroom at margin 5 allows
-(tau_max - drag)/(2*pi*I) ~ 1250 Hz/s -- ample safety factor.
-
-Usage: uv run python ai/design_hover_lqr.py [--rate 30] [--k-lat 0.05] ...
-Writes ai/hover_controller.json (convention: compute_model_gains.py).
+Usage: uv run python controller/control/design_hover_lqr.py
 """
 
 from __future__ import annotations
@@ -57,9 +40,7 @@ C_MEAS = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])
 def augment_integrators(
     Ad: np.ndarray, Bd: np.ndarray, C: np.ndarray, ts: float
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    q(k+1) = q(k) + Ts*(C x(k) - y_ref): forward-Euler error integrators.
-    """
+    """q(k+1) = q(k) + Ts*(C x(k) - y_ref): forward-Euler error integrators."""
 
     n, m = Ad.shape[0], Bd.shape[1]
     p = C.shape[0]
@@ -69,9 +50,7 @@ def augment_integrators(
 
 
 def dlqr(A: np.ndarray, B: np.ndarray, Q: np.ndarray, R: np.ndarray):
-    """
-    Discrete LQR: K = (R + B'PB)^-1 B'PA with P from the discrete ARE.
-    """
+    """Discrete LQR: K = (R + B'PB)^-1 B'PA with P from the discrete ARE."""
 
     P = solve_discrete_are(A, B, Q, R)
     K = np.linalg.solve(R + B.T @ P @ B, B.T @ P @ A)
@@ -89,14 +68,7 @@ def design(
     freq_slew=200.0,
     out=None,
 ):
-    """
-    Synthesise the hover LQR and write the gain file. Returns the gain dict.
-
-    ``k_lat`` is a **seed guess** for tilt per unit magnet command and must be
-    re-identified on the rig. Raises rather than exiting if any closed-loop pole
-    exceeds ``rate_hz/6``: past that the discrete design is faster than the loop
-    that has to run it, and the gains are fiction.
-    """
+    """Synthesise the hover LQR and write the gain file. Returns the gain dict."""
 
     ts = 1.0 / rate_hz
     p = make_params(f_hover=f_hover, k_lat=k_lat, margin=margin)
@@ -175,3 +147,7 @@ def design(
         json.dump(gains, f, indent=2)
     print(f"wrote {path}")
     return gains
+
+
+if __name__ == "__main__":
+    design()

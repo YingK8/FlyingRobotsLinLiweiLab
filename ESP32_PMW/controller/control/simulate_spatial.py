@@ -2,29 +2,19 @@
 """
 Closed-loop simulation and viewer for the multi-coil spatial plant.
 
-Two modes over the same controller and plant:
+Headless (default) runs a scripted target sequence, writes spatial_mpc_sim.png, and asserts the
+tracking and constraint bounds. --live animates in real time: click the top-down panel to move
+the target, the slider sets its height. The live sim advances by wall-clock elapsed time, so a
+slow solve shows as the clock slowing rather than as a trajectory pretending to be real time.
 
-    headless (default)   runs a scripted target sequence, writes
-                         `spatial_mpc_sim.png`, and asserts the tracking and
-                         constraint bounds. This is the reproducible one.
-    --live               real-time animation. **Click the top-down panel to move
-                         the target; the slider sets its height.** The sim
-                         advances by wall-clock elapsed time, so a slow solve
-                         shows up as the clock slowing rather than as a
-                         diverging trajectory pretending to be real time. The
-                         title carries the achieved real-time factor.
-
-What the plots are for. The controller is running against its own model, so the
-position traces measure the control law and nothing else. The panels that carry
-real information are the two constraint traces: the lock margin, which is how
-close the robot is to losing synchronisation, and the channel currents, which are
-what the amplifier has to deliver. A run that tracks beautifully while riding
-either limit has not solved the problem.
+The controller runs against its own model, so the position traces measure the control law and
+nothing else. The panels carrying real information are the two constraint traces: the lock
+margin, which is how close the robot is to losing synchronisation, and the channel currents,
+which are what the amplifier has to deliver. A run that tracks beautifully while riding either
+limit has not solved the problem.
 
 Usage:
-    uv run python controller/control/simulate_spatial.py
-    uv run python controller/control/simulate_spatial.py --live
-    uv run python controller/control/simulate_spatial.py --live --grad
+    uv run python controller/control/simulate_spatial.py [--live] [--grad]
 """
 
 from __future__ import annotations
@@ -132,14 +122,7 @@ def plot(run, mpc, path):
 
 
 def live(mpc, speed=1.0):
-    """
-    Real-time animation with a mouse-driven target.
-
-        Click anywhere on the top-down panel to move the target in x and y; the
-        slider sets z. The plant is advanced by however much wall-clock time has
-        actually passed since the last frame, capped so a stall cannot take a
-        single enormous step, which would be numerically meaningless.
-    """
+    """Real-time animation with a mouse-driven target."""
 
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider

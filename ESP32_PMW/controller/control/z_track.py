@@ -2,37 +2,27 @@
 """
 Altitude waypoint tracking by rotating-field frequency modulation.
 
-The plant (theory.md 6.2, with k_T = m_R*g/f_hover^2 from the
-hover test) reduces to a form carrying no robot mass at all:
+The plant (theory.md 6.2) carries no robot mass at all, and the input enters as a pure
+quadratic, so it inverts exactly. No trim linearization, no A/B matrices:
 
-    z_ddot = g*((f_robot/f_hover)^2 - 1)
-
-The input enters as a pure quadratic, so it INVERTS EXACTLY -- no trim
-linearization, no A/B matrices:
-
+    z_ddot  = g*((f_robot/f_hover)^2 - 1)
     f_robot = f_hover*sqrt(1 + a_des/g),     a_des >= -g
 
-The domain limit a_des >= -g is the actuator limit, not a modelling artifact:
-thrust is non-negative and f_robot = 0 gives z_ddot = -g, so free fall is the
-hardest available downward acceleration.
+The domain limit a_des >= -g is the actuator, not the model: thrust is non-negative, so free
+fall is the hardest available downward acceleration. Exact inversion rather than the linearized
+2g/f_hover gain because every trajectory starts and ends on the pad, where the linear model is
+worst (100% error at rest) and its gain drifts 83-111% across a 125-167 Hz band.
 
-Why exact rather than the linearized 2g/f_hover gain: every trajectory starts
-and ends on the pad, so it traverses f_robot << f_hover where the linear model
-is worst (at rest it predicts -2g, i.e. 100% error). The true incremental gain
-2*g*f_robot/f_hover^2 also varies 83%-111% over a 125-167 Hz band; the exact
-inverse cancels that identically.
-
-What IS still borrowed from the state-space work is one scalar: the phase-lock
-mode sits at ~112 rad/s with DC gain 1 (notes 8.4), which is what licenses
-f_robot ~ f_field here. Keep OMEGA_N well below it.
-
-Torque-ratio limiting (notes 5.6 / App. B) is applied in ACCELERATION space
-before inverting, so the emitted frequency is feasible by construction:
+Torque-ratio limiting (theory.md 5.6, App. B) is applied in ACCELERATION space before
+inverting, so the emitted frequency is feasible by construction:
 
     sin(delta) = k_drag*f^2 / tau_max(f) <= s_lim        -> a_max
     2*pi*I*f_dot + k_drag*f^2 <= s_lim*tau_max(f)        -> a_dot_max
 
-Self-check: uv run python ai/z_track.py
+The cascade assumes f_robot ~ f_field, which the ~112 rad/s phase-lock mode licenses. Keep
+OMEGA_N well below it.
+
+Self-check: uv run python controller/control/z_track.py
 """
 
 from __future__ import annotations
@@ -45,40 +35,23 @@ import numpy as np
 
 from hover_model import GRAVITY, I_ROBOT, fit_k_drag
 
-# Series-RLC coil channel, from the MATLAB modelConstants() defaults. tau_max
-# moves with drive frequency, which is what makes the torque ceiling a function
-# of f rather than a constant.
+# Series-RLC coil channel. tau_max moves with drive frequency, which is what makes the
+# torque ceiling a function of f rather than a constant.
 INDUCTANCE_H = 1.4e-3
 CAPACITANCE_F = 500e-6
 RESISTANCE_OHM = 1.7
 
-# main_flight.cpp HOVER_HZ. Note ai/hover_model.py and hover_controller.json
-# default to 140 Hz (the MATLAB GUI default) -- 150 is what actually flies.
-F_HOVER_HZ = 150.0
+F_HOVER_HZ = 150.0     # what actually flies; hover_model.py defaults to the GUI's 140
+F_STEPOUT_HZ = 190.0   # MEASURED: highest f the field still holds. See f_ceiling().
+S_LIM = 0.8            # sin(delta) ceiling, below 1 for the Q~22 phase swing at ramp ends
 
-# Measured step-out frequency: the highest f the field still holds
-# synchronously, found by ramping until phase slips. This replaces the
-# datasheet B_max guess, which is badly wrong -- see f_ceiling().
-F_STEPOUT_HZ = 190.0
-
-# sin(delta) ceiling. Below 1 to leave headroom for the Q~22 phase swing that
-# ramp ends deposit into the lightly-damped (zeta~0.02) phase-lock mode.
-S_LIM = 0.8
-
-# Outer-loop bandwidth. 2 rad/s against the 112 rad/s phase-lock mode is 56:1
-# separation, so the cascade assumption f_robot ~ f_field holds.
-OMEGA_N = 2.0
+OMEGA_N = 2.0          # rad/s. 56:1 below the phase-lock mode, so f_robot ~ f_field holds.
 ZETA = 0.9
-# f_hover calibration dominates the error budget: 1% high on f_hover is a
-# -0.19 m/s^2 bias, i.e. ~5 cm of steady droop at KP. KI absorbs it -- read it
-# as a slow f_hover trim estimator rather than as a classical integral term.
-KI = 0.5
+KI = 0.5               # read as a slow f_hover trim estimator, not a classical integral
 
 
 def coil_gain(f_hz: float) -> float:
-    """
-    |I(f)|/|I(f_res)| for the series RLC channel. 1 at resonance, 0 at DC.
-    """
+    """|I(f)|/|I(f_res)| for the series RLC channel. 1 at resonance, 0 at DC."""
 
     if f_hz <= 0.0:
         return 0.0
@@ -89,43 +62,31 @@ def coil_gain(f_hz: float) -> float:
 
 @dataclass
 class TorqueLimits:
-    """
-    Phase-lock torque budget, expressed as limits on vertical acceleration.
+    """Phase-lock torque budget, expressed as limits on vertical acceleration."""
 
-        tau_max is pinned to a MEASURED step-out frequency rather than to the
-        notes' B_max = 2.5 mT. That default gives m*B_max = 9.06e-6 N m, while drag
-        at 150 Hz is already 8.80e-6 against tau_max(150) = 8.20e-6 -> sin(delta) =
-        1.07 > 1. The datasheet numbers claim hover is past step-out, so a limiter
-        built on them clamps below f_hover and the robot never leaves the pad.
-    """
-
-    f_hover: float = F_HOVER_HZ
-    f_stepout: float = F_STEPOUT_HZ
-    s_lim: float = S_LIM
-    k_drag: float = field(default_factory=lambda: fit_k_drag()[0])
-    i_robot: float = I_ROBOT
-    g: float = GRAVITY
+    f_hover: float = F_HOVER_HZ       # Hz
+    f_stepout: float = F_STEPOUT_HZ   # Hz, measured. tau_max is pinned to this, NOT to a
+                                      # datasheet B_max: that gives sin(delta) > 1 at hover,
+                                      # so the limiter clamps below f_hover and never flies.
+    s_lim: float = S_LIM              # sin(delta) ceiling
+    k_drag: float = field(default_factory=lambda: fit_k_drag()[0])   # N m/Hz^2
+    i_robot: float = I_ROBOT          # kg m^2
+    g: float = GRAVITY                # m/s^2
 
     def tau_max(self, f_hz: float) -> float:
-        """
-        Peak magnetic torque m*B(f) available at drive frequency f_hz.
-        """
+        """Peak magnetic torque m*B(f) available at drive frequency f_hz."""
 
         scale = self.k_drag * self.f_stepout**2 / coil_gain(self.f_stepout)
         return scale * coil_gain(f_hz)
 
     def sin_delta(self, f_hz: float) -> float:
-        """
-        Torque ratio at steady spin. >= 1 means step-out.
-        """
+        """Torque ratio at steady spin. >= 1 means step-out."""
 
         tau = self.tau_max(f_hz)
         return math.inf if tau <= 0.0 else self.k_drag * f_hz**2 / tau
 
     def f_ceiling(self) -> float:
-        """
-        Highest f with k_drag*f^2 <= s_lim*tau_max(f).
-        """
+        """Highest f with k_drag*f^2 <= s_lim*tau_max(f)."""
 
         surplus = lambda f: self.s_lim * self.tau_max(f) - self.k_drag * f**2
         if surplus(self.f_hover) <= 0.0:
@@ -146,37 +107,24 @@ class TorqueLimits:
         return 0.5 * (lo + hi)
 
     def a_max(self) -> float:
-        """
-        Largest sustainable upward acceleration, from the magnitude clamp.
-        """
+        """Largest sustainable upward acceleration, from the magnitude clamp."""
 
         return self.g * ((self.f_ceiling() / self.f_hover) ** 2 - 1.0)
 
     def f_dot_max(self, f_hz: float) -> float:
-        """
-        Ramp rate whose spin-up torque still fits under s_lim*tau_max.
-        """
+        """Ramp rate whose spin-up torque still fits under s_lim*tau_max."""
 
         headroom = self.s_lim * self.tau_max(f_hz) - self.k_drag * f_hz**2
         return max(0.0, headroom / (2.0 * math.pi * self.i_robot))
 
     def a_dot_max(self, f_hz: float) -> float:
-        """
-        Slew clamp mapped into acceleration units: d/dt of g*((f/f_h)^2-1).
-
-                Note this vanishes as f -> f_ceiling, since the headroom in f_dot_max is
-                zero there by definition. So the slew clamp asymptotically enforces the
-                magnitude clamp by itself: an aggressive demand ramps up and then eases
-                itself to a halt just under the ceiling, rather than slamming into it.
-        """
+        """Slew clamp mapped into acceleration units: d/dt of g*((f/f_h)^2-1)."""
 
         return 2.0 * self.g * f_hz * self.f_dot_max(f_hz) / self.f_hover**2
 
 
 def load_waypoints(path: str) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Read [[t_s, z_m], ...] and return (times, heights), sorted by time.
-    """
+    """Read [[t_s, z_m], ...] and return (times, heights), sorted by time."""
 
     pairs = np.asarray(json.loads(open(path).read()), dtype=float)
     if pairs.ndim != 2 or pairs.shape[1] != 2:
@@ -186,20 +134,13 @@ def load_waypoints(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def z_ref(t: float, times: np.ndarray, heights: np.ndarray) -> float:
-    """
-    Linearly interpolated setpoint; held flat outside the waypoint span.
-    """
+    """Linearly interpolated setpoint; held flat outside the waypoint span."""
 
     return float(np.interp(t, times, heights))
 
 
 class ZTracker:
-    """
-    PID on altitude -> clamped acceleration -> exact lift inversion.
-
-        Emits a field-frequency command. Estimates z_dot from successive z probes
-        unless one is supplied (swap in vision.py's KalmanZ when the camera lands).
-    """
+    """PID on altitude -> clamped acceleration -> exact lift inversion."""
 
     def __init__(
         self,
@@ -221,9 +162,7 @@ class ZTracker:
         self.f_cmd = self.lim.f_hover
 
     def _estimate_zdot(self, z: float, dt: float) -> float:
-        """
-        Finite difference through a first-order lowpass.
-        """
+        """Finite difference through a first-order lowpass."""
 
         if self._z_prev is None or dt <= 0.0:
             self._z_prev = z
@@ -235,9 +174,7 @@ class ZTracker:
         return self._zdot
 
     def step(self, t: float, z: float, dt: float, z_dot: float | None = None) -> float:
-        """
-        One control tick. Returns the field frequency to command, in Hz.
-        """
+        """One control tick. Returns the field frequency to command, in Hz."""
 
         zdot = self._estimate_zdot(z, dt) if z_dot is None else z_dot
         error = z_ref(t, self.times, self.heights) - z
@@ -275,7 +212,7 @@ def demo() -> None:
     k_drag = lim.k_drag
     f_ceil, a_max = lim.f_ceiling(), lim.a_max()
 
-    print(f"k_drag      = {k_drag:.4e} N m/Hz^2   (reused from ai/hover_model.py)")
+    print(f"k_drag      = {k_drag:.4e} N m/Hz^2   (reused from hover_model.py)")
     print(f"f_hover     = {lim.f_hover:.1f} Hz")
     print(
         f"f_resonance = {1.0 / (2 * math.pi * math.sqrt(INDUCTANCE_H * CAPACITANCE_F)):.1f} Hz"
@@ -339,3 +276,7 @@ def demo() -> None:
     assert f_max <= f_ceil + 1e-9, (f_max, f_ceil)
     assert f_max > 0.98 * f_ceil, f"clamp far too conservative: {f_max} << {f_ceil}"
     print("self-check PASS")
+
+
+if __name__ == "__main__":
+    demo()

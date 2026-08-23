@@ -1,28 +1,22 @@
 #!/usr/bin/env python3
 """
-Closed-loop nonlinear simulation of the state-space hover controller.
+Closed-loop nonlinear simulation of the hover controller.
 
-Truth plant: the full 6-state nonlinear model (ai/hover_model.py) integrated
-with solve_ivp one ZOH interval at a time; controller runs at the camera rate
-with the SAME DiscreteHoverController code path the hardware runner uses
-(velocity estimation, integrators + anti-windup, saturation, slew).
+Truth plant: the full 6-state nonlinear model integrated with solve_ivp one ZOH interval at a
+time. The controller runs at the camera rate through the SAME DiscreteHoverController code path
+the hardware runner uses, so velocity estimation, anti-windup, saturation and slew are all
+exercised here rather than only in flight.
 
-Scenarios (--scenario a|b|c|d|e|all):
+Scenarios (a|b|c|d|e|all):
   a  10 mm lateral + 10 mm vertical initial offset, clean measurements
   b  (a) + 0.5 mm sensor noise + 1 frame latency
-  c  trim mismatch: plant hovers at 143 Hz, controller believes 140
-     (integrator proof)
+  c  trim mismatch: plant hovers at 143 Hz, controller believes 140 (integrator proof)
   d  k_lat robustness: true k_lat in {0.25x, 1x, 4x} the design value
-  e  profile tracking: quadratic-ease 10 mm climb + linear 15 mm lateral
-     translate (reference feedforward proof)
+  e  profile tracking: quadratic-ease 10 mm climb + linear 15 mm lateral translate
 
-Each run prints PASS/FAIL and writes hover_sim_<scenario>.png: x/z vs
-reference (+-2 mm band), inputs with saturation lines, and wrapped delta(t)
-with the 90 deg pull-out line (validity check for the phase-locked
-model reduction).
+Each prints PASS/FAIL and writes hover_sim_<scenario>.png.
 
-Usage: uv run python ai/simulate_hover.py [--scenario all]
-       [--gains ai/hover_controller.json]
+Usage: uv run python controller/control/simulate_hover.py [scenario]
 """
 
 from __future__ import annotations
@@ -41,9 +35,7 @@ from reference_profiles import Profile, demo_profile
 
 
 class VelocityEstimator:
-    """
-    Finite difference + 1-pole IIR low-pass (default ~5 Hz cutoff).
-    """
+    """Finite difference + 1-pole IIR low-pass (default ~5 Hz cutoff)."""
 
     def __init__(self, ts: float, cutoff_hz: float = 5.0):
         self.ts = ts
@@ -63,12 +55,7 @@ class VelocityEstimator:
 
 
 class DiscreteHoverController:
-    """
-    u(k) = u_trim + u_ff(k) - K [x_hat - x_ref ; q]  -- see design_hover_lqr.py.
-
-        Shared verbatim between this simulator and hover_controller_runner.py.
-        step() expects to be called once per camera frame (fixed rate ts).
-    """
+    """u(k) = u_trim + u_ff(k) - K [x_hat - x_ref ; q] -- see design_hover_lqr.py."""
 
     def __init__(self, gains: dict, profile: Profile):
         self.K = np.array(gains["K"])
@@ -311,12 +298,7 @@ def build_scenarios() -> dict[str, list[Scenario]]:
 
 
 def run(scenario="all", gains=None, plots=True):
-    """
-    Simulate the scenarios and report pass/fail. Returns ``(all_ok, results)``.
-
-        ``scenario`` is a key of `build_scenarios` or ``"all"``. Raising rather than
-        exiting on failure, so a notebook keeps its results.
-    """
+    """Simulate the scenarios and report pass/fail. Returns ``(all_ok, results)``."""
 
     gains_path = gains or os.path.join(
         os.path.dirname(__file__), "hover_controller.json"
@@ -342,3 +324,10 @@ def run(scenario="all", gains=None, plots=True):
     print("=" * 40)
     print("ALL PASS" if all_ok else "SOME FAILED")
     return all_ok, results
+
+
+if __name__ == "__main__":
+    import sys
+
+    ok, _ = run(sys.argv[1] if len(sys.argv) > 1 else "all")
+    sys.exit(0 if ok else 1)

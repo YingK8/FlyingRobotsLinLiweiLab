@@ -36,14 +36,15 @@ uv run jupyter lab controller/calib/calibrate_camera.ipynb
 # 3. pose: the live loop, with overlay (ellipse, rotor axis, ignored area, fps)
 uv run jupyter lab controller/pose/online_camera.ipynb
 
-# 4. control: closed loop off the camera
-uv run python controller/control/hover_controller_runner.py --source camera --dry-run
+# 4. control: closed loop off the camera. No CLI; drive it from Python.
+uv run python -c "import sys; sys.path.insert(0, 'controller/control'); \
+  import hover_controller_runner as r; r.fly(source='camera', dry_run=True)"
 ```
 
 Two things worth knowing before the first run:
 
-- **The coils have no firmware watchdog.** `control/servo.py`'s `coils_on()`
-  context manager is the only thing that guarantees they turn off. See
+- **The coils have no firmware watchdog.** Nothing on the robot turns them off
+  by itself, so the host must, on every exit path including an exception. See
   [chapter 4 §4.0](control/theory.md).
 - **`POSE_APPEARANCE` must be set before importing the pose package.**
   `estimator.RADIUS_MM` binds at import, so setting it afterwards silently leaves
@@ -56,6 +57,6 @@ Two things worth knowing before the first run:
 uv run python ai/tests/run_tests.py
 ```
 
-8/9 suites pass. The one failure, `stereo::test_speed`, is left visible on
-purpose: the full two-view solve is ~3.4 ms against a 4.17 ms budget at 240 Hz and
-segmentation needs the rest. `segment.py` documents it.
+`stereo::test_speed` is expected to fail and is left visible on purpose: the full
+two-view solve takes ~3.4 ms of a 4.17 ms budget at 240 Hz, and segmentation needs
+the rest. `segment.py` documents it.

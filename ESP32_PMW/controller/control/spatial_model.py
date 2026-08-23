@@ -1,57 +1,30 @@
 #!/usr/bin/env python3
 """
-Multi-coil spatial plant -- Python port of
-matlab/MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m.
-
-A different plant from `hover_model.py`. That one is a scalar cascade: altitude
-only, uniform field, lateral motion out of scope. This one flies in 3-D over a
-spatially varying 16-coil field, and carries the spin axis as a state:
+Multi-coil spatial plant: 3-D flight over a 16-coil rotating field. See theory.md section 12.
 
     state  x = [r(3) m, v(3) m/s, s(3) unit]        8 DOF, |s| = 1
     input  u = [Re I(4), Im I(4), f_drive Hz]       4 channel phasors + drive
 
-Its configuration manifold is R^3 x S^2, which is exactly what `pose/estimator.py`
-measures -- see theory.md section 13. Roll is absent from both: cycle-averaging
-removes the spin phase, and the vision estimator cannot see it either.
+Per step: decompose the local field into first harmonics B(th) = b_cos cos th + b_sin sin th,
+solve the synchronous phase lag from the drag balance, cycle-average the magnetic torque and
+slew the spin axis, then cycle-average the gradient force and integrate translation.
 
-Per step the model:
+The configuration manifold R^3 x S^2 is exactly what pose/estimator.py measures. Roll is absent
+from both: cycle-averaging removes the spin phase, and the vision estimator cannot see it.
 
-    1. decomposes the local field into first harmonics, B(th) = u cos th + v sin th
-    2. solves the synchronous phase lag phi from the drag balance
-    3. cycle-averages the magnetic torque and slews the spin axis
-    4. cycle-averages the gradient force and integrates translation
+Two properties of this plant drive everything downstream:
 
-Step 2 has no solution when the local field is too weak. That is step-out, and
-it bounds the workspace: a circular field at 110 Hz needs |B| >= 1.00 mT, against
-4.28 mT actually available at the array centre. `phase_lag` reports the failure
-rather than clipping, matching the MATLAB.
+    step-out     The phase lag has no solution when the local field is too weak, which bounds
+                 the workspace. `phase_lag` raises rather than clipping.
+    divergence   Open loop, the robot slides away and steps out within a second from 2 mm off
+                 axis: lift points along s, s follows the local field axis, and that axis tilts
+                 ~1.4 deg per mm off centre. The plant needs a controller, hence spatial_mpc.py.
 
-Two things the model does that are worth knowing before reading a trajectory.
+The gradient force is not a perturbation despite the GUI defaulting it off: it reaches 44% of
+weight at z = 20 mm, trapping vertically and expelling laterally, as Earnshaw requires.
 
-    The gradient force is not a perturbation. The GUI defaults it off, and its
-    name invites treating it as a correction, but on this array it reaches 44% of
-    the robot's weight at z = 20 mm. It traps vertically (stiffness -0.107 N/m
-    about the field maximum at z = 15.16 mm) and expels laterally (+13% of weight
-    at 2 mm off axis) -- the signs Earnshaw's theorem requires, and a real
-    destabilizing term the controller has to fight.
-
-    The open loop diverges off axis. Lift points along s, s aligns with the local
-    field rotation axis, and that axis tilts about 1.4 deg per mm off centre. Two
-    millimetres out, the robot slides away and steps out within a second. That is
-    the plant, not a bug, and it is why this file ships with a controller.
-
-Two deliberate departures from the MATLAB, both in `field_at`:
-
-    grad B     analytic, not six central differences. Deletes the GUI's `Grad h`
-               knob and its step-size error, and cuts field evaluations 7x, which
-               is what makes MPC over a horizon affordable.
-    basis      `coil_basis` exposes the per-coil field and gradient per unit
-               current. The field is linear in the currents (theory.md A4), so an
-               MPC evaluating many candidate currents at one point pays for the
-               geometry once.
-
-Numbers come from `newRobotPhysicalParams()`, computed from CAD rather than the
-older hardcoded scalar the 1-D models use. See theory.md section 3.
+Ported from matlab/MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m; theory.md Appendix A
+lists the departures. Physical constants come from CAD, theory.md section 3.
 
 Self-check: uv run python controller/control/spatial_model.py
 """
@@ -72,13 +45,7 @@ _ZHAT = np.array([0.0, 0.0, 1.0])
 
 
 def _cross3(a, b):
-    """
-    Cross product of two 3-vectors.
-
-        `np.cross` is generic over axes and spends most of its time in
-        `moveaxis`; at 13 calls per plant step that was 65% of the model's
-        runtime, and the MPC rolls out thousands of steps per solve.
-    """
+    """Cross product of two 3-vectors."""
 
     return np.array(
         [
@@ -108,23 +75,14 @@ def _norm3(a):
 
 @dataclass(frozen=True)
 class Robot:
-    """
-    Rigid-body and magnetic properties, all SI.
+    """Rigid-body and magnetic properties, all SI."""
 
-        I_spin      polar moment about the spin axis (body x), kg m^2
-        I_trans     transverse moment about a diameter, kg m^2
-        I_tensor    (3,3) inertia about the total COM, body frame, kg m^2
-        mdip        total dipole moment of the two magnets, A m^2
-        mass        total mass, kg
-        com         (3,) COM in body CAD coordinates, m
-    """
-
-    I_spin: float
-    I_trans: float
-    I_tensor: np.ndarray
-    mdip: float
-    mass: float
-    com: np.ndarray
+    I_spin: float        # polar moment about the spin axis (body x), kg m^2
+    I_trans: float       # transverse moment about a diameter, kg m^2
+    I_tensor: np.ndarray # (3,3) about the total COM, body frame, kg m^2
+    mdip: float          # total dipole moment of the two magnets, A m^2
+    mass: float          # kg
+    com: np.ndarray      # (3,) COM in body CAD coordinates, m
 
     @property
     def weight(self) -> float:
@@ -133,13 +91,7 @@ class Robot:
 
 
 def robot_params() -> Robot:
-    """
-    CAD body plus two N52 magnets, by the parallel-axis theorem.
-
-        Port of `newRobotPhysicalParams`. Assumes, as the MATLAB does, that the
-        cylinder axis is CAD z, the spin axis is CAD x, and the two magnets are
-        magnetized alike so their moments add.
-    """
+    """CAD body plus two N52 magnets, by the parallel-axis theorem."""
 
     m_body_g = 0.06
     com_body_mm = np.array([2.82, 0.0, 0.0])
@@ -188,37 +140,21 @@ def robot_params() -> Robot:
 
 @dataclass(frozen=True)
 class Coils:
-    """
-    A coil array as parallel arrays over M coils. Positions in m, angles in rad.
+    """A coil array as parallel arrays over M coils. Positions in m, angles in rad."""
 
-        pos     (M,3) centre
-        nhat    (M,3) unit axis
-        moment  (M,3) dipole moment per ampere, N pi R^2 nhat, A m^2/A
-        amp     (M,) drive current amplitude, A
-        phase   (M,) drive phase, rad
-        channel (M,) which of the 4 drive channels each coil belongs to
-    """
-
-    pos: np.ndarray
-    nhat: np.ndarray
-    moment: np.ndarray
-    amp: np.ndarray
-    phase: np.ndarray
-    channel: np.ndarray
+    pos: np.ndarray      # (M,3) centre, m
+    nhat: np.ndarray     # (M,3) unit axis
+    moment: np.ndarray   # (M,3) dipole moment per ampere, N pi R^2 nhat, A m^2/A
+    amp: np.ndarray      # (M,) drive current amplitude, A
+    phase: np.ndarray    # (M,) drive phase, rad
+    channel: np.ndarray  # (M,) which of the 4 drive channels this coil belongs to
 
     @property
     def n_channels(self) -> int:
         return int(self.channel.max()) + 1
 
     def phasor_weights(self, phasor=None):
-        """
-        Per-coil (w_u, w_v) for B(th) = u cos th + v sin th.
-
-            A coil driven at I cos(th + ph) contributes I cos(ph) to u and
-            -I sin(ph) to v, so both are linear in the complex phasor
-            I e^{j ph}. Pass ``phasor`` as (n_channels,) complex to override
-            the stored drive, which is how the MPC varies the input.
-        """
+        """Per-coil (w_u, w_v) for B(th) = u cos th + v sin th."""
 
         if phasor is None:
             z = self.amp * np.exp(1j * self.phase)
@@ -228,18 +164,7 @@ class Coils:
 
 
 def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021):
-    """
-    One of the GUI's two 4-channel presets, 16 coils as four 2x2 groups.
-
-        Port of `buildQuickCoilGeometry`. Coil radius 10.5 mm and 650 turns are
-        the physical hardware and are not parameters. Positive ``tilt_deg`` tips
-        each channel plane radially outward, rigidly: the whole 2x2 group rotates
-        about its local tangential axis, so its four coils stay coplanar.
-
-        cross    centres at (+d,0), (0,+d), (-d,0), (0,-d); the 2x2 square turns
-                 with its channel
-        corners  centres at (+-d,+-d); the 2x2 squares stay aligned to global x/y
-    """
+    """One of the GUI's two 4-channel presets, 16 coils as four 2x2 groups."""
 
     coil_r, turns = 0.0105, 650
     a = math.radians(tilt_deg)
@@ -297,36 +222,7 @@ def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021):
 
 
 def coil_basis(r, coils, want_grad=True):
-    """
-    Per-coil field and field gradient at ``r``, per ampere.
-
-        Returns ``(b, grad_b)`` shaped (M,3) and (M,3,3), with
-        ``grad_b[c,i,j] = d b[c,i] / d r_j``.
-
-        The point-dipole stub, matching the MATLAB's `B_from_coil_stub`. Its
-        gradient is closed-form,
-
-            dB_i/dr_j = 3k/|d|^5 [ (m.d) delta_ij + d_i m_j + m_i d_j
-                                   - 5 (m.d) d_i d_j / |d|^2 ],   k = mu0/4pi
-
-        which the MATLAB approximates with six extra field evaluations. Symmetric
-        and traceless, since curl B = div B = 0 away from the sources.
-
-        Accuracy ceiling, and it is the largest error in the whole chain: this
-        is a far-field form, used here at R/|d| ~ 0.2-0.3. Against the exact
-        on-axis loop field it overestimates by 14% at the nearest coils (35 mm)
-        and 6% at the farthest (53 mm), and `_self_check` prints both. Because
-        the error varies with distance it does not cancel: it reweights near
-        coils against far ones, which is what sets the field *direction*, so it
-        biases n_rot and every torque downstream, not just field magnitude.
-
-        Biot-Savart for a circular loop (elliptic integrals, already available in
-        scipy) drops in here. Kept as the dipole stub for now because it is what
-        the MATLAB uses, and matching the reference matters more than absolute
-        accuracy while the loop is closed in simulation only.
-        # ponytail: point dipole, ~10% field error; swap for the exact loop
-        # field before closing this loop on real hardware.
-    """
+    """Per-coil field and field gradient at ``r``, per ampere."""
 
     d = np.asarray(r, dtype=float)[None, :] - coils.pos  # (M,3)
     m = coils.moment  # (M,3)
@@ -351,15 +247,7 @@ def coil_basis(r, coils, want_grad=True):
 
 
 def field_at(r, coils, phasor=None, want_grad=True):
-    """
-    First-harmonic field and its spatial gradients at ``r``.
-
-        B(th) = u cos(th) + v sin(th), exactly -- no time sampling, so no aliasing
-        and no eigenvector sign ambiguity. Returns ``(u, v, du, dv)`` with u, v in
-        tesla and du[i,j] = du_i/dr_j in T/m.
-
-        Port of `harmonicUVAtPoint`, extended with the gradients the force needs.
-    """
+    """First-harmonic field and its spatial gradients at ``r``."""
 
     b, grad_b = coil_basis(r, coils, want_grad)
     w_u, w_v = coils.phasor_weights(phasor)
@@ -370,16 +258,7 @@ def field_at(r, coils, phasor=None, want_grad=True):
 
 
 def rotation_axis(u, v):
-    """
-    Directed rotation axis of the local rotating field, normalize(u x v).
-
-        Since dB/dth = -u sin th + v cos th, B x dB/dth = u x v, so the sign of
-        u x v *is* the physical rotation sense.
-
-        Never flip this toward +z, toward the previous axis, or toward the robot
-        spin axis. The sign carries the physics; a continuity rule would silently
-        reverse the modelled precession. Returns NaN on a degenerate field.
-    """
+    """Directed rotation axis of the local rotating field, normalize(u x v)."""
 
     n = _cross3(u, v)
     norm = _norm3(n)
@@ -389,22 +268,7 @@ def rotation_axis(u, v):
 
 
 def ellipse_semiaxes(u, v):
-    """
-    Exact semiaxes a >= b of the field polarization ellipse, in tesla.
-
-        The ellipse traced by u cos th + v sin th is the image of the unit circle
-        under the 3x2 map [u v], so its semiaxes are that map's singular values.
-        Exact, and free of the time sampling the name "ellipse fit" suggests.
-
-        Computed from the 2x2 Gram matrix rather than by calling an SVD: the
-        singular values squared are its eigenvalues, so
-
-            a^2, b^2 = (tr +- sqrt(tr^2 - 4 det)) / 2
-
-        closed form. The MATLAB calls `svd` here; this is the same number without
-        a LAPACK dispatch, which matters because it sits in the innermost loop of
-        every prediction the MPC rolls out.
-    """
+    """Exact semiaxes a >= b of the field polarization ellipse, in tesla."""
 
     uu, uv, vv = u @ u, u @ v, v @ v
     tr = uu + vv
@@ -419,12 +283,7 @@ def ellipse_semiaxes(u, v):
 
 
 class StepOut(RuntimeError):
-    """
-    The local field cannot sustain synchronous lock at this drive frequency.
-
-        Carries ``ratio``, the required sin(phi); it exceeds 1 exactly when no
-        real phase-locked solution exists.
-    """
+    """The local field cannot sustain synchronous lock at this drive frequency."""
 
     def __init__(self, msg, ratio=math.nan):
         super().__init__(msg)
@@ -432,23 +291,7 @@ class StepOut(RuntimeError):
 
 
 def phase_lag(u, v, mdip, tau_drag):
-    """
-    Synchronous phase lag from the steady spin-drag balance.
-
-        The cycle-averaged axial magnetic torque of a dipole in an elliptically
-        polarized rotating field is (1/2) mdip (a+b) sin(phi), so balancing it
-        against drag gives
-
-            sin(phi) = 2 tau_drag / [mdip (a + b)]
-
-        Returns ``(phi, a, b, ratio)`` with phi on the stable branch [0, pi/2].
-
-        Raises `StepOut` when the ratio exceeds 1 rather than clipping phi to
-        pi/2. Clipping would hide loss of synchronization behind a plausible
-        trajectory, which is the one failure this model exists to predict. At
-        a = b the relation collapses to theory.md section 5.3's sin(delta) =
-        k_d f^2 / tau_max.
-    """
+    """Synchronous phase lag from the steady spin-drag balance."""
 
     if not (np.all(np.isfinite(u)) and np.all(np.isfinite(v))):
         raise StepOut("non-finite local field harmonics")
@@ -472,13 +315,7 @@ def phase_lag(u, v, mdip, tau_drag):
 
 
 def lock_margin(u, v, mdip, tau_drag):
-    """
-    Required sin(phi) as a plain number, without raising.
-
-        The same quantity `phase_lag` guards, exposed so an optimizer can hold
-        it below 1 as a smooth inequality instead of hitting an exception. This
-        is the constraint that makes the workspace a region rather than a box.
-    """
+    """Required sin(phi) as a plain number, without raising."""
 
     a, b = ellipse_semiaxes(u, v)
     den = mdip * (a + b)
@@ -491,29 +328,7 @@ def lock_margin(u, v, mdip, tau_drag):
 
 
 def _phase_basis(s, u, v, n_ref):
-    """
-    Geometric phase reference shared by the torque and force models.
-
-        Returns ``(eI, eR, lam, aligned)``. The reference phase is not the
-        arbitrary cos(th) coefficient u; it is the field phase ``lam`` at which
-        B points along the intersection line of two planes:
-
-            eI   normalize(n x s), the intersection of the robot rotation plane
-                 (normal s) and the field rotation plane (normal n)
-            eR   normalize(s x eI), in the robot plane and in the (s, n) plane,
-                 pointing toward the projection of n, so it is the aligning
-                 direction
-            eF   normalize(n x eI), used only to solve dot(B(lam), eF) = 0
-
-        ``aligned`` is True in the limit s || n, where the two planes coincide
-        and the intersection line is undefined. Callers differ there: torque
-        genuinely vanishes, while the force still needs some in-plane reference,
-        so it falls back to the ellipse major axis.
-
-        The MATLAB duplicates this geometry in `tauAvgFromUV_newPhaseRef` and
-        `magneticMomentHarmonicsForGradient`; the two must not drift apart, so
-        here they share it.
-    """
+    """Geometric phase reference shared by the torque and force models."""
 
     n_raw = _cross3(u, v)
     nn = _norm3(n_raw)
@@ -553,19 +368,7 @@ def _phase_basis(s, u, v, n_ref):
 
 
 def moment_harmonics(s, u, v, n_ref, mdip, phi):
-    """
-    Harmonic coefficients of the rotating magnetic moment at one robot state.
-
-        m(th) = m_cos cos(th) + m_sin sin(th), with the moment lagging the
-        geometric reference by phi:
-
-            m(th) = mdip [ cos(th - lam - phi) eI + sin(th - lam - phi) eR ]
-
-        At alignment (s || n) the intersection line is undefined. Torque vanishes
-        there, but force does not, so this falls back to the field ellipse's major
-        axis: it only fixes an otherwise arbitrary phase origin, and keeps the
-        moment continuous and deterministic through the limit.
-    """
+    """Harmonic coefficients of the rotating magnetic moment at one robot state."""
 
     s = np.asarray(s, dtype=float)
     s = s / max(_norm3(s), 1e-12)
@@ -595,14 +398,7 @@ def moment_harmonics(s, u, v, n_ref, mdip, phi):
 
 
 def cycle_average(s, u, v, n_ref, mdip, phi):
-    """
-    Transverse torque and moment harmonics from one shared phase basis.
-
-        Returns ``(tau, m_cos, m_sin)``. The MATLAB computes the geometric basis
-        twice per step, once in `tauAvgFromUV_newPhaseRef` and once in
-        `magneticMomentHarmonicsForGradient`; they must agree exactly or torque
-        and force disagree about where the moment points, so here they share one.
-    """
+    """Transverse torque and moment harmonics from one shared phase basis."""
 
     s = np.asarray(s, dtype=float)
     s = s / max(_norm3(s), 1e-12)
@@ -622,76 +418,19 @@ def cycle_average(s, u, v, n_ref, mdip, phi):
 
 
 def torque_avg(s, u, v, n_ref, mdip, phi):
-    """
-    Cycle-averaged magnetic torque, with the axial component removed.
-
-        Exact over one cycle from the first harmonics, since <cos^2> = <sin^2> =
-        1/2 and <sin cos> = 0:
-
-            <m x B> = (1/2) (m_cos x u + m_sin x v)
-
-        The component along s is dropped because the model holds the spin rate
-        constant: air drag absorbs the axial magnetic impulse. What is left is
-        the transverse torque that tilts the axis.
-
-        Returns zero at alignment (s || n) rather than inventing a basis. The
-        transverse torque genuinely vanishes in that limit.
-    """
+    """Cycle-averaged magnetic torque, with the axial component removed."""
 
     return cycle_average(s, u, v, n_ref, mdip, phi)[0]
 
 
 def gradient_force(m_cos, m_sin, du, dv):
-    """
-    Cycle-averaged magnetic gradient force, F = grad(m . B), in newtons.
-
-        The moment harmonics are held fixed through the spatial derivative, as
-        grad(m . B) requires for a fixed instantaneous dipole orientation; only
-        the field varies. Averaging over a cycle then leaves
-
-            <F>_i = (1/2) ( m_cos . du/dr_i + m_sin . dv/dr_i )
-
-        Weak on this rig. Judge it against `Robot.weight`, not against zero.
-    """
+    """Cycle-averaged magnetic gradient force, F = grad(m . B), in newtons."""
 
     return 0.5 * (du.T @ m_cos + dv.T @ m_sin)
 
 
 def update_spin_axis(s, tau_avg, i_spin, w_spin, dt, n_rot=None, align_tau=0.0):
-    """
-    Slew the spin axis under transverse torque, first order in the fast spin.
-
-        With L = I_spin w_spin s held constant in magnitude, dL = tau_perp dt and
-        s is the renormalized result. This is the fast-spin limit of the
-        second-order tilt equation in theory.md section 11.3: nutation, at
-        1.65 w (180-380 Hz here), is far above every mode that matters and is
-        dropped, which is what turns two tilt states per axis into one.
-
-        Valid while the per-step turn |tau_perp| dt / (I_spin w_spin) stays well
-        under a radian; `recommended_dt` reports that bound.
-
-        ``align_tau`` adds the dissipation the MATLAB omits: s relaxes toward
-        ``n_rot`` with that time constant, in seconds. Zero disables it, which is
-        the MATLAB's behaviour and the default.
-
-        This is not decoration. Section 11.3 of theory.md is explicit that
-        alignment is an attractor only because of damping: with none, the
-        transverse torque gives steady coning at fixed tilt, not straightening.
-        Ported faithfully, the plant is unconditionally unstable in lateral
-        position at every height. Displacement tilts the local field axis, the
-        spin axis answers by precessing 90 degrees out of phase instead of
-        aligning, and a restoring torque through a 90 degree phase shift is a
-        growing spiral.
-
-        The value is NOT identified. Blade aerodynamics gives c_t of order the
-        axial drag coefficient, which by section 11.3's rate
-        kappa_t c_t / (I_s w)^2 is a time constant near 100 s, three orders of
-        magnitude too slow to matter. A real robot that holds lateral position is
-        therefore getting this dissipation from something the model does not
-        contain, and identifying what is the open question. Treat `align_tau`
-        exactly as `hover_model.py` treats `k_lat`: a seed to identify on the rig,
-        never a result.
-    """
+    """Slew the spin axis under transverse torque, first order in the fast spin."""
 
     s = np.asarray(s, dtype=float)
     s = s / max(_norm3(s), 1e-12)
@@ -707,19 +446,7 @@ def update_spin_axis(s, tau_avg, i_spin, w_spin, dt, n_rot=None, align_tau=0.0):
 
 
 def recommended_dt(tau_perp, i_spin, w_spin, f_field, max_turn=0.01, eta=0.05):
-    """
-    Largest integration step that keeps the explicit spin-axis update accurate.
-
-        Two bounds, the tighter wins: the per-step axis turn
-        |tau_perp| dt / (I_spin w_spin) stays under ``max_turn`` rad, and dt stays
-        under ``eta`` field periods.
-
-        This is a numerical bound on forward Euler, not a physical timescale. The
-        model itself has nothing faster than precession, around 1 Hz, because
-        cycle-averaging already removed the spin and the fast-spin limit removed
-        nutation. A predictor stepping this model at a camera period is heavily
-        oversampled against its physics; it is only Euler that wants sub-ms steps.
-    """
+    """Largest integration step that keeps the explicit spin-axis update accurate."""
 
     l0 = max(i_spin * w_spin, 1e-18)
     return min(max_turn * l0 / max(tau_perp, 1e-18), eta / max(f_field, 1e-12))
@@ -732,25 +459,14 @@ def recommended_dt(tau_perp, i_spin, w_spin, f_field, max_turn=0.01, eta=0.05):
 
 @dataclass
 class Plant:
-    """
-    The 8-state plant: coil array, robot, and the aerodynamic coefficients.
-
-        f_hover   spin frequency at which lift equals weight, Hz
-        k_drag    rotational drag, tau = k_drag f^2, N m/Hz^2
-        beta      translational damping, 1/s (0 disables)
-        use_grad  include the magnetic gradient force in translation
-
-        Lift is modelled as the GUI does, magnitude (f/f_hover)^2 g along the
-        current spin axis s. Tilting s is therefore the lateral actuator, and it
-        is the physical content of the `k_lat` seed guess in `hover_model.py`.
-    """
+    """The 8-state plant: coil array, robot, and the aerodynamic coefficients."""
 
     coils: Coils
     robot: Robot = None
-    f_hover: float = 110.0
-    k_drag: float = 3.0e-10
-    beta: float = 0.20
-    use_grad: bool = False
+    f_hover: float = 110.0    # spin frequency at which lift equals weight, Hz
+    k_drag: float = 3.0e-10   # rotational drag, tau = k_drag f^2, N m/Hz^2
+    beta: float = 0.20        # translational damping, 1/s (0 disables)
+    use_grad: bool = False    # include the magnetic gradient force in translation
     align_tau: float = 0.0  # spin-axis alignment time constant, s (0 = MATLAB)
 
     def __post_init__(self):
@@ -758,13 +474,7 @@ class Plant:
             self.robot = robot_params()
 
     def accel(self, r, v, s, f_drive, phasor=None):
-        """
-        Net acceleration and the diagnostics of the step, at one state.
-
-            Returns ``(a, info)`` with a in m/s^2 and info carrying u, v, n_rot,
-            phi, the lock ratio, the ellipse semiaxes, the averaged torque and the
-            gradient force. Raises `StepOut` if the local field cannot hold lock.
-        """
+        """Net acceleration and the diagnostics of the step, at one state."""
 
         u, v_h, du, dv = field_at(r, self.coils, phasor, self.use_grad)
         n_rot = rotation_axis(u, v_h)
@@ -794,15 +504,7 @@ class Plant:
         return a, info
 
     def step(self, x, f_drive, dt, phasor=None):
-        """
-        Advance one step. ``x`` is (9,) = [r(3), v(3), s(3)]; returns (x, info).
-
-            Ordering follows the MATLAB exactly, and it is load-bearing: the spin
-            axis is updated *before* the gradient force and the lift are
-            evaluated, so translation uses the same s within a step. Translation
-            is semi-implicit Euler (velocity first, then position), also as in
-            the MATLAB.
-        """
+        """Advance one step. ``x`` is (9,) = [r(3), v(3), s(3)]; returns (x, info)."""
 
         r, v, s = x[0:3], x[3:6], x[6:9]
         u, v_h, du, dv = field_at(r, self.coils, phasor, self.use_grad)

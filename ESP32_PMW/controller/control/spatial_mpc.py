@@ -1,45 +1,31 @@
 #!/usr/bin/env python3
 """
-Nonlinear MPC for the multi-coil spatial plant in `spatial_model.py`.
+Nonlinear MPC for the multi-coil spatial plant in `spatial_model.py`. theory.md section 13.
 
-Why MPC and not a second LQR. The plant has three properties a gain matrix
-cannot express:
+Why MPC and not a second LQR: three properties a gain matrix cannot express.
 
-    a moving feasibility boundary   synchronous lock needs
-                                    2 k_drag f^2 <= mdip (a+b)(r, I), and (a+b)
-                                    falls off with position. The workspace is a
-                                    region, not a box, and it moves with the
-                                    drive frequency.
-    lateral authority through tilt  lift points along the spin axis, and the axis
-                                    is slewed by a torque, so lateral force is two
-                                    integrations from the input, with roughly 1 Hz
-                                    precession sitting in the same band as heave.
-                                    It has to be predicted, not just fed back.
-    an unstable plant               the gradient force expels laterally (+13% of
-                                    weight at 2 mm off axis) and the field axis
-                                    tilts ~1.4 deg/mm. Open loop, the robot leaves
-                                    in under a second.
-
-It also removes the one un-identified number in `hover_model.py`: `K_LAT_DEFAULT`
-is a seed guess for lateral authority, which here is derived from the field.
-
-Input, and why this parametrisation. The honest input is four complex channel
-phasors plus drive frequency, nine numbers. But at any point the four channels
-span the field with rank 3 (condition number 3-7), so they command the rotation
-axis, amplitude and ellipticity independently and completely. That makes a
-cleaner three-input handle:
+    moving feasibility   Synchronous lock needs 2 k_drag f^2 <= mdip (a+b)(r, I), and (a+b)
+                         falls off with position. The workspace is a region, not a box, and it
+                         moves with the drive frequency.
+    authority via tilt   Lift points along the spin axis and the axis is slewed by a torque, so
+                         lateral force is two integrations from the input, with ~1 Hz precession
+                         in the same band as heave. It has to be predicted, not just fed back.
+    an unstable plant    Open loop the robot leaves in under a second (spatial_model.py).
 
     u = [tilt_x, tilt_y, f_drive]
 
-with a circular field of fixed amplitude whose rotation axis is
-normalize(tilt_x, tilt_y, 1). `allocate` inverts the 3x4 channel basis by
-pseudo-inverse, which reproduces the commanded axis to ~1e-3 degrees and, being
-minimum-norm, is simultaneously the minimum-ohmic-loss current set.
+The honest input is four complex channel phasors plus drive frequency, nine numbers. At any
+point the four channels span the field with rank 3, so they set rotation axis, amplitude and
+ellipticity independently: three numbers suffice. `allocate` commands a circular field of fixed
+amplitude about normalize(tilt_x, tilt_y, 1), inverting the 3x4 channel basis by pseudo-inverse,
+which is minimum-norm and therefore minimum-ohmic-loss.
 
-Scheme: real-time iteration. One SQP pass per control step, warm-started from
-the previous solution shifted forward, with the inputs move-blocked. That is what
-fits the budget: the plant costs ~105 us per step, and a gradient over B blocks
-costs (3B+1) rollouts.
+This also removes the one un-identified number in `hover_model.py`: `K_LAT_DEFAULT` is a seed
+guess for lateral authority, which here is derived from the field.
+
+Scheme: real-time iteration. One SQP pass per control step, warm-started from the previous
+solution shifted forward, inputs move-blocked. The plant costs ~105 us per step and a gradient
+over B blocks costs (3B+1) rollouts, which is what fits the budget.
 
 Self-check: uv run python controller/control/spatial_mpc.py
 """
@@ -69,26 +55,7 @@ from spatial_model import (
 
 @dataclass
 class Weights:
-    """
-    Stage-cost weights, each normalised by a tolerance so the terms compare.
-
-        Bryson's rule, the convention `design_hover_lqr.py` already uses: divide
-        each term by the square of the value at which it should count as "one
-        unit of bad", then set a scalar to trade the terms against each other.
-
-        pos_tol     position error that counts as one unit, m
-        vel_tol     speed, m/s
-        acc_tol     acceleration, m/s^2 (section 6.4: a 20 Hz step is a quarter g)
-        jerk_tol    jerk, m/s^3 (acc_tol per 0.1 s, one loop time constant)
-        i_tol       per-channel current, A -- the coil-energy term. Ohmic loss is
-                    (1/2) sum R_c |I_c|^2, the same quadratic in watts once coil
-                    resistance is measured; until then this is dimensionless duty.
-        slew_tol    input change per control step, in the input's own units
-
-        The scalar weights say what the controller is for. Position dominates;
-        acceleration and jerk buy smoothness; energy is small because the lock
-        constraint, not the cost, is what stops the current going to zero.
-    """
+    """Stage-cost weights, each normalised by a tolerance so the terms compare."""
 
     pos: float = 1.0
     vel: float = 0.05
@@ -99,11 +66,12 @@ class Weights:
     lock: float = 50.0
     terminal: float = 8.0
 
-    pos_tol: float = 2e-3
-    vel_tol: float = 0.05
-    acc_tol: float = 2.5
-    jerk_tol: float = 25.0
-    i_tol: float = 3.0
+    # Bryson tolerances: the value at which each term counts as one unit of bad.
+    pos_tol: float = 2e-3     # m
+    vel_tol: float = 0.05     # m/s
+    acc_tol: float = 2.5      # m/s^2
+    jerk_tol: float = 25.0    # m/s^3
+    i_tol: float = 3.0        # per-channel current, A: ohmic loss up to a factor
     slew_tol: np.ndarray = field(
         default_factory=lambda: np.array([0.05, 0.05, 10.0])
     )
@@ -111,56 +79,30 @@ class Weights:
 
 @dataclass
 class Limits:
-    """
-    Hard bounds and the soft feasibility margin.
+    """Hard bounds and the soft feasibility margin."""
 
-        i_max       per-channel current ceiling, A
-        f_min/max   drive frequency, Hz
-        tilt_max    field-axis tilt, as tan(angle); 0.30 is 16.7 deg and keeps the
-                    allocation inside i_max across the workspace
-        lock_max    largest allowed required sin(phi). Below 1 by a safety factor:
-                    at exactly 1 the robot is on the point of stepping out, and
-                    the phase oscillation has Q ~ 20 (theory.md section 5.5), so
-                    the swing needs room.
-        box_*       workspace where the field map is trusted, m
-    """
-
-    i_max: float = 3.0
-    f_min: float = 60.0
-    f_max: float = 260.0  # ceiling; `SpatialMPC` tightens it to the lock bound
-    tilt_max: float = 0.30
-    lock_max: float = 0.80
-    box_xy: float = 0.020
-    box_z: tuple = (0.006, 0.034)
+    i_max: float = 3.0            # per-channel current ceiling, A
+    f_min: float = 60.0           # drive frequency, Hz
+    f_max: float = 260.0          # ceiling; `SpatialMPC` tightens it to the lock bound
+    tilt_max: float = 0.30        # field-axis tilt as tan(angle); 0.30 = 16.7 deg
+    lock_max: float = 0.80        # largest allowed required sin(phi); below 1 for the Q~20 swing
+    box_xy: float = 0.020         # workspace where the field map is trusted, m
+    box_z: tuple = (0.006, 0.034) # m
 
 
 class SpatialMPC:
-    """
-    Receding-horizon controller over `spatial_model.Plant`.
-
-        horizon    control steps predicted
-        ts         control step, s
-        substeps   plant integration steps per control step. The plant integrates
-                   with explicit Euler, so this sets predictor accuracy: 10 ms
-                   substeps drift about 1 mm over 0.3 s, which the receding
-                   horizon absorbs because the loop re-measures every step.
-        blocks     move blocking. Inputs are free for the first `blocks` control
-                   steps and held after, which is what makes the gradient
-                   affordable: (3*blocks + 1) rollouts per SQP iteration.
-        iters      SQP iterations per control step. One is the real-time
-                   iteration scheme; warm starting is what makes one enough.
-    """
+    """Receding-horizon controller over `spatial_model.Plant`."""
 
     def __init__(
         self,
         plant: Plant,
         weights: Weights = None,
         limits: Limits = None,
-        horizon: int = 10,
-        ts: float = 0.05,
-        substeps: int = 5,
-        blocks: int = 3,
-        iters: int = 1,
+        horizon: int = 10,    # control steps predicted
+        ts: float = 0.05,     # control step, s
+        substeps: int = 5,    # plant Euler steps per control step: predictor accuracy
+        blocks: int = 3,      # move blocking; inputs free for this many steps, then trim
+        iters: int = 1,       # SQP iterations per step; 1 works because of the LQR warm start
         b_amp: float = 4.5e-3,
     ):
         self.plant = plant
@@ -205,12 +147,7 @@ class SpatialMPC:
     # -- actuator ---------------------------------------------------------
 
     def channel_basis(self, r):
-        """
-        (3,4) field per ampere of each channel at ``r``, in tesla per amp.
-
-            Summing each channel's coils is exact: the coils in a channel are
-            driven in series at one phase, so the channel is one actuator.
-        """
+        """(3,4) field per ampere of each channel at ``r``, in tesla per amp."""
 
         b, _ = coil_basis(np.asarray(r, float), self.plant.coils, want_grad=False)
         ch = self.plant.coils.channel
@@ -219,27 +156,7 @@ class SpatialMPC:
         )
 
     def allocate(self, tilt, r=None):
-        """
-        Channel phasors realizing a circular field about ``normalize(tilt, 1)``.
-
-            Builds an orthonormal pair (e1, e2) spanning the plane normal to the
-            commanded axis, with e1 x e2 along it, then solves
-
-                u = B Re(z),   v = -B Im(z)
-
-            by pseudo-inverse. B has rank 3, so the axis is realized exactly; the
-            remaining null direction is set to zero, which is the minimum-norm
-            and therefore minimum-ohmic-loss current set.
-
-            Pass ``r`` to allocate at a predicted position rather than at the
-            measured one. Inside a rollout that is not optional: the real loop
-            re-measures and re-allocates every control step, so predicting a
-            frozen current set predicts a different closed loop than the one that
-            will run. Frozen over a 1.9 s horizon it also predicted nonsense --
-            the robot leaves the region where those currents make a strong field,
-            so every nonzero tilt looked like step-out and the optimizer was left
-            with exactly one feasible point, tilt = 0.
-        """
+        """Channel phasors realizing a circular field about ``normalize(tilt, 1)``."""
 
         pinv = self._pinv if r is None else self._pinv_at(r)
         n = np.array([tilt[0], tilt[1], 1.0])
@@ -260,13 +177,7 @@ class SpatialMPC:
         return z
 
     def _pinv_at(self, r):
-        """
-        Right inverse of the 3x4 channel basis at ``r``, as a (4,3) array.
-
-            B B^T is 3x3 and well conditioned (the basis has rank 3 with condition
-            number 3-7 across the workspace), so this is a 3x3 solve rather than
-            an SVD. Same minimum-norm solution, and it sits inside the rollout.
-        """
+        """Right inverse of the 3x4 channel basis at ``r``, as a (4,3) array."""
 
         b = self.channel_basis(r)
         return b.T @ np.linalg.inv(b @ b.T)
@@ -274,27 +185,7 @@ class SpatialMPC:
     # -- linear model and the warm start ----------------------------------
 
     def linearize(self, r0, f0=None):
-        """
-        Numerical Jacobians of the reduced 8-state model about hover at ``r0``.
-
-            Reduced state [x, y, z, vx, vy, vz, sx, sy], with sz recovered from
-            |s| = 1; input [tilt_x, tilt_y, f]. Returns ``(A, B)``.
-
-            Taken through `allocate` with the *predicted* position, so it is the
-            Jacobian of the re-allocating loop, and that is the whole point. The
-            fixed-current plant is violently unstable: displacement tilts the local
-            field axis, the spin axis precesses 90 degrees out of phase instead of
-            aligning, and the spiral grows with a 0.175 s time constant, leaving a
-            20 mm box in about a second from a 10 um offset. Re-solving the
-            currents for the measured position cancels that coupling outright, and
-            what is left has no unstable eigenvalue at all: a damped precession at
-            -0.78 +- 3.43j, three modes at -beta, and three integrators.
-
-            Worth stating plainly, because it inverts the obvious reading: the
-            hard part of this plant is not stabilising an unstable rotor, it is
-            that the actuator must be recomputed from the measurement every step.
-            Hold the currents fixed and no gain can save it.
-        """
+        """Numerical Jacobians of the reduced 8-state model about hover at ``r0``."""
 
         f0 = self.plant.f_hover if f0 is None else f0
         st0 = np.concatenate([np.asarray(r0, float), np.zeros(3), np.zeros(2)])
@@ -322,21 +213,7 @@ class SpatialMPC:
         return A, B
 
     def design_lqr(self, r0, r_scale=50.0):
-        """
-        Continuous LQR about hover at ``r0``, stored as `self.K` (3x8).
-
-            Weighted by the same tolerances as the MPC stage cost, so the warm
-            start and the objective agree about what matters. Used only to seed
-            the optimizer; the MPC still owns the constraints, which is the part
-            a gain cannot express.
-
-            ``r_scale`` detunes the input weight, and it is not cosmetic. At
-            r_scale = 1 the fastest closed-loop pole is 27.6 rad/s, which holds at
-            a 20 ms control step and diverges at 50 ms. At 50 it is 8.3 rad/s and
-            the loop is unconditionally stable across 10-50 ms. Same trade
-            `design_hover_lqr.py` documents for the altitude LQR: the tighter
-            design fails on sample rate and latency long before it fails on paper.
-        """
+        """Continuous LQR about hover at ``r0``, stored as `self.K` (3x8)."""
 
         A, B = self.linearize(r0)
         w = self.w
@@ -366,18 +243,7 @@ class SpatialMPC:
     # -- prediction -------------------------------------------------------
 
     def _expand(self, U):
-        """
-        Move-blocked inputs to one per horizon step, padded with trim.
-
-            The free inputs cover the first `blocks` control steps; the rest of
-            the horizon runs at trim. Holding the *last* block instead, the usual
-            move-blocking choice, is wrong for this plant: a constant field tilt
-            drives a constant precession, so any nonzero tail spirals the robot
-            out and loses lock. Every nonzero input then scored as infeasible and
-            the optimizer had one feasible point, tilt = 0. Padding with trim
-            says "make this correction, then hover", which is the manoeuvre the
-            controller is actually choosing between.
-        """
+        """Move-blocked inputs to one per horizon step, padded with trim."""
 
         seq = np.tile(self.u_trim, (self.horizon, 1))
         n = min(self.blocks, self.horizon)
@@ -385,14 +251,7 @@ class SpatialMPC:
         return seq
 
     def rollout(self, x0, U, target, collect=False):
-        """
-        Cost of an input sequence, and optionally the predicted trajectory.
-
-            A rollout that steps out is not merely expensive, it is invalid, so it
-            returns a large finite cost rather than an exception: the optimizer
-            has to be able to walk back from an infeasible trial point, and inf
-            gives it no gradient to walk along.
-        """
+        """Cost of an input sequence, and optionally the predicted trajectory."""
 
         seq = self._expand(U)
         x = x0.copy()
@@ -459,14 +318,7 @@ class SpatialMPC:
     # -- solve ------------------------------------------------------------
 
     def solve(self, x, target, u_prev=None):
-        """
-        One real-time iteration. Returns ``(u, diagnostics)``.
-
-            ``u`` is [tilt_x, tilt_y, f_drive] to apply now. Warm-started from the
-            previous solution shifted one block forward, which is what lets a
-            single SQP iteration track: the shifted guess is already near optimal
-            when the target has not moved.
-        """
+        """One real-time iteration. Returns ``(u, diagnostics)``."""
 
         self._pinv = np.linalg.pinv(self.channel_basis(x[0:3]))
         self._u_prev = self.u_trim if u_prev is None else np.asarray(u_prev, float)
@@ -516,14 +368,7 @@ class SpatialMPC:
         return self.lqr_input(x, target)
 
     def apply(self, x, u, dt):
-        """
-        Step the plant under a held input, returning ``(x, info, ok)``.
-
-            ``ok`` is False if the plant stepped out, with ``x`` left at the last
-            valid state. A controller must report divergence, not raise through
-            its caller: the real runner turns this into a land command, and a
-            simulation should draw the failure rather than lose the trace.
-        """
+        """Step the plant under a held input, returning ``(x, info, ok)``."""
 
         phasor = self.allocate(u[:2])
         info = None
@@ -539,15 +384,7 @@ class SpatialMPC:
 
 
 def closed_loop(mpc, x0, targets, duration, log=None):
-    """
-    Run the loop against the plant. ``targets`` is a callable t -> (3,) in m.
-
-        Returns a dict of stacked histories. The plant here *is* the controller's
-        model, so this measures the control law, not robustness to model error.
-        The real mismatch, named in theory.md section 13, is the point-dipole
-        field (about 10% at the working point) and serial latency; neither is
-        simulated here.
-    """
+    """Run the loop against the plant. ``targets`` is a callable t -> (3,) in m."""
 
     x = x0.copy()
     u = mpc.u_trim.copy()

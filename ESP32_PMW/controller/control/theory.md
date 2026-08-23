@@ -1019,37 +1019,27 @@ Three items, in descending order of size.
 
 ### 12.10 Validating the port
 
-MATLAB is not runnable in this environment, so `spatial_model.py` cannot be checked by
-diffing trajectories against the original. It is pinned instead by invariants, each chosen to
-fail loudly for a different class of mistake. All of them run on
-`uv run python controller/control/spatial_model.py`.
+MATLAB does not run in this environment, so `spatial_model.py` cannot be checked by diffing
+trajectories against the original. It is pinned by invariants instead, all of which run on:
 
-| check | tolerance | what it catches |
-|---|---|---|
-| `quick_coils` reproduces the GUI's 16-row default table, position and phase | exact | geometry, channel ordering, the phase progression |
-| $\hat n = +\hat z$ exactly on the symmetry axis | $10^{-12}$ | a sign error or a mis-assigned channel; by symmetry nothing else gives this |
-| $\hat n$ at the GUI's start point, pinned | $10^{-9}$ | any later change to the field, silently |
-| analytic $\nabla B$ against central differences | $2\times10^{-5}$ rel. | that §12.6's departure from the MATLAB is a refactor, not a change of model |
-| $\nabla B$ symmetric and traceless | $10^{-12}$, $10^{-9}$ | $\nabla\times\mathbf B = \nabla\cdot\mathbf B = 0$: an algebra slip in the gradient |
-| dipole stub vs the exact on-axis loop | asserted 5–20 % | that §12.9's headline error stays a measured number, not a caveat |
-| circular-field limit reproduces §5.3's $\sin\delta = k_d f^2/\tau_{max}$ | $10^{-12}$ | the elliptical generalization of §12.3, tied back to chapter 4's own scalar model |
-| step-out raises rather than clipping $\varphi$ | — | the one failure mode the model exists to predict |
-| $\langle\boldsymbol\tau\rangle \perp \hat s$, and $\to 0$ monotonically as $\hat s \to \hat n$ | exact, monotone | the constant-spin constraint, and the aligned-limit branch of §12.5 |
-| $\lvert\hat s\rvert = 1$ over 2000 steps | $10^{-12}$ | the renormalization in the spin-axis update |
-| on-axis hover drifts $< 1$ nm in 2 s | — | the lift law and the integrator together |
-| off-axis it steps out in 0.39 s | $< 5$ s | §12.8's defining behaviour, pinned so it cannot silently become stable |
-| force-gradient tensor trace $= 0$ | 1 part in $10^5$ | §12.6's Earnshaw structure |
+```bash
+uv run python controller/control/spatial_model.py
+```
 
-Two of these deserve emphasis because they are free. The GUI's own default start point is
-documented as the local $\hat n$, which makes recomputing it a regression test against the
-original implementation costing nothing — and it is what exposed the stale constant in §12.9.
-And the circular-field limit is not a self-consistency check: it lands on a number chapter 4
-derived independently in §5.3, so §12.3 and §5.3 stand or fall together.
+They cover geometry, the field and its analytic gradient, the torque and force structure, and
+the two defining behaviours of §12.8: on-axis hover drifts under 1 nm in 2 s, off-axis it
+steps out in 0.39 s. Read `_self_check` for what each one asserts.
 
-**What none of this catches** is a shared assumption. Every check above is internal to the
+Two are worth knowing about because they reach outside the port. The GUI documents its default
+start point as the local $\hat n$, so recomputing it is a free regression test against the
+original implementation, and it is what exposed the stale constant in §12.9. The circular-field
+limit lands on $\sin\delta = k_d f^2/\tau_{max}$, which §5.3 derived independently, so §12.3
+and §5.3 stand or fall together.
+
+**What none of this catches** is a shared assumption. Every check is internal to the
 point-dipole field, so if `B_from_coil_stub` is wrong then the port is faithfully, verifiably
-wrong in exactly the same way as the MATLAB. §12.9 item 1 is the reason that matters, and only
-Biot–Savart or hardware settles it.
+wrong in the same way as the MATLAB. §12.9 item 1 is why that matters, and only Biot–Savart or
+hardware settles it.
 
 ---
 
@@ -1273,49 +1263,20 @@ riding either limit has not solved the problem. In the shipped scenario both sta
 
 ## Appendix A — Correspondence with the MATLAB implementation
 
-### A.1 The 1-D altitude models (§1–§11)
+Two model families were ported. The four 1-D `*_gui.m` files map onto §1–§11, and
+`MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` maps onto §12–§13 as
+`control/spatial_model.py`. Function and variable names are kept across the port, so the two
+read side by side and `grep` finds the counterpart.
 
-| Model element | Code location (search anchor) |
-|---|---|
-| $I$ assembly (§3) | the inlined `I_robot = 3.89E-9 + 2.0*(...)` in all four 1-D `*.m` files. **Superseded**: these simulate the older robot; `hover_model.I_ROBOT` now carries the CAD value from §3 |
-| drag data + through-origin LS fit + $R^2$ | `fre_points`, `drag_torque_points`, `k_drag = sum(...)`, `R_squared` |
-| $\tau_{max} = M k_d f_0^2$ | `tauMagMax = torqueMargin * tauRequiredInitial` |
-| initial condition $[\arcsin(1/M),\ 2\pi f_0]$ | `deltaInitial = asin(...)`, `stateAtStart` |
-| two-state ODE | `rotationODE` in `runSimulation` |
-| per-segment `ode45`, state handoff | segment loop in `runSimulation` (`MaxStep` resolves the $\omega_n$ ringing) |
-| segment shapes: hold / $s^n$ / normalized exponential blend | `evaluateSegmentFrequency` |
-| wrapped $\delta$, tracking error, pole-slip count | `deltaWrapped`, `frequencyError`, `netPhaseTurns` |
-| Hold-tail settling check | `buildHoldSummary` |
+Three departures from the multi-coil original, each argued at its own section: the field
+gradient is analytic rather than a six-point central difference (§12.6), the geometric phase
+basis is computed once per step and shared by torque and force (§12.5), and `align_tau` exists,
+defaulting to the MATLAB's zero, so §12.8's missing dissipation is an explicit parameter rather
+than a silent one.
 
-The GUI integrates states 1–2 of the §7 model with $u = f_f(t)$ built from piecewise
-segments; states 3–4 (vertical) are the analytical extension derived in §6.
-
-### A.2 The multi-coil spatial model (§12–§13)
-
-`MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m`, ported to
-`control/spatial_model.py`. Names are kept across the port so the two read side by side.
-
-| Model element | MATLAB | Python |
-|---|---|---|
-| CAD inertia, COM, $m_{dip}$ (§3) | `newRobotPhysicalParams` | `robot_params` |
-| coil array, `cross`/`corners` presets | `buildQuickCoilGeometry` | `quick_coils` |
-| per-coil field | `B_from_coil_stub` | `coil_basis` (plus the analytic gradient, §12.6) |
-| harmonics $\mathbf u,\mathbf v$ (§12.1) | `harmonicUVAtPoint` | `field_at` |
-| ellipse semiaxes (§12.2) | `svd([u v])` | `ellipse_semiaxes` (closed form) |
-| drag balance, step-out (§12.3) | `phaseLagFromDragBalance` | `phase_lag`, `lock_margin` |
-| directed axis (§12.4) | `directedRotationAxis` | `rotation_axis` |
-| phase reference and torque (§12.5) | `tauAvgFromUV_newPhaseRef`, `magneticMomentHarmonicsForGradient` | `_phase_basis`, `cycle_average` |
-| gradient force (§12.6) | `cycleAveragedGradientForce*` | `gradient_force` |
-| spin-axis update (§12.8) | `updateSpinAxisFromUV_withTau` | `update_spin_axis` |
-| trajectory loop | `onComputeTrajectory` | `Plant.step` |
-| step-size heuristic | the `dtRec` block | `recommended_dt` |
-
-Deliberate departures, all argued in §12: the field gradient is analytic rather than a
-six-point central difference; the geometric phase basis is computed once per step and shared
-by torque and force instead of twice; and `align_tau` exists (defaulting to the MATLAB's zero)
-to make §12.8's missing dissipation an explicit parameter rather than a silent one.
-
-The controller has no MATLAB counterpart: `spatial_mpc.py` and `simulate_spatial.py` are new.
+The four 1-D files carry an older robot's inertia and simulate a different machine; §3 has the
+current value. The controller has no MATLAB counterpart at all: `spatial_mpc.py` and
+`simulate_spatial.py` are new.
 
 ## Appendix B — Why $\dot f_{max}$ and $f_{max}$ are the two feasibility axes
 

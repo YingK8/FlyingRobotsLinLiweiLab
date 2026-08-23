@@ -1,4 +1,4 @@
-# Chapter 2 — Calibration: fixing the frames everything else assumes
+# Chapter 2. Calibration: fixing the frames everything else assumes
 
 *Stage 2 of the pipeline. Consumes: frames from [chapter 1](../camera/theory.md).
 Produces: intrinsics, `stereo_rig.json`, the tilt and centre corrections, and the
@@ -6,7 +6,7 @@ datum. Consumed by: [chapter 3, pose](../pose/theory.md).*
 
 Every gain the estimator claims is stated in some frame, and this stage is where
 those frames come from. The chapter's real subject is not how to run a
-calibration — it is **which errors the residual can see and which it structurally
+calibration: it is **which errors the residual can see and which it structurally
 cannot**, because the second kind are the ones that survive to become confident
 wrong answers.
 
@@ -34,8 +34,8 @@ They are independent and fail differently, which is why they are separate files:
 | **shape** (tilt, centre) | flat-circle model -> real robot | `tilt_calibration*.json` | systematic tilt bias, ~3 degrees |
 
 The first two are geometry and are checked by reprojection. The third is not
-geometry at all — it corrects for the robot not being the flat circle
-[chapter 3](../pose/theory.md) assumes — and no reprojection residual can see it.
+geometry at all, it corrects for the robot not being the flat circle
+[chapter 3](../pose/theory.md) assumes, and no reprojection residual can see it.
 
 **`APPEARANCE` lives here**, in `shape.py`, not with the segmenter that uses it
 most. It is the key the calibration files are named by: each rig appearance
@@ -44,12 +44,12 @@ constants. `pose/segment.py` re-exports it.
 
 ## 14. Extrinsic calibration: fixing the frame the two cameras share
 
-[§12.6](../pose/theory.md) (ch.3) assumes a shared frame — every gain it claims is stated in one. This section is how
+[§12.6](../pose/theory.md) (ch.3) assumes a shared frame: every gain it claims is stated in one. This section is how
 that frame is obtained, and, more usefully, which of its errors the calibration residual can
 see and which it structurally cannot. Implemented in
 `controller/pose/stereo_calibration.ipynb`.
 
-**A7 — Rigid stereo mount.** The two cameras hold their relative pose across both
+**A7: Rigid stereo mount.** The two cameras hold their relative pose across both
 calibration and use. Nothing here estimates a time-varying extrinsic, and nothing downstream
 would notice one drifting: [§12.6](../pose/theory.md) (ch.3)'s fusion would keep reporting a confident wrong pose. A
 knock to the rig invalidates this section's output, not just degrades it.
@@ -68,8 +68,8 @@ quantity, and the board should be *swept* through many poses rather than held st
 spread across placements is a direct, assumption-free estimate of the extrinsic's
 uncertainty, and an outlier identifies a bad view rather than a moved board.
 
-The obvious alternative — hold the board **stationary**, average
-$T_{\text{cam}\leftarrow b}$ per camera, and adopt the board as the world frame — was
+The obvious alternative, hold the board **stationary**, average
+$T_{\text{cam}\leftarrow b}$ per camera, and adopt the board as the world frame, was
 implemented first and then removed. It is a valid estimator of a different thing, but it
 requires the board fixed, it cannot separate a board-placement bias from an extrinsic error,
 and it inherits whatever single placement happened to be chosen. Sweeping is strictly
@@ -80,7 +80,7 @@ the *board* would tie the rig to a placement that exists only during calibration
 it to the *robot* would make the extrinsic depend on the thing being measured. Camera A is
 the only datum that is both physically persistent and independent of the measurement.
 Rebasing onto the robot's disk frame at rest is a separate, later step, taken when the
-estimator is wired into visual servoing ([§11.6](../control/theory.md) (ch.4)) — and it is a pure change of basis, so it
+estimator is wired into visual servoing ([§11.6](../control/theory.md) (ch.4)): and it is a pure change of basis, so it
 cannot disturb anything derived here.
 
 ### 14.2 Averaging rotations
@@ -105,7 +105,7 @@ uncertainty goes as
 $$\sigma_{\text{angle}} \;\sim\; \frac{\sigma_{\text{px}}}{D \cos\theta},$$
 
 with $D$ the board's projected diagonal. The penalty is $1.5\times$ at $50°$, $2.9\times$ at
-$70°$, $11\times$ at $85°$ — which is why views past $70°$ are rejected outright rather than
+$70°$, $11\times$ at $85°$: which is why views past $70°$ are rejected outright rather than
 downweighted (`MAX_INCIDENCE_DEG`).
 
 This settles **open item 3** of `docs/pose_localization_project_context.md`. For an axis
@@ -147,8 +147,8 @@ $\tilde x_i = x_i$ **exactly**, for every point and every view.
 The consequences are worth stating separately:
 
 - The mis-scaled problem attains an *identical* reprojection residual. No criterion built on
-  reprojection — RMS, per-view error, the residual-structure test of §14.5, the bundle's own
-  cost — can detect $\lambda$. It is not that the check is weak; the quantity is exactly
+  reprojection, RMS, per-view error, the residual-structure test of §14.5, the bundle's own
+  cost, can detect $\lambda$. It is not that the check is weak; the quantity is exactly
   invariant.
 - $R$ is untouched, so every **angle** the rig reports is correct.
 - Every **length** scales by $\lambda$: the baseline, the depths, and therefore the robot
@@ -158,7 +158,7 @@ The consequences are worth stating separately:
   normalised coordinates.
 
 The last point is testable, and was tested: building the board in millimetres rather than
-metres — $\lambda = 1000$ — changes the recovered $K$ by **exactly zero** to all printed
+metres, $\lambda = 1000$, changes the recovered $K$ by **exactly zero** to all printed
 digits. That is this theorem at an absurd $\lambda$, and it is why the calibration can be
 carried out in millimetres to match the rest of the package (§14.7) with no correction
 anywhere.
@@ -170,7 +170,7 @@ printer that touched it.
 
 ### 14.5 What the residual *can* see, and the trap in measuring it
 
-The natural residual — re-solve each camera's board pose by PnP and reproject — is worthless
+The natural residual, re-solve each camera's board pose by PnP and reproject, is worthless
 for extrinsics: $T_{B\leftarrow A}$ never enters it, so an arbitrarily wrong extrinsic still
 yields a clean, isotropic, structureless residual. It measures intrinsics and nothing else.
 
@@ -181,8 +181,8 @@ $$\min_{T_{A\leftarrow b}} \; \sum_i \big\lVert \pi_A(T_{A\leftarrow b} X_i) - x
 \big\rVert^2 + \big\lVert \pi_B(T_{B\leftarrow A} T_{A\leftarrow b} X_i) - x^B_i \big\rVert^2 .$$
 
 Camera B's residual then carries the extrinsic error, which is the gated quantity. Combined
-with the acceptance criteria of [§6](../control/theory.md) (ch.4) of the project context — RMS $< 0.5$ px, residuals
-isotropic and structureless — this is what the calibration is allowed to certify.
+with the acceptance criteria of [§6](../control/theory.md) (ch.4) of the project context, RMS $< 0.5$ px, residuals
+isotropic and structureless, this is what the calibration is allowed to certify.
 
 A second, free check exists because OpenCV 5 **refuses** `CALIB_USE_EXTRINSIC_GUESS` in
 `stereoCalibrate`. The closed-form per-placement estimate of §14.1 therefore cannot seed the
@@ -209,11 +209,11 @@ larger by three orders of magnitude and is the only term worth attention.
 
 | tried | result |
 |---|---|
-| Seeding `stereoCalibrate` with the closed-form extrinsic | **Not available.** OpenCV 5 raises "stereoCalibrate does not support CALIB_USE_EXTRINSIC_GUESS". Turned into an asset — see §14.5. |
+| Seeding `stereoCalibrate` with the closed-form extrinsic | **Not available.** OpenCV 5 raises "stereoCalibrate does not support CALIB_USE_EXTRINSIC_GUESS". Turned into an asset, see §14.5. |
 | Board in metres vs millimetres | **Exactly zero** change in $K$, $\mathrm{dist}$, or RMS. §14.4 predicts this. |
 | Flat `(N,2)` vs `(N,1,2)` correspondence arrays | **Exactly zero** change. The OpenCV 4→5 shape change is cosmetic at this layer. |
 | `cv2.imread(..., IMREAD_GRAYSCALE)` vs `cvtColor(imread(...), BGR2GRAY)` | **Real, and small**: the two JPEG grayscale paths differ by up to 2 grey levels (mean 0.005), moving $f_x$ by $0.34$ px, $c_y$ by $0.18$ px. Neither is more correct; the notebook uses `IMREAD_GRAYSCALE` to match how `pose/sources.py` feeds the live pipeline. |
-| Reproducing the checked-in `vision/camera_intrinsics.npz` from `board_images/9x6/` | **Not reproducible** by either decode path — $f_x$ 1411.14 / 1410.80 against the file's 1408.78. That file predates the current image set or came from a different OpenCV, so it is a fact about the reference, not a drift. |
+| Reproducing the checked-in `vision/camera_intrinsics.npz` from `board_images/9x6/` | **Not reproducible** by either decode path, $f_x$ 1411.14 / 1410.80 against the file's 1408.78. That file predates the current image set or came from a different OpenCV, so it is a fact about the reference, not a drift. |
 | Per-camera PnP residual as an extrinsic check | **Blind by construction** (§14.5). |
 | Averaging $T_{\text{cam}\leftarrow b}$ over a stationary board | Valid but weaker: cannot separate placement bias from extrinsic error (§14.1). |
 

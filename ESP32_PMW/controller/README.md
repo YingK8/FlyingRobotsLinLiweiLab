@@ -1,4 +1,4 @@
-# `controller/` — the vision → control pipeline
+# `controller/`: the vision → control pipeline
 
 Four stages. Each consumes the previous stage's output and nothing else; each has
 a theory chapter that walks its own code.
@@ -18,8 +18,8 @@ The layering is enforced, not merely intended: each module's `sys.path` bootstra
 adds only the stages *before* it, so a forward import fails immediately instead of
 quietly creating a cycle.
 
-Everything that is not front-end pipeline code — tests, sweeps, one-shot
-validation, instrumentation, sysID, plotting — lives in [`../ai/`](../ai/), which
+Everything that is not front-end pipeline code, tests, sweeps, one-shot
+validation, instrumentation, sysID, plotting, lives in [`../ai/`](../ai/), which
 may depend on all four stages.
 
 ## Running it

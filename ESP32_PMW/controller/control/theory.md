@@ -1,4 +1,4 @@
-# Chapter 4 — Control: pose in, coil commands out
+# Chapter 4. Control: pose in, coil commands out
 
 *Stage 4 of the pipeline. Consumes: a position fix from
 [chapter 3](../pose/theory.md), via `CameraSource`. Produces: field frequency and
@@ -22,7 +22,7 @@ field while you move it.
 | 1 | `hover_model.py` | the plant: inertia, drag, thrust. Sections 3-7 of this chapter |
 | 2 | `design_hover_lqr.py` | linearise, discretise, solve the DARE -> `hover_controller.json`. Section 8 |
 | 3 | `simulate_hover.py` | closed loop against the *nonlinear* truth plant |
-| 4 | `hover_controller_runner.py` | the real-time runner, and `CameraSource` — the seam |
+| 4 | `hover_controller_runner.py` | the real-time runner, and `CameraSource`: the seam |
 | 5 | `z_track.py` | altitude tracking by frequency modulation; the torque budget |
 | 6 | `servo.py` | the serial protocol client, the PID, and `coils_on()` |
 | 7 | `link.py` | `SerialComm`: the host half of the firmware link |
@@ -46,7 +46,7 @@ through it.
 The runner adds a second layer: a measurement watchdog (no fix for `--timeout`
 seconds -> `hover`, then `land`), first SIGINT -> `land`, second -> `stop`, and
 `stop` on any unhandled exception. These exist because the failure mode of a
-vision-driven loop is not a crash, it is a *silence* — and a silent position
+vision-driven loop is not a crash, it is a *silence*: and a silent position
 source looks exactly like a perfectly stationary robot.
 
 ## 4.0.1 Two controllers, and which to use
@@ -68,23 +68,23 @@ spin speed, hence thrust, hence altitude.
 
 **Assumptions (A1–A7):**
 
-- **A1 — Coaxial alignment.** The robot's spin axis coincides with the field's rotation
+- **A1: Coaxial alignment.** The robot's spin axis coincides with the field's rotation
   axis ($\hat z$). Justified by gyroscopic stiffness at 100–230 Hz spin rates and by the
   restoring out-of-plane magnetic torque, which makes the aligned state an attractor.
-- **A2 — Rigid body.** Blades do not flex; inertia is constant.
-- **A3 — Uniform field over the robot.** The coil array's working volume is
+- **A2: Rigid body.** Blades do not flex; inertia is constant.
+- **A3: Uniform field over the robot.** The coil array's working volume is
   Helmholtz-like: the field applies pure torque (no translational magnetic force, since
   force couples to $\nabla B \approx 0$), and the torque amplitude $\tau_{max}$ is
   position-independent.
-- **A4 — Linear magnetics.** Air-core coils (or cores well below saturation):
+- **A4: Linear magnetics.** Air-core coils (or cores well below saturation):
   $B \propto I_{coil}$, so $\tau_{max}$ is a constant set by the drive amplitude.
-- **A5 — Quadratic aerodynamics.** Blade-element Reynolds number is in the pressure-drag
+- **A5: Quadratic aerodynamics.** Blade-element Reynolds number is in the pressure-drag
   regime ($Re \sim 10\text{-}100$), so local aerodynamic forces scale with the *square*
   of local airspeed. Validated empirically (§4.3, $R^2$ reported by the GUI).
-- **A6 — Hover-referenced aerodynamic coefficients.** Drag and thrust coefficients are
+- **A6: Hover-referenced aerodynamic coefficients.** Drag and thrust coefficients are
   those measured/fitted near hover; inflow corrections for climb appear only as the
   first-order heave damping term (§6.3).
-- **A7 — Rigid stereo mount.** The two cameras hold their relative pose across both
+- **A7: Rigid stereo mount.** The two cameras hold their relative pose across both
   calibration and use ([§14](../calib/theory.md) (ch.2)). Introduced with the extrinsic calibration; irrelevant to
   §1–[§13](../pose/theory.md) (ch.3), which are monocular or camera-free.
 
@@ -172,7 +172,7 @@ Properties that shape the whole problem:
   synchronization ("step-out", pole slipping) becomes possible.
 - **Linear in coil current** (A4): the coil array obeys superposition,
   $\mathbf B(p) = A(p)\,\mathbf I_{coil}$, so $\tau_{max} \propto I_{coil}$. Distance
-  enters through the field map — approximately constant inside the designed uniform
+  enters through the field map: approximately constant inside the designed uniform
   region, $\propto 1/r^3$ (dipole far field) outside; never linear in $r$.
 
 **Margin parameterization.** Instead of specifying $B$ in tesla, define the margin at
@@ -236,7 +236,7 @@ I\,\ddot\delta \;+\; \underbrace{\frac{k_d f_f}{\pi}}_{c\ \text{(damping)}}\dot\
 \;+\; \underbrace{k_d f_f^2}_{\text{drag load}}
 \;}$$
 
-This is the **swing equation** — identical in form to a synchronous machine on a power
+This is the **swing equation**: identical in form to a synchronous machine on a power
 grid or a torque-driven pendulum. The right-hand side is the torque the field must
 supply for perfect tracking; the robot "pays" for it by settling at whatever lag
 $\delta$ makes $\tau_{max}\sin\delta$ match the demand.
@@ -272,7 +272,7 @@ Lock requires $s_e \le 1$:
 $$\boxed{\ f_{f} \le f_{max} = f_0\sqrt{M}\ }
 \qquad (M{=}5,\ f_0{=}160\ \text{Hz} \Rightarrow f_{max} \approx 358\ \text{Hz}).$$
 
-The margin is *not* constant — it erodes quadratically with commanded frequency:
+The margin is *not* constant: it erodes quadratically with commanded frequency:
 $M_{eff}(f_f) = M (f_0/f_f)^2$.
 
 ### 5.5 Small-signal behavior: natural frequency and damping
@@ -307,7 +307,7 @@ $$2\pi I\,\dot f_f + k_d f_f^2 \le \tau_{max}
 \quad\Longrightarrow\quad
 \boxed{\ \dot f_{max}(f_f) = \frac{\tau_{max} - k_d f_f^2}{2\pi I}\ }$$
 
-At $f_0 = 160$ Hz, $M = 5$: $\dot f_{max} \approx 1.9$ kHz/s — far above the ~100 Hz/s
+At $f_0 = 160$ Hz, $M = 5$: $\dot f_{max} \approx 1.9$ kHz/s: far above the ~100 Hz/s
 ramps in the example schedule. The *practical* limit is usually dynamic, not
 quasi-static: an abrupt ramp end deposits energy into the $Q \approx 20$ phase
 oscillation, and if the swing peak carries $\delta$ across the separatrix (§5.3) the
@@ -376,7 +376,7 @@ $$\frac{\Delta z(s)}{\Delta f(s)} = \frac{2g/f_h}{s\,(s + 1/\tau_h)} .$$
 ## 7. The coupled nonlinear model
 
 Stack the rotational and vertical dynamics. Thrust responds to the robot's **actual**
-spin frequency $\omega/2\pi$ (not the command) — the physically correct coupling:
+spin frequency $\omega/2\pi$ (not the command): the physically correct coupling:
 
 **State** $x = [\delta,\ \omega,\ z,\ w]^\top$, **input** $u = f_f(t)$ (Hz):
 
@@ -397,7 +397,7 @@ $$\underbrace{\text{phase lock}}_{\sim 18\ \text{Hz},\ \zeta \approx 0.02}
 \;\gg\;
 \underbrace{\text{heave}}_{\sim 0.1\text{-}1\ \text{Hz}}$$
 
-This separation legitimizes designing the layers independently — the altitude planner
+This separation legitimizes designing the layers independently: the altitude planner
 treats $f$ as directly commandable *provided* it respects the inner loop's limits
 ($f \le f_0\sqrt{M}$, $\dot f \le \dot f_{max}$). The MATLAB GUI simulates exactly the
 inner two states of this model.
@@ -456,7 +456,7 @@ $$\lambda_{1,2} = -\zeta\omega_n \pm j\,\omega_n\sqrt{1-\zeta^2} \approx -2.96 \
 
 - $\lambda_{1,2}$: the 19.2 Hz, $\zeta \approx 0.025$ phase ringing (visible in every GUI run).
 - $\lambda_3$: climb-rate settling, aerodynamic (inflow) damping.
-- $\lambda_4$: altitude is an integrator — no feedback, marginally stable, as expected
+- $\lambda_4$: altitude is an integrator: no feedback, marginally stable, as expected
   for open-loop height.
 
 ### 8.4 Input–output transfer functions
@@ -479,8 +479,8 @@ $w_{ss}/\Delta f = (2g/f_h)\,\tau_h = 2 m_R g /(k_w f_h^2)$.
 
 - **Controllability:** single input $u$ enters only $\dot\delta$, but the chain
   $u \to \delta \to \omega \to w \to z$ makes $(A, B)$ controllable for
-  $\kappa, g, f_h \ne 0$ (generic hover). The robot is *underactuated* — one input,
-  four states — but the cascade renders altitude controllable through frequency modulation.
+  $\kappa, g, f_h \ne 0$ (generic hover). The robot is *underactuated*, one input,
+  four states, but the cascade renders altitude controllable through frequency modulation.
 - **Observability:** with $y = [f_{robot}, z]$, all four states are observable
   ($\delta$ is reconstructed from $\dot f_{robot}$ via the second state equation).
 - **Validity boundary:** the linear model holds while (i) $\delta$ stays well inside
@@ -510,7 +510,7 @@ $w_{ss}/\Delta f = (2g/f_h)\,\tau_h = 2 m_R g /(k_w f_h^2)$.
 | $f_{max}$ | ≈ 358 Hz | $f_0\sqrt M$ |
 | $\dot f_{max}(f_0)$ | ≈ 1.9 kHz/s | §5.6 |
 | $2g/f_h$ | ≈ 0.12 (m/s²)/Hz at $f_h{=}160$ Hz | §6.4 |
-| $k_T,\ k_w$ | symbolic — calibrate via hover test ($k_T = m_R g/f_h^2$) | §6.2 |
+| $k_T,\ k_w$ | symbolic: calibrate via hover test ($k_T = m_R g/f_h^2$) | §6.2 |
 
 Multi-coil array (§12), the `cross` preset at its GUI defaults:
 
@@ -531,8 +531,8 @@ Multi-coil array (§12), the `cross` preset at its GUI defaults:
 1. **Rotation-only attitude.** A1 removes tilt dynamics. Steering (tilting the field's
    rotation plane) and righting maneuvers (e.g. inverted takeoff) need full rigid-body
    attitude dynamics: Euler's equations + 3-D $\mathbf m \times \mathbf B$, where
-   $\theta_f, \theta_r$ are no longer scalars. These two tilt DOF — and the precession
-   they produce on a fast-spinning rotor — are developed in §11, and §12 builds the
+   $\theta_f, \theta_r$ are no longer scalars. These two tilt DOF, and the precession
+   they produce on a fast-spinning rotor, are developed in §11, and §12 builds the
    executable model.
 2. **Constant $\tau_{max}$.** Real drives (resonant LC coil drive, cored coils) have
    frequency- and amplitude-dependent field: replace $\tau_{max} \to \tau_{max}(f_f)$
@@ -553,7 +553,7 @@ Multi-coil array (§12), the `cross` preset at its GUI defaults:
 
 §10.1 and §10.5 defer the two attitude DOF that A1 discards: the **tilt** of the robot's
 spin axis $\hat n$ away from the field's rotation axis $\hat z$. On a body spinning at
-100–230 Hz this tilt does not simply relax back to level — it **precesses**. This section
+100–230 Hz this tilt does not simply relax back to level: it **precesses**. This section
 derives the tilt subsystem, quantifies why A1 is nonetheless safe for the altitude
 problem, and connects it to the optical pose estimate produced by `pose/estimator.py`.
 
@@ -572,7 +572,7 @@ nearly constant, so
 
 $$\frac{d\hat n}{dt} \approx \frac{\boldsymbol\tau_\perp}{I_s\omega}$$
 
-— the axis moves **along** $\boldsymbol\tau_\perp$, i.e. 90° from the naive "falling"
+: the axis moves **along** $\boldsymbol\tau_\perp$, i.e. 90° from the naive "falling"
 direction. A restoring torque therefore produces circulation of the axis (precession),
 not direct un-tilting. This is the geometric heart of the whole subsystem.
 
@@ -607,7 +607,7 @@ $$\kappa_t = \tfrac12\,\tau_{max}\cos\delta_{eq} \approx \tfrac12\,\kappa
 \qquad(\text{half the phase-lock stiffness }\kappa=\tau_{max}\cos\delta_{eq}\text{ of §5.5/§8}),$$
 
 plus a smaller cross-axis torque $\propto\sin\delta = 1/M$. This is the "restoring
-out-of-plane magnetic torque" A1 invokes — now with an explicit coefficient.
+out-of-plane magnetic torque" A1 invokes: now with an explicit coefficient.
 
 ### 11.3 Precession, nutation, and the role of damping
 
@@ -631,7 +631,7 @@ $$\Omega_{\text{nut}} \approx \frac{I_s}{I_t}\,\omega = 1.65\,\omega
 \ (\approx 1.2\ \text{Hz, slow precession}).$$
 
 **Damping is what makes alignment an attractor.** With $c_t = 0$, gyroscopic action plus
-the restoring torque yield *steady coning at fixed $\beta$* — a tilted top circles forever,
+the restoring torque yield *steady coning at fixed $\beta$*: a tilted top circles forever,
 it does not straighten. Only $c_t$ (aerodynamic drag on the wobbling blades, plus any
 magnetic/eddy loss) spirals the cone inward to $\beta\to0$. A1's claim that "the aligned
 state is an attractor" is therefore a statement about **dissipation**, not about the
@@ -661,7 +661,7 @@ A tilted rotor splits its thrust between vertical and lateral:
 
 $$T_z = k_T f^2\cos\beta, \qquad T_{\text{lat}} = k_T f^2\sin\beta.$$
 
-Vertical thrust loses only $O(\beta^2)$ — negligible for the small $\beta$ that gyroscopic
+Vertical thrust loses only $O(\beta^2)$: negligible for the small $\beta$ that gyroscopic
 stiffness enforces, so the §7 one-way cascade into heave survives to second order. The
 **lateral** component is first order in $\beta$: it is precisely the steering handle the
 scalar model omits (§10.5). Altitude is insensitive to tilt; *translation is made entirely
@@ -678,12 +678,12 @@ $$I_t\ddot\beta_x + c_t\dot\beta_x + \kappa_t\beta_x - I_s\omega\,\dot\beta_y = 
 I_t\ddot\beta_y + c_t\dot\beta_y + \kappa_t\beta_y + I_s\omega\,\dot\beta_x = \tau^{d}_y.$$
 
 The disturbance/input torques $\tau^{d}$ are set by the commanded tilt of the field's
-rotation plane — the steering input the scalar model has no room for. §12.5 derives
+rotation plane: the steering input the scalar model has no room for. §12.5 derives
 $\tau^{d}$ from the coil currents, and §12.8 gives the first-order form this block collapses
 to once nutation is dropped, which is what the executable model integrates.
 
 This subsystem is the natural plant for the optical sensor. `pose/estimator.py` returns the
-disk's **normal vector** — to first order that is exactly $(\beta_x,\beta_y)$ — so it adds
+disk's **normal vector**, to first order that is exactly $(\beta_x,\beta_y)$, so it adds
 output rows
 
 $$y_{\text{tilt}} = \begin{bmatrix}\beta_x\\ \beta_y\end{bmatrix} = C_t\,\tilde x,$$
@@ -777,7 +777,7 @@ puts a number on it.
 
 $\mathbf B(\theta)$ traces the image of the unit circle under the $3\times2$ map
 $A = [\,\mathbf u\ \ \mathbf v\,]$, which is an ellipse. Its semiaxes $a \ge b$ are therefore
-$A$'s **singular values** — exact, with no fitting and no time sampling. Since only $a+b$ and
+$A$'s **singular values**: exact, with no fitting and no time sampling. Since only $a+b$ and
 $ab$ are ever needed, the $2\times2$ Gram matrix suffices:
 
 $$G = A^\top A = \begin{bmatrix} \mathbf u\cdot\mathbf u & \mathbf u\cdot\mathbf v \\
@@ -803,8 +803,8 @@ recovering §5.3 exactly. The elliptical generalization simply replaces the fiel
 the mean semiaxis $(a+b)/2$.
 
 Unlike §5's $\delta$, $\varphi$ here is **not a dynamic state**. The model assumes the phase
-loop has already settled — legitimate, since §11.4's stack puts phase lock at 19 Hz, an order
-above everything this section cares about — and solves the balance algebraically each step.
+loop has already settled, legitimate, since §11.4's stack puts phase lock at 19 Hz, an order
+above everything this section cares about, and solves the balance algebraically each step.
 The price is that the phase transient is invisible, so §5.6's ramp limits still bind and are
 not enforced here.
 
@@ -816,7 +816,7 @@ $$a + b \;\ge\; \frac{2 k_d f^2}{m_{dip}}
 \lvert B\rvert \ \ge\ 1.00\ \text{mT at }110\ \text{Hz (circular, } k_d = 3\times10^{-10}).$$
 
 Against the 4.3–4.6 mT actually available near the axis that is a factor of about 4.4 in
-hand — but the floor scales as $f^2$, so the margin erodes fast: at 4.5 mT the required
+hand: but the floor scales as $f^2$, so the margin erodes fast: at 4.5 mT the required
 $\sin\varphi$ reaches the 0.8 safety limit at 209 Hz and hits 1 at 233 Hz. **The workspace is
 therefore a region whose shape depends on the commanded frequency**, not a fixed box. Both the MATLAB and
 the port report the violation rather than clipping $\varphi$ to $\pi/2$: clipping would hide
@@ -830,7 +830,7 @@ $\mathbf B \times \tfrac{d\mathbf B}{d\theta} = \mathbf u \times \mathbf v$, so
 
 $$\hat n = \frac{\mathbf u \times \mathbf v}{\lVert \mathbf u \times \mathbf v\rVert}$$
 
-is the physical axis *and sense* of rotation. **Never flip it** — not toward $+\hat z$, not
+is the physical axis *and sense* of rotation. **Never flip it**: not toward $+\hat z$, not
 toward the previous step's value, not toward the robot's spin axis. All three are tempting as
 continuity rules and all three are wrong: the sign carries the rotation direction, and
 flipping it silently reverses the modelled precession. Both the MATLAB and the port carry
@@ -838,8 +838,8 @@ this as a comment at the point of temptation.
 
 ### 12.5 The geometric phase reference and the averaged torque
 
-The phase lag $\varphi$ has to be measured from *something*, and the natural-looking choice —
-the $\cos\theta$ coefficient $\mathbf u$ — is arbitrary, since it depends on where the drive's
+The phase lag $\varphi$ has to be measured from *something*, and the natural-looking choice,
+the $\cos\theta$ coefficient $\mathbf u$, is arbitrary, since it depends on where the drive's
 phase origin was put. The model instead uses a reference fixed by geometry. Let $\hat s$ be
 the robot's spin axis and $\hat n$ the field's, and define
 
@@ -862,7 +862,7 @@ $$\mathbf m(\theta) = m_{dip}\big[\cos(\theta - \lambda - \varphi)\,\hat e_I
 + \sin(\theta - \lambda - \varphi)\,\hat e_R\big].$$
 
 Because both $\mathbf m$ and $\mathbf B$ are first harmonics, the cycle average is exact from
-their coefficients — $\langle\cos^2\rangle = \langle\sin^2\rangle = \tfrac12$ and
+their coefficients: $\langle\cos^2\rangle = \langle\sin^2\rangle = \tfrac12$ and
 $\langle\sin\cos\rangle = 0$ give
 
 $$\boxed{\ \langle\boldsymbol\tau\rangle
@@ -934,8 +934,8 @@ which is block diagonal: the real parts set $\mathbf u$, the imaginary parts set
 independently. Numerically $\mathbf B_{ch}$ has **rank 3 everywhere in the workspace**, with
 singular values $(2.42,\ 2.42,\ 0.36)$ mT/A on axis and condition number 3–7. So the array
 commands the rotation axis, the amplitude and the ellipticity of the local field completely
-and independently. The weak singular direction is the one that tilts the rotation plane —
-unsurprising, since all sixteen coils are coplanar with $+\hat z$ normals — so tilt costs
+and independently. The weak singular direction is the one that tilts the rotation plane,
+unsurprising, since all sixteen coils are coplanar with $+\hat z$ normals, so tilt costs
 about seven times the current that in-plane field does.
 
 Full rank means the map inverts. To command a circular field of amplitude $B_0$ about an axis
@@ -947,8 +947,8 @@ $$\mathbf z = \mathbf B_{ch}^{+}(B_0\hat e_1) - i\,\mathbf B_{ch}^{+}(B_0\hat e_
 
 The realized axis matches the command to better than $10^{-3}$ degrees, and the ellipse is
 circular to machine precision. The pseudo-inverse picks the minimum-norm solution in the
-one-dimensional null space, which — since ohmic loss is $\tfrac12\sum_c R_c\lvert I_c\rvert^2$
-— is simultaneously the **minimum-dissipation** current set. The energy term in §13's cost is
+one-dimensional null space, which, since ohmic loss is $\tfrac12\sum_c R_c\lvert I_c\rvert^2$
+, is simultaneously the **minimum-dissipation** current set. The energy term in §13's cost is
 therefore already at its optimum for any commanded field, and only trades against amplitude.
 
 ### 12.8 The eight-state plant
@@ -966,7 +966,7 @@ I_s\,\omega\,\dot{\hat s} &= \langle\boldsymbol\tau\rangle_{\perp \hat s}
 
 The third line is the first-order, fast-spin limit of §11.6's block: nutation at $1.65\omega$
 (165–379 Hz) is far above everything else and is dropped, which turns two tilt states per axis
-into one. **Lift points along $\hat s$, not along $\hat z$** — that single fact is the whole
+into one. **Lift points along $\hat s$, not along $\hat z$**: that single fact is the whole
 lateral actuator, and it is the first-principles content of the `k_lat` seed guess in
 `control/hover_model.py`.
 
@@ -1012,7 +1012,7 @@ Three items, in descending order of size.
    is not, for the coil table shipped beside it: the port reproduces that table
    position-for-position and phase-for-phase, and the axis at $(2, 0, 20.084)$ mm tilts
    $+0.0488$ in $x$, not $-0.00056$. The stored value fits the same array at $z \approx 15.03$
-   mm — within 0.12 mm of the field maximum at 15.156 mm, which is where the axis tilt crosses
+   mm: within 0.12 mm of the field maximum at 15.156 mm, which is where the axis tilt crosses
    zero and where passive hover would have been tested. So `z0` was later changed from about
    15 mm to 20.084 mm and `s0` was never regenerated. Regenerate it; do not trust the
    constant.
@@ -1051,7 +1051,7 @@ flown by MPC? Yes, and the reasons it works are not the ones the formulation sug
 ### 13.1 The estimator is a complete sensor
 
 §12's configuration manifold is $\mathbb{R}^3\times S^2$. Chapter 3's estimator returns
-position and normal, and proves roll is exactly unobservable — [§21](../pose/theory.md)
+position and normal, and proves roll is exactly unobservable: [§21](../pose/theory.md)
 (ch.3) shows rotating the rim about its own normal maps the image to itself. That is not a
 gap to be worked around: **§12's model has no roll state either**, because cycle-averaging
 integrated the spin phase away in §12.5. Sensor and model have the same five degrees of
@@ -1077,7 +1077,7 @@ Three practical gaps, all small and all real:
 
 ### 13.2 The instability belongs to the currents, not the robot
 
-§12.8's open-loop result — gone in under a second from a 10 µm offset — looks like it settles
+§12.8's open-loop result, gone in under a second from a 10 µm offset, looks like it settles
 the question in the negative. It does not, and the reason is worth stating plainly because it
 inverts the obvious reading.
 
@@ -1089,7 +1089,7 @@ through the allocation) gives
 
 $$\lambda = \{-0.78 \pm 3.43j,\ \ -0.2,\ -0.2,\ -0.2,\ \ 0,\ 0,\ 0\}\ \text{s}^{-1}$$
 
-— a damped precession, three modes at the translational damping $\beta$, three integrators for
+: a damped precession, three modes at the translational damping $\beta$, three integrators for
 position, and **no unstable eigenvalue at all**.
 
 So the hard part of this plant is not stabilizing an unstable rotor. It is that the actuator
@@ -1110,7 +1110,7 @@ nine real numbers; the reduction is lossless because §12.7's rank-3 result says
 all that the tilt knobs can independently set, and the allocation recovers the phasors.
 
 **Cost.** Quadratic, each term normalized by the value at which it should count as one unit of
-bad — Bryson's rule, the convention `design_hover_lqr.py` already uses:
+bad: Bryson's rule, the convention `design_hover_lqr.py` already uses:
 
 $$J = \sum_{k}\Big[
 \lVert \mathbf r_k - \mathbf r^{ref}\rVert^2_{Q_r} +
@@ -1134,7 +1134,7 @@ Acceleration and jerk cost nothing extra to evaluate: the plant already produces
 $\mathbf a_k$ at every predicted step, and $\mathbf j_k = (\mathbf a_{k+1}-\mathbf a_k)/T_s$
 is one subtraction. Physically
 $\mathbf j \approx \tfrac{2gf}{f_h^2}\dot f\,\hat s + g(f/f_h)^2\dot{\hat s}$, so the two
-sources of jerk are frequency slew and tilt rate — the same two things $R_\Delta$ reaches.
+sources of jerk are frequency slew and tilt rate: the same two things $R_\Delta$ reaches.
 Both are kept, because $R_\Delta$ shapes the *command* and $Q_j$ shapes the *trajectory*, and
 over a spatially varying field those differ.
 
@@ -1151,8 +1151,8 @@ away:
 **Constraints**, and this is what a gain cannot express:
 
 - **Lock margin** $2k_d f^2 \le m_{dip}(a+b)$. Under §12.7's fixed-amplitude allocation
-  $a+b = 2B_0$ everywhere, so it collapses to a *bound* on $f$ alone — 208.6 Hz at
-  $B_0 = 4.5$ mT with an 0.8 safety factor — which the solver enforces exactly and for free.
+  $a+b = 2B_0$ everywhere, so it collapses to a *bound* on $f$ alone, 208.6 Hz at
+  $B_0 = 4.5$ mT with an 0.8 safety factor, which the solver enforces exactly and for free.
   It does not collapse entirely: $B_0$ is only achievable while the allocation stays inside
   the current ceiling, and far off axis it does not, so the residual coupling stays as a
   penalty on the realized ratio.
@@ -1214,8 +1214,8 @@ bite:
 
 1. **The field model** (§12.9), at 6–14 % and biasing direction, not just magnitude.
 2. **The frames** (§13.1): the datum-to-coil transform does not exist.
-3. **Latency.** Chapter 4's existing finding — keep the loop under about 0.8 Hz or it
-   limit-cycles — is about actuation delay through the serial link, not solver speed, and
+3. **Latency.** Chapter 4's existing finding, keep the loop under about 0.8 Hz or it
+   limit-cycles, is about actuation delay through the serial link, not solver speed, and
    nothing here simulates it. MPC is the right tool for it (`PoseFilter.predict_ahead` exists
    precisely to hand a controller a current estimate), but that has not been demonstrated.
 4. **The gradient force.** Turned on, §12.6's Earnshaw argument says this array cannot hold
@@ -1235,8 +1235,8 @@ of its role.
 
 `control/simulate_spatial.py` drives the loop in two modes over the same plant and controller.
 
-**Headless** (the default) runs a scripted target sequence — hold, 6 mm across, 4 mm up, then
-a diagonal — writes `spatial_mpc_sim.png`, and asserts the settling, constraint and
+**Headless** (the default) runs a scripted target sequence, hold, 6 mm across, 4 mm up, then
+a diagonal, writes `spatial_mpc_sim.png`, and asserts the settling, constraint and
 solve-time bounds tabulated in §13.4. This is the reproducible path and the one to run after
 touching anything in §12.
 
@@ -1251,8 +1251,8 @@ $y$; a slider sets $z$. Two choices in it are worth knowing:
   matches what the runner has to do on hardware, where the response to divergence is a land
   command and the trace is the thing you want to keep.
 
-**Reading the panels.** The controller is running against its own model — the predictor and
-the plant are literally the same code — so the position traces measure the control law and
+**Reading the panels.** The controller is running against its own model, the predictor and
+the plant are literally the same code, so the position traces measure the control law and
 contain no information about robustness. The two panels that do carry information are the
 **lock margin**, which is how close the robot is to §12.3's step-out, and the **channel
 currents**, which are what the amplifier has to deliver. A run that tracks beautifully while
@@ -1261,7 +1261,7 @@ riding either limit has not solved the problem. In the shipped scenario both sta
 
 ---
 
-## Appendix A — Correspondence with the MATLAB implementation
+## Appendix A: Correspondence with the MATLAB implementation
 
 Two model families were ported. The four 1-D `*_gui.m` files map onto §1–§11, and
 `MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` maps onto §12–§13 as
@@ -1278,14 +1278,14 @@ The four 1-D files carry an older robot's inertia and simulate a different machi
 current value. The controller has no MATLAB counterpart at all: `spatial_mpc.py` and
 `simulate_spatial.py` are new.
 
-## Appendix B — Why $\dot f_{max}$ and $f_{max}$ are the two feasibility axes
+## Appendix B: Why $\dot f_{max}$ and $f_{max}$ are the two feasibility axes
 
 The torque budget $\tau_{max} \ge 2\pi I \dot f_f + k_d f_f^2$ is a single inequality in
 two variables $(f_f, \dot f_f)$: its boundary is a downward parabola in the
 $(f_f^2, \dot f_f)$ plane. $f_{max} = f_0\sqrt M$ is its $\dot f_f = 0$ intercept;
 $\dot f_{max}(f)$ is a horizontal slice. Any commanded trajectory must remain inside
 this region *with dynamic margin* for the $Q \approx 20$ phase swing excited at segment
-boundaries — a conservative rule of thumb is to keep the quasi-static demand below
+boundaries: a conservative rule of thumb is to keep the quasi-static demand below
 $\tau_{max}\sin(\pi/2 - \Delta)$ with a swing allowance $\Delta$ of a few tens of
 degrees, or to shape $\dot f_f$ continuously (higher-order polynomial / exponential
 segments) so little swing energy is injected.

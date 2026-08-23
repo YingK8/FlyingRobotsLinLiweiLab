@@ -1,4 +1,4 @@
-# Chapter 3 — Pose: frame in, five degrees of freedom out
+# Chapter 3. Pose: frame in, five degrees of freedom out
 
 *Stage 3 of the pipeline. Consumes: frames from [chapter 1](../camera/theory.md)
 and the frames fixed by [chapter 2](../calib/theory.md). Produces: a `Pose` per
@@ -19,7 +19,7 @@ robot in a cluttered frame in the first place (§15).
 | 4 | `stereo.py` | the same from two views, which kills the ambiguity outright |
 | 5 | `filter.py` | constant-velocity Kalman: velocity, coasting, latency compensation |
 | 6 | `uncertainty.py` | predicts this frame's error so the estimator can decline |
-| 7 | `bounds.py` | the Cramer-Rao floors of §13 — what no estimator can beat |
+| 7 | `bounds.py` | the Cramer-Rao floors of §13: what no estimator can beat |
 | 8 | `render.py`, `render_stereo.py` | the renderer: ground truth to measure all of the above against |
 
 The dependency runs 1 -> 2 -> 3 -> 4; `bounds.py` and the renderer are how the
@@ -37,11 +37,11 @@ of magnitude, and where the model breaks. Implementation: `controller/pose/`.
 
 **Assumptions (B1–B4):**
 
-- **B1 — Known circular feature.** The duct rim is a circle of known radius $R$. Measured
+- **B1, Known circular feature.** The duct rim is a circle of known radius $R$. Measured
   off `flyingrobot_thick _rod2.STL`: $R = 10.204$ mm, radial standard deviation 0.108 mm.
-- **B2 — Calibrated pinhole.** Intrinsics $K$ known; the contour is undistorted before use.
-- **B3 — Rigid.** The rim does not deform in flight.
-- **B4 — Spin aliased.** At 310–350 Hz against $\le$ 420 fps, blade phase is temporally
+- **B2, Calibrated pinhole.** Intrinsics $K$ known; the contour is undistorted before use.
+- **B3, Rigid.** The rim does not deform in flight.
+- **B4, Spin aliased.** At 310–350 Hz against $\le$ 420 fps, blade phase is temporally
   aliased ([§0](../control/theory.md) (ch.4), A5) and is treated as an unknown nuisance, not a state.
 
 ### 12.1 Circle to ellipse, and back
@@ -53,7 +53,7 @@ quadratic form $X^\top Q X = 0$ with
 
 $$Q = d^2 I - d\,(n C^\top + C n^\top) + (|C|^2 - R^2)\, n n^\top .$$
 
-In pixels, $p = KX$ up to scale, so the image conic is $K^{-\top} Q K^{-1}$ — an ellipse.
+In pixels, $p = KX$ up to scale, so the image conic is $K^{-\top} Q K^{-1}$: an ellipse.
 Running it backwards, $Q$'s eigendecomposition has signature $(+,+,-)$ and a quadric cone
 admits exactly **two** families of circular cross-section, so a fitted ellipse yields two
 poses $(C, n)$ and $(C', n')$. This is not a numerical degeneracy: a tilted circle and its
@@ -74,7 +74,7 @@ Two consequences, both structural rather than implementation defects:
 - **Depth is measured from the ellipse's *size*, lateral position from its *centre*.** A
   one-pixel error on a 130 px major axis is 0.77 % of range; the same pixel on the centroid
   is 0.16 mm. Measured, the ratio is $\approx 11:1$ (0.078 mm lateral against 0.857 mm
-  depth), and it is constant in *relative* terms — 0.57 % of range at every distance.
+  depth), and it is constant in *relative* terms: 0.57 % of range at every distance.
   The clean statement of this ratio is $z/2R$, range over diameter, and that is what the
   rest of §12 uses. It is the **tilt-known** case. §13.4 derives the version that applies
   here, where tilt must be estimated from the same ellipse: the penalty is
@@ -131,7 +131,7 @@ perimeter and at every tilt.
 
 This has a direct consequence for estimator design: a **symmetric** robust loss cannot
 exploit it, because it has no notion of which direction is suspicious. Measured, `soft_l1`
-against plain least squares changed the normal error from 0.524° to 0.509° — nothing. A
+against plain least squares changed the normal error from 0.524° to 0.509°: nothing. A
 one-sided loss, penalising points inside the current estimate and tolerating points outside,
 is the form that matches the geometry.
 
@@ -149,7 +149,7 @@ $t \approx 0, 180^\circ$ nearly clean. Measured on held-out renders:
 | 60–71° | −0.6 % ± 1.0 % | **0.48°** | **+12.7 % ± 26.5 %** |
 
 The major axis holds to ~0.5 % everywhere; the minor axis scatter reaches 26 %. **That
-25:1 split is why position survives tilts that destroy orientation** — depth comes from the
+25:1 split is why position survives tilts that destroy orientation**: depth comes from the
 major axis (§12.2), tilt from the ratio.
 
 It also constrains what can be done about it. The sensitivity of a boundary point to the
@@ -159,7 +159,7 @@ symmetrically to reject the contamination removes precisely the quantity being r
 the fit gets less biased and much noisier. Only the one-sided form of §12.4 avoids this.
 
 **A resolution floor follows.** $\rho = \cos\theta + k\sin\theta$ exceeds 1 on the whole
-interval $(0,\ 2\arctan k)$ — it peaks at $\arctan k$ and returns to 1 at twice that — so
+interval $(0,\ 2\arctan k)$, it peaks at $\arctan k$ and returns to 1 at twice that, so
 every tilt in that band produces a silhouette at least as wide as it is long, and none of
 them can be distinguished by an axis ratio at *any* resolution. With $k = 0.0433$ that is
 
@@ -168,10 +168,10 @@ $$\theta_{\min} = 2\arctan k = 4.96^\circ .$$
 This is a second, independent reason not to read tilt from the ratio near face-on, the
 first being the singularity of §12.2.
 
-**The centre moves too, and that is a position error — but it resists correction.** The obvious symptom of
+**The centre moves too, and that is a position error, but it resists correction.** The obvious symptom of
 out-of-plane structure is a fattened short axis, and everything above measures
 that. But the hull grows on **one** side, so the fitted ellipse's *centre* is
-displaced as well — and lateral position is read straight off the centre.
+displaced as well, and lateral position is read straight off the centre.
 Measured against the analytic rim centre, decomposed along the ellipse's own
 axes:
 
@@ -187,15 +187,15 @@ pulls it the other. So no monotone function of tilt can correct both, for the
 same structural reason a quadratic could not correct the axis ratio (§12.7).
 
 At 70° this displacement alone exceeds the 0.5 mm position target. The one-sided
-re-weighting of §12.4 only partly removes it — 0.501 → 0.341 mm at 65°, 0.867 →
-0.705 at 70°, and nothing at all below 55° — because its weights are judged
+re-weighting of §12.4 only partly removes it: 0.501 → 0.341 mm at 65°, 0.867 →
+0.705 at 70°, and nothing at all below 55°: because its weights are judged
 against an ellipse that has already absorbed the shift, and the mast's
 contribution is a coherent arc rather than sparse outliers, so an IRLS started
 from a biased fit converges to a nearby biased one. **Not corrected anywhere in
 the shipped estimator.** Whether stereo fusion partially cancels it is untested:
 the minor direction points differently in the two views, so some cancellation is
 expected, and the measured stereo lateral error (0.14–0.18 mm) is indeed below
-the single-view centre bias — but that is consistent with cancellation rather
+the single-view centre bias: but that is consistent with cancellation rather
 than evidence of it.
 
 ### 12.6 What a second camera adds
@@ -211,19 +211,19 @@ counting that as evidence against the pair leaves the true pair ahead by only 1.
 noise. Weighted properly the margin is ~50×.
 
 **(b) Bias attenuation, not noise averaging.** The single-view residual autocorrelates at
-0.966 after one frame — it is a smooth function of pose, so temporal averaging cannot remove
+0.966 after one frame: it is a smooth function of pose, so temporal averaging cannot remove
 it, and a Kalman filter measured a best case of 1.01×. Fusion is different in kind: it
 weights by *direction*. Along camera A's depth axis, camera B measures laterally and carries
 $\approx 120\times$ the weight, so a 3 mm systematic depth error in A enters the fused
 estimate as 0.025 mm.
 
 **(c) Tilt without the minor axis.** The projected normal is perpendicular to the major
-axis, so view $i$ constrains $n$ to a plane through that camera's centre — one constraint on
+axis, so view $i$ constrains $n$ to a plane through that camera's centre: one constraint on
 $n$'s two degrees of freedom. **Two views give two planes, and their intersection fixes $n$
 using only the major axes and the centres.** Eight observables for five unknowns, every one
 from the channel that holds to 0.2–1 % (§12.5), and it is *best* conditioned exactly where
-the ratio method is worst. A single view cannot do this — it has one constraint for two
-unknowns — so this capability is intrinsically stereo.
+the ratio method is worst. A single view cannot do this: it has one constraint for two
+unknowns: so this capability is intrinsically stereo.
 
 **Status of (c).** Implemented as `stereo.solve_from_major` and A/B-tested on
 identical frames: the normal improves 1.65× overall and **2.25× (8.15° → 3.62°)**
@@ -252,12 +252,12 @@ implemented and measured.
 |---|---|
 | Sub-pixel edge refinement (walk hull vertices to the interpolated threshold crossing) | **No change**: depth scatter 0.661 % vs 0.662 %. The hull already averages 30–60 points. |
 | Better segmentation generally | **Nothing to win**: `seg_iou` is flat at 0.89 from 0° to 71° while `fit_rms_px` goes 0.15 → 1.90 px. The segmenter traces the silhouette correctly; the silhouette is not an ellipse. |
-| Symmetric robust loss (`soft_l1`) | **No effect** (0.524° vs 0.509°) — see §12.4 for why. |
+| Symmetric robust loss (`soft_l1`) | **No effect** (0.524° vs 0.509°): see §12.4 for why. |
 | Sampson residuals on every hull point | **Worse** than eight axis-endpoint residuals (1.55° vs 0.53°): the correction of §12.3 is defined on the *fitted ellipse*, so residualising raw hull points compares the model against a quantity it was never fitted for. |
 | Quadratic-in-angle tilt correction | **Superseded.** It cannot represent §12.3's form; its residual crossed zero twice and 84 % of the leftover variance was still deterministic in tilt. Replaced by the one-parameter wall model: held-out median tilt error 2.43° → 1.97°, bias +0.807° → −0.038°. |
-| **Correcting the ellipse's displaced centre** (§12.5) | **Fails, three ways.** Applied to the *measured* ellipse it removes 22–68× of the 2-D displacement and still makes 3-D position worse (0.397 → 0.533 mm) — because `conic.backproject` consumes all five ellipse parameters jointly, and a centre moved independently of axes that `TiltCalibration` has already rewritten yields a conic corresponding to no real circle projection. Moved into the *forward* model, where all five move together, it is neutral with the centre held fixed and still loses with it free (0.348 → 0.462 mm). Characterised but not exploited. |
+| **Correcting the ellipse's displaced centre** (§12.5) | **Fails, three ways.** Applied to the *measured* ellipse it removes 22–68× of the 2-D displacement and still makes 3-D position worse (0.397 → 0.533 mm): because `conic.backproject` consumes all five ellipse parameters jointly, and a centre moved independently of axes that `TiltCalibration` has already rewritten yields a conic corresponding to no real circle projection. Moved into the *forward* model, where all five move together, it is neutral with the centre held fixed and still loses with it free (0.348 → 0.462 mm). Characterised but not exploited. |
 | Fitting that wall model over the full 5–71° range | **Worse than doing nothing** (3.54°, bias +3.54°): the mast regime drags $k$ from 0.043 to 0.098. The model must be fitted where it applies, 20–50°. |
-| **Symmetric** hull re-weighting by position along the major axis | **Worse below 55°** — median tilt error 0.43° → 0.80°, as §12.5's $\partial/\partial b \propto \sin t$ argument requires. It does help at 55–71° (5.13° → 3.13°), where the contamination outweighs the information it destroys. |
+| **Symmetric** hull re-weighting by position along the major axis | **Worse below 55°**: median tilt error 0.43° → 0.80°, as §12.5's $\partial/\partial b \propto \sin t$ argument requires. It does help at 55–71° (5.13° → 3.13°), where the contamination outweighs the information it destroys. |
 | **One-sided** re-weighting (tolerate points outside, per §12.4) | **The form that works**: 0.43° → 0.46° below 55° (free) and **5.13° → 2.83°** above it. Costs major-axis precision at high tilt (±0.81 % → ±2.59 %), because rejecting outward points can also shave genuine rim, so it is worth enabling only where its benefit appears. |
 
 ### 12.8 Correspondence with the implementation
@@ -298,10 +298,10 @@ average rather than a difference, and averages do not lose a power.
 (The $z/2R$ factor here assumes the tilt is known. §13.4 shows that estimating it
 from the same ellipse multiplies the depth term by a further $\sqrt3$, so the
 noise-only depth figures in the table below are optimistic by that factor. The
-conclusion the table is used for — that noise alone is not the limit — is
+conclusion the table is used for, that noise alone is not the limit, is
 strengthened, not weakened, by the correction.)
 
-Single-view depth therefore misses the target at **every** sensor mode — 0.522 mm
+Single-view depth therefore misses the target at **every** sensor mode: 0.522 mm
 at 1280×800, rising to 4.176 mm at 160×120. Stereo is what rescues it: with the
 optical axes 60° apart, camera B measures laterally exactly the direction along
 which camera A is blind, and the fused worst axis becomes
@@ -317,7 +317,7 @@ which camera A is blind, and the fused worst axis becomes
 Every mode, including the 640 fps one, sits inside ±0.5 mm **on noise alone**.
 
 **What is actually measured.** At 1280×800 the estimator returns 0.277 mm mean and
-1.496 mm worst — $4.6\times$ and $25\times$ the noise prediction. The discrepancy
+1.496 mm worst: $4.6\times$ and $25\times$ the noise prediction. The discrepancy
 is not a failure of the derivation; it is the derivation doing its job, by
 isolating what the remaining error cannot be.
 
@@ -331,7 +331,7 @@ $$\text{precision-limited} \Rightarrow \varepsilon \propto M^{-1}\ \text{or}\ M^
 Measured position error across 1280→640 changes by $1.66\times$ while $M$ changes
 by $2\times$. Pure lateral noise predicts $2\times$, depth noise $4\times$, a pure
 bias $1\times$. The observed 1.66 is close to neither extreme, which says the
-error is a **sum** of a shrinking noise term and a floor that does not shrink —
+error is a **sum** of a shrinking noise term and a floor that does not shrink:
 consistent with the independently measured centre displacement of 0.185–0.274 mm,
 which is a property of the projected shape and carries no resolution dependence
 at all.
@@ -340,7 +340,7 @@ at all.
 
 1. **Resolution is nearly free to give up.** Going from 143.7 px to 71.8 px across
    the rim costs 0.06 mm of noise against a bias floor several times larger. The
-   420 fps mode is not disqualified by geometry — it is disqualified, if at all,
+   420 fps mode is not disqualified by geometry: it is disqualified, if at all,
    by segmentation robustness, which is a different and more fixable problem.
 2. **A gate built only from noise features cannot reach 100%.** The features
    $e/M^{2}$ and $e/(M\sin\theta)$ describe precision. A frame whose error is
@@ -359,7 +359,7 @@ will fail by producing an absurd bound rather than an obviously wrong one.** The
 fit has no way to say "this is not noise"; it can only inflate until the worst
 systematic case is covered, at which point the bound rejects everything. The
 diagnostic that catches it is comparing the fitted scale against the *derived*
-noise floor — if the ratio is large and roughly constant across conditions, the
+noise floor: if the ratio is large and roughly constant across conditions, the
 residual is bias and no amount of refitting will help.
 
 ### 12.10 Certifying a measurement: the gate as an operating point
@@ -375,8 +375,8 @@ treating it as one avoids a trap that is easy to fall into.
 $\log$ features, then accept when $k\,s(x) \le$ target, where $k$ is a high
 quantile of the observed ratio $\varepsilon/s(x)$.
 
-**The trap.** It is natural to read $k$ as a *bound* — "the error is below
-$k\,s(x)$ with probability $q$" — and therefore to raise $q$ toward 1 for safety.
+**The trap.** It is natural to read $k$ as a *bound*, "the error is below
+$k\,s(x)$ with probability $q$", and therefore to raise $q$ toward 1 for safety.
 This is backwards, and the sign error is instructive. $k$ multiplies every
 frame's prediction by the same constant, so it induces no reordering:
 
@@ -384,12 +384,12 @@ $$k\,s(x_1) \le k\,s(x_2) \iff s(x_1) \le s(x_2) \quad \forall k > 0$$
 
 The accepted set is always the sublevel set $\{x : s(x) \le \text{target}/k\}$,
 and these sets are **nested in $k$**. Raising $q$ raises $k$, shrinks the sublevel
-set, and accepts *fewer* frames — until at $q = 0.999$ the set is empty. So $k$
+set, and accepts *fewer* frames: until at $q = 0.999$ the set is empty. So $k$
 is not a bound at all; it is a monotone reparameterisation of the decision
 threshold, and choosing it is choosing an operating point on an ROC curve.
 
 Once that is seen, the calibration follows. An operating point should be chosen
-against the requirement it must satisfy, on data held out for that purpose — not
+against the requirement it must satisfy, on data held out for that purpose: not
 computed from a training statistic that has no knowledge of the requirement.
 Hence three splits rather than two:
 
@@ -405,7 +405,7 @@ here was 37.9% acceptance claimed against 30.6% cross-validated.
 
 **Searching in the right direction.** Since acceptance rises as $q$ falls, a scan
 that stops at the first qualifying $q$ returns the *most conservative* operating
-point — which satisfies any coverage requirement trivially by accepting almost
+point: which satisfies any coverage requirement trivially by accepting almost
 nothing. The scan must retain the *last* qualifying value. This produced a 1.8%
 acceptance figure before it was corrected, at the same 100% coverage, and the two
 are indistinguishable on the coverage metric alone. **Coverage without acceptance
@@ -413,12 +413,12 @@ beside it is not a measurement**, which is why both appear in every table in the
 journal.
 
 **Precision and blunders are separate populations.** The features
-$e/M^{2}$ and $e/(M\sin\theta)$ describe precision. A blunder — the outline closed
-around the wrong object — has ordinary-looking features and an error two orders of
+$e/M^{2}$ and $e/(M\sin\theta)$ describe precision. A blunder: the outline closed
+around the wrong object: has ordinary-looking features and an error two orders of
 magnitude out, so no monotone function of them predicts it. Including blunders in
 the fit lets them set the quantile: measured, $k$ reached $2.4\times10^{9}$, then
 280, then 674. They belong in the *evaluation* but not in the *fit*, and that
-asymmetry is deliberate — a blunder the hard gates miss must surface as a coverage
+asymmetry is deliberate: a blunder the hard gates miss must surface as a coverage
 failure rather than be excused by a model that was allowed to expect it.
 
 The general form of this result is worth separating from the application:
@@ -429,7 +429,7 @@ rather than estimated from the residuals.**
 ### 12.11 An ill-conditioned direction in a robust fit
 
 Section 12.9 attributed the error above the noise floor to systematic silhouette
-bias. Part of it was not bias at all — it was a defect in the fit, and the shape
+bias. Part of it was not bias at all: it was a defect in the fit, and the shape
 of that defect is worth recording because the failure mode is general.
 
 **The construction.** The rod and magnet fatten the silhouette in its short
@@ -450,7 +450,7 @@ $$\frac{\partial}{\partial\phi}\big(a\cos t\,\hat u + b\sin t\,\hat v\big)
 = a\cos t\,\hat v - b\sin t\,\hat u$$
 
 which at the retained points ($\cos t \approx \pm 1$, $\sin t \approx 0$) is
-$\pm a\hat v$ — perpendicular to the cluster's own extent, and therefore almost
+$\pm a\hat v$: perpendicular to the cluster's own extent, and therefore almost
 unconstrained once those points are the only ones with weight. The Fisher
 information in $\phi$ is carried by the points near $\sin t = \pm 1$, which are
 exactly the ones the weighting deletes.
@@ -463,7 +463,7 @@ to* has lost a direction rather than gained robustness.
 
 **Why flooring the weights does not fix it.** Flooring stops the deletion, and on
 the case above it restores the exact answer. But re-measuring across a pose set
-showed it moved the failure rather than removing it — at floor 0.05 the 33.5°
+showed it moved the failure rather than removing it: at floor 0.05 the 33.5°
 case became exact and a different pose went 14° out, with the worst downstream
 error unchanged. Conditioning is a property of the weighted design matrix, and a
 small floor leaves the smallest singular value small.
@@ -479,14 +479,14 @@ to 3.85e-08 mm.
 Stated generally: **when a re-weighting is designed to suppress a contamination
 that affects some parameters and not others, it must not be given authority over
 the parameters it does not inform.** The contamination here is symmetric in
-$\phi$, so the weights carry no information about $\phi$ — and a parameter
+$\phi$, so the weights carry no information about $\phi$: and a parameter
 estimated from data carrying no information about it does not merely stay at its
 prior, it drifts to wherever the residual is flattest.
 
 **How it propagated.** `stereo.refine` compares the four axis endpoints of the
 measured and predicted ellipses. An angle error moves those endpoints by order of
 the major axis length, so a 33° rotation makes the cost large **at the true
-pose** — every seed, including one initialised exactly at the truth, converged
+pose**: every seed, including one initialised exactly at the truth, converged
 away from it. The refinement was not failing to converge; it was converging
 correctly onto a corrupted objective. The lesson for the residual design is that
 a cost built from *oriented* features inherits every orientation error in its
@@ -515,8 +515,8 @@ held-out split, and bin the residual by true tilt:
 The calibration does its job: the mean residual is within a few tenths of a
 degree across the working range. But a calibration is a function of one variable,
 so it can only remove the *mean* at each tilt. The standard deviation is what
-survives, and at 40–50° — precisely where the estimator's remaining failures sit
-— it is **2.6°**, more than twice the specification on its own.
+survives, and at 40–50°, precisely where the estimator's remaining failures sit
+, it is **2.6°**, more than twice the specification on its own.
 
 Stereo fusion is what makes the estimator work at all against this: two views at
 60° axis separation reduce a 2.6° per-view scatter to roughly 0.3° in the fused
@@ -524,9 +524,9 @@ normal. The failures are the tail of that distribution, not its centre.
 
 **Is the scatter reducible?** Only if something predicts it. Regressing the
 absolute residual in the 40–50° band against every quantity the dataset records
-— pose (`az_deg`, `cx/cy/cz`, `nx/ny/nz`), appearance (`major`, `minor`,
+, pose (`az_deg`, `cx/cy/cz`, `nx/ny/nz`), appearance (`major`, `minor`,
 `area_px`, `iou`, `fit_rms_px`), and conditions (`alpha`, `bg`, `ambient`,
-`exposure_s`, `sigma`, `spin_hz`) — gives Spearman correlations whose strongest
+`exposure_s`, `sigma`, `spin_hz`), gives Spearman correlations whose strongest
 members are
 
 $$\rho(n_y) = -0.226,\quad \rho(n_x) = +0.200,\quad \rho(\alpha) = -0.191$$
@@ -543,7 +543,7 @@ a line of work:
 2. **No gate feature declines it.** A predicted-error model can only reject what
    its observables see, and no observable correlates. This is why Iteration 8's
    split of the conditioning term recovered the derived exponent
-   ($+1.332$ against a derived $1$) and yet removed none of the failures — the
+   ($+1.332$ against a derived $1$) and yet removed none of the failures: the
    term was right and insufficient at the same time.
 3. **A richer silhouette model will not obviously help either**, because the
    residual does not vary systematically with pose. A better *forward model*
@@ -577,13 +577,13 @@ threshold-and-hull silhouette pipeline delivers roughly 0.2–0.3° mean and ~1.
 worst-case orientation after stereo fusion, and the worst case is set by
 irreducible boundary scatter rather than by anything the estimator chooses. A
 specification of ±1° on *every* frame is therefore not reachable by tuning this
-pipeline — it requires changing how the boundary is measured.
+pipeline: it requires changing how the boundary is measured.
 
 ## 13. The information floor: what no estimator can beat
 
 §12 ends by asserting that the remaining error is a property of the *method*, and
 supports that with a scaling argument: the error falls too slowly with resolution
-to be noise. That argument is sound but indirect — it infers a floor from an
+to be noise. That argument is sound but indirect: it infers a floor from an
 exponent. This section derives the floor.
 
 The tool is the Cramér–Rao bound. For an unbiased estimator of a parameter vector
@@ -594,7 +594,7 @@ J = \mathbb{E}\!\left[\left(\frac{\partial \log L}{\partial p}\right)
 \left(\frac{\partial \log L}{\partial p}\right)^{\!\top}\right]$$
 
 which converts "how much does the data change when the parameter changes" into a
-hard limit on precision. Its value here is not that it flatters the estimator —
+hard limit on precision. Its value here is not that it flatters the estimator:
 it is that when the measured error sits far *above* the bound, the excess
 provably cannot be noise, and every lever that acts on noise is ruled out at
 once.
@@ -612,7 +612,7 @@ real system is placed against the result by
 **Assumptions (C1–C3).** C1: additive Gaussian sensor noise of standard
 deviation $\sigma_n$ per pixel, independent between pixels. C2: the boundary is a
 step of contrast $C$ blurred by a Gaussian PSF of width $s$ px. C3: boundary
-points are measured along the local normal only. C3 is not a simplification —
+points are measured along the local normal only. C3 is not a simplification:
 §13.2 shows the tangential component carries no information at all.
 
 ### 13.1 Locating one edge: the sub-pixel limit
@@ -764,7 +764,7 @@ so a serviceable form of the whole result is
 $$\sigma_{\text{depth}} \;\approx\; 2\,\frac{z}{2R}\,\sigma_{\text{lat}}
 \;=\; \frac{z}{R}\,\sigma_{\text{lat}}$$
 
-— **range divided by the robot's radius**, to within 15% at any tilt. At
+: **range divided by the robot's radius**, to within 15% at any tilt. At
 $z = 250$ mm and $R = 10.2$ mm the exact value runs 21.2× face-on, 22.2× at 30°
 and 25.0× at 60°, against the $z/R = 24.5$ of the approximation and the
 $z/2R = 12.3$ the earlier sections imply.
@@ -788,7 +788,7 @@ $(R/z)^2/\sin^2\theta$:
 | 700 mm | 0.015 | 0.987 | 0.999 | 1.000 |
 
 Inside the operating envelope ($z$ = 150–400 mm, tilt ≥ 30°) it holds to 2%. Close
-up and near face-on it does not, and the direction is favourable — perspective
+up and near face-on it does not, and the direction is favourable: perspective
 gives back some of what the tilt degeneracy takes.
 
 ### 13.5 Tilt has two regimes, and the textbook one is the wrong one at hover
@@ -810,8 +810,8 @@ $$\mathbb{E}[\hat\theta]\Big|_{\theta=0} = \mathbb{E}\big|u\big|^{1/2}\sqrt{2\si
 biased away from zero.** The constant is $\mathbb{E}|u|^{1/2}$ for a standard
 normal, and the law is verified to 0.1% against 200 000 Monte Carlo draws.
 
-Feeding it the *measured* boundary statistics of §13.7 — $\sigma_r = 1.035$ px,
-$N_{\text{eff}} = 15$, $a = 56.3$ px — gives $\sigma_{\text{ratio}} = 0.0139$
+Feeding it the *measured* boundary statistics of §13.7, $\sigma_r = 1.035$ px,
+$N_{\text{eff}} = 15$, $a = 56.3$ px, gives $\sigma_{\text{ratio}} = 0.0139$
 and therefore
 
 | configuration | $\sigma_{\text{ratio}}$ | apparent tilt of a face-on rim |
@@ -825,7 +825,7 @@ face-on case**: the platform's attitude envelope is 1.1° RMS ([§11](../control
 apparent tilt at hover is dominated by noise rectification rather than by tilt.
 It is also the independent confirmation of §13.7's tilt breakdown, where the
 0–10° bin shows a 13.5° median angular error against 1.5–1.7° in the
-well-conditioned bins — the same effect, measured rather than predicted.
+well-conditioned bins: the same effect, measured rather than predicted.
 
 Note the second row: the factor available from keeping more of the boundary is
 *larger* here than anywhere else in this section, because the $\sqrt{\cdot}$
@@ -843,7 +843,7 @@ centre is
 
 (The 1° and 2° entries are not monotone, and should not be read as a trend: at
 that tilt the Fisher matrix is within numerical reach of its rank-4 limit and the
-inversion is unstable. What the row supports is the *magnitude* — several-fold —
+inversion is unstable. What the row supports is the *magnitude*, several-fold,
 and the *cutoff* at about 5°, both of which are stable.)
 
 The mechanism is that an eccentricity error indistinguishable from noise is
@@ -857,7 +857,7 @@ for everything**, and the degradation is confined to below about 5°.
 circle onto itself, so the projected conic is identical and the derivative of the
 image with respect to roll is zero. Measured over 64 roll angles: the largest
 image displacement is $1.6\times10^{-12}$ px, i.e. float noise. Together with
-§13.3's rank-5 Jacobian this is the complete statement — the missing degree of
+§13.3's rank-5 Jacobian this is the complete statement: the missing degree of
 freedom is not weakly observed, it is absent.
 
 **The two-fold ambiguity is a genuine bimodality, not a numerical failure.** A
@@ -867,7 +867,7 @@ normals differ by 49.1°, and their reprojected ellipses differ by
 $4.2\times10^{-12}$ px. The single-view likelihood has two exactly equal maxima.
 No amount of data from this view can prefer one, and any estimator that appears
 to is using a prior. That is the formal justification for both the temporal prior
-in `estimator.py` and the second camera in §12.6 — and it is also why the CRLB,
+in `estimator.py` and the second camera in §12.6: and it is also why the CRLB,
 a *local* bound, must be compared against oracle-branch errors, with branch
 failures counted separately rather than folded into a residual.
 
@@ -875,14 +875,14 @@ failures counted separately rather than folded into a residual.
 
 391 rendered frames at 1280×800 (199 `core`, 192 `edge`), tilt 0–70°, range
 170–340 mm, with the analytic ground-truth ellipse available for every one, at
-the **shipped** configuration (axial weighting on — journal Iteration 14).
+the **shipped** configuration (axial weighting on: journal Iteration 14).
 `controller/pose/validation/limits.py`.
 
 This is a **harsher sample than §12's headline band**, deliberately: it spans the
 full tilt range including the degenerate ends, and it includes the `edge`
 condition tier. The absolute residuals below are therefore larger than the
 0.87 mm quoted for tilt 10–45° under good light, and the two are not directly
-comparable. What *is* comparable — and what this section is about — is the ratio
+comparable. What *is* comparable, and what this section is about, is the ratio
 of each residual to its own floor, computed frame by frame on the same data.
 
 **The boundary, decomposed.** Signed distance from every convex-hull point to
@@ -919,7 +919,7 @@ ambiguity branch, for the reason in §13.6:
 Two things to read off this table, and they point in opposite directions.
 
 **The estimator beats the noise-equivalent prediction** (1.82 against 2.36 mm).
-That is not a paradox and not an error — the prediction is not a bound. It
+That is not a paradox and not an error: the prediction is not a bound. It
 assumes the boundary errors are independent and Gaussian, and they are neither:
 they are dominated by a common outward offset, and the fitted `RADIUS_MM` exists
 precisely to absorb that common mode. Independent noise of the observed size
@@ -937,19 +937,19 @@ those is the informative one. Split by tilt:
 | 45–71° | 218 | 1.834 | 0.567 | 3.2× |
 
 Two things to read here. Away from face-on the ratio is a **constant multiple**
-of the bound — 3.2–3.9× — which is the signature of a term that scales with the
+of the bound, 3.2–3.9×, which is the signature of a term that scales with the
 same geometry as the bound but is not noise. And the 0–10° bin is not a
 degradation, it is a **collapse**: a median of 387 mm on a 250 mm working range,
 503× its own floor. That is §13.5's face-on degeneracy in its rawest form, on
 seven frames. It is the single strongest argument in this document for keeping
 the rotor out of the face-on geometry, or for the second camera.
 
-Conditions move the aggregate in the expected direction — `core` gives 1.27 mm
+Conditions move the aggregate in the expected direction: `core` gives 1.27 mm
 and 2.36°, `edge` 3.15 mm and 3.95°.
 
 **Branch selection, separately.** Prior-free, on independent frames, the shipped
 selector picks the wrong ambiguity branch on **48%** of frames, with a median
-margin of 103.6° between the candidates — so the shipped angular error reads
+margin of 103.6° between the candidates: so the shipped angular error reads
 29.4° against an oracle 2.67°. Prior-free branch selection is a coin toss, which
 is exactly what §13.6 says it must be. This is the worst case by construction: it is the
 estimator with no temporal prior at all, and the live loop in `online_camera.ipynb` in a video stream has
@@ -969,7 +969,7 @@ people reach for them:
    1.46× of the edge CRLB (§13.1), so at most a factor of 1.5 exists there, and
    it applies to a term (0.076 px) already 14× below the one that matters
    (1.087 px). This is the
-   derived version of §12.12's measured result — an 18× improvement in the
+   derived version of §12.12's measured result: an 18× improvement in the
    mechanism bought 2% of the outcome. **Ruled out.**
 3. **A better ellipse fit.** Statistical efficiency 0.96–1.01 on all five
    parameters, 0.94–1.06 end-to-end through the back-projection. Replacing the
@@ -981,7 +981,7 @@ people reach for them:
    same statement arrived at empirically. **Marginal.**
 5. **Keeping more of the boundary.** This is the one that is *not* ruled out.
    The convex hull retains 31 vertices of a ~354 px perimeter, and $1/\sqrt N$
-   says that costs **3.2×** — comparable to the entire remaining gap. It is a
+   says that costs **3.2×**: comparable to the entire remaining gap. It is a
    design choice rather than a limit: the hull is there to enforce the
    outward-only property the one-sided loss depends on, and journal Iteration 11
    found on real captures that 42–62% of dense contour points lie *inside* the
@@ -989,7 +989,7 @@ people reach for them:
    dense contour points *restricted to the hull*, which recovered 55–461 points
    with the property intact. **This is where the next factor of two is.**
 6. **The remaining ~3.7×.** After the hull is accounted for, what is left is
-   that the silhouette is not the rim (§12.3, §12.12) — the rod and magnet
+   that the silhouette is not the rim (§12.3, §12.12): the rod and magnet
    project into the outline, and which non-circular shape is presented varies
    frame to frame. Mostly this needs a change to what is imaged: a fiducial on
    the rim, illumination that lights only the rim, or a forward model that
@@ -1002,7 +1002,7 @@ people reach for them:
    contamination rather than a better fit to the contaminated boundary, which is
    why it works where trimming by residual did not. The same third factor
    measures 3.7 in the shipped weighted configuration against 4.4 in an
-   unweighted run — suggestive rather than controlled, since the two runs drew
+   unweighted run: suggestive rather than controlled, since the two runs drew
    different pose samples, but pointing the same way as the controlled sweep A/B
    in journal Iteration 13.
 7. **Depth specifically.** $g(\theta)\,z/2R \approx z/R$, which is 21–25× at
@@ -1024,18 +1024,18 @@ independent budgets. It is not:
 
 So the honest summary is: **a factor of ~3.2 is sitting untouched in the hull, a
 factor of ~3.7 is the shape of the silhouette and is only partly reachable from
-software, and the remaining 6.0 was never available at all** — it is the price of
+software, and the remaining 6.0 was never available at all**: it is the price of
 reading a 3-D pose off a 20.4 mm circle from 250 mm away with one camera, and it
 is the smallest of the three.
 
 None of this touches the two structural results (§13.6) or the face-on collapse
-(§13.5, §13.7), which are not factors in a budget — they are geometry, and they
+(§13.5, §13.7), which are not factors in a budget: they are geometry, and they
 are why the second camera is on the plan.
 
 ## 15. Separating the robot from the room on a monochrome sensor
 
 §12 assumes a silhouette. This section is where that silhouette comes from when the robot is
-**black on a white backdrop with the rig in frame**, and the camera is the ELP OV9281 — a
+**black on a white backdrop with the rig in frame**, and the camera is the ELP OV9281: a
 *monochrome* global-shutter sensor. Implemented in `controller/pose/segment.py`.
 
 The reason it needs a section is that the obvious method is unavailable and the second
@@ -1043,14 +1043,14 @@ obvious method is impossible, and both failures are informative rather than inci
 
 **Assumptions (C1–C4):**
 
-- **C1 — The clutter is fixed to the rig.** Coils, wires, the support box and the backdrop
+- **C1, The clutter is fixed to the rig.** Coils, wires, the support box and the backdrop
   do not move relative to the camera. This is what makes §15.3 work at all, and it fails the
   moment the camera is knocked.
-- **C2 — The robot is the darkest thing in the working region.** Not in the frame: the room
+- **C2, The robot is the darkest thing in the working region.** Not in the frame: the room
   beyond the backdrop is darker still (§15.1).
-- **C3 — The backdrop is the brightest smooth surface in view.** Used only by the fallback
+- **C3, The backdrop is the brightest smooth surface in view.** Used only by the fallback
   of §15.4.
-- **C4 — The robot is one compact object.** Its pieces — rim arcs, magnet mount, rod tips —
+- **C4, The robot is one compact object.** Its pieces, rim arcs, magnet mount, rod tips,
   lie within one object radius of each other. §15.5.
 
 ### 15.1 Why brightness alone cannot work
@@ -1061,13 +1061,13 @@ Measured over both frames in `vision/drone_orientation/elp/`, in 8-bit counts:
 |---|---|---|---|---|
 | white backdrop | 176–179 | **179–184** | 188–197 | **0.8** |
 | drone rim | 4–26 | **42–78** | 176–182 | 26.9–27.4 |
-| grey rod | 83 | **96** | 162 | — |
+| grey rod | 83 | **96** | 162 |: |
 | coils | 8–28 | 85–104 | 170–224 | 15.7–34.4 |
 | dark ambient beyond the backdrop | 6 | **7–8** | 10–11 | 1.1 |
 
 Two facts follow, and they point in opposite directions. The coils' 85–104 sits on top of
 the drone's 42–78, so no threshold separates them. And the ambient is *darker than the
-drone* — so an inverted threshold does not merely admit the room, it prefers it. Because
+drone*: so an inverted threshold does not merely admit the room, it prefers it. Because
 `silhouette_hull` pools every surviving blob into a single convex hull, and the ambient
 reaches the frame edge, the failure is not a stray contour but a hull spanning the image.
 The fit still returns an ellipse. It is simply meaningless.
@@ -1086,7 +1086,7 @@ captures, $c(x) \equiv 0$ at **every pixel** (max 0, mean 0.00). A mono sensor r
 channel, so the gate `c(x) ≤ CHROMA_MAX` passes the entire frame.
 
 The lesson is about instruments, not about colour. The gate was not skipped for want of a
-three-channel array — feeding it a replicated BGR frame passes it just as completely. A
+three-channel array: feeding it a replicated BGR frame passes it just as completely. A
 discriminant that is identically zero on its input is not a weak test, it is *no test*, and
 it had been failing open and silently.
 
@@ -1108,7 +1108,7 @@ resolution and 48.4 ms at full. Since `segment()` alone costs 7.9 ms single-core
 and dropping every fourth frame.
 
 Its weakness is exactly C1. A camera that has moved makes $B$ describe a scene that no longer
-exists, and the subtraction reports the shifted edges as robot — confidently, with no
+exists, and the subtraction reports the shifted edges as robot: confidently, with no
 residual to betray it. The defence is not statistical but procedural: measure the differing
 fraction and refuse when it exceeds a scene-change threshold (`background.py --check`).
 
@@ -1116,7 +1116,7 @@ fraction and refuse when it exceeds a scene-change threshold (`background.py --c
 
 Without $B$, the question changes from *what to reject* to **where to look**, and there the
 table in §15.1 has a second, unused column. The backdrop's local standard deviation is 0.8
-against 15.7–34.4 for the coils — a 20–40× margin — while the equally smooth ambient is 170
+against 15.7–34.4 for the coils, a 20–40× margin, while the equally smooth ambient is 170
 counts darker. Neither brightness nor texture separates the backdrop alone; their conjunction
 does:
 
@@ -1127,7 +1127,7 @@ as two box filters via $\sigma^2 = \mathbb{E}[I^2] - \mathbb{E}[I]^2$.
 
 **The hull is not cosmetic, and this is the part that took measurement to find.** The robot
 punches a dark hole in the backdrop, so the region must be closed over it. The obvious
-closure — fill enclosed holes — *cannot work here*: the robot touches the rod, and the rod
+closure, fill enclosed holes, *cannot work here*: the robot touches the rod, and the rod
 runs off the bottom of the frame, so the robot-hole and the rod-notch form one region open to
 the image border and therefore not enclosed. Both `MORPH_CLOSE` and a border flood fill
 return nothing on the face-on capture. A convex hull has no such dependence on connectivity.
@@ -1148,18 +1148,18 @@ definition.
 is a *ring* and therefore hollow: on the synthetic clutter scene the robot is 1783 px against
 3225 px for a solid coil, and anchoring on area returns a confident fit to the coil. Score
 each candidate grouping by its plain-fit Sampson residual relative to its own size,
-$\rho = \text{rms}/a$ — relative, because an absolute residual systematically prefers the
+$\rho = \text{rms}/a$: relative, because an absolute residual systematically prefers the
 smallest group, which is the clutter.
 
 But shape alone fails too, and symmetrically: **a solid disc is a perfect ellipse**, so round
 clutter scores better than the robot ever can. Ranking on $\rho$ returns a 64 px coil in place
 of the 125 px robot. The resolution is that the two criteria are not competing measures of
-the same thing — $\rho$ decides *admissibility* and size decides *between* admissible groups:
+the same thing: $\rho$ decides *admissibility* and size decides *between* admissible groups:
 
 $$\text{choose } \arg\max_{\,g\,:\,\rho(g)\,\le\,\rho_{\max}} a(g).$$
 
-Every real candidate clears $\rho_{\max}$ comfortably — the robot fits at $\rho = 0.006$ on
-both captures against a tolerance of 0.05 — so the tolerance exists only to reject groupings
+Every real candidate clears $\rho_{\max}$ comfortably, the robot fits at $\rho = 0.006$ on
+both captures against a tolerance of 0.05, so the tolerance exists only to reject groupings
 that have spanned two objects, and among what survives, the robot is the largest thing in
 frame that is an ellipse at all.
 
@@ -1184,15 +1184,15 @@ implemented and measured** against both real captures.
 
 | tried | result |
 |---|---|
-| chroma gate, $\max-\min$ over BGR | **Inoperative** — $c(x) \equiv 0$ on a mono sensor; passes the whole frame, and failed open silently |
-| luminance threshold, no region gate | **Fails** — coils 85–104 overlap the drone's 42–78, and the ambient at 7–8 is darker than the drone and touches the border |
-| `MORPH_CLOSE` to fill the robot-shaped hole | **Fails face-on** — cannot close a 325 px hole; no detection at all |
-| enclosed-hole border flood fill | **Fails, structurally** — the drone touches the rod and the rod reaches the border, so the hole is not enclosed |
-| vertical morphological opening to remove the rod | **No gain** — identical fits with and without; brightness already separates it |
-| column-strip "middle third" prior | **Worse** — the drone darkens its own columns, collapsing the detected strip to 17% of frame and cutting the robot in half |
-| anchoring the spread gate on the largest blob | **Fails** — the rim is hollow, so a solid coil outweighs it; returns the coil |
-| ranking blob groupings by shape alone | **Fails** — a disc is a perfect ellipse; returns a 64 px coil over the 125 px robot |
-| full-resolution backdrop mask | **Disqualified on cost** — 48.4 ms, i.e. 20 Hz, against an 8.3 ms camera period |
+| chroma gate, $\max-\min$ over BGR | **Inoperative**: $c(x) \equiv 0$ on a mono sensor; passes the whole frame, and failed open silently |
+| luminance threshold, no region gate | **Fails**: coils 85–104 overlap the drone's 42–78, and the ambient at 7–8 is darker than the drone and touches the border |
+| `MORPH_CLOSE` to fill the robot-shaped hole | **Fails face-on**: cannot close a 325 px hole; no detection at all |
+| enclosed-hole border flood fill | **Fails, structurally**: the drone touches the rod and the rod reaches the border, so the hole is not enclosed |
+| vertical morphological opening to remove the rod | **No gain**: identical fits with and without; brightness already separates it |
+| column-strip "middle third" prior | **Worse**: the drone darkens its own columns, collapsing the detected strip to 17% of frame and cutting the robot in half |
+| anchoring the spread gate on the largest blob | **Fails**: the rim is hollow, so a solid coil outweighs it; returns the coil |
+| ranking blob groupings by shape alone | **Fails**: a disc is a perfect ellipse; returns a 64 px coil over the 125 px robot |
+| full-resolution backdrop mask | **Disqualified on cost**: 48.4 ms, i.e. 20 Hz, against an 8.3 ms camera period |
 
 ### 15.8 Correspondence with the implementation
 

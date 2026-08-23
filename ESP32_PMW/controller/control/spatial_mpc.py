@@ -115,11 +115,10 @@ class SpatialMPC:
         self.iters = iters
         self.b_amp = b_amp
 
-        # `allocate` commands a circular field of fixed amplitude, so a + b = 2 b_amp and the
-        # feasibility condition collapses to a ceiling on f alone: a bound SLSQP enforces
-        # exactly and for free, not a penalty it can wander past. The amplitude is only
-        # achievable while the allocation stays inside i_max, so `rollout` keeps a soft term
-        # for the residual position/current/lock coupling.
+        # A circular field of fixed amplitude collapses the feasibility condition to a
+        # ceiling on f alone: a bound SLSQP enforces exactly and free, not a penalty it can
+        # wander past. That amplitude needs the allocation inside i_max, so `rollout` keeps
+        # a soft term for the residual position/current/lock coupling.
         f_lock = math.sqrt(
             self.lim.lock_max * plant.robot.mdip * 2.0 * b_amp / (2.0 * plant.k_drag)
         )

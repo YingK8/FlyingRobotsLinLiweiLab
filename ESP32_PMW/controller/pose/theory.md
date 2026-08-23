@@ -617,173 +617,108 @@ points are measured along the local normal only. C3 is not a simplification —
 
 ### 13.1 Locating one edge: the sub-pixel limit
 
-The natural first question is how precisely a boundary can be placed, since
-everything downstream is a function of that. Take a 1-D cut across the boundary.
-The noiseless intensity is $I(x) = B + C\,\Phi\!\big((x-x_0)/s\big)$ with $\Phi$
-the Gaussian CDF, and the Fisher information about the edge position $x_0$ from
-samples at integer $x_i$ is
+Everything downstream is a function of how precisely a boundary can be placed, so
+that is the first floor to establish. Take a 1-D cut across the boundary with
+noiseless intensity $B + C\,\Phi\!\big((x-x_0)/s\big)$, $\Phi$ the Gaussian CDF,
+and read the Cramér-Rao bound on $x_0$.
 
-$$J(x_0) = \frac{1}{\sigma_n^2}\sum_i \left(\frac{\partial I_i}{\partial x_0}\right)^{\!2}.$$
+**Point samples cost $\sqrt{s}$ in blur**, $\sigma_{x_0} \ge 1.883\,(\sigma_n/C)\sqrt{s}$,
+but that model breaks at its own limit: a perfectly sharp edge between two point
+samples moves no sample, so the bound diverges as $s\to0$ and there is an interior
+optimum near $s = 0.5$ px.
 
-**Point samples.** With $\partial I/\partial x_0 = -C\,\phi\big((x-x_0)/s\big)/s$
-and the sum dense enough to become an integral, $\int\phi^2 = 1/(2\sqrt\pi)$ gives
+**Box pixels change the limit rather than refining it.** Real pixels integrate over
+their footprint, giving
 
-$$J = \frac{C^2}{2\sqrt{\pi}\,s\,\sigma_n^{2}}
-\qquad\Longrightarrow\qquad
-\sigma_{x_0} \;\ge\; \frac{\sigma_n}{C}\sqrt{2\sqrt{\pi}\,s}
-\;\approx\; 1.883\,\frac{\sigma_n}{C}\sqrt{s}.$$
+$$\frac{\sigma_n}{C} \;\le\; \sigma_{x_0} \;\le\; \sqrt{2}\,\frac{\sigma_n}{C},$$
 
-Blur costs precision, as $\sqrt{s}$. But taken to its own limit this formula is
-wrong in an instructive way: as $s\to0$ it promises perfect localisation, while
-the *discrete* sum does the opposite. A perfectly sharp edge falling between two
-point samples moves no sample at all, every derivative underflows, $J\to0$, and
-the bound **diverges**. Point sampling has an interior optimum, measured at
-$s \approx 0.5$ px.
-
-**Box pixels.** Real pixels integrate over their own footprint, and that changes
-the limit rather than refining it. For a sharp edge a fraction $w$ into a pixel,
-the derivative vector is a partition of unity over two pixels, so
-
-$$J = \frac{C^2}{\sigma_n^2}\big(w^2 + (1-w)^2\big)
-\qquad\Longrightarrow\qquad
-\frac{\sigma_n}{C} \;\le\; \sigma_{x_0} \;\le\; \sqrt{2}\,\frac{\sigma_n}{C},$$
-
-finite for every blur width and every sub-pixel phase, and **monotone**: sharper
-is always better. The sensor is not merely sampling the scene, it is low-pass
-filtering it first, and *that filter is what makes the sub-pixel phase
-observable*. Both limits are verified numerically; the two models agree to 0.3%
+finite for every blur width and every sub-pixel phase, and monotone: sharper is
+always better. The sensor low-pass filters the scene before sampling it, and *that
+filter is what makes the sub-pixel phase observable*. The two models agree to 0.3 %
 at $s = 4$ px and disagree by 49× at $s = 0.15$ px.
 
-**The quantisation floor.** A threshold-and-contour outline reports the centre of
-the last inside pixel, so the true edge is uniform over one pixel about it:
+**The quantisation floor** for a threshold-and-contour outline is
+$1/\sqrt{12} = 0.2887$ px. Sub-pixel refinement pays only above $C/\sigma_n = 6.7$,
+which a white rotor on a black ground clears easily.
 
-$$\sigma_{\text{quant}} = 1/\sqrt{12} = 0.2887\ \text{px}.$$
-
-Sub-pixel refinement is worth doing only above the break-even contrast-to-noise
-ratio where the CRLB drops below that, computed as $C/\sigma_n = 6.7$ — trivially
-satisfied by a white rotor on a black ground, which is why §12.12's sub-pixel
-experiment was worth running even though it bought only 2%.
-
-**Verification.** Maximum-likelihood template fitting on synthetic profiles at
-$C = 200$, $\sigma_n = 6$, $s = 1$ px reaches 0.0584 px against a bound of 0.0576
-px — an efficiency of **0.97**. The algebra is right.
-
-**And the shipped refinement is close to it.** Running `segment.subpixel_boundary`
-on a synthetic soft-edged disc of known radius, at $C = 200$, $\sigma_n = 5$,
-$s = 1.2$ px:
+**The shipped refinement is near the bound.** `segment.subpixel_boundary` on a
+synthetic soft-edged disc at $C = 200$, $\sigma_n = 5$, $s = 1.2$ px:
 
 | | bias | scatter |
 |---|---|---|
 | thresholded contour | −0.461 px | 0.269 px |
 | after sub-pixel refinement | −0.038 px | **0.076 px** |
-| edge CRLB | — | 0.052 px |
+| edge CRLB | | 0.052 px |
 
-The refinement removes 92% of the bias and 72% of the scatter, and what remains
-is **1.46× the theoretical bound**. So there is at most a factor of 1.5 available
-in edge localisation, ever, by any method.
+It removes 92 % of the bias and 72 % of the scatter, landing at **1.46× the
+theoretical bound**. At most a factor of 1.5 is available in edge localisation,
+ever, by any method.
 
-Hold that number against the boundary scatter actually measured on rendered
-frames — **1.17 px** (§13.7) — and §12.12's negative result stops being a
-surprise. Sub-pixel work improved the mechanism by 18× and bought 2% of the
-outcome because the mechanism was never the constraint: the boundary is being
-located to a tenth of a pixel, and it is a tenth of a pixel away from *the wrong
-curve*. Locating the edge of the wrong shape more precisely does not help, and
-now there is a number for how much it cannot help by.
+Hold that against the boundary scatter measured on rendered frames, **1.17 px**
+(§13.7), and §12.12's negative result stops being a surprise. Sub-pixel work
+improved the mechanism by 18× and bought 2 % of the outcome, because the mechanism
+was never the constraint. The boundary is being located to a tenth of a pixel, and
+it is a tenth of a pixel away from *the wrong curve*.
 
 ### 13.2 From boundary points to the ellipse
 
-Parametrise the ellipse as $p = (c_x, c_y, a, b, \theta)$ with $a \ge b$ the
-semi-axes. A boundary point at eccentric angle $\varphi$ is
-$x(\varphi) = c + R(\theta)\,(a\cos\varphi,\; b\sin\varphi)^\top$, with outward
-normal along $R(\theta)(b\cos\varphi,\; a\sin\varphi)^\top$.
+Parametrise the ellipse as $p = (c_x, c_y, a, b, \theta)$, $a \ge b$.
 
-**Only the normal component is observable.** Displacing a boundary point along
-the tangent slides it to another point of the same curve and changes nothing —
-the aperture problem, in its cleanest form. So each point contributes one scalar,
-not two, and
+**Only the normal component of a boundary point is observable.** Displacing a point
+along the tangent slides it to another point of the same curve, the aperture problem
+in its cleanest form, so each point contributes one scalar and not two.
 
-$$g_i = n_i^\top \frac{\partial x(\varphi_i)}{\partial p},
-\qquad J = \frac{1}{\sigma_r^2}\sum_i g_i g_i^\top .$$
+**The circle case closes analytically**, and inverts the usual intuition:
 
-**The circle case closes analytically**, and is worth doing by hand because the
-answer is counter-intuitive. For $a = b = r$ the normal is
-$(\cos\varphi, \sin\varphi)$, the gradients are $(-\cos\varphi, -\sin\varphi, -1)$,
-and averaging $\cos^2 = \sin^2 = 1/2$, $\cos\sin = 0$ over a full turn,
+$$\sigma_{c} = \sigma_r\sqrt{2/N}, \qquad \sigma_{r_{\!\text{px}}} = \sigma_r/\sqrt{N}.$$
 
-$$J = \frac{N}{\sigma_r^2}\operatorname{diag}\!\left(\tfrac12, \tfrac12, 1\right)
-\qquad\Longrightarrow\qquad
-\sigma_{c} = \sigma_r\sqrt{2/N}, \qquad \sigma_{r_{\!\text{px}}} = \sigma_r/\sqrt{N}.$$
-
-**The centre is measured $\sqrt2$ times worse than the radius**, per axis. That
-inverts the usual intuition — a centre is an average of opposed points and ought
-to be the better-determined quantity — and the reason is that each point
-constrains the centre only along its own normal, diluting the information by
-$\cos^2\varphi$, while every point constrains the radius fully.
+The centre is measured $\sqrt2$ times worse than the radius, per axis. A centre looks
+like an average of opposed points and ought to be better determined, but each point
+constrains it only along its own normal, diluting the information by $\cos^2\varphi$,
+while every point constrains the radius fully.
 
 Two structural facts fall out of the same matrix:
 
-- **A circle has no orientation.** At $a = b$ the $\theta$ row and column vanish
-  identically; the Fisher matrix has rank 4, not 5. Measured
-  $\lambda_{\min}/\lambda_{\max} = 8\times10^{-30}$ — this is exact, not
-  ill-conditioning.
-- **A short arc is catastrophic.** Keeping 40% of the perimeter inflates the
-  bound on the semi-major axis by **17.9×**. Occlusion is not a graceful
-  degradation.
+- **A circle has no orientation.** At $a = b$ the $\theta$ row and column vanish and
+  the Fisher matrix has rank 4, not 5. Measured
+  $\lambda_{\min}/\lambda_{\max} = 8\times10^{-30}$: exact, not ill-conditioning.
+- **A short arc is catastrophic.** Keeping 40 % of the perimeter inflates the bound on
+  the semi-major axis by **17.9×**. Occlusion is not a graceful degradation.
 
-**Correlated points.** Adjacent contour points are produced by the same PSF and
-the same silhouette excursion, so their errors are not independent. For noise
-with correlation length $L$ sampled every $d$, the honest count is
-$N_{\text{eff}} = N d / \max(d, L)$. On real renders $L$ is measured at 17.5 px
-against a hull-point spacing of about 11 px, which turns 31 hull points into 15
-independent ones — a factor of 1.4 in the bound. That is the *second* largest
-source of optimism in a naive contour CRLB; the largest is hulling a ~354 px
-perimeter down to 31 points in the first place, worth 3.4 (§13.8).
+**Adjacent points are correlated**, produced by the same PSF and the same silhouette
+excursion, so the honest count is $N_{\text{eff}} = N d / \max(d, L)$ for correlation
+length $L$ at spacing $d$. On real renders $L = 17.5$ px against about 11 px spacing,
+turning 31 hull points into 15 independent ones, a factor of 1.4. That is the second
+largest source of optimism in a naive contour CRLB. The largest is hulling a ~354 px
+perimeter down to 31 points at all, worth 3.4 (§13.8).
 
-**Verification.** Monte Carlo over 4000 trials with the shipped
-`segment.fit_ellipse` on exact ellipses with normal-direction noise:
-
-| parameter | CRLB | empirical | efficiency | bias/σ |
-|---|---|---|---|---|
-| $c_x$ | 0.006386 | 0.006497 | 0.966 | +0.025 |
-| $c_y$ | 0.005477 | 0.005556 | 0.972 | −0.006 |
-| $a$ | 0.007939 | 0.008058 | 0.971 | −0.008 |
-| $b$ | 0.006509 | 0.006634 | 0.963 | +0.025 |
-| $\theta$ | 0.000324 | 0.000323 | 1.007 | +0.000 |
-
-**The direct algebraic fit is statistically efficient to within 4%.** This is
-worth stating plainly because it closes off a whole category of work: Fitzgibbon's
-direct fit is famously *biased* toward small ellipses, and the natural reflex is
-to replace it with an iterative geometric or maximum-likelihood fit. At this
-noise level there is nothing to recover — the fit is already extracting
-essentially all the information the boundary points contain, and a better fitter
-would buy at most 4%.
+**The direct algebraic fit is statistically efficient to within 4 %.** Monte Carlo over
+4000 trials with the shipped `segment.fit_ellipse` puts every parameter's efficiency
+between 0.96 and 1.01. This closes off a category of work: Fitzgibbon's direct fit is
+famously biased toward small ellipses, and the reflex is to replace it with an iterative
+geometric or maximum-likelihood fit. At this noise level there is nothing to recover.
 
 ### 13.3 From the ellipse to the pose
 
-The remaining link is a change of variables. The Jacobian
-$G = \partial(\text{pose})/\partial(c_x, c_y, a, b, \theta)$ is taken by central
-differences of the shipped `conic.backproject_ellipse` rather than a
-hand-linearised model — deliberately, since an analytic Jacobian of the
-eigendecomposition would be a second implementation to keep in sync, and what we
-want bounded is the pipeline that ships. The branch is re-selected at every
-perturbed point by proximity to the nominal pose, so the derivative does not jump
-between the two ambiguity solutions and report a spurious infinity. Then
-$\Sigma_{\text{pose}} = G\,\Sigma_{\text{ellipse}}\,G^\top$.
+The remaining link is a change of variables,
+$\Sigma_{\text{pose}} = G\,\Sigma_{\text{ellipse}}\,G^\top$, with
+$G = \partial(\text{pose})/\partial(c_x, c_y, a, b, \theta)$ taken by central
+differences of the shipped `conic.backproject_ellipse`. Differencing the shipped code
+rather than hand-linearising it keeps one implementation instead of two, and bounds the
+pipeline that actually runs. The branch is re-selected at every perturbed point by
+proximity to the nominal pose, so the derivative cannot jump between the two ambiguity
+solutions and report a spurious infinity.
 
-$G$ is $6\times5$ and cannot have rank above 5. That is the formal statement of
-§12's claim that the estimator is 5-DOF: there is no sixth direction for it to
-have information about.
+$G$ is $6\times5$ and cannot have rank above 5. That is the formal statement of §12's
+claim that the estimator is 5-DOF: there is no sixth direction for it to have
+information about.
 
-**Verification.** End-to-end Monte Carlo — noisy boundary points through
-`fit_ellipse` through `backproject_ellipse` — gives efficiencies of 0.96, 1.06,
-0.94 on $(X, Y, Z)$ and 0.99, 1.03, 1.00 on the normal components, all within the
-sampling error of unity.
-
-**The estimator is at the bound.** Every stage of the solve — the edge model, the
-ellipse fit, the back-projection — extracts essentially all of the information
-that exists in the boundary points it is given. Whatever explains the
-two-orders-of-magnitude gap between these bounds and the measured residual
-(§13.7), it is not the solver.
+**The estimator is at the bound.** End-to-end Monte Carlo through `fit_ellipse` and
+`backproject_ellipse` gives efficiencies within sampling error of unity on all three
+positions and all three normal components. Every stage of the solve extracts
+essentially all the information in the boundary points it is given. Whatever explains
+the two-orders-of-magnitude gap between these bounds and the measured residual (§13.7),
+it is not the solver.
 
 ### 13.4 The depth law, corrected: $\sqrt3$ is the price of not knowing the tilt
 

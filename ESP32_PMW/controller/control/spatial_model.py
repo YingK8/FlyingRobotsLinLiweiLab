@@ -559,17 +559,9 @@ def make_state(r, v=(0.0, 0.0, 0.0), s=(0.0, 0.0, 1.0)):
 # The GUI's recommended passive-hover start point.
 GUI_R0 = np.array([0.002, 0.0, 0.020084])
 
-# n_rot at GUI_R0 for the default array, pinned so a refactor that changes the
-# field cannot pass quietly.
-#
-# The GUI stores s0 = [-5.55574937058e-4, -8.3e-18, 0.999999845668] and its
-# comment calls it "the local directed n_rot at the recommended initial point".
-# It is not, for the coil table that ships beside it: `quick_coils()` reproduces
-# that table position-for-position and phase-for-phase, and the axis there tilts
-# +0.0488 in x, not -0.00056. The stored value fits the same array at z ~ 15 mm,
-# where the tilt crosses zero, so it is a stale default left behind by a geometry
-# change -- consistent with the file being named coil22mm while its table is the
-# 21 mm hardware. Regenerate it from here rather than trusting the constant.
+# n_rot at GUI_R0, pinned so a refactor that changes the field cannot pass quietly.
+# Regenerate it from here rather than trusting the GUI's own stored s0, which belongs to a
+# different geometry: it tilts -0.00056 in x where this coil table gives +0.0488.
 N_ROT_AT_R0 = np.array([0.048798659933, 0.0, 0.998808635580])
 
 

@@ -102,11 +102,9 @@ class DiscreteHoverController:
         )
         self.prev_f_field = f_field
 
-        # Conditional-integration anti-windup. u depends on q through -K, so
-        # integrating error e moves u by ~ -K_int*ts*e: when the unsaturated
-        # command is above the clamp we need e > 0 to come back into range,
-        # below the clamp we need e < 0. Slew limiting is a transient and
-        # does NOT freeze the integrator -- only hard clamps do.
+        # Conditional-integration anti-windup: integrate only when the unsaturated command
+        # is in range, or when the error points back toward it. Slew limiting is a transient
+        # and does NOT freeze the integrator; only hard clamps do.
         self._integrate(0, err[0], u[0], -self.mag_max, self.mag_max)
         self._integrate(1, err[2], u[1], self.freq_min, self.freq_max)
         return mag, f_field

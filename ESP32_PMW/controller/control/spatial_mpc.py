@@ -115,16 +115,11 @@ class SpatialMPC:
         self.iters = iters
         self.b_amp = b_amp
 
-        # The lock bound, as a frequency bound. `allocate` commands a circular
-        # field of fixed amplitude, so a + b = 2 b_amp and the feasibility
-        # condition 2 k_drag f^2 <= mdip (a+b) collapses to a ceiling on f alone.
-        # That makes it a *bound*, which SLSQP enforces exactly and for free,
-        # rather than a penalty it can wander past.
-        #
-        # It is not the whole story: the amplitude is only achievable while the
-        # allocation stays inside i_max, and far off axis or at large tilt it does
-        # not. The residual coupling between position, current and lock is what
-        # the soft term in `rollout` still covers.
+        # `allocate` commands a circular field of fixed amplitude, so a + b = 2 b_amp and the
+        # feasibility condition collapses to a ceiling on f alone: a bound SLSQP enforces
+        # exactly and for free, not a penalty it can wander past. The amplitude is only
+        # achievable while the allocation stays inside i_max, so `rollout` keeps a soft term
+        # for the residual position/current/lock coupling.
         f_lock = math.sqrt(
             self.lim.lock_max * plant.robot.mdip * 2.0 * b_amp / (2.0 * plant.k_drag)
         )
@@ -133,12 +128,10 @@ class SpatialMPC:
         self.u_trim = np.array([0.0, 0.0, plant.f_hover])
         self.U = np.tile(self.u_trim, (blocks, 1))
 
-        # Decision variables are scaled to comparable sensitivity before they
-        # reach SLSQP. Unscaled, a tilt of ~0.01 and a frequency of ~110 differ by
-        # four orders of magnitude, and SLSQP's single absolute finite-difference
-        # step cannot suit both: with the default 1.5e-8 the tilt gradient came
-        # out as rounding noise from the rollout's ~60 Euler steps, and the
-        # controller sat at trim while the robot flew away.
+        # Scale the decision variables to comparable sensitivity. SLSQP takes one absolute
+        # finite-difference step, which cannot suit both a ~0.01 tilt and a ~110 Hz drive:
+        # at the default 1.5e-8 the tilt gradient was rounding noise and the controller sat
+        # at trim while the robot flew away.
         self.scale = np.array([0.05, 0.05, 20.0])
         self.fd_eps = 2e-3  # in scaled units: 1e-4 of tilt, 0.04 Hz
         self.K = None  # LQR warm-start gain, built on first use
@@ -166,11 +159,10 @@ class SpatialMPC:
         e2 = np.cross(n, e1)
         z = pinv @ (self.b_amp * e1) - 1j * (pinv @ (self.b_amp * e2))
 
-        # Saturate on the current ceiling, keeping the axis and shape and giving
-        # up amplitude. Without this the allocation "achieves" b_amp anywhere by
-        # demanding unbounded current, so a prediction that leaves the array
-        # never loses lock and the cost landscape fills with 1e21 spikes. The
-        # drive saturates; the model has to as well.
+        # Saturate on the current ceiling, keeping axis and shape and giving up amplitude.
+        # The drive saturates, so the model must: otherwise the allocation "achieves" b_amp
+        # anywhere by demanding unbounded current, a prediction that leaves the array never
+        # loses lock, and the cost landscape fills with 1e21 spikes.
         peak = float(np.abs(z).max())
         if peak > self.lim.i_max:
             z = z * (self.lim.i_max / peak)
@@ -289,9 +281,8 @@ class SpatialMPC:
             cost += self.w.slew * (du @ du)
             prev_u = seq[k]
 
-            # Exact penalty on the lock margin. Kept soft rather than as an SLSQP
-            # constraint because a constrained solve finite-differences the
-            # constraint too, which does not fit the real-time budget.
+            # Exact penalty on the lock margin, soft rather than an SLSQP constraint: a
+            # constrained solve finite-differences the constraint too, blowing the budget.
             # ponytail: soft lock margin; promote to a hard constraint if the
             # trajectory is ever seen riding the boundary.
             over = info["ratio"] - self.lim.lock_max
@@ -323,12 +314,10 @@ class SpatialMPC:
         self._pinv = np.linalg.pinv(self.channel_basis(x[0:3]))
         self._u_prev = self.u_trim if u_prev is None else np.asarray(u_prev, float)
 
-        # Warm start: LQR now, trim afterwards. Seeding from a stabilising input
-        # rather than from trim is what makes one SQP iteration enough. Started
-        # at trim, SLSQP could not find a descent direction at all -- doing
-        # nothing is a deep local minimum here, because a tilt costs position
-        # immediately (precession sends the robot 90 degrees off the command) and
-        # only pays off later.
+        # Warm start: LQR now, trim afterwards. Seeding from a stabilising input is what
+        # makes one SQP iteration enough. From trim, SLSQP found no descent direction at
+        # all: doing nothing is a deep local minimum, because a tilt costs position at once
+        # (precession sends the robot 90 degrees off the command) and only pays off later.
         self.U = np.vstack(
             [self.lqr_input(x, target), np.tile(self.u_trim, (self.blocks - 1, 1))]
         )

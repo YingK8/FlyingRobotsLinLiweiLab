@@ -276,6 +276,19 @@ def up_direction(rig, zero=None):
     return "-y" if frame == "camera_A" else "+z"
 
 
+def grid_plane(up):
+    """
+    The plane a floor grid lies in, given which axis is up.
+
+        Two-way before, ``"xy" if up == "+z" else "xz"``, which was right while up could
+        only be +z or -y. `up_direction` can now answer +x or -x as well -- a `rotate`
+        moves it -- and those were falling through to "xz", laying the floor through the
+        vertical axis.
+    """
+
+    return {"x": "yz", "y": "xz", "z": "xy"}[up[-1]]
+
+
 def camera_in_datum(cam, zero):
     """
     A camera's `T_world_cam` expressed in the datum frame, mirroring `Zero.apply`.
@@ -513,7 +526,7 @@ class LiveViz:
             height=400.0,
             cell_size=10.0,
             section_size=50.0,
-            plane="xy" if self.up == "+z" else "xz",
+            plane=grid_plane(self.up),
             position=(0.0, 0.0, 0.0),
         )
         scene.add_frame("/world", axes_length=40.0, axes_radius=0.8)
@@ -586,7 +599,7 @@ class LiveViz:
         self.up = up_direction(self.rig, zero)
         try:
             self.server.scene.set_up_direction(self.up)
-            self._grid.plane = "xy" if self.up == "+z" else "xz"
+            self._grid.plane = grid_plane(self.up)
             for cam, frustum in zip(self.rig.cameras, self._frustums):
                 T = camera_in_datum(cam, zero)
                 frustum.wxyz = wxyz_from_matrix(T[:3, :3])
@@ -1597,13 +1610,22 @@ def prime_zero(est, frames, n=AUTO_ZERO_FRAMES, tol_deg=AUTO_ZERO_TOL_DEG,
         if spread <= tol_deg:
             mean_c = np.mean([a for a, _ in window], axis=0)
             axis = -mean_n if flip else mean_n
-            return _rotate_zero(Zero.from_pose(
+            base = Zero.from_pose(
                 mean_c, axis,
                 meta={"source": "prime_zero", "n": n, "flip": bool(flip),
                       "spread_deg": round(spread, 2)},
-            ), rotate), (f"datum from {n} poses, spread {spread:.2f} deg"
-                + (" (flipped)" if flip else "")
-                + (f" rotated {rotate}" if rotate else ""))
+            )
+            z = _rotate_zero(base, rotate)
+            # Say where up ended up, rather than only that a rotation was applied.
+            # "counter-clockwise about y" depends on which side you view from, so the
+            # sign of `rotate` is not something to reason about -- scipy's is
+            # right-handed about the named axis, and ("y", 90) takes the rotor axis
+            # from +z to +x. Printing the result makes it one glance instead of an
+            # argument, and `("y", -90)` is the other way.
+            return z, (f"datum from {n} poses, spread {spread:.2f} deg"
+                       + (" (flipped)" if flip else "")
+                       + (f" rotated {rotate}, up is now "
+                          f"{z.meta.get('up', '+z')}" if rotate else ""))
     return None, f"no stable pose in {len(kept)} detections -- datum left as loaded"
 
 

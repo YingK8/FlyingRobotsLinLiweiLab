@@ -14,15 +14,34 @@ camera  ──frames──▶  calib  ──K, rig, datum──▶  pose  ──
 | 3 | [`pose/`](pose/) | a 5-DOF `Pose` per frame | [Pose](pose/theory.md) |
 | 4 | [`control/`](control/) | field frequency and lateral commands over serial | [Control](control/theory.md) |
 
+Plus [`viz/`](viz/) (`live_viz.py`), which is not a pipeline stage: it is the live
+viser view of the estimated pose. It lives here rather than in `../ai/` because
+`control/hover_controller_runner.py` imports it to show what the loop is doing.
+
 The layering is enforced, not merely intended: each module's `sys.path` bootstrap
 adds only the stages *before* it, so a forward import fails immediately instead of
-quietly creating a cycle.
+quietly creating a cycle. Stages 1-3 hold to this strictly. The two exceptions are
+`viz/`, which reaches back to `camera`, `calib` and `pose` to draw them, and
+`control/hover_controller_runner.py`, which adds `../viz` to show the loop live.
 
-Everything that is not front-end pipeline code, tests, sweeps, one-shot
+Everything that is not pipeline or view code, tests, sweeps, one-shot
 validation, instrumentation, sysID, plotting, lives in [`../ai/`](../ai/), which
 may depend on all four stages.
 
 ## Running it
+
+[`run.ipynb`](run.ipynb) is the driver, and the one to start from. Its three
+sections are the pipeline end to end: calibrate (`calib/calibrate.py`), record a
+flight (`camera/record.py`), then estimate and view the pose (`pose/background.py`,
+`viz/live_viz.py`).
+
+```bash
+cd ESP32_PMW
+uv run jupyter lab controller/run.ipynb
+```
+
+The per-stage entry points below are what `run.ipynb` calls, and are useful when
+you want one stage on its own:
 
 ```bash
 cd ESP32_PMW

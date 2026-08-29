@@ -1285,7 +1285,7 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
               file=sys.stderr)
     est.backgrounds = dict(backgrounds)
 
-    filt = PoseFilter()
+    filt = PoseFilter(rig=rig)
 
     # **Not primed before the viewer exists.** A live session normally starts before
     # the robot is in shot, and waiting for a stable pose there blocks `make_viz`
@@ -1434,6 +1434,19 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
             f"deliberately: a bad extrinsic gives poses that are smooth, plausible and "
             f"wrong.")
     rig = rigmod.StereoRig.load(p)
+
+    # Say which noise model is in force. A rendered fallback silently standing in
+    # for a bench measurement is exactly the confusion `noise.py` exists to end, and
+    # the only place it would ever be visible is here.
+    from noise import NoiseModel
+    nm = NoiseModel.load()
+    if nm.measured:
+        print(f"noise model: measured, {nm.meta.get('condition', 'condition unrecorded')},"
+              f" {len(nm.stations)} station(s), {nm.meta.get('created', '?')}")
+    else:
+        print("noise model: none on disk, using the rendered fallbacks. "
+              "Record one with\n    python pose/noise.py --record")
+
     if backgrounds == "running":
         import background as bgmod
         backgrounds = {c.name: bgmod.RunningPlate() for c in rig.cameras}
@@ -1687,7 +1700,7 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
     if zero is not None:
         est.zero = zero
 
-    filt = PoseFilter()
+    filt = PoseFilter(rig=rig)
     log = None
     if csv_out:
         from recorder import PoseRecorder
@@ -1713,7 +1726,7 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
                 for c in caps:
                     c.release()
                 caps, stamps = open_recording(rec_dir)
-                i, filt = 0, PoseFilter()
+                i, filt = 0, PoseFilter(rig=rig)
                 # Dropped, not kept: a tuning session runs for hundreds of passes and
                 # the only pass anyone reads is the one on screen.
                 poses.clear()

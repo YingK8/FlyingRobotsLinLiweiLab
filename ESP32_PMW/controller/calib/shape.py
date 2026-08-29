@@ -54,6 +54,10 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "tilt_calibration.json"
 #
 # Read at import. Setting POSE_APPEARANCE after importing the pose package leaves
 # the previous appearance's radius and calibration in force, silently.
+# `dark` is the rig on the bench: a black rim against the white foam backdrop. This said
+# `bright` long after the rig changed, and it is most of why an offline run returned a
+# poses.csv with a header and no rows -- `bright` thresholds at 128 on a scene whose median
+# is 144, so the hull takes the backdrop and every downstream gate refuses it.
 APPEARANCE = os.environ.get("POSE_APPEARANCE", "bright")
 
 

@@ -5,7 +5,7 @@
 lateral commands over serial to `src/main_flight.cpp`.*
 
 *Two plants live here. Sections 1–11 are the altitude model that flies today: one input, one
-axis, a uniform field. Sections 12–13 are the three-dimensional model behind the coil-array
+axis, a uniform field. Sections 12–15 are the three-dimensional model behind the coil-array
 GUI, which shares the robot but not much else, and which turns out to consume exactly the five
 degrees of freedom the vision estimator produces.*
 
@@ -29,9 +29,12 @@ field while you move it.
 | 8 | `spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
 | 9 | `spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
 | 10 | `simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
-| 11 | `matlab/` | the original interactive sims these models were ported from |
+| 11 | `open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
+| 12 | `coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
+| 13 | `stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
+| 14 | `matlab/` | the original interactive sims these models were ported from |
 
-Sections 1–11 are the scalar altitude plant, one input and one axis. Sections 12–13 are the
+Sections 1–11 are the scalar altitude plant, one input and one axis. Sections 12–15 are the
 three-dimensional one, and are self-contained apart from the inertia in section 3 and the
 tilt geometry in section 11.
 
@@ -370,6 +373,77 @@ At $f_h = 160$ Hz: $2g/f_h \approx 0.12\ \text{(m/s}^2)$ per Hz. The example sch
 constant $\tau_h = m_R/(k_w f_h)$:
 
 $$\frac{\Delta z(s)}{\Delta f(s)} = \frac{2g/f_h}{s\,(s + 1/\tau_h)} .$$
+
+---
+
+### 6.5 Sensitivity
+
+From 6.2, $T = k_T f^2$ and $m_R g = k_T f_h^2$, so the heave law carries $f_h$ as a
+parameter:
+
+$$\ddot z = g\left(\frac{f^2}{f_h^2} - 1\right).$$
+
+Two partials at hover, $f = f_h$:
+
+$$\frac{\partial \ddot z}{\partial f} = \frac{2g}{f_h},
+\qquad
+\frac{\partial \ddot z}{\partial f_h} = -\frac{2g}{f_h}.$$
+
+They are equal and opposite. A relative error $\varepsilon$ in the parameter is therefore
+indistinguishable from a relative error $-\varepsilon$ in the command, and no measurement of
+$z$ separates them. Exactly, under $f_h \to f_h(1+\varepsilon)$,
+
+$$\ddot z = g\left(\frac{f^2}{f_h^2(1+\varepsilon)^2} - 1\right),$$
+
+so holding hover needs $f = f_h(1+\varepsilon)$: **the command carries the parameter error in
+full.** The heave gain $2g/f_h$ is the exchange rate in both directions, which fixes the
+precision to which $f_h$ must be known: to keep $|\ddot z|$ below some $a$, the relative error
+must satisfy $|\varepsilon| \le a/(2g)$.
+
+### 6.6 Frequency trim
+
+Write the inverted law with an estimate $\hat f$ in place of $f_h$:
+
+$$f_{cmd} = \hat f \sqrt{1 + \frac{a}{g}}, \qquad a \ge -g.$$
+
+A parameter error can be absorbed in $a$ or in $\hat f$. The two are not equivalent.
+
+**Trim in acceleration.** Hold $\hat f$ fixed and let $a$ carry it. Hovering against a true
+$f_h(1+\varepsilon)$ requires $f_{cmd} = \hat f(1+\varepsilon)$, hence a constant
+
+$$a_{bias} = g\left[(1+\varepsilon)^2 - 1\right] = g\left(2\varepsilon + \varepsilon^2\right).$$
+
+This is permanent, and it is spent inside the actuator's own limits: with $a$ clamped to
+$[-g,\,a_{max}]$ the usable upward range falls to $a_{max} - a_{bias}$, and the slew bound
+$\dot a_{max}$ is reached $a_{bias}$ earlier in the climbing direction. Whatever integral gain
+produces $a_{bias}$ sets how fast it arrives, never its size: the cost follows from where the
+trim is stored, not from how it is tuned.
+
+**Trim in frequency.** Let $\hat f$ carry the parameter and $a$ carry feedback alone:
+
+$$a_{fb} = k_p e + k_v(\dot z_{ref} - \dot z), \qquad \dot{\hat f} = \gamma e,
+\qquad e = z_{ref} - z.$$
+
+At equilibrium $e = 0$, so $a_{fb} = 0$ and $\hat f \to f_h$ whatever $f_h$ is. The clamp range
+is preserved in full and $a_{bias}$ does not exist.
+
+For the estimator dynamics, expand about hover with $a_{fb}$ small. Writing
+$\delta = \hat f - f_h$ and $f_{cmd} \approx \hat f\,(1 + a_{fb}/2g)$,
+
+$$\ddot z \approx a_{fb} + \frac{2g}{f_h}\,\delta,$$
+
+so $\delta$ enters as a disturbance acceleration through the same gain $2g/f_h$. With
+$z_{ref} = 0$ the closed loop is third order,
+
+$$\dddot z + k_v \ddot z + k_p \dot z + \frac{2g\gamma}{f_h} z = 0,$$
+
+whose slow root, for small $\gamma$, is the trim pole
+
+$$s \approx -\frac{2g\gamma}{f_h\,k_p}.$$
+
+The position loop has $\omega_n = \sqrt{k_p}$ and $\zeta = k_v/2\sqrt{k_p}$. Keeping the trim
+pole well below $\omega_n$ decouples the two: the estimator sees a settled position loop, and
+the position loop sees a constant parameter.
 
 ---
 
@@ -922,6 +996,9 @@ that would have to fight it slews the spin axis at $\tfrac12\tau_{max}/(I_s\omeg
 array cannot hold the robot laterally, and no controller changes that, because the ratio is
 set by Laplace's equation and the magnet's dipole moment rather than by the control law.
 
+§14 reopens this with the coil array tilted and the frequency dropped, which does make the
+static lateral stiffness restoring, and shows why that is still not enough.
+
 ### 12.7 Channel authority, and inverting it
 
 The four channels give $2\times4 = 8$ real knobs; the field at a point is 6 numbers. Summing
@@ -991,7 +1068,8 @@ to zero, matching the MATLAB. Treat it exactly as `hover_model.py` treats `k_lat
 identify on the rig, never a result.
 
 §13.2 shows this is not the end of the story, because the instability belongs to the
-*fixed-current* plant, and a controller does not hold its currents fixed.
+*fixed-current* plant, and a controller does not hold its currents fixed. §14 asks the
+opposite question, whether any fixed-current array is passively stable, and bounds the answer.
 
 ### 12.9 What the model gets wrong
 
@@ -1072,7 +1150,7 @@ Three practical gaps, all small and all real:
   `(xyz, velocity, normal)` and drops `self.nrm.rate`, which is the normal's rate the filter
   already estimated. One line.
 - **The frames are not connected.** The estimator reports millimetres in the datum frame set
-  by `pose/zeroing.py`; §12 is SI in the coil frame. The rigid transform between them exists
+  by `calib/zeroing.py`; §12 is SI in the coil frame. The rigid transform between them exists
   nowhere in this repository. Nothing here can touch hardware until it does.
 
 ### 13.2 The instability belongs to the currents, not the robot
@@ -1261,9 +1339,572 @@ riding either limit has not solved the problem. In the shipped scenario both sta
 
 ---
 
+---
+
+## 14. Passive open-loop stability, and the bandwidth that decides it
+
+§12.6 stated the negative result: the gradient force traps vertically, Earnshaw makes it expel
+laterally at exactly half the rate, and the field-tilt actuator that would fight the expulsion
+is eight times too slow. An earlier write-up (removed; this section supersedes it) reopened
+the question with a sweep over channel
+radius $d$, outward coil tilt $\theta$ and drive frequency $f$, and found geometries where the
+quasi-static lateral stiffness goes negative. This section derives what that quantity is a
+limit of, why it is not sufficient, and what the sufficient condition actually is.
+
+`control/open_loop_sweep.py` is the executable form. It reuses §12's model unchanged.
+
+### 14.1 Where the lateral restoring force comes from
+
+Move the robot off axis by $x$. Two forces answer, and they oppose each other.
+
+**The gradient force expels.** §12.6: $C_{grad} = \partial F_x/\partial r_x > 0$, forced
+positive by $\operatorname{tr}\nabla\mathbf F = 0$ whenever the axial trap
+$\partial F_z / \partial r_z$ is negative.
+
+**The tilted lift restores.** The local rotation axis $\hat n$ is no longer vertical off
+centre, and §12.8's lift points along the spin axis $\hat s$, not along $\hat z$. If the axis
+tips *inward* as the robot moves out, the lift acquires an inward component:
+
+$$C_{tilt} = L\,G_n, \qquad L = m_R g\left(\frac{f}{f_h}\right)^2,
+\qquad G_n = \frac{\partial n_x}{\partial r_x}.$$
+
+$G_n$ is zero on the untilted array at its field maximum, which is why §12.6 saw only the
+expulsion. Tilting the coils outward and dropping $f$ moves the trim height off that null and
+makes $G_n$ strongly negative: $-58.9\ \mathrm{m^{-1}}$ at $d = 46$ mm, $\theta = 15^\circ$,
+$f = 92$ Hz. The sum
+
+$$C_{net} = C_{tilt} + C_{grad}$$
+
+is then genuinely negative, and that earlier reading took it for passive lateral trapping.
+
+**Why the frequency has to drop.** In this model lift depends on $f$ alone, so the axial
+equilibrium is set entirely by the gradient force having to make up the difference:
+
+$$\langle F_{grad,z}\rangle(z_{eq}) = m_R g\left(1 - (f/f_h)^2\right).$$
+
+At $f < f_h$ that is positive, so $z_{eq}$ sits *below* the on-axis field maximum, where the
+gradient pulls up, and the magnetic field carries about 30 % of the weight. That is also the
+only reason an axial trap exists at all: nothing else in the model depends on $z$.
+
+### 14.2 The lateral transfer function
+
+$C_{net}$ is a static stiffness, and the path it describes is not static. Collect the lateral
+position into $\xi = r_x + i r_y$ and the spin-axis tilt into $\chi = s_x + i s_y$. Four-fold
+symmetry of the array makes the field-axis tilt isotropic, $\nu = G_n \xi$, with no cross term.
+Translation from §12.8, and alignment from §11.6 with nutation dropped:
+
+$$m_R\ddot\xi + m_R\beta\dot\xi = C_{grad}\,\xi + L\,\chi,
+\qquad
+(c_t + i I_s\omega)\,\dot\chi = \kappa_t(\nu - \chi).$$
+
+The alignment block is a first-order lag with a **complex** pole, and the $i$ is §11.1's
+precession: the axis moves *along* the torque, not toward it.
+
+$$\frac{\chi}{\nu} = \frac{p}{s + p},
+\qquad p = \frac{\kappa_t}{c_t + i I_s\omega}.$$
+
+Closing the loop gives a cubic with complex coefficients, which is correct rather than sloppy:
+the gyroscopic term splits forward whirl from backward whirl, so the two lateral axes do not
+decouple into a real conjugate pair.
+
+$$\boxed{\ m_R s^3 + m_R(\beta + p)\,s^2 + (m_R\beta p - C_{grad})\,s - C_{net}\,p = 0\ }$$
+
+Three limits, and each is a design rule.
+
+**At $s \to 0$** the constant term is $-C_{net}\,p$. So $C_{net} < 0$ is the DC stiffness
+condition and says nothing whatever about any other frequency. It is exactly, and only, what
+that earlier sweep computed.
+
+**At $|s| \gg |p|$** the cubic degenerates to $s^2 - C_{grad}/m_R$: the tilt path has been
+rolled off and the anti-trap acts alone, with growth rate
+
+$$\lambda_{grad} = \sqrt{C_{grad}/m_R}.$$
+
+**The pole cannot be moved past a ceiling.** Since $c_t \ge 0$,
+
+$$\lvert p\rvert = \frac{\kappa_t}{\lvert c_t + i I_s\omega\rvert}
+\;\le\; \frac{\kappa_t}{I_s\omega} \;\equiv\; \Omega_{align},$$
+
+with equality at $c_t = 0$. **Alignment damping cannot buy bandwidth, it can only lose it.**
+This is worth stating plainly because §11.3 and §12.8 both point at $c_t$ as the missing
+ingredient, and for *alignment as an attractor* they are right. For *speed* they are not: the
+bound is gyroscopic, set by the spin angular momentum, and no dissipation, and no control law,
+touches it.
+
+### 14.3 The criterion
+
+Putting the two together, a necessary condition for the tilt mechanism to reach the
+instability it is meant to cancel:
+
+$$\boxed{\
+R \;\equiv\; \frac{\Omega_{align}}{\lambda_{grad}}
+= \frac{m_{dip}\,(a+b)\cos\varphi}{4\,I_s\,(2\pi f)}\Big/\sqrt{\frac{C_{grad}}{m_R}}
+\;>\; 1\ }$$
+
+$R$ replaces $C_{net}$ as the screening quantity. Measured at that sweep's three candidates
+and at the §12 baseline, under the exact loop field of §14.5:
+
+| $d$, $\theta$, $f$ | $z_{eq}$ | $C_{net}$ | $\Omega_{align}$ | $\lambda_{grad}$ | $R$ | predicted root | plant |
+|---|---|---|---|---|---|---|---|
+| 46 mm, 15°, 92 Hz | 18.39 mm | $-0.0157$ | 1.08 rad/s | 14.7 rad/s | **0.073** | $+14.6$ /s | escapes at 0.54 s |
+| 47 mm, 10°, 94 Hz | 17.17 mm | $-0.0111$ | 1.18 rad/s | 14.3 rad/s | **0.082** | $+14.3$ /s | escapes at 0.55 s |
+| 49 mm, 14°, 98 Hz | 17.82 mm | $-0.0355$ | 0.59 rad/s | 10.9 rad/s | **0.054** | $+11.0$ /s | escapes at 0.81 s |
+| 37 mm, 0°, 110 Hz | 15.16 mm | $+0.0536$ | 3.49 rad/s | 25.3 rad/s | 0.138 | $+25.3$ /s | §12.8 |
+
+The last two columns are the check that matters. The cubic's rightmost root is compared
+against the growth rate the *full nonlinear plant* shows when integrated from 10 µm off axis,
+$\ln(1000)/t_{escape}$: $+14.6$ against $+12.8$, $+14.3$ against $+12.5$, $+11.0$ against
+$+8.5$. Agreement to 15–30 % on a reduced-order model with a complex pole is enough to trust
+the structure, and without it §14.2 would be algebra with no plant attached.
+
+Note also that the geometry sweep made $R$ **worse than the baseline**, not better. Pushing
+$d$ out to 46–49 mm is what makes $G_n$ negative, and it is the same move that drops the
+working field from 4.58 mT to 1.0–1.5 mT, which costs $\Omega_{align}$ linearly while buying
+$\lambda_{grad}$ only as a square root.
+
+### 14.4 Which knob moves $R$, and by how much
+
+Since $C_{grad} \propto m_{dip} B''$ and $\kappa_t \propto m_{dip} B$,
+
+$$R \;\propto\; \frac{\sqrt{m_{dip}\,m_R}}{I_s\,f}\cdot\frac{B}{\sqrt{B''}}
+\;\propto\; \frac{\sqrt{m_{dip}\,m_R}\;\sqrt{I_{amp}}\;\ell}{I_s\,f},$$
+
+with $\ell$ the array's length scale. Drive current enters as $\sqrt{\ }$ only, because it
+raises the anti-trap at the same time as the tilt stiffness. From $R = 0.073$:
+
+| knob | predicted | measured (§14.7 stage D) | what $R = 1$ would take |
+|---|---|---|---|
+| drive current $I_{amp}$ | $+1/2$ | non-monotone, see below | nothing available |
+| drive frequency $f$ | $-1$ | $-1$ | 6.7 Hz, far below hover |
+| dipole moment $m_{dip}$ | $+1/2$ | $+0.685$ | $30\times$ the magnet volume |
+| spin inertia $I_s$ | $-1$ | $-1.000$ | $10\times$ lighter rotor at fixed $m_{dip}$ |
+| uniform rotor scale $k$ | $-3/2$ | $-1.578$ | $k = 0.215$, a $4.6\times$ smaller robot |
+
+$I_s$ comes out at exactly $-1$, as it must: it enters nowhere but $\Omega_{align}$. $m_{dip}$
+and mass overshoot and undershoot their predicted $+1/2$ because both move the trim height, so
+neither is a clean one-parameter family; the uniform scale is, and it lands within 5 % of the
+predicted $-3/2$. The last row is the only knob that is not absurd, and it is not a parameter
+of the drive: it is a different robot. Under a uniform scale $m_{dip}, m_R \propto k^3$,
+$I_s \propto k^5$, and $f_h \propto k^{-1/2}$ because blade thrust goes as $f^2 D^4$ against a
+weight going as $k^3$. Two consequences make the family clean: $\lambda_{grad}$ is
+$k$-independent, since $C_{grad}$ and $m_R$ both go as $k^3$, and $z_{eq}$ is $k$-invariant for
+the same reason. Only $\Omega_{align}$ moves, as $k^{-3/2}$. Step-out gets easier too,
+$\sin\varphi \propto k$.
+
+So the honest reading of that result: **the tilt mechanism is real, the geometry
+does move $C_{net}$ through zero, and none of it is reachable by tuning the drive.** What it
+buys is a factor of $\sqrt{}$ where a factor of 14 is needed. The lever that works is rotor
+size, and §13.2's answer, re-solve the currents from the measurement, remains the one that
+works on this hardware.
+
+### 14.5 Three thresholds the stiffness screen does not see
+
+**Step-out.** §12.3's lock floor $\sin\varphi = 2 k_d f^2 / (m_{dip}(a+b))$ is a condition on
+the *local* field, and pushing the coils out to $d = 49$ mm drops it to 1.04 mT. That point
+runs at $\sin\varphi = 0.766$, essentially at the 0.8 safety limit, so the geometry with the
+most negative $C_{net}$ is nearly disqualified on step-out alone. It is not, however, the
+binding constraint globally: of the 1707 gridded points with adequate clearance, step-out
+rejects 64 and $C_{net} \ge 0$ rejects 1483 (§14.7).
+
+**Clearance.** Outward tilt raises the inner coils of each $2\times2$ group by
+$\tfrac12\,\text{pitch}\,\sin\theta$, and the coil bodies are 22 mm long. Trim heights of
+17–19 mm are not automatically above them.
+
+**The Laplace trace.** $\operatorname{tr}\nabla\mathbf F = 0$ holds for a *fixed* moment, and
+the port asserts it: at the untilted baseline $2C_{grad} + \partial F_z/\partial r_z$ closes to
+$1\times10^{-8}$ N/m. At the tilted operating points it leaves $+0.0054$ N/m, about 15 % of the
+axial stiffness. That residual is not an error. Recomputing the derivative with the moment
+frozen at its on-axis value closes the trace again, to $1.5\times10^{-8}$, which identifies the
+whole residual as the moment re-orienting with position. It is worth knowing about, because it
+is the one term in the model that Earnshaw does not constrain, and therefore the only place a
+static lateral trap could hide. It is 15 % of the wrong sign's worth, so it does not, but the
+sweep reports it per point rather than absorbing it.
+
+### 14.6 The field model, and what fixing it changed
+
+§12.9 item 1 said the point-dipole stub was the first thing to fix, and this section is where it
+mattered, since $G_n$ is a statement about field *direction*.
+`spatial_model.loop_basis` now provides the exact circular-loop field via elliptic integrals,
+selected by `Coils.model = "loop"`, and the sweep runs every point under both. The verdict does
+not move, $R$ changes by under 20 %, but $C_{net}$ does: at 46 mm/15°/92 Hz it goes from
+$-0.0157$ to $-0.0067$ N/m, and $z_{eq}$ from 18.39 to 18.92 mm. **The dipole stub overstates
+the lateral restoring by a factor of 2.3.** Any future search over coil positions has to run on
+the loop field.
+
+### 14.7 What the sweep found
+
+Stage A grids $d \in [34, 60]$ mm, $\theta \in [0, 30]^\circ$, $f \in [60, 130]$ Hz under both
+field models. Under the loop field, 3112 of those points have a stable axial trim at all, 1643
+of those clear step-out and the coil bodies, and **none of them is laterally stable**: the
+rightmost root of §14.2's cubic is positive at every one, from $+8.6$ to $+20.4\ \mathrm{s^{-1}}$.
+
+Read that as a statement about this *family*, not about coil arrays. It is a two-parameter,
+coplanar, four-fold symmetric family, and §15 shows that opening three specific freedoms inside
+it produces designs that are asymptotically stable and certifiable.
+
+The interesting part is why, and it is sharper than "$R$ is small everywhere".
+
+$$\textbf{The two conditions pull the trim height in opposite directions.}$$
+
+$C_{net} < 0$ needs the robot **below** the on-axis field maximum, where $\hat n$ tips inward;
+that means $f < f_h$ and pushing $d$ out to 41 to 55 mm, which is exactly what drops the working
+field to 0.92 to 1.83 mT and collapses $\Omega_{align}$. $R$ is largest **above** the maximum,
+at $f = 130$ Hz and $z_{eq} = 29.9$ mm, where the field is flat enough that
+$\lambda_{grad}$ falls faster than $\Omega_{align}$ does: $R = 0.281$ there, the best anywhere.
+But above the maximum the axis tips the wrong way and $C_{net} = +0.043$ N/m. The best point
+that actually restores is $d = 48$ mm, $\theta = 2^\circ$, $f = 95$ Hz, and it has $R = 0.097$.
+
+`stability_map.png` shows this as one picture: $R$ falls monotonically to the right across the
+$(d,\theta)$ plane while $C_{net}$ only crosses zero to the right of the black contour.
+
+**Two corrections to how that reads.** First, the regions are not *disjoint*: 215 gridded points
+have $C_{net} < 0$ while clearing step-out and the coil bodies. What is true is weaker and is the
+whole point, namely that they overlap only where both are weak, $R$ running from 0.043 to 0.097
+across that entire region against 0.138 for the untilted baseline. Second, the opposition is
+structural only for **coaxial** arrays. The $G_n$ sign flip sits within 0.2 mm of the on-axis
+field maximum at $0$ to $2^\circ$ of tilt, and separates from it by more than 10 mm at $20$ to
+$30^\circ$: at $d = 43$ mm and $\theta = 30^\circ$ the maximum is at 6.0 mm and the flip at
+16.6 mm. Tilt already begins to prise the two apart, which is the thread §15 pulls.
+
+**Frequency.** The upper bound is not step-out. $C_{net}$ crosses zero at 95 Hz for most
+geometries and 105 Hz at $30^\circ$ tilt, while $\sin\varphi$ there is only 0.41 to 0.65. A
+second, harder ceiling sits just above: past about 130 Hz **no axial equilibrium exists at all**,
+because lift then exceeds weight and the gradient force cannot pull down hard enough anywhere.
+
+**Amplitude does not help.** Raising the drive from 1.25 A to 8 A moves $R$ from 0.281 to 0.256,
+non-monotonically, because the extra field pulls the trim point down into a steeper gradient as
+fast as it raises $\kappa_t$. $C_{net}$ meanwhile goes from $+0.043$ to $+0.285$ N/m. The
+$\sqrt{I_{amp}}$ of §14.4 is an upper bound that the moving trim does not even deliver.
+
+**Phase precision is not a limiting factor**, which is worth recording because it was a
+candidate. A quadrature error $\varepsilon$ gives an ellipse of aspect exactly
+$b/a = \tan(45^\circ - \varepsilon/2)$, but $\kappa_t$ and the lock margin both depend on the
+*mean* semiaxis $(a+b)/2$, which is second order in $\varepsilon$: at $30^\circ$ of error the
+field is visibly elliptical ($b/a = 0.577$) and yet $(a+b)/2$ has fallen 4 % and $R$ 9 %.
+
+**The trace audit, over the whole grid.** With the moment frozen the residual
+$2C_{grad} + \partial F_z/\partial r_z$ stays under $3.8\times10^{-7}$ N/m at all 3112 points,
+and with the moment re-solved its median is $3\times10^{-4}$ N/m. §14.5's reading holds
+everywhere, not just at the three points it was checked on.
+
+### 14.8 Correspondence with the implementation
+
+| quantity | where |
+|---|---|
+| exact loop field, FD gradient | `spatial_model.loop_field`, `loop_basis` |
+| trim solve, scanning past step-out | `open_loop_sweep.trim` |
+| $G_n$, $C_{grad}$, $C_{tilt}$, $C_{net}$, the trace audit | `open_loop_sweep.evaluate` |
+| §14.2's cubic | `open_loop_sweep.lateral_roots` |
+| §14.4's exponents, measured | `open_loop_sweep.stage_d`, `fit_exponent`, `solve_scale` |
+| §14.7's grid, and the figures | `open_loop_sweep.run`, `results/open_loop_sweep/` |
+| the pinned numbers in §14.3 | `open_loop_sweep._self_check` |
+
+```bash
+uv run python controller/control/open_loop_sweep.py --self-check
+uv run python controller/control/open_loop_sweep.py            # about 25 minutes
+uv run python controller/control/open_loop_sweep.py --reuse    # cached stage A, seconds
+```
+
+---
+
+## 15. Opening the geometry: two rings, a fifth channel, and a certificate
+
+§14 ended on a negative result: nothing in the `quick_coils` family is laterally stable. That
+family is coplanar, four-fold symmetric, and two parameters wide. This section opens three
+freedoms inside it, and the result changes sign: designs that are asymptotically stable, carry a
+Lyapunov certificate, and hold position in the nonlinear plant for as long as they are run.
+
+The three freedoms are not arbitrary. Each one answers a specific obstruction §14 identified.
+
+### 15.1 Where the rotating field actually comes from
+
+Take a coil at radius $r$ from the array axis with its own axis along $\hat z$, and evaluate its
+field at an on-axis point $(0,0,z)$. With $\mathbf m = m\hat z$ and
+$\mathbf d = (-r, 0, z - z_c)$, the dipole form gives
+
+$$B_x = \frac{\mu_0}{4\pi}\,\frac{3(\mathbf m\cdot\mathbf d)\,d_x}{\lvert d\rvert^5}
+= \frac{\mu_0}{4\pi}\,\frac{3\,m\,(z - z_c)(-r)}{\lvert d\rvert^5}.$$
+
+$$\boxed{\ \text{The transverse field on the array axis is proportional to } z - z_c.\ }$$
+
+Three consequences follow immediately, and all three are load-bearing.
+
+**A coil plane level with the robot drives nothing.** At $z = z_c$ the transverse field is
+exactly zero, so a ring coplanar with the working point contributes no rotation whatsoever. The
+existing array works only because the robot hovers 20 mm above it. `coil_geometry` pins this:
+the in-plane field measures $1.6\times10^{-18}$ T.
+
+**A symmetric two-ring split cancels the drive.** Put half the coils at $z_c - g/2$ and half at
+$z_c + g/2$ with the robot at the midpoint, and the two contributions carry opposite signs of
+$z - z_c$ and cancel. The textbook Helmholtz move, applied naively here, turns the field off.
+
+**The upper ring must be reverse-wound.** Driven in antiphase, the sign flip in the drive
+cancels the sign flip in $z - z_c$ and the two rings *add*. That costs nothing: it is a winding
+reversal, not a fifth driver. Measured at $r = 37$ mm with the rings at $z = -10$ and $+50$ mm
+and the robot at 20 mm, against the 16 coplanar coils of §12:
+
+| array | $B$ | $B''$ | $B^2/\lvert B''\rvert$ |
+|---|---|---|---|
+| 16 coplanar, $d = 37$ mm | 4.448 mT | $-7.550$ | $2.62\times10^{-6}$ |
+| the same 16, split into two antiphase rings | 2.737 mT | $-0.813$ | $9.21\times10^{-6}$ |
+
+Field strength falls, curvature falls nine times faster. Since §14.4 gives
+$R \propto \sqrt{B^2/\lvert B''\rvert}$, that is a factor 1.9 on $R$ for no hardware at all.
+
+### 15.2 The fifth channel, and why the obvious version of it is inert
+
+**A steady field does exactly nothing to this robot.** Not to a tolerance: exactly. The
+cycle-averaged force and torque are linear in $\mathbf B$, and §12.5 makes the moment of a
+synchronous rotor a pure first harmonic, so $\langle\mathbf m\rangle = 0$ and
+
+$$\langle\boldsymbol\tau\rangle = \langle\mathbf m\rangle\times\mathbf B_{dc} = 0,
+\qquad
+\langle\mathbf F\rangle = \nabla\big(\langle\mathbf m\rangle\cdot\mathbf B_{dc}\big) = 0.$$
+
+The same orthogonality kills every harmonic $n \ne 1$, so a fifth channel at any frequency other
+than $f$ is inert too. `spatial_model._self_check` pins this as bitwise equality: a 5.9 mT steady
+field changes the acceleration and the torque by zero.
+
+**It becomes decisive the moment the rotor carries an axial moment.** Give it
+$m_z = \varepsilon\,m_{dip}$ along the spin axis, $\varepsilon$ of order a few per cent, by
+tilting the magnets or adding a third. The two couplings are then exactly orthogonal:
+
+$$m_{dip}\ (\text{blade plane}) \leftrightarrow \text{the rotating field only},
+\qquad
+m_z\ (\text{spin axis}) \leftrightarrow \text{the steady field only},$$
+
+the first because $\langle\mathbf m_{rot}\rangle = 0$, the second because
+$\langle\mathbf B_{rot}\rangle = 0$.
+
+That orthogonality is what breaks §14's deadlock. There, the axial trap and the drive field were
+**the same knob**: flattening the field to raise $\Omega_{align}$ destroyed the trap, which is
+the saddle-node the sweep ran into, and keeping the trap kept the anti-trap that sets
+$\lambda_{grad}$. Earnshaw ties them because both act on $m_{dip}$.
+
+With a steady channel they separate. Tune the rotating geometry so $B''\approx 0$, which §15.1
+does, and let the steady gradient acting on $m_z$ supply the axial trap on its own. Earnshaw
+still applies to the steady part, and the port asserts its trace closes, but the anti-trap it
+buys scales with the **small** $m_z$ instead of the large $m_{dip}$. The criterion collapses to
+
+$$\boxed{\ R = \sqrt2\,\frac{\Omega_{align}}{\omega_z} > 1
+\qquad\Longleftrightarrow\qquad \omega_z < \sqrt2\,\Omega_{align}\ }$$
+
+with $\omega_z$ the axial trap's natural frequency, now a free design parameter rather than a
+consequence. **The price is a soft, slow axial mode**, and that trade is the deliverable.
+
+The steady field also adds a tilt stiffness $m_z B_{dc}$ alongside $\tfrac12 m_{dip}B_{ac}$,
+worth a few per cent at $\varepsilon = 3\%$. A bonus, not the mechanism.
+
+**Where the two coil sets go, and why they do not fight.** The rotating rings must be axially
+offset from the robot, by §15.1. The steady ring wants the opposite: a ring's on-axis $B_z$ peaks
+in its own plane, which is exactly where an axial trap has to sit. So the steady ring goes level
+with the robot, where §15.1 guarantees it contributes no rotating field at all. The two
+requirements put the two coil sets in different places, which is the reason one array can serve
+both.
+
+### 15.3 Four-fold symmetry is optimal, not merely convenient
+
+It is tempting to break symmetry to gain freedom. Earnshaw forbids the gain. The lateral
+Jacobian satisfies $C_{xx} + C_{yy} = k_z$ with $k_z$ fixed by whatever axial trap is wanted, and
+what destabilises the robot is the **stiffest** lateral direction, $\max(C_{xx}, C_{yy})$. Since
+
+$$\max(C_{xx}, C_{yy}) \;\ge\; \tfrac12\,(C_{xx} + C_{yy}) = \tfrac12 k_z,$$
+
+with equality if and only if $C_{xx} = C_{yy}$, breaking symmetry can only make the worst
+direction worse. The four-fold family is therefore the right place to search, and the search
+space is four times smaller for it. `coil_geometry.free_array` exists to test the claim
+numerically rather than to rely on it.
+
+### 15.4 The optimiser, and what it optimises
+
+The objective is not $R$. $R$ and the static stiffness $C_{net}$ are two separate necessary
+conditions and neither implies the other: the two-ring array of §15.1 reaches $R = 0.55$ while
+still being laterally *expelling*. Optimising either alone is gameable. So the objective is the
+stability margin of the **full eight-state plant**, linearised at its own trim with the coil
+currents held fixed:
+
+$$\sigma = -\max\operatorname{Re}\lambda(A), \qquad A = \texttt{stability\_cert.linearize}.$$
+
+Held fixed is the whole point. `spatial_mpc.linearize` differentiates *through* the current
+allocator and so answers the closed-loop question, which §13.2 already settles. Sanity check on
+the reduced model: at §14's operating point the eight-state margin is $+13.98\ \mathrm{s^{-1}}$
+against the cubic's $+14.63$, a ratio of 0.96, so §14.2 was an honest summary.
+
+`optimise_array` searches with `differential_evolution`, population-based sampling followed by an
+L-BFGS-B polish. One detail is worth recording because it inverted the result. The feasible
+region is a thin sliver bounded by the camera cone, and the best designs sit on its edge;
+differential evolution's mutation walks out of that sliver and does not return. A 3960-evaluation
+run returned $-1.17\ \mathrm{s^{-1}}$ where a 33-evaluation local polish of the same seed
+returned $+0.067$. The module therefore polishes from the seed as well as from the global answer
+and keeps the better. **Global optimality is not claimed**, and cannot be for a problem this
+non-convex; the run reports the spread across independent restarts instead.
+
+### 15.5 Certification
+
+A Hurwitz linearisation gives local asymptotic stability of the nonlinear system by Lyapunov's
+indirect method, and $V = x^\top P x$ from $A^\top P + PA = -Q$ is a genuine Lyapunov function on
+a neighbourhood. `stability_cert.certify` solves it and refuses to return anything when $A$ is
+not Hurwitz, so a certificate cannot be produced for a design that does not deserve one.
+
+One structural warning decides what is provable at all. With `align_tau = 0` the tilt block
+carries no dissipation, so damping has to arrive through the translational coupling or not at
+all. `min_align_tau` reports the smallest alignment damping that makes a given design Hurwitz.
+That number is a rig identification, never a result, exactly as §12.8 says of `align_tau` and
+`hover_model.py` says of `k_lat`.
+
+### 15.6 The drive: rail-limited, and why the square wave is already right
+
+Measured per channel, from `calculations/coil_capacitors.xlsx`: $R = 12.6$ to $18\ \Omega$,
+$L = 6.64$ to $6.85$ mH. At 92 Hz that is $X_L = 3.9\ \Omega$ against $R = 15\ \Omega$, so
+$Q = 0.26$ and
+
+- **the chain is essentially purely resistive.** Series resonance cancels $X_L$ and recovers
+  3.3 %. It only begins to pay above about 350 Hz, where $X_L \approx R$. The 447 µF that would
+  resonate 92 Hz is not worth fitting.
+- **the binding limit is the supply, not heat.** 12 V across 15 $\Omega$ delivers 0.99 A of peak
+  fundamental against a 2 A continuous rating, a factor of two in hand thermally and none at all
+  electrically. Worth noting that the 1.25 A the model has always assumed needs about 15 V, not
+  12.
+
+**The first-harmonic theorem.** The cycle averages of §12.5 and §12.6 project onto $n = 1$:
+$\langle\cos\theta\cos n\theta\rangle = 0$ for $n \ne 1$. So the waveform *shape* within a cycle
+is irrelevant to both the torque and the force, and only the fundamental phasor matters. Every
+harmonic dissipates $I_n^2R/2$ and contributes exactly nothing.
+
+That settles the waveform question in a direction worth stating plainly. A bipolar square puts
+$4/\pi = 1.27$ times its amplitude into the fundamental, so **under a voltage limit it beats a
+sine by 27 %**. Under a thermal limit a sine would win by 19 %, because 19 % of a square's heating
+sits in harmonics that average to nothing. The rail is what binds, so **the square drive already
+in the firmware is the correct choice** and should not be changed. A trapezoid interpolates and
+wins under neither.
+
+Two places where a non-sinusoidal drive does earn something, both reachable with the existing
+firmware and no new code:
+
+- **envelope modulation** near the precession pole, through `addCarrier*RampTask`, as a route to
+  the alignment damping §15.5 needs;
+- **burst duty-cycling**, because the rotor's spin-down time constant $I_s\omega/(k_d f^2)$ is
+  0.764 s at 92 Hz, seventy field periods, so it carries through an off time on inertia alone.
+
+### 15.7 What was found
+
+A design that is asymptotically stable, certified, and holds up nonlinearly:
+
+| | |
+|---|---|
+| rotating rings | $r = 36.7$ mm at $z = -11.0$ and $+50.7$ mm, upper reverse-wound, pitch 21 mm |
+| steady ring | $r = 60$ mm at $z = 19.9$ mm, 2.0 A |
+| drive | $f = 110$ Hz, 0.97 A set by the 12 V rail, 28.4 W ohmic |
+| rotor | $m_z = 3\%$ of $m_{dip}$ |
+| trim | $z_{eq} = 19.92$ mm, $B = 2.10$ mT, $\sin\varphi = 0.478$ |
+
+$$\lambda = \{-0.067 \pm 0.182j,\ -0.071 \pm 0.295j,\ -0.100 \pm 0.492j,\ -0.844 \pm 1.285j\}$$
+
+All eight in the left half plane, so $A$ is Hurwitz and `certify` returns a $P$. Run open loop
+with the currents fixed from 100 µm off axis, the nonlinear plant **holds for the full 6 s**,
+ending 48.8 µm off axis with $z$ within 3 µm of trim. Against §14, where every design left a
+10 mm box in about half a second, that is a change of kind and not of degree.
+
+**Five channels, four driven, no new driver boards.** The upper ring is a winding reversal on the
+existing four; the steady ring draws constant current and needs a bench supply, not an H-bridge.
+
+### 15.8 What this does not settle
+
+1. **The margin is small and the axial trap is soft.** $\sigma = 0.067\ \mathrm{s^{-1}}$ is a
+   15 s time constant, and $\omega_z = 0.50$ rad/s is 0.08 Hz. This is stability, not authority.
+2. **Camera clearance is 0.2 degrees.** The design sits on that constraint, and the constraint
+   itself assumes the stereo pair sights *between* the coil arms rather than along them. Along
+   them it fails by 8.4 degrees. Confirm the rig's actual azimuths before trusting it.
+3. **It needs a robot change.** Without $m_z$ the fifth channel is inert, by §15.2.
+4. **The field model is unvalidated against hardware.** There is no field measurement anywhere in
+   this repository, and the coils carry a ferrite core the model does not represent, so absolute
+   magnitudes are the least trustworthy numbers here and the ratios are the most. A single
+   Hall-probe axial scan remains the highest-value missing measurement in the project.
+
+### 15.9 Correspondence with the implementation
+
+| quantity | where |
+|---|---|
+| $B \propto (z - z_c)$, the antiphase two-ring, constraints | `coil_geometry.py` |
+| the steady field, and the axial moment it acts on | `spatial_model.dc_field_at`, `Plant._dc_terms` |
+| fixed-current linearisation, Lyapunov, region of attraction | `stability_cert.py` |
+| rail limit, resonance, waveform fundamentals | `drive_model.py` |
+| the search, and the Pareto front | `optimise_array.py` |
+
+```bash
+uv run python controller/control/coil_geometry.py --self-check
+uv run python controller/control/drive_model.py --self-check
+uv run python controller/control/stability_cert.py --self-check
+uv run python controller/control/optimise_array.py --self-check
+uv run python controller/control/optimise_array.py
+```
+
+## 16. What the measurement noise does to the loop
+
+§11 settles that this stage needs no observer of its own: `pose/filter.py` already
+delivers the full eight-state $x = [r, v, \hat s]$, so the controller reads a state
+rather than reconstructing one. That is still true, and nothing here adds a second
+Kalman gain. What it does add is the number that was missing from three separate
+decisions in this chapter.
+
+The measurement is now characterised on the bench rather than assumed --
+[ch. 3 §18](../pose/theory.md) derives the model and `pose/noise.py` fits it. Two of
+its outputs reach this stage, and they are not interchangeable.
+
+**$\sigma_{\text{total}}$, the whole scatter**, is what the pose filter carries as
+$R$. It is dominated by a drift with a correlation time of order hundreds of
+milliseconds, which no filter removes and which therefore lands in the loop as a
+slowly varying position bias -- an error the integrator will faithfully chase.
+
+**$\sigma_{\text{white}}$, the frame-to-frame part**, is the only component that
+reaches a *rate*. A first difference subtracts two samples that share the drift, so
+it cancels; what survives is the white part alone, amplified by $1/\Delta t$ and
+then low-passed. With $a = \Delta t/(\tau+\Delta t)$,
+
+$$\sigma_v = \frac{\sigma_w\sqrt2}{\Delta t}\sqrt{\frac{a}{2-a}}$$
+
+### 16.1 The three constants this fixes
+
+**`z_track.TAU_ZDOT_S` and `predictor.TAU_VEL_S`** are the same time constant and
+must move together. The equation above prices any candidate $\tau$, and
+`noise.NoiseModel.tau_for_velocity_sigma` inverts it. The bound worth knowing is
+that raising $\tau$ past the measured correlation time averages over samples that
+are not independent: it buys lag and nearly no noise. At 80 ms against a correlation
+time of order 400 ms, both constants already sit inside that regime, so the lever
+here is smaller than it looks.
+
+**`z_track.STEPOUT_ZDOT_MPS`** used to be justified in a comment as "16 sigma" of a
+$\dot z$ noise of 9 mm/s, itself derived from an assumed 0.5 mm per frame that
+nothing had measured. Tripping step-out spuriously commands full torque at a robot
+that is flying correctly, so the margin has to be real. `check_stepout_margin`
+recomputes the multiple from whatever model is on disk and `demo()` asserts it
+against `STEPOUT_MIN_SIGMA`; with no calibration recorded it says the threshold is
+unjustified rather than passing quietly.
+
+**The Bryson weights in `design_hover_lqr`** put $1/(0.010)^2$ on $x$, meaning 10 mm
+of lateral deviation is worth one unit of cost. A measurement whose own noise is a
+large fraction of that makes the controller spend authority chasing noise, so the
+design now warns when the measured lateral $\sigma$ exceeds a tenth of the weight.
+
+### 16.2 Correspondence with the implementation
+
+| Model element | Code |
+|---|---|
+| Rate noise from the white component | `noise.NoiseModel.velocity_sigma_mm_s` |
+| Choosing $\tau$ from a noise budget | `noise.NoiseModel.tau_for_velocity_sigma` |
+| The shared rate time constant | `z_track.TAU_ZDOT_S`, `predictor.TAU_VEL_S` |
+| Step-out margin, checked against the measurement | `z_track.check_stepout_margin`, `z_track.demo` |
+| Bryson weight sanity against measured noise | `design_hover_lqr._noise_provenance`, `design` |
+| What noise a gain file was tuned against | the `noise` block in `control/hover_controller.json` |
+
+The gain file records the noise it assumed. Gains that cannot be audited against the
+conditions they were tuned for are the same failure as a constant with an expired
+reason attached, which [ch. 3 §16.26](../pose/theory.md) had already paid for twice.
+
 ## Appendix A: Correspondence with the MATLAB implementation
 
-Two model families were ported. The four 1-D `*_gui.m` files map onto §1–§11, and
+Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`
+plus `frequency_tracking_statespace_sim.m`) map onto §1–§11, and
 `MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` maps onto §12–§13 as
 `control/spatial_model.py`. Function and variable names are kept across the port, so the two
 read side by side and `grep` finds the counterpart.
@@ -1277,6 +1918,14 @@ than a silent one.
 The four 1-D files carry an older robot's inertia and simulate a different machine; §3 has the
 current value. The controller has no MATLAB counterpart at all: `spatial_mpc.py` and
 `simulate_spatial.py` are new.
+
+One file goes the other way. `matlab/open_loop_two_ring.m` is a back-port of §15's
+two-ring result out of Python and into MATLAB, self-contained because the helpers
+inside the multi-coil GUI file are local to it. It has **never been executed** --
+MATLAB was not available where it was written -- so `matlab/two_ring_fixture.csv`
+ships beside it as the Python model's output: any disagreement past 1e-9 is a
+porting bug in the `.m` file, not a physics difference. Python remains the source
+of truth.
 
 ## Appendix B: Why $\dot f_{max}$ and $f_{max}$ are the two feasibility axes
 

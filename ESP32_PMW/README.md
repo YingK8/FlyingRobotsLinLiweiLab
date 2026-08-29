@@ -16,15 +16,24 @@ pio run -e <env> --target upload     # builds + flashes the firmware
 
 | Environment | Source file | Balance | Purpose |
 |---|---|---|---|
-| `tilt` | `main_tilt.cpp` | PI | 1→210 Hz ramp, then 100%→0% carrier step-down |
-| `takeoff` | `main_takeoff.cpp` | PI | 1→500 Hz double ramp at 100% carrier |
-| `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | PI | CW, 1→190 Hz |
-| `carrier_ramp` | `main_carrier_ramp.cpp` | PI | carrier 0→100% at 190 Hz |
-| `comp_test` | `main_comp_test.cpp` | passthrough | per-channel trim A/B test |
-| `coupling_test` | `main_coupling_test.cpp` | passthrough | coil-coupling sweep |
-| `dc` | `main_dc.cpp` | passthrough | DC current-sense calibration |
-| `ceiling` | `main_ceiling.cpp` | passthrough | unregulated ceiling vs frequency |
-| `current_pid` | `main_current_pid.cpp` | PI | standalone serial PID tuning rig |
+| `flight` *(default)* | `main_flight.cpp` | PI | live PC-commanded takeoff → hover → directional accel |
+| `servo` | `main_servo.cpp` | PI | dumb serial shim; the host owns the control loop |
+| `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | PI | CW, EASE 1→200 Hz over 25 s at 100% carrier, then overshoot to 210 Hz and settle at 190 |
+| `comp_test` | `calibration/main_comp_test.cpp` | passthrough | per-channel trim A/B test |
+| `coupling_test` | `calibration/main_coupling_test.cpp` | passthrough | coil-coupling sweep |
+| `dc` | `calibration/main_dc.cpp` | passthrough | DC current-sense calibration |
+| `serialcomm_demo` | `examples/main_serialcomm_demo.cpp` | — | `lib/SerialComm` echo demo, not a flight target |
+
+All seven envs above build. `main_flight.cpp` was briefly missing the
+declarations for its state variables (`state`, `collective`, `azSet`, `magSet`,
+`clampf`, the mode enum, `SPINUP_THROTTLE`, `FREQ_MIN/MAX`); that block is back,
+and `pio run -e flight` links at 6.8% RAM / 27.0% flash.
+
+`platformio.ini` used to declare `tilt`, `takeoff`, `carrier_ramp`, `ceiling`,
+`current_pid`, and `hover_zigzag` as well. Their sources were deleted in
+`5866dd5`, so those env blocks are gone too. The three `calibration/` envs build
+but need their JSON payloads, which were removed in the same commit -- recover
+from git history before rerunning one.
 
 "PI" = the current-balance loop (folded into `PwmController`, opt-in via
 `enableCurrentBalance()`) rebalances the four channels beneath the schedule's
@@ -37,21 +46,26 @@ pio device monitor -e <env>   # 115200 baud
 
 Or chain both:
 ```bash
-pio run -e tilt --target upload && pio device monitor -e tilt
+pio run -e flight --target upload && pio device monitor -e flight
 ```
 
-Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>.py`).
+The host-side Python is in two places: the vision → control pipeline that flies
+the robot is in [`controller/`](controller/README.md), and the sweeps, sysID,
+validation and plotting are in `ai/` (run with `uv run python ai/<script>.py`).
 
 ---
 
 ## Channel Map
 
-| Index | Name | PWM pin | Carrier pin | Phase |
-|---|---|---|---|---|
-| 0 | A | GPIO 32 | GPIO 33 | 0° |
-| 1 | B | GPIO 25 | GPIO 26 | 180° |
-| 2 | C | GPIO 27 | GPIO 14 | 90° |
-| 3 | D | GPIO 23 | GPIO 13 | 270° |
+| Index | Name | PWM pin | Carrier pin | ADC pin | Phase (CCW) |
+|---|---|---|---|---|---|
+| 0 | A | GPIO 32 | GPIO 33 | GPIO 36 | 90° |
+| 1 | B | GPIO 25 | GPIO 26 | GPIO 39 | 270° |
+| 2 | C | GPIO 18 | GPIO 19 | GPIO 34 | 180° |
+| 3 | D | GPIO 22 | GPIO 23 | GPIO 35 | 0° |
+
+Transcribed from the `#else` (classic ESP32) branch of `src/constants.h`, which
+is the authority. GPIO 14 is `RESET_BUTTON_PIN`, not a coil pin.
 
 Rotation order (CCW): A → C → B → D
 
@@ -92,19 +106,19 @@ controller->overcurrentTripped();                   // true once the latch fired
 ```
 
 Most experiment mains don't call these directly — `src/drive_common.h`
-(`driveBoot` / `driveMake` / `driveLoad` / `driveTelemetry`) wraps the boilerplate
+(`driveBoot` / `driveTelemetry`) wraps the boilerplate
 so each `main_*.cpp` stays a short, explicit `setup()` + `loop()`.
 
 ---
 
-## PhaseSequencer
+## PwmSequencer
 
 Queues time-based tasks (ramps, waits, phase snaps) and executes them against a PwmController.
 
 ```cpp
-#include "PhaseSequencer.h"
+#include "PwmSequencer.h"
 
-PhaseSequencer* seq = new PhaseSequencer(controller);
+PwmSequencer* seq = new PwmSequencer(controller);
 
 // One addRampTask for every quantity; TaskType picks it, TaskMode the curve
 seq->addRampTask(1.0f, 200.0f, 15000, TaskType::PWM_FREQ, TaskMode::EASE);   // 1→200 Hz ease
@@ -136,19 +150,9 @@ bool done = seq->isDone();
 
 ---
 
-## Carrier Sweep Pattern (tilt)
-
-`main_tilt.cpp` ramps 1→210 Hz, then steps every channel's carrier ceiling down
-100% → 0% in −10% steps. The folded PI loop rebalances the four channels beneath
-each ceiling, so per-channel trims are found automatically instead of hand-tuned.
-The LED on GPIO 2 toggles once per schedule step — that per-step behavior lives
-right in the main's `loop()` and is the template for adding your own.
-
----
-
 ## Scheduling Tasks
 
-### Code-based (PhaseSequencer)
+### Code-based (PwmSequencer)
 
 Build the sequence in `setup()`, then execute it in `loop()`:
 
@@ -175,20 +179,28 @@ void loop() {
 
 ---
 
-### JSON file (JsonPhaseSequencer)
+### JSON file (JsonPwmSequencer)
 
-Upload a `.json` file to SPIFFS, then load it at startup. It's an array of
-entries, each naming a `PhaseSequencer` method and its arguments, applied in
-array order (not by a timestamp field):
+Upload a `.json` file to SPIFFS, then load it at startup. The file is an object
+carrying the initial state plus a `schedule` array, each entry naming a
+`PwmSequencer` method and its arguments, applied in array order (not by a
+timestamp field):
 
 ```json
-[
-  { "method": "addDutyCycleTask",       "channels": 0, "value": 60.0 },
-  { "method": "addPhaseRampTask",       "channels": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
-  { "method": "addCarrierDutyCycleTask","channels": 0, "value": 75.0 },
-  { "method": "addWaitTask",            "duration_ms": 3000 }
-]
+{
+  "resolution_ms": 25,
+  "initial_freq": 190.0,
+  "direction": "CCW",
+  "schedule": [
+    { "method": "addDutyCycleTask",       "channels": 0, "value": 60.0 },
+    { "method": "addPhaseRampTask",       "channels": 1, "from": 0.0, "to": 90.0, "duration_ms": 500 },
+    { "method": "addCarrierDutyCycleTask","channels": 0, "value": 75.0 },
+    { "method": "addWaitTask",            "duration_ms": 3000 }
+  ]
+}
 ```
+
+A bare top-level array is still accepted, with every config key at its default.
 
 `method` is one of: `addDutyCycleTask` / `addPhaseTask` / `addCarrierDutyCycleTask`
 (instant, per-channel set), `addWaitTask`, `addLinearRampTask` /
@@ -201,11 +213,11 @@ serial.
 Every ramp method takes an optional `"shape"` that tunes its curve.
 `addLinearRampTask` / `addCarrierRampTask` are power ramps `t^p` — `shape` is
 the power `p>0`, defaulting to 1, i.e. the straight line they have always
-produced. See `lib/JsonPhaseSequencer/README.md` for the full table.
+produced. See `lib/JsonPwmSequencer/README.md` for the full table.
 
 ```cpp
-#include "JsonPhaseSequencer.h"
-JsonPhaseSequencer* seq = new JsonPhaseSequencer(controller);
+#include "JsonPwmSequencer.h"
+JsonPwmSequencer* seq = new JsonPwmSequencer(controller);
 seq->loadFromJsonFile("/schedule.json");
 seq->start();
 // call seq->run() in loop()
@@ -213,40 +225,14 @@ seq->start();
 
 ---
 
-### CSV waypoints (CsvPhaseSequencer)
-
-Define channel states at each timestamp; the sequencer interpolates between them:
-
-```csv
-# channels, 4
-# step_size_ms, 25
-# interpolation, linear
-time,channel,duty,carrier_duty,frequency,phase
-0,0,50,100,10,0
-0,1,50,100,10,90
-0,2,50,100,10,180
-0,3,50,100,10,270
-500,0,60,80,15,0
-500,1,60,80,15,90
-500,2,60,80,15,180
-500,3,60,80,15,270
-```
-
-Interpolation modes: `linear`, `hermite` / `ease` (smoothstep).
-
-```cpp
-#include "CsvPhaseSequencer.h"
-CsvPhaseSequencer* seq = new CsvPhaseSequencer(controller);
-seq->loadFromCSVFile("/profile.csv");
-seq->start();
-// call seq->run() in loop()
-```
-
-Upload the data file to SPIFFS with: `pio run -e <env> --target uploadfs`
-
----
-
 ## Further Reading
 
-- Full API docs: [`DOCS.md`](DOCS.md)
-- Library details: [`lib/PwmController/README.md`](lib/PwmController/README.md), [`lib/PhaseSequencer/README.md`](lib/PhaseSequencer/README.md)
+- Firmware libraries: [`lib/PwmController/`](lib/PwmController/README.md),
+  [`lib/PwmSequencer/`](lib/PwmSequencer/README.md),
+  [`lib/JsonPwmSequencer/`](lib/JsonPwmSequencer/README.md),
+  [`lib/SerialComm/`](lib/SerialComm/README.md)
+- The vision → control pipeline that drives this firmware:
+  [`controller/README.md`](controller/README.md)
+- Schedule payloads: [`spiffs_data/README.md`](spiffs_data/README.md)
+- Captured experiment data: [`data/README.md`](data/README.md)
+- Board / power stage: [`docs/PCB_Design_Documentation.md`](docs/PCB_Design_Documentation.md)

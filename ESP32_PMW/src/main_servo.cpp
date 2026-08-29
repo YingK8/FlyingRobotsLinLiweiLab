@@ -31,7 +31,9 @@ void setup() {
   ctl.begin(); // DC until the host sends the first F
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   ctl.enableCurrentSense(ADC_PINS, SENS, /*tripA*/ 10.0f);
-  ctl.enableCurrentBalance(); // A<ch> duty becomes the per-channel ceiling
+  // ctl.enableCurrentBalance();  // OFF: CS is blind to the disk (tilt_ccw_nodisk), the
+  // imbalance is static magnetic coupling that feedforward trims already fix (1.97 ->
+  // 1.046), and the loop confounds the az sweep. Re-enable only with evidence.
 }
 
 void loop() {

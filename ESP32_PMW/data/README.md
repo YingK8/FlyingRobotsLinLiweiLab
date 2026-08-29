@@ -64,8 +64,30 @@ Serial logs contain the `field trim:` value lines from each session.
 Not yet successful; open thread: geometric field asymmetry (B/C vs A/D),
 suspect coil mounting height/tilt — calipers check pending.
 
+## 2026-07-14_tilt/
+The largest session here (99 files). PI-balance and tilt development on the
+2026-07-14 rig: `tilt_pi_fixed_run1/2`, `tilt_pi_governor_run3`,
+`tilt_pi_balance_run4`, the `tilt_ratio_run1..10` sweep, `tilt_maxperf_15V_run6`
+(+ its freq sweep), the `tilt_cw_*_run11..19` diagnostic series (coramp, low
+signal, from-0Hz, v/f, 170 Hz, align), `spinup_torque_aware_run20/21`,
+`dwell_staircase_run22`, `takeoff_220_run23/24`, plus `ceiling_run1/2`,
+`coramp_fix_comparison.png` and `sync_model`. Each run is a `.csv` capture with
+its `.log` serial companion and, where analyzed, a `.png`.
+
+## current_pid_tuning/
+Standalone current-PID tuning rig, `current_pid_iter1..N` — each iteration a
+serial `.log` plus a `*_pid_telemetry.png`. Plotted by `ai/plots/plot_pid_log.py`.
+
+## Loose captures (2026-07-19 onward)
+Not yet grouped into a session directory:
+- `cs_20260719_223458.*` and `cs_20260719_223543_part01..08.*` — a long
+  current-sense recording split into parts (`*_cs.png` for the analyzed ones).
+- `reset_test_20260719_230603.*` — reset-button / boot behaviour check.
+- `takeoff_1.csv` — a single takeoff capture.
+- `hover_zigzag_debug.{log,png}` — from the since-deleted `hover_zigzag` firmware.
+
 ## Removed as garbage (2026-07-05 cleanup)
 - `tilt_ccw_verify.*` — capture recorded against the wrong firmware after a
   failed flash (PhaseSequencer mid-refactor); serial log was empty.
 - `comp_ff_iter1_rms.png` — auto-generated overview that was provably inverted
-  (see workflow memory note; regenerate any overview with `tools/plot_rms.py`).
+  (see workflow memory note; regenerate any overview with `ai/plots/plot_rms.py`).

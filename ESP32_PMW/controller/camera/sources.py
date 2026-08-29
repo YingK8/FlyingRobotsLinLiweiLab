@@ -176,6 +176,7 @@ class MonoCamera(Capture):
         fps=None,
         fourcc="MJPG",
         grayscale=True,
+        rotate180=False,
         backend=None,
     ):
         if backend is None:
@@ -198,6 +199,12 @@ class MonoCamera(Capture):
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self._gray = grayscale
+        # Cameras mounted inverted. A 180 deg rotation is a pure pixel permutation --
+        # exact, no resampling -- and it belongs here because this is the only place
+        # frames enter the system: calibration and the live loop then agree by
+        # construction, instead of the pose loop running inverted frames against
+        # right-way-up intrinsics.
+        self._rot180 = rotate180
         self._lock = threading.Lock()
         self._slot = None
         self._new = threading.Event()
@@ -231,6 +238,8 @@ class MonoCamera(Capture):
             t = time.monotonic()
             if self._gray and frame.ndim == 3:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if self._rot180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
             with self._lock:
                 if self._slot is not None:
                     self.n_dropped += 1  # consumer never saw the previous one
@@ -290,25 +299,40 @@ class StereoCamera(Capture):
         self.timeout = timeout
         self.n_read = 0
         self.n_skew_dropped = 0
+        self.last_skew = float("nan")   # of the pair `read` returned, not of the retries
+        self.last_stamps = ()           # each camera's own capture time for that pair
         self._skews = []
 
+    MAX_SKEW_RETRIES = 200
+
     def read(self):
-        items = []
-        for s in self.sources:
-            item = s.read() if not isinstance(s, MonoCamera) else s.read(self.timeout)
-            if item is None:
-                return None
-            items.append(item)
+        # Rejection sampling on phase, bounded rather than recursive: two free-running
+        # cameras hold a slowly drifting offset, so a `max_skew_s` tighter than that offset
+        # is unsatisfiable for seconds at a time. Looping gives up and returns the best pair
+        # seen; recursing would raise RecursionError instead.
+        best = None
+        for _ in range(self.MAX_SKEW_RETRIES):
+            items = []
+            for s in self.sources:
+                item = s.read() if not isinstance(s, MonoCamera) else s.read(self.timeout)
+                if item is None:
+                    return None
+                items.append(item)
 
-        stamps = [t for t, _ in items]
-        skew = max(stamps) - min(stamps)
-        self._skews.append(skew)
-        self.n_read += 1
+            stamps = [t for t, _ in items]
+            skew = max(stamps) - min(stamps)
+            self._skews.append(skew)
+            self.n_read += 1
+            if best is None or skew < best[0]:
+                best = (skew, stamps, items)
 
-        if self.max_skew_s is not None and skew > self.max_skew_s:
+            if self.max_skew_s is None or skew <= self.max_skew_s:
+                break
             self.n_skew_dropped += 1
-            return self.read()
+        skew, stamps, items = best
 
+        self.last_skew = skew
+        self.last_stamps = tuple(stamps)
         return float(np.mean(stamps)), [f for _, f in items]
 
     def skew_stats(self):

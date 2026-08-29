@@ -46,10 +46,46 @@ COLUMNS = [
     "ambiguity_margin_deg",
     "n_solutions",
     "jump_deg",
+    "discrepancy_mm",
+    "margin",
+    "refine_rms_px",
+    "union_coverage",
+    "pred_pos_mm",
+    "pred_ang_deg",
     "t_seg_ms",
     "t_est_ms",
     "t_total_ms",
 ]
+
+#: Columns that only a `stereo.StereoPose` carries.  A monocular `estimator.Pose`
+#: leaves them blank rather than absent, so one reader handles both logs.
+#:
+#: `discrepancy_mm` earns its place twice over: it is the two views disagreeing,
+#: which is an estimate of the error that needs no stationary robot and no ground
+#: truth at all -- see `noise.py`.
+STEREO_COLUMNS = (
+    "discrepancy_mm",
+    "margin",
+    "refine_rms_px",
+    "union_coverage",
+    "pred_pos_mm",
+    "pred_ang_deg",
+)
+
+
+def _stereo_cells(pose):
+    """
+    The stereo-only columns for ``pose``, blank on anything that lacks them.
+    """
+
+    out = []
+    for name in STEREO_COLUMNS:
+        v = getattr(pose, name, None)
+        try:
+            out.append("" if v is None or not np.isfinite(v) else f"{float(v):.4f}")
+        except TypeError:
+            out.append("")
+    return out
 
 
 def write_metadata(fh, meta):
@@ -137,6 +173,7 @@ class PoseRecorder:
                     f"{pose.ambiguity_margin_deg:.3f}",
                     pose.n_solutions,
                     "" if not np.isfinite(pose.jump_deg) else f"{pose.jump_deg:.3f}",
+                    *_stereo_cells(pose),
                     f"{pose.t_seg_ms:.4f}",
                     f"{pose.t_est_ms:.4f}",
                     f"{pose.t_total_ms:.4f}",

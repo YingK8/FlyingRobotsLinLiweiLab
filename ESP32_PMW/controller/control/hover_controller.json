@@ -1,20 +1,19 @@
 {
   "meta": {
-    "generated_by": "ai/design_hover_lqr.py",
-    "date": "2026-07-23",
+    "generated_by": "controller/control/design_hover_lqr.design",
+    "date": "2026-08-28",
     "args": {
-      "rate": 30.0,
+      "rate_hz": 30.0,
       "f_hover": 140.0,
       "k_lat": 0.05,
       "margin": 5.0,
       "mag_max": 0.8,
       "freq_delta_max": 15.0,
-      "freq_slew": 200.0,
-      "out": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/ai/hover_controller.json"
+      "freq_slew": 200.0
     }
   },
   "params": {
-    "I_robot": 3.900767435994792e-09,
+    "I_robot": 3.3578361348541667e-09,
     "k_drag": 3.908983509946592e-10,
     "f_hover": 140.0,
     "k_lat": 0.05,
@@ -38,6 +37,10 @@
       4.0,
       0.1111111111111111
     ]
+  },
+  "noise": {
+    "measured": false,
+    "why": "no static calibration recorded; run pose/noise.py --record"
   },
   "K": [
     [

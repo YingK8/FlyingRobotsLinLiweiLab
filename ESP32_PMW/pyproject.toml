@@ -11,6 +11,7 @@ dependencies = [
     "picosdk>=1.1",
     "pyserial>=3.5",
     "opencv-contrib-python>=4.10",  # cv2.aruco (ChArUco) lives in contrib
+    "pillow>=10.0",                 # calib/calibrate.py writes the board PDF
     "ipykernel>=6.29",              # model/visual_servo.ipynb
     "ipywidgets>=8.1",              # camera/elp_capture.ipynb: capture button + live preview
     # controller/pose/validation: offscreen rendering of the robot mesh at known
@@ -18,8 +19,11 @@ dependencies = [
     "trimesh>=4.0",
     "pyrender>=0.1.45",
     "pyglet<2",                     # pyrender 0.1.45 predates the pyglet 2 API break
+    # controller/viz/live_viz.py: the live 3-D flight view. Browser-based, so it
+    # needs no GL context of its own -- unlike pyrender above.
+    "viser>=1.1.0",
 ]
 
-# No Python package to build — this project is just scripts under tools/.
+# No Python package to build -- this project is just scripts under controller/ and ai/.
 [tool.uv]
 package = false

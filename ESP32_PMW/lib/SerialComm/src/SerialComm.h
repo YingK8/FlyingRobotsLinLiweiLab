@@ -3,8 +3,8 @@
 #include <Arduino.h>
 
 // Non-blocking, newline-framed serial link. Framing: ASCII lines ending in \n,
-// \r, or \r\n; no checksum. Matches the PC-side tools (run_experiment.py,
-// trigger_reset_log.py, tools/serial_comm.py).
+// \r, or \r\n; no checksum. Matches the PC-side tools in ai/experiments/
+// (run_experiment.py, trigger_reset_log.py).
 class SerialComm {
 public:
   explicit SerialComm(Stream &port = Serial) : _port(port) {}

@@ -23,17 +23,24 @@ Two independent filters:
                  as a 3-vector and renormalising avoids the wrap and singularity
                  that (theta, phi) would hit -- phi is undefined at zero tilt.
 
-Measurement noise defaults are held-out measurements, not taste: 0.13 mm lateral,
-0.36% of range in depth, 1.24 deg on the normal. Depth noise is range dependent and
-rebuilt each update; a fixed value would over-trust depth far away and under-trust
-it up close.
+Measurement noise comes from `noise.py` when a static calibration has been recorded,
+and from the rendered fallbacks below when it has not. Depth noise is range dependent
+and rebuilt each update; a fixed value would over-trust depth far away and under-trust
+it up close. Given a rig, R is the *fused* 3x3 of the two views rather than a triple:
+cameras 90 degrees apart in azimuth do not give a world-axis-aligned covariance.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-# Measured 1-sigma per-frame noise, from the held-out test split.
+# Per-frame 1-sigma noise, from the held-out split of *rendered* data.
+#
+# These are the fallbacks, not the answer. `noise.py` measures the real thing on a
+# stationary robot and writes `noise_model.json`; when that file exists the defaults
+# below are replaced by what the bench actually does. They stay here because the
+# first static run has to be estimated by something, and because a rendered number
+# that is labelled as one is honest -- silently shipping it as "measured" was not.
 SIGMA_LATERAL_MM = 0.13
 SIGMA_DEPTH_FRAC = 0.0036  # of range
 SIGMA_NORMAL = 0.022  # unit-vector components, ~= sin(1.24 deg)
@@ -113,6 +120,11 @@ class _ConstantVelocity:
         """
         Fuse a measurement with per-channel standard deviations ``sigma``.
 
+            ``sigma`` may instead be a full 3x3 covariance. Two cameras 90 degrees
+            apart in azimuth do not produce a covariance aligned to the world axes,
+            so the triple is the *monocular* geometry and the matrix is the stereo
+            one -- see `noise.NoiseModel.sigma_pos`.
+
             ``gate`` rejects a measurement whose innovation is more than that many
             sigmas from where the filter expected it, in the innovation's own metric --
             `y' S^-1 y` normalised by the three degrees of freedom, where ``S`` is the
@@ -131,7 +143,8 @@ class _ConstantVelocity:
         """
 
         z = np.asarray(z, dtype=np.float64)
-        r = np.diag(np.asarray(sigma, dtype=np.float64) ** 2)
+        sigma = np.asarray(sigma, dtype=np.float64)
+        r = np.diag(sigma**2) if sigma.ndim == 1 else sigma
 
         if not self.initialised:
             # Seed from the first measurement rather than from zero, so the
@@ -210,17 +223,34 @@ class PoseFilter:
         self,
         accel_mm_s2=ACCEL_MM_S2,
         accel_normal=ACCEL_NORMAL,
-        sigma_lateral_mm=SIGMA_LATERAL_MM,
-        sigma_depth_frac=SIGMA_DEPTH_FRAC,
-        sigma_normal=SIGMA_NORMAL,
+        sigma_lateral_mm=None,
+        sigma_depth_frac=None,
+        sigma_normal=None,
         max_coast_s=0.15,
         gate=GATE_SIGMA,
+        noise=None,
+        rig=None,
     ):
+        # `noise` is a `noise.NoiseModel`; absent, the measured one on disk is used,
+        # and absent that, the rendered fallbacks above. An explicit sigma always
+        # wins over all three -- callers that pass one mean it.
+        if noise is None:
+            from noise import NoiseModel
+            noise = NoiseModel.load()
+        self.noise = noise
+        # With a rig, R is the fused covariance of two cameras that are not aligned
+        # to the world axes; without one it is the axis-aligned triple. Held here
+        # rather than resolved per frame: it does not change during a run.
+        self.rig = rig
+
         self.pos = _ConstantVelocity(accel_mm_s2, p0_pos=100.0, p0_vel=1e4)
         self.nrm = _ConstantVelocity(accel_normal, p0_pos=1.0, p0_vel=100.0)
-        self.sigma_lateral_mm = sigma_lateral_mm
-        self.sigma_depth_frac = sigma_depth_frac
-        self.sigma_normal = sigma_normal
+        self.sigma_lateral_mm = (
+            noise.sigma_lateral_mm if sigma_lateral_mm is None else sigma_lateral_mm)
+        self.sigma_depth_frac = (
+            noise.sigma_depth_frac_world if sigma_depth_frac is None
+            else sigma_depth_frac)
+        self.sigma_normal = noise.sigma_normal if sigma_normal is None else sigma_normal
         self.max_coast_s = max_coast_s
         # `None` disables the innovation gate and fuses every frame, which is what the
         # filter did before.
@@ -267,11 +297,19 @@ class PoseFilter:
 
         # Depth noise scales with range; lateral noise does not.
         z = max(1.0, abs(float(pose.xyz_mm[2])))
-        sigma_pos = (
-            self.sigma_lateral_mm,
-            self.sigma_lateral_mm,
-            self.sigma_depth_frac * z,
-        )
+        if self.rig is None:
+            sigma_pos = (
+                self.sigma_lateral_mm,
+                self.sigma_lateral_mm,
+                self.sigma_depth_frac * z,
+            )
+        else:
+            # `rig.position_covariance` combines the two views' anisotropic error in
+            # information form and returns the 3x3 in world coordinates. The triple
+            # above is what that reduces to for one camera looking down world z; for
+            # this rig, whose cameras sit 90 degrees apart in azimuth, it does not.
+            sigma_pos = self.rig.position_covariance(
+                self.noise.sigma_lat_mm, self.noise.sigma_depth_mm(z))
 
         _, took_pos = self.pos.update(
             np.asarray(pose.xyz_mm, dtype=np.float64), sigma_pos, gate=self.gate)
@@ -335,6 +373,31 @@ def _check():
     moved = float(np.linalg.norm(f.pos.value - settled))
     assert moved > 100.0, f"the gate locked on: track moved only {moved:.1f} mm"
     print("filter self-check ok (gate refuses an outlier, yields to a manoeuvre)")
+
+    # A full 3x3 R tracks the same target as the equivalent triple. Correlated R is
+    # the whole point of passing a rig, so the check uses one with real off-diagonal
+    # terms rather than a diagonal matrix that would pass either way.
+    class _Rig:
+        def position_covariance(self, lat, dep):
+            c = np.diag([lat**2, lat**2, dep**2])
+            c[0, 2] = c[2, 0] = 0.5 * lat * dep
+            return c
+
+    rig = _Rig()
+    g = PoseFilter(rig=rig)
+    g.update(_P([0.0, 0.0, 200.0], 0.0))
+    # The seed sets P[:3,:3] = R, so this is a direct read-back: the off-diagonal
+    # proves the matrix went in whole rather than being flattened to its diagonal.
+    want = rig.position_covariance(g.noise.sigma_lat_mm, g.noise.sigma_depth_mm(200.0))
+    assert np.allclose(g.pos.P[:3, :3], want), g.pos.P[:3, :3]
+    assert abs(want[0, 2]) > 0, "the test rig must have an off-diagonal term"
+    for i in range(1, 30):
+        g.update(_P([i * 0.5, 0.0, 200.0], i / 60.0))
+    d = float(np.linalg.norm(g.pos.value - settled))
+    assert d < 5.0, f"the 3x3 R path tracks elsewhere than the triple: {d:.2f} mm"
+    assert g.n_gated == 0, f"the 3x3 R path gated a clean track, n_gated={g.n_gated}"
+    print(f"  3x3 R reaches the filter whole (off-diagonal {want[0, 2]:.4f}), "
+          f"tracks to {d:.3f} mm")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+  "camera_indices": [
+    0,
+    1
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "fps": 60.0,
+  "rotate180": true,
+  "n_frames": 1365,
+  "dropped": 0,
+  "created": "2026-08-28T09:21:47"
+}

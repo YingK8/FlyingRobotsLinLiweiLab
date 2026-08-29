@@ -7,7 +7,9 @@ frame. Consumed by: [chapter 4, control](../control/theory.md).*
 This is the largest chapter because it is the one that turns an image into a
 number, and there are three separable questions in that: what a camera can *see*
 of the robot (§12), what precision is *possible* at all (§13), and how to find the
-robot in a cluttered frame in the first place (§15).
+robot in a cluttered frame in the first place (§15). §18 closes the loop on all
+three: it measures what the noise on this bench actually is, rather than bounding
+it (§13) or scoring it against renders (§16).
 
 ## Reading order
 
@@ -24,7 +26,8 @@ robot in a cluttered frame in the first place (§15).
 | 9 | `background.py` | the empty-rig plate the mask subtracts, and its staleness check (§15.3, §15.8) |
 | 10 | `fit_radius.py` | the rim radius, recovered from cross-view disagreement (§15.9) |
 | 11 | `calibrate_zero.py`, `recorder.py` | the datum, and capture to disk for offline replay |
-| 12 | `test_ring_fit.py`, `test_timing.py` | the ring fit and the per-stage budget of §17.5 |
+| 12 | `noise.py` | the measured noise model of §18: what the scatter is when nothing moves |
+| 13 | `test_ring_fit.py`, `test_timing.py` | the ring fit and the per-stage budget of §17.5 |
 
 The dependency runs 1 -> 2 -> 3 -> 4; `bounds.py` and the renderer are how the
 claims in this chapter were measured rather than asserted.
@@ -2315,3 +2318,179 @@ from renders with a comment explaining that it had been considered and left alon
 was cutting through a quarter of the rim. The second was `RADIUS_BENCH_MM` describing an
 edge the pipeline had stopped measuring. Both were constants with reasons attached, and
 the reasons had expired.
+
+## 18. The static noise model: measuring the scatter instead of predicting it
+
+§13 derives what the error *cannot* go below and §16 measures what the pipeline
+achieves against rendered ground truth. Neither is a measurement of the noise this
+bench actually has. Every $\sigma$ the running pipeline consumed until now was one
+or the other: `filter.py` took 0.13 mm lateral and 0.36% of range in depth from a
+held-out split of *renders*, `stereo.py` took its fusion weights straight from the
+Cramér–Rao floor of §13, and `control/z_track.py` priced its step-out threshold
+against an assumed 0.5 mm per frame that nothing had ever measured.
+
+A stationary robot settles all of them with one experiment. If the truth does not
+move, everything the estimator reports that does is error. No renderer, no ground
+truth, no analytic pose: the scatter *is* the noise.
+
+### 18.1 Why this is not simply a standard deviation
+
+The obvious procedure -- hold the robot still, take $\sigma$ of the reported
+positions, put it in the filter -- is wrong here, and §5's own module docstring
+says why before this section existed: depth autocorrelates at $r = 0.966$ from one
+frame to the next and stays above $0.5$ for 408 ms.
+
+Model the residual as an AR(1) process, which is the least structure that has a
+correlation time at all:
+
+$$x_t = \rho\, x_{t-1} + e_t, \qquad e_t \sim \mathcal N\!\left(0,\ \sigma^2 (1-\rho^2)\right)$$
+
+so that the *marginal* variance is $\sigma^2$ whatever $\rho$ is. Three consequences
+follow, and each is a number the calibration has to report separately.
+
+**The correlation time.** The envelope decays as $e^{-t/\tau}$ with
+
+$$\tau = -\frac{\Delta t}{\ln \rho}$$
+
+At 60 fps and $\rho = 0.966$ that is 480 ms -- far longer than any control interval,
+which is what makes it a bias rather than a noise.
+
+**The effective sample count.** For estimating a mean, $N$ correlated samples are
+worth
+
+$$N_{\text{eff}} = N\,\frac{1-\rho}{1+\rho}$$
+
+At $\rho = 0.966$, a thousand frames are worth seventeen. This is the error bar on
+$\sigma$ itself, and without it a long static run looks far more authoritative than
+it is.
+
+**The white part.** Differencing kills drift of any shape, and for a white series
+$\operatorname{Var}(x_t - x_{t-1}) = 2\sigma^2$ exactly. So
+
+$$\sigma_{\text{white}} = \frac{\operatorname{MAD}(\Delta x)\times 1.4826}{\sqrt 2}$$
+
+answers the question the total scatter cannot: **how much of this could averaging
+ever remove?** For a white channel $\sigma_{\text{white}} = \sigma$; for the depth
+channel it is a small fraction of it.
+
+MAD before standard deviation throughout, and both reported. A static run still
+drops the occasional blunder frame (§16.23), one of those moves a standard
+deviation and not a median, and their ratio is the same contamination figure §13.7
+tabulates for the boundary.
+
+### 18.2 Which $\sigma$ is the Kalman $R$
+
+A Kalman filter assumes $v_k \sim \mathcal N(0, R)$ **independent between frames**.
+That assumption is false here, so neither candidate is correct and the question is
+only which way to be wrong.
+
+| choice | what the filter then believes | failure |
+|---|---|---|
+| $R = \sigma_{\text{white}}^2$ | each frame is nearly independent | it averages, the bias does not average, and the track becomes *confidently* wrong -- the gate of §16.25 tightens around a wrong centre |
+| $R = \sigma_{\text{total}}^2$ | each frame is worth less than it is | slower to converge, wider gate, no false confidence |
+
+**The total scatter ships as $R$.** Under-trusting a correlated measurement costs
+convergence rate; over-trusting one costs correctness, and the whole point of §5's
+"take position raw, velocity from the filter" advice is that the correlated part
+cannot be filtered away. $\sigma_{\text{white}}$ is reported beside it because it
+is what sets the achievable *rate* noise, which is the quantity control actually
+consumes (§18.5).
+
+### 18.3 Depth is a fraction of range, and one station cannot show it
+
+From §12, $z = 2fR/M$, so a boundary error $e$ propagates as
+
+$$\mathrm{d}z = -\frac{z}{M}\,\mathrm{d}M \;\propto\; \frac{z^2 e}{2fR},
+\qquad \mathrm{d}x = \frac{z}{f}\,\mathrm{d}u \;\propto\; z e$$
+
+Depth error goes as $z^2$ and lateral as $z$: the ratio itself grows with range.
+The shipped model in `filter.py` is depth $\propto z$ with lateral flat, which is a
+linearisation of that around one operating point, not the law.
+
+Two things follow. A single static station cannot separate a fraction of range from
+a constant offset at all -- one measurement, two unknowns -- so the calibration
+takes **three or four heights across the envelope**. And the fitted exponents are
+worth reporting even though the shipped shape stays put: $\sigma = c\,z^p$ fitted in
+log space gives $p$, and a $p$ far from the derived one says the shape is wrong. The
+model records both, and ships the shape its consumers already speak.
+
+### 18.4 Inverting the fusion, without an optimiser
+
+`filter.py` built $R$ as $(\sigma_{\text{lat}}, \sigma_{\text{lat}}, \sigma_{\text{depth}})$
+on the world axes. That is the *monocular* geometry. This rig's cameras sit 90°
+apart in azimuth (ch. 2), and `rig.position_covariance` combines their anisotropic
+per-view covariances in information form:
+
+$$\Sigma_{\text{fused}} = \left[\sum_i \left(\sigma_{\text{lat}}^2 I +
+(\sigma_{\text{depth}}^2 - \sigma_{\text{lat}}^2)\, d_i d_i^{\!\top}\right)^{-1}\right]^{-1}$$
+
+which is not diagonal in world coordinates for any pair of $d_i$ that are not axis
+aligned. On the shipped rig the $x$–$z$ term is real and not small. So the filter
+now takes the full $3\times3$ when a rig is available, and the triple only on the
+monocular path.
+
+Going the other way -- measured fused scatter to per-view scales -- needs no
+optimiser. The map is homogeneous of degree one,
+
+$$\Sigma_{\text{fused}}(k\sigma_{\text{lat}}, k\sigma_{\text{depth}}) = k^2\,
+\Sigma_{\text{fused}}(\sigma_{\text{lat}}, \sigma_{\text{depth}})$$
+
+so the *shape* of the eigenvalue triple fixes the ratio and one scalar then fixes
+the size. A two-parameter fit becomes two one-parameter ones, neither of which can
+fail to converge. A scan rather than a solver, because nobody has shown the shape
+error is unimodal, and because a scan can be asked whether it stopped at its own
+edge -- which is how an anisotropy no rig can produce gets reported instead of
+fitted.
+
+### 18.5 What the rate filters can and cannot remove
+
+Control consumes rate, not position, and rate comes from a first difference through
+a one-pole low-pass: `z_track.TAU_ZDOT_S`, `predictor.TAU_VEL_S`, and
+`simulate_hover.VelocityEstimator`. With $a = \Delta t/(\tau + \Delta t)$ and a
+white position component $\sigma_w$,
+
+$$\sigma_v = \frac{\sigma_w \sqrt 2}{\Delta t}\sqrt{\frac{a}{2-a}}$$
+
+and it is $\sigma_w$ that appears, **not** $\sigma_{\text{total}}$. The correlated
+part of the position error is common to both ends of the difference and cancels out
+of it exactly. This is the useful half of §18.1's bad news: the drift that no filter
+removes from position never reaches the rate in the first place.
+
+It also bounds what $\tau$ is worth. Raising $\tau$ past the measured $\tau_{\text{corr}}$
+starts averaging over samples that are not independent, so it buys lag and almost no
+noise. An 80 ms low-pass against a 400 ms correlation time is inside that regime.
+
+### 18.6 What does not work
+
+| tried | result |
+|---|---|
+| Standard deviation of a static run as $R$ | **Right number, wrong quantity.** It is the total wander, most of which is bias. Correct as a conservative $R$ (§18.2), wrong as "the noise", and useless for predicting rate noise. |
+| One station, at hover height | **Underdetermined.** Depth $\sigma$ is a fraction of range; one height cannot separate the fraction from a constant. |
+| Fitting a two-parameter line $\sigma_{\text{depth}} = a + bz$ | **Fitted then discarded.** The shipped consumers have no slot for an intercept, so it would be estimated and silently dropped. The exponent in §18.3 is where a bad shape is meant to show. |
+| Per-view scales from a single fused number | **Not possible.** The ratio is a property of where the cameras are; the fused scatter constrains shape and size together, and needs the rig to be separated. |
+| Recording with the coils energised | **Not done here, and it matters.** The shipped calibration is coils-off, so it is the *vision* noise floor and excludes drive-induced vibration and EMI. The artifact records `condition` so a coils-on set can be taken later and differenced against this one. |
+| An LQG observer in `control/` | **Redundant.** The full state is already measured and filtered in `filter.py`; §11 of ch. 4 says no further observer is needed. The measured noise goes into the gain file as provenance, not as a second Kalman gain. |
+
+### 18.7 Correspondence with the implementation
+
+| Model element | Code |
+|---|---|
+| Robust scatter, $1.4826\times$MAD (§18.1) | `noise._robust_sigma` |
+| $\rho_1$, $\tau$, $N_{\text{eff}}$, $\sigma_{\text{white}}$ (§18.1) | `noise._channel` |
+| One station, and the fused $3\times3$ (§18.1) | `noise.measure` |
+| Total scatter ships as $R$ (§18.2) | `noise.NoiseModel.sigma_pos`, `filter.PoseFilter.update` |
+| Depth as a fraction of range, exponents (§18.3) | `noise.NoiseModel.fit`, `noise._powerlaw` |
+| Inverting the fusion (§18.4) | `noise.per_view_scales`, against `rig.position_covariance` |
+| Full $3\times3$ $R$ on the stereo path (§18.4) | `filter._ConstantVelocity.update`, `filter.PoseFilter(rig=...)` |
+| Rate noise from $\sigma_{\text{white}}$ (§18.5) | `noise.NoiseModel.velocity_sigma_mm_s`, `.tau_for_velocity_sigma` |
+| Step-out threshold, checked not asserted (§18.5) | `control/z_track.check_stepout_margin`, asserted in its `demo()` |
+| Capture, one take per height | `camera/record.py --out results/static`, `noise.station_from_recording` |
+| The artifact, and the fallback when it is absent | `pose/noise_model.json`, `noise.NoiseModel.load`, announced in `live_viz._stereo_estimator` |
+
+The measured numbers are not in this document because the recording has not been
+taken yet. `python pose/noise.py --show` prints them against the §13 floors once it
+has, and the artifact carries its own provenance -- condition, station count,
+sample count, date -- so a number read here can always be traced to the run that
+produced it. **Until then the pipeline runs on the rendered fallbacks and says so
+on every start**, which is the state this section exists to make visible rather
+than comfortable.

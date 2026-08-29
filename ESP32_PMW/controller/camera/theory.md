@@ -15,9 +15,16 @@ device will tell you something that is not true.
 | 2 | `elp.py` | opens the ELP with the mode *checked*, and the device profile |
 | 3 | `elp_camera.json` | the mode table, as data rather than a list retyped per script |
 | 4 | `modes.py` | measures what each mode actually delivers, and diagnoses why |
+| 5 | `record.py` | the flight recorder: one video per camera plus the `frames.csv` that makes them a timed pair |
+| 6 | `test_record.py` | checks that pairing and the take boundaries hold |
 
 Start at `sources.MonoCamera`; everything else exists because of what §1.2 and
 §1.3 say about it.
+
+`record.py` is what every flight result downstream was measured on: it writes
+`results/flights/<date>_<time>/{A,B}/` plus a `frames.csv` of per-camera capture
+times, which is what lets `stereo.fuse` move both views to a common instant
+(`pose/theory.md` §17). Without that file the two videos are just two videos.
 
 ## 1.1 Two rates, and why they are not the same number
 

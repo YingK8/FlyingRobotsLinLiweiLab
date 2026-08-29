@@ -70,8 +70,11 @@ void loop() {
 - Use `setDutyCycle(channel, value)` for per-channel updates.
 
 ### How to Use Carrier PWM
-- Call `initCarrierPWM(channel, pin, freq, duty)` for each channel.
-- Adjust with `setCarrierDutyCycle(channel, duty)`.
+- Call `initCarrierPWM(pins, freqHz, dutyPercents)` **once**, with arrays for all
+  channels and a single shared carrier frequency.
+- Adjust one channel afterwards with `setCarrierDutyCycle(channel, duty)`.
+- With the balance loop on, `setCarrierDutyCycle` sets that channel's *ceiling*,
+  not its duty.
 
 ---
 
@@ -89,18 +92,72 @@ PwmController(const gpio_num_t* pins, const float* phaseOffsetsDegrees, const fl
 - `numChannels`: Number of channels
 
 #### Methods
-- `void begin(float initialFreqHz);`
-- `void run();`  // Call in main loop
+
+Lifecycle:
+- `void begin(float initialFreqHz = 0.0f);` — default `0` starts in DC mode: the
+  field is held static rather than rotating.
+- `void run();` — drift compensation, current sampling, trip check, balance. Call
+  every `loop()`.
+- `void shutdown(unsigned long rampMs = 2000);` — ramp the coils down and stop.
+- `bool rampDownStep(float stepPct);` — one step of a manual ramp-down.
+
+Drive:
 - `void setGlobalFrequency(float newHz);`
 - `void setFrequency(int channel, float newHz);`
 - `void setDutyCycle(int channel, float dutyPercent);`
 - `void setPhase(int channel, float degrees);`
-- `float getFrequency(int channel) const;`
+- `float getFrequency() const;` — global, no argument; `0` in DC mode.
+- `bool isDC() const;`
 - `float getPhase(int channel) const;`
 - `float getDutyCycle(int channel) const;`
 - `void enableSync(gpio_num_t syncPin);`
-- `void initCarrierPWM(int channel, gpio_num_t pin, float freqHz, float dutyPercent);`
+
+Carrier:
+- `void initCarrierPWM(const gpio_num_t *pins, float freqHz, const float *dutyPercents);`
 - `void setCarrierDutyCycle(int channel, float dutyPercent);`
+- `float getCarrierDutyCycle(int channel) const;`
+
+Current sense and balance (both opt-in, see §4a):
+- `void enableCurrentSense(const gpio_num_t *adcPins, const float *sensPerVolt, float overcurrentTripA = 0.0f);`
+- `void enableCurrentBalance(const BalanceConfig &cfg = BalanceConfig(), float startDuty = 50.0f);`
+- `void setBalanceGains(float kp, float ki, float kd);`
+- `void setBalanceRamp(float pctPerMs);`
+- `const float *measuredCurrents() const;` — `float[4]` in amps, or `nullptr`.
+- `float carrierCeiling(int channel) const;`
+- `bool balanceActive() const;` / `bool currentSenseActive() const;`
+- `bool overcurrentTripped() const;` — true once the latch has fired.
+
+### 4a. Current sense and the balance loop
+
+Both were folded into `PwmController` (they used to be a separate
+`CurrentBalanceController` plus framework). Neither runs unless you opt in.
+
+```cpp
+// Call with the coils OFF so the ADC zero seeds cleanly.
+controller.enableCurrentSense(ADC_PINS, SENS, /*tripA=*/10.0f);
+controller.enableCurrentBalance();   // omit for open-loop passthrough
+```
+
+With balance on, each channel's commanded carrier duty becomes its **ceiling**;
+the PI loop equalizes the four measured currents beneath those ceilings, so
+per-channel trims are found at runtime instead of hand-tuned. A *differential*
+set of ceilings therefore still tilts the rotor.
+
+`BalanceConfig` (`src/CurrentBalanceController.h`) carries the tuning; the
+defaults are the converged values and every field is overridable:
+
+| field | default | meaning |
+|---|---|---|
+| `kp` / `ki` / `kd` | 2.2 / 0.10 / 0.15 | duty % per amp of error |
+| `dutyMin` / `dutyMax` | 5 / 100 | hard clamp, before the per-channel ceiling |
+| `iMax` | 12.0 | per-channel overcurrent backoff level (A) |
+| `overcurrentBackoffPct` | 5.0 | duty backed off per tick above `iMax` |
+| `nominalTickMs` | 2.0 | gains are scaled by `dt/nominalTickMs`, so they are rate-independent |
+| `minSwitchMarginA` | 0.3 | hysteresis before the latched-minimum channel reassigns |
+| `minRampPctPerMs` | 0.05 | ramp rate of the minimum channel toward its ceiling |
+
+`CurrentSense` (`src/current_sense.h`) does the ADC reads and the zero-offset
+calibration behind `enableCurrentSense`.
 
 #### Configuration
 - All channels are independent.

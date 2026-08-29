@@ -15,7 +15,7 @@ Conventions, all of them OpenCV to match the rest of the package:
   not agree -- check ``meta["world_frame"]`` before reading any angle off a
   loaded rig:
 
-  - **A measured rig** (`stereo_calibration.ipynb`) uses **camera A** as the
+  - **A measured rig** (`run.ipynb`) uses **camera A** as the
     datum, ``T_world_camA = I``, so +z is A's optical axis and +y is image-down.
     `baseline_mm` and `axis_separation_deg` are frame-independent and stay
     correct; `tilt_seen_deg`, `tilt_information` and anything phrased as an
@@ -347,6 +347,22 @@ class StereoRig:
         )
         return math.degrees(math.acos(d))
 
+    def bisector_incidence_deg(self, i=0, j=1):
+        """
+        The best incidence a single flat board can present to both cameras at once.
+
+                Half the **directed** angle between the optical axes, and the quantity that
+                decides whether one board can calibrate this rig at all: a plane faces one
+                hemisphere, so on a mixed-hemisphere rig it is stuck at 60 degrees or worse
+                to both even though `axis_separation_deg` reports a comfortable 60. Compare
+                it against `calibrate.MAX_INCIDENCE_DEG`.
+        """
+
+        d = float(
+            np.clip(self.cameras[i].optical_axis @ self.cameras[j].optical_axis, -1, 1)
+        )
+        return math.degrees(math.acos(d)) / 2.0
+
     def baseline_mm(self, i=0, j=1):
         return float(
             np.linalg.norm(self.cameras[i].position - self.cameras[j].position)
@@ -483,7 +499,7 @@ class StereoRig:
         if not path.exists():
             raise FileNotFoundError(
                 f"no stereo rig at {path}; measure one with "
-                f"stereo_calibration.ipynb, or build a nominal one with "
+                f"run.ipynb, or build a nominal one with "
                 f"StereoRig.from_spherical(...)"
             )
         d = json.loads(path.read_text())

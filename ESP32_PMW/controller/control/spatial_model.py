@@ -32,9 +32,10 @@ Self-check: uv run python controller/control/spatial_model.py
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
+from scipy.special import ellipe, ellipk
 
 MU0 = 4.0e-7 * math.pi  # H/m
 # The beamforming GUI's value (line 1099). The 1-D GUIs and hover_model.py use
@@ -83,6 +84,8 @@ class Robot:
     mdip: float          # total dipole moment of the two magnets, A m^2
     mass: float          # kg
     com: np.ndarray      # (3,) COM in body CAD coordinates, m
+    m_axial: float = 0.0 # moment along the spin axis, A m^2. Zero on the CAD rotor: see
+                         # theory.md section 15, it is what makes a DC channel do anything
 
     @property
     def weight(self) -> float:
@@ -148,6 +151,10 @@ class Coils:
     amp: np.ndarray      # (M,) drive current amplitude, A
     phase: np.ndarray    # (M,) drive phase, rad
     channel: np.ndarray  # (M,) which of the 4 drive channels this coil belongs to
+    radius: np.ndarray = None  # (M,) loop radius, m. Only the "loop" model needs it
+    turns: np.ndarray = None   # (M,) turns. Only the "loop" model needs it
+    model: str = "dipole"      # "dipole" (the MATLAB stub) or "loop" (Biot-Savart)
+    dc_amp: np.ndarray = None  # (M,) steady current, A. None = no DC channel
 
     @property
     def n_channels(self) -> int:
@@ -163,7 +170,7 @@ class Coils:
         return z.real, -z.imag
 
 
-def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021):
+def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021, model="dipole"):
     """One of the GUI's two 4-channel presets, 16 coils as four 2x2 groups."""
 
     coil_r, turns = 0.0105, 650
@@ -213,6 +220,9 @@ def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021):
         amp=np.full(len(pos), float(amp)),
         phase=phases[np.array(channel)],
         channel=np.array(channel),
+        radius=np.full(len(pos), coil_r),
+        turns=np.full(len(pos), float(turns)),
+        model=model,
     )
 
 
@@ -221,8 +231,72 @@ def quick_coils(mode="cross", d=0.037, tilt_deg=0.0, amp=1.25, pitch=0.021):
 # --------------------------------------------------------------------------
 
 
+def loop_field(r, coils):
+    """Exact circular-loop field at ``r``, per ampere, one row per coil.
+
+    Section 12.9 item 1: the point dipole overestimates by 13.9 % at 35 mm and 6.0 % at
+    53 mm, and because that error varies with distance it reweights near coils against far,
+    biasing the field *direction* and so every torque downstream. This is the replacement.
+    """
+
+    if coils.radius is None or coils.turns is None:
+        raise ValueError('the "loop" field model needs Coils.radius and Coils.turns')
+
+    d = np.asarray(r, dtype=float)[None, :] - coils.pos          # (M,3)
+    z = np.einsum("ci,ci->c", d, coils.nhat)                     # axial coordinate
+    rho_vec = d - z[:, None] * coils.nhat                        # radial offset
+    rho = np.linalg.norm(rho_vec, axis=1)
+
+    a = coils.radius
+    alpha2 = a * a + rho * rho + z * z - 2.0 * a * rho
+    beta2 = a * a + rho * rho + z * z + 2.0 * a * rho
+    alpha2 = np.maximum(alpha2, 1e-24)
+    beta = np.sqrt(beta2)
+    m_ell = np.clip(1.0 - alpha2 / beta2, 0.0, 1.0 - 1e-15)      # scipy takes m = k^2
+    kk, ee = ellipk(m_ell), ellipe(m_ell)
+
+    c = MU0 * coils.turns / math.pi
+    b_z = c / (2.0 * alpha2 * beta) * (
+        (a * a - rho * rho - z * z) * ee + alpha2 * kk
+    )
+    # B_rho vanishes on the axis; the 1/rho there is removable, not a singularity.
+    safe = rho > 1e-12
+    b_rho = np.zeros_like(rho)
+    b_rho[safe] = (
+        c[safe] * z[safe] / (2.0 * alpha2[safe] * beta[safe] * rho[safe])
+    ) * ((a[safe] ** 2 + rho[safe] ** 2 + z[safe] ** 2) * ee[safe] - alpha2[safe] * kk[safe])
+
+    e_rho = np.zeros_like(rho_vec)
+    e_rho[safe] = rho_vec[safe] / rho[safe, None]
+    return b_rho[:, None] * e_rho + b_z[:, None] * coils.nhat
+
+
+def loop_basis(r, coils, want_grad=True, h=1e-5):
+    """``coil_basis`` under the exact loop field, gradient by central differences."""
+
+    # ponytail: FD gradient, 6 extra field evaluations. The analytic form exists only for
+    # the dipole, and only section 13's MPC horizon is hot enough to care. h = 1e-5 m sits
+    # in the clean h^2 window: trace and asymmetry are 7e-7 of the largest entry, and there
+    # is no roundoff floor above it.
+    b = loop_field(r, coils)
+    if not want_grad:
+        return b, None
+
+    r = np.asarray(r, dtype=float)
+    grad_b = np.empty((len(coils.pos), 3, 3))
+    for j in range(3):
+        rp, rm = r.copy(), r.copy()
+        rp[j] += h
+        rm[j] -= h
+        grad_b[:, :, j] = (loop_field(rp, coils) - loop_field(rm, coils)) / (2.0 * h)
+    return b, grad_b
+
+
 def coil_basis(r, coils, want_grad=True):
     """Per-coil field and field gradient at ``r``, per ampere."""
+
+    if coils.model == "loop":
+        return loop_basis(r, coils, want_grad)
 
     d = np.asarray(r, dtype=float)[None, :] - coils.pos  # (M,3)
     m = coils.moment  # (M,3)
@@ -255,6 +329,24 @@ def field_at(r, coils, phasor=None, want_grad=True):
     if not want_grad:
         return u, v, None, None
     return u, v, np.einsum("c,cij->ij", w_u, grad_b), np.einsum("c,cij->ij", w_v, grad_b)
+
+
+def dc_field_at(r, coils, want_grad=True):
+    """Steady field and its gradient at ``r`` from the DC currents. ``(0,0)`` if there are none.
+
+    Kept separate from ``field_at`` rather than folded into it, because the two act on different
+    parts of the robot and never mix: the rotating field couples only to the in-plane moment and
+    the steady field only to the axial one (theory.md section 15.2).
+    """
+
+    if coils.dc_amp is None or not np.any(coils.dc_amp):
+        return np.zeros(3), (np.zeros((3, 3)) if want_grad else None)
+
+    b, grad_b = coil_basis(r, coils, want_grad)
+    w = np.asarray(coils.dc_amp, dtype=float)
+    if not want_grad:
+        return w @ b, None
+    return w @ b, np.einsum("c,cij->ij", w, grad_b)
 
 
 def rotation_axis(u, v):
@@ -473,6 +565,24 @@ class Plant:
         if self.robot is None:
             self.robot = robot_params()
 
+    def _dc_terms(self, r, s):
+        """Force and torque from the steady field on the rotor's axial moment.
+
+        Both vanish identically when ``m_axial`` is zero, which is the CAD rotor: the
+        cycle-averaged moment of a synchronous rotor is a pure first harmonic, so a field with
+        no first harmonic sees nothing to act on (theory.md section 15.2).
+        """
+
+        m_z = self.robot.m_axial
+        if m_z == 0.0 or self.coils.dc_amp is None:
+            return np.zeros(3), np.zeros(3)
+
+        b_dc, g_dc = dc_field_at(r, self.coils, want_grad=True)
+        # F = grad(m . B) with m = m_z s held fixed through the derivative, as in 12.6.
+        f_dc = m_z * (g_dc.T @ s)
+        tau_dc = m_z * _cross3(s, b_dc)
+        return f_dc, tau_dc - (tau_dc @ s) * s
+
     def accel(self, r, v, s, f_drive, phasor=None):
         """Net acceleration and the diagnostics of the step, at one state."""
 
@@ -485,9 +595,10 @@ class Plant:
         f_grad = (
             gradient_force(m_cos, m_sin, du, dv) if self.use_grad else np.zeros(3)
         )
+        f_dc, tau_dc = self._dc_terms(r, s)
 
         lift = (f_drive / self.f_hover) ** 2 * GRAVITY
-        a = lift * s - GRAVITY * _ZHAT + f_grad / self.robot.mass
+        a = lift * s - GRAVITY * _ZHAT + (f_grad + f_dc) / self.robot.mass
         if self.beta > 0:
             a = a - self.beta * v
 
@@ -498,8 +609,10 @@ class Plant:
             "phi": phi,
             "ratio": ratio,
             "semiaxes": (a_ax, b_ax),
-            "tau": tau,
+            "tau": tau + tau_dc,
             "f_grad": f_grad,
+            "f_dc": f_dc,
+            "tau_dc": tau_dc,
         }
         return a, info
 
@@ -512,7 +625,8 @@ class Plant:
         tau_drag = self.k_drag * f_drive**2
         phi, a_ax, b_ax, ratio = phase_lag(u, v_h, self.robot.mdip, tau_drag)
 
-        tau = torque_avg(s, u, v_h, n_rot, self.robot.mdip, phi)
+        f_dc, tau_dc = self._dc_terms(r, s)
+        tau = torque_avg(s, u, v_h, n_rot, self.robot.mdip, phi) + tau_dc
         w_spin = 2.0 * math.pi * f_drive
         s_new = update_spin_axis(
             s, tau, self.robot.I_spin, w_spin, dt, n_rot, self.align_tau
@@ -527,8 +641,12 @@ class Plant:
             )
             f_grad = gradient_force(m_cos, m_sin, du, dv)
 
+        # The axial moment follows the updated axis, matching how lift and the gradient
+        # force are rebuilt on s_new above.
+        f_dc, _ = self._dc_terms(r, s_new)
+
         lift = (f_drive / self.f_hover) ** 2 * GRAVITY
-        a = lift * s_new - GRAVITY * _ZHAT + f_grad / self.robot.mass
+        a = lift * s_new - GRAVITY * _ZHAT + (f_grad + f_dc) / self.robot.mass
         if self.beta > 0:
             a = a - self.beta * v
 
@@ -542,6 +660,7 @@ class Plant:
             "semiaxes": (a_ax, b_ax),
             "tau": tau,
             "f_grad": f_grad,
+            "f_dc": f_dc,
             "accel": a,
         }
         return np.concatenate([r_new, v_new, s_new]), info
@@ -604,6 +723,21 @@ def _self_check():
         errs.append(100 * (approx - exact) / exact)
     print(f"dipole stub : +{errs[0]:.1f}% at 35 mm, +{errs[1]:.1f}% at 53 mm vs exact loop")
     assert 5.0 < errs[1] < errs[0] < 20.0, errs
+
+    # 1c. The loop backend reproduces that exact on-axis form it is measured against, and
+    # its finite-difference gradient still satisfies Laplace. Both are what let section 14
+    # quote the dipole error as a number rather than assume it cancels.
+    solo_loop = replace(
+        solo, radius=np.array([r_coil]), turns=np.array([float(turns)]), model="loop"
+    )
+    for dist in (0.0349, 0.0526):
+        got = coil_basis(np.array([0.0, 0.0, dist]), solo_loop, False)[0][0, 2]
+        exact = MU0 * turns * r_coil**2 / (2 * (r_coil**2 + dist**2) ** 1.5)
+        assert abs(got - exact) < 1e-12 * abs(exact), (dist, got, exact)
+    gb = loop_basis(np.array([0.003, 0.001, 0.020]), solo_loop)[1][0]
+    scale = np.abs(gb).max()
+    assert abs(np.trace(gb)) < 1e-5 * scale, np.trace(gb) / scale
+    assert np.abs(gb - gb.T).max() < 1e-5 * scale
 
     # 2. Analytic gradient against the central differences the MATLAB uses.
     h = 1e-6
@@ -720,6 +854,44 @@ def _self_check():
         np.linalg.norm(info["tau"]), p.I_spin, 2 * math.pi * plant.f_hover, plant.f_hover
     )
     print(f"dt bound    = {dt_rec*1e3:.3f} ms (explicit Euler, not physics)")
+
+    # 9. The DC channel. Two claims, both exact rather than approximate, and both the
+    # reason a fifth channel is worth building at all (theory.md section 15.2).
+    dc = np.zeros(len(coils.pos))
+    dc[coils.channel == 0] = 3.0          # a deliberately large steady current
+    coils_dc = replace(coils, dc_amp=dc)
+    b_dc, g_dc = dc_field_at(GUI_R0, coils_dc)
+    assert np.linalg.norm(b_dc) > 1e-4, b_dc          # the field is genuinely there
+
+    # 9a. On the CAD rotor (no axial moment) it does exactly nothing. Not to a tolerance:
+    # <m> over a cycle is identically zero, so a field with no first harmonic has nothing
+    # to couple to.
+    p_off, p_on = Plant(coils, p, use_grad=True), Plant(coils_dc, p, use_grad=True)
+    s_t = _unit(np.array([0.15, -0.1, 1.0]))
+    a0 = p_off.accel(GUI_R0, np.zeros(3), s_t, 110.0)
+    a1 = p_on.accel(GUI_R0, np.zeros(3), s_t, 110.0)
+    assert np.array_equal(a0[0], a1[0]), (a0[0], a1[0])
+    assert np.array_equal(a0[1]["tau"], a1[1]["tau"])
+
+    # 9b. Give the rotor an axial moment and the same field now acts. Its force Jacobian is
+    # traceless, so the DC trap pays the same Earnshaw tax as the AC one, but scaled by the
+    # small m_axial instead of the large mdip. That ratio is the whole design.
+    p_ax = replace(p, m_axial=0.03 * p.mdip)
+    plant_ax = Plant(coils_dc, p_ax, use_grad=True)
+    f_dc, tau_dc = plant_ax._dc_terms(GUI_R0, _ZHAT)
+    assert np.linalg.norm(f_dc) > 0.0, f_dc
+    h, jac = 1e-5, np.empty((3, 3))
+    for j in range(3):
+        rp, rm = GUI_R0.copy(), GUI_R0.copy()
+        rp[j] += h
+        rm[j] -= h
+        jac[:, j] = (plant_ax._dc_terms(rp, _ZHAT)[0]
+                     - plant_ax._dc_terms(rm, _ZHAT)[0]) / (2 * h)
+    scale = np.abs(jac).max()
+    print(f"DC channel  : |B_dc|={np.linalg.norm(b_dc)*1e3:.3f} mT, inert at m_axial=0; "
+          f"at 3% axial moment |F|={np.linalg.norm(f_dc)/p.weight*100:.2f} % of weight, "
+          f"tr(dF/dr)/|dF/dr| = {np.trace(jac)/scale:.1e}")
+    assert abs(np.trace(jac)) < 1e-5 * scale, np.trace(jac) / scale
 
     # A random state must not raise: the model is defined off the axis too.
     for _ in range(20):

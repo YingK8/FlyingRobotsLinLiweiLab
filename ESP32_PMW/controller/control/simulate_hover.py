@@ -35,7 +35,14 @@ from reference_profiles import Profile, demo_profile
 
 
 class VelocityEstimator:
-    """Finite difference + 1-pole IIR low-pass (default ~5 Hz cutoff)."""
+    """Finite difference + 1-pole IIR low-pass (default ~5 Hz cutoff).
+
+    The lateral twin of `z_track`'s zdot filter, and the same tradeoff: a 5 Hz
+    cutoff is tau = 32 ms, which is *shorter* than the 80 ms those use. What it
+    costs in rate noise follows from the measured lateral sigma --
+    `noise.NoiseModel.velocity_sigma_mm_s("x", tau_s=1/(2*pi*cutoff_hz))` -- and
+    only the white part of the position error reaches the rate at all.
+    """
 
     def __init__(self, ts: float, cutoff_hz: float = 5.0):
         self.ts = ts

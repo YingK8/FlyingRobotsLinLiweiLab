@@ -69,11 +69,16 @@ from zeroing import Zero  # noqa: E402
 from filter import ACCEL_MM_S2  # noqa: E402
 
 # Per-view error scales used to weight the fusion, in mm at the calibration
-# resolution (1024x768).  Straight from the held-out measurements in
+# resolution (1024x768).  Straight from the Cramer-Rao floor in
 # controller/pose/theory.md S13: lateral 0.078, depth 0.857.  They are weights, not
 # predictions -- only their *ratio* matters to the fused answer, which is why a
 # rough figure is good enough and why the ratio is the thing to keep current if
 # these are ever refitted.
+#
+# A floor is not a measurement.  `noise.py` measures both scales on a stationary
+# robot and writes `noise_model.json`; `StereoPoseEstimator` prefers that when it
+# exists and falls back to these.  The depth scale there is a fraction of range, so
+# the value below is the fallback quoted at `noise.FALLBACK_REF_Z_MM`.
 SIGMA_LAT_MM = 0.078
 SIGMA_DEPTH_MM = 0.857
 
@@ -1154,8 +1159,9 @@ class StereoPoseEstimator:
         tilt_cal=None,
         do_refine=True,
         loss="linear",
-        sigma_lat_mm=SIGMA_LAT_MM,
-        sigma_depth_mm=SIGMA_DEPTH_MM,
+        sigma_lat_mm=None,
+        sigma_depth_mm=None,
+        noise=None,
         reference=None,
         max_discrepancy_mm=MAX_DISCREPANCY_MM,
         use_major_channel=False,
@@ -1247,8 +1253,21 @@ class StereoPoseEstimator:
             self.tilt_cal = TiltCalibration()
         self.do_refine = do_refine
         self.loss = loss
-        self.sigma_lat_mm = sigma_lat_mm
-        self.sigma_depth_mm = sigma_depth_mm
+        # Measured scales when a static calibration exists, the S13 floor otherwise.
+        # An explicit argument beats both: a caller that passes one means it.
+        if noise is None:
+            from noise import NoiseModel
+            noise = NoiseModel.load()
+        self.noise = noise
+        self.sigma_lat_mm = (
+            noise.sigma_lat_mm if sigma_lat_mm is None else sigma_lat_mm)
+        # ponytail: the depth scale is a fraction of range but the fusion wants a
+        # fixed pair, so it is frozen at the middle of the measured envelope. The
+        # ratio it sets therefore drifts at the ends of the working range. Evaluate
+        # per-frame in `fuse` if that ever shows up in the discrepancy statistics.
+        self.sigma_depth_mm = (
+            noise.sigma_depth_mm(noise.ref_z_mm) if sigma_depth_mm is None
+            else sigma_depth_mm)
         # Which way is up, and it is not a preference. A silhouette is identical for a
         # normal and its negative, and the second camera does not help: both see the same
         # outline. Only a prior about the rig settles it, and the prior is that the

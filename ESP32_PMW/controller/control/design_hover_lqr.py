@@ -58,6 +58,49 @@ def dlqr(A: np.ndarray, B: np.ndarray, Q: np.ndarray, R: np.ndarray):
     return K, P, eig
 
 
+def _noise_provenance(rate_hz):
+    """
+    The measured noise these gains assume, for the gain file's own record.
+
+        Degrades to ``{"measured": False}`` when no static calibration exists --
+        the design does not depend on it, and refusing to synthesise gains until
+        someone has clamped the robot would be the wrong trade.
+    """
+
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    here = _Path(__file__).resolve().parent
+    _sys.path[:0] = [str(here.parent / "pose"), str(here.parent / "calib"),
+                     str(here.parent / "camera")]
+    try:
+        from noise import NoiseModel
+    except Exception as e:
+        return {"measured": False, "why": f"noise model unavailable: {e}"}
+
+    m = NoiseModel.load()
+    if not m.measured:
+        return {"measured": False,
+                "why": "no static calibration recorded; run pose/noise.py --record"}
+
+    dt = 1.0 / rate_hz
+    return {
+        "measured": True,
+        "condition": m.meta.get("condition"),
+        "created": m.meta.get("created"),
+        "sigma_lateral_mm": m.sigma_lateral_mm,
+        "sigma_depth_frac": m.sigma_depth_frac_world,
+        "sigma_normal": m.sigma_normal,
+        "sigma_white_mm": m.sigma_white,
+        "rho1": m.rho1,
+        "tau_corr_s": m.tau_s,
+        # What the loop actually sees on its rate channels at this rate.
+        "velocity_sigma_mm_s": {
+            ax: m.velocity_sigma_mm_s(ax, tau_s=0.08, dt=dt) for ax in "xyz"
+        },
+    }
+
+
 def design(
     rate_hz=30.0,
     f_hover=140.0,
@@ -107,6 +150,17 @@ def design(
             f"detune Q/R or raise rate_hz"
         )
 
+    noise_block = _noise_provenance(rate_hz)
+    if noise_block.get("measured") and noise_block.get("sigma_lateral_mm"):
+        # Bryson weights the x state by 1/0.010^2, i.e. 10 mm is the deviation worth
+        # one unit of cost. A measurement whose own noise is a large fraction of that
+        # makes the controller spend authority chasing noise.
+        frac = noise_block["sigma_lateral_mm"] / 1e3 / 0.010
+        if frac > 0.1:
+            print(f"WARNING: measured lateral noise is {frac:.0%} of the 10 mm Bryson "
+                  f"weight on x.\n         The x/int_ex weights are chasing noise; "
+                  f"loosen them or filter harder.")
+
     gains = {
         "meta": {
             "generated_by": "controller/control/design_hover_lqr.design",
@@ -132,6 +186,11 @@ def design(
             "delta_trim_rad": p.delta_trim,
         },
         "design": {"rate_hz": rate_hz, "ts": ts, "Q_diag": q_diag, "R_diag": r_diag},
+        # What noise these gains were tuned against. Provenance, not an LQG R: the
+        # full state is already measured (`pose/filter.py`), and `control/theory.md`
+        # S11 says no further observer is needed. A gain file that does not record
+        # the noise it assumed cannot be audited when the noise changes.
+        "noise": noise_block,
         "K": K.tolist(),
         "u_ff": {"mag": 0.0, "f_field_hz": p.f_hover},
         "limits": {

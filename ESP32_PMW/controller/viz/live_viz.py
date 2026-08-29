@@ -267,7 +267,9 @@ def up_direction(rig, zero=None):
     """
 
     if zero is not None and not zero.is_identity:
-        return "+z"
+        # `_rotate_zero` leaves this when a `rotate` has turned the datum's frame; a
+        # bare datum has not moved +z and does not set it.
+        return zero.meta.get("up", "+z")
     frame = rig.meta.get("world_frame")
     if frame is None:
         frame = "camera_A" if np.allclose(rig.a.T_world_cam, np.eye(4)) else "lab"
@@ -1477,8 +1479,16 @@ def _rotate_zero(zero, spec):
         return zero
     from zeroing import Zero
 
+    # Record where the rotation *puts* up, not just that one was applied. The datum
+    # alone always puts the rotor axis on +z, so `up_direction` used to answer "+z" for
+    # any datum -- and then a `rotate` moved the poses out from under it, leaving viser
+    # drawing an xy grid and calling z up while the robot's axis sat on x. A z motion
+    # then reads as an x motion, which is exactly how it looked.
+    up = S @ np.array([0.0, 0.0, 1.0])
+    i = int(np.argmax(np.abs(up)))
     return Zero(R=zero.R @ S.T, t=zero.t, psi_ref_deg=zero.psi_ref_deg,
-                meta={**zero.meta, "rotate": str(spec)})
+                meta={**zero.meta, "rotate": str(spec),
+                      "up": f"{'+' if up[i] >= 0 else '-'}{'xyz'[i]}"})
 
 
 class _DatumPrimer:

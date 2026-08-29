@@ -364,6 +364,108 @@ def open_stereo(specs, max_skew_s=None, **kw):
     return StereoCamera([open_source(s, **kw) for s in specs], max_skew_s=max_skew_s)
 
 
+def in_notebook():
+    """
+    True inside a Jupyter kernel, where a HighGUI window will not appear.
+
+        `cv2.imshow` needs a GUI event loop on the process's main thread. A kernel
+        does not give it one, so on macOS the window silently never opens -- no error,
+        no window -- which is why a preview has to render into the output cell instead.
+    """
+
+    try:
+        from IPython import get_ipython
+
+        return "IPKernelApp" in (get_ipython().config or {})
+    except Exception:
+        return False
+
+
+class Sink:
+    """
+    Where a live preview goes: the output cell in a kernel, a window outside it.
+
+        One place, because every preview in this repository wants the same two
+        behaviours and got them wrong separately: a window that never opens under
+        Jupyter, and a `destroyAllWindows` that never runs the event loop that would
+        actually close it.
+
+        `show` returns the key pressed, or -1, so a caller can keep its own SPACE/q
+        handling on the window path. A cell has no keys: there the loop is ended by
+        interrupting the kernel, and callers must treat `KeyboardInterrupt` as "stop
+        cleanly", not as a crash.
+
+        The JPEG encode is throttled to ``hz`` rather than run per frame. Encoding a
+        1280x800 pair at capture rate costs more than the capture does, and would make
+        the display the thing being measured.
+    """
+
+    def __init__(self, title="preview", hz=12.0, quality=80):
+        self.title = title
+        self.inline = in_notebook()
+        self.period = 1.0 / hz if hz else 0.0
+        self.quality = int(quality)
+        self._last = 0.0
+        self._w = None
+
+    def open(self):
+        """
+        Create the widget. **Must be called from the main thread**, before any
+        background pump: Jupyter routes output by the parent message, so a `display`
+        from a worker thread publishes to no cell at all and the preview silently
+        never appears.
+        """
+
+        if self.inline and self._w is None:
+            import ipywidgets as W
+            from IPython.display import display
+
+            self._w = W.Image(format="jpeg")
+            display(self._w)
+        return self
+
+    def due(self):
+        """Whether the next draw is due, so a caller can skip the work behind it."""
+
+        return (time.monotonic() - self._last) >= self.period
+
+    def show(self, view):
+        """Draw if due. Returns the key pressed on the window path, else -1."""
+
+        if view is None or not self.due():
+            return -1
+        self._last = time.monotonic()
+        if not self.inline:
+            cv2.imshow(self.title, view)
+            return cv2.waitKey(1) & 0xFF
+        if self._w is None:
+            self.open()
+        ok, buf = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, self.quality])
+        if ok:
+            self._w.value = buf.tobytes()
+        return -1
+
+    def close(self):
+        if not self.inline:
+            close_windows()
+
+
+def close_windows(pumps=4):
+    """
+    Close every HighGUI window, and make it actually happen.
+
+        `cv2.destroyAllWindows` only *marks* windows for destruction; the teardown
+        runs in the GUI event loop, which OpenCV pumps inside `waitKey`. A script
+        never notices -- the interpreter exits and the OS reclaims the window. A
+        Jupyter kernel does: the process lives on, so the window stays on screen
+        ignoring clicks and 'q' until the kernel is restarted.
+    """
+
+    cv2.destroyAllWindows()
+    for _ in range(pumps):
+        cv2.waitKey(1)
+
+
 def default_backend():
     """
     The capture backend for this platform.
@@ -379,8 +481,8 @@ def measure_fps(source, n=120):
     """
     Time real reads. The only honest frame-rate number.
 
-        Mirrors the helper in `visual_servo/servo.ipynb`, whose README makes the
-        point that `CAP_PROP_FPS` reports what was requested, not what arrives.
+        `camera/modes.py` builds on this: `CAP_PROP_FPS` reports what was
+        requested, not what arrives, so only timed reads measure anything.
     """
 
     t0 = time.monotonic()

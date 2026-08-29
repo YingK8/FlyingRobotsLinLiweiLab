@@ -255,8 +255,8 @@ def pose_matrix(rvec, tvec):
 
 
 NATIVE_W, NATIVE_H = 1280, 800  # ELP OV9281 native: 119 fps, full field of view
-# Which index is which camera: `camera/elp.py :: probe_indices`. USB cameras enumerate
-# BEFORE the built-in FaceTime, so the ELP is normally index 0.
+# Which index is an ELP: `camera/identify.py :: elp_indices`, which probes rather
+# than reading a device listing -- no macOS listing is in OpenCV's index order.
 
 
 # ---- load what was shot -------------------------------------------------------------
@@ -614,6 +614,8 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
     """A capture bag -> a gated result. Everything downstream reads the returned dict."""
 
     views_a, views_b, image_size = load_views(spec, pair_dir)
+    from capture import read_meta
+    elp_ids = read_meta(pair_dir).get("elp_ids", [])
     print(f"image size {image_size}\n")
 
     K_a, dist_a, intr_a = calibrate_intrinsics(spec, views_a, image_size, "A")
@@ -671,6 +673,7 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
         "struct_a": struct_a,
         "struct_b": struct_b,
         "passed": passed,
+        "elp_ids": elp_ids,
     }
 
 

@@ -54,6 +54,8 @@ import argparse
 import json
 import math
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,6 +65,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it. pose is stage 3 of 4.
 sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
+
+import sources  # noqa: E402
 
 DEFAULT_PATH = HERE / "noise_model.json"
 
@@ -562,7 +566,109 @@ def station_from_csv(path, meta=None):
         meta or {}, source=str(path), n_lost=len(rows) - len(xyz)))
 
 
-def _collect(est, read, n_frames, filt=None, progress=True):
+def _preview(frames, pose, footer, scale=0.5):
+    """
+    The two views side by side with the fit drawn on, or ``None`` if there is nothing.
+
+        Same overlay `live_viz` puts in its sidebar (`segment.draw` over each view's
+        own `Segmentation`), minus the rotor-axis arrow, which needs the rig and the
+        datum this path has no reason to carry. The ellipse is the thing you are
+        looking at while you position the robot: a station is only worth shooting
+        once both views are locked on.
+    """
+
+    import cv2
+    import segment
+
+    if not frames:
+        return None
+    per_view = getattr(pose, "per_view", ()) if pose is not None else ()
+    panels = [segment.draw(f, per_view[i] if i < len(per_view) else None)
+              for i, f in enumerate(frames)]
+    if len({p.shape for p in panels}) != 1:
+        return None                       # mismatched sizes: not a pair worth drawing
+    view = np.hstack(panels)
+    if scale != 1.0:
+        view = cv2.resize(view, None, fx=scale, fy=scale)
+    cv2.putText(view, footer, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                (0, 200, 0) if pose is not None else (0, 0, 255), 2, cv2.LINE_AA)
+    return view
+
+
+def _hold_plates(est, frozen):
+    """
+    Freeze or thaw the running background plates for a station.
+
+        `background.RunningPlate` walks itself onto a subject that stops moving, so
+        the robot fades out of its own measurement -- and a station is *defined* by
+        the robot being clamped, which makes this the one place the failure is
+        guaranteed rather than possible. Aiming leaves the plate running, because the
+        robot is being moved then and the plate wants that drift; the take freezes it.
+
+        Returns the steps it replaced, for `thaw`.
+    """
+
+    plates = [p for p in getattr(est, "backgrounds", {}).values()
+              if hasattr(p, "freeze")]
+    if frozen:
+        return [p.freeze() for p in plates]
+    for p, step in zip(plates, frozen if isinstance(frozen, list) else []):
+        p.thaw(step)
+    return []
+
+
+def _aim(src, est, sink, prompt):
+    """
+    Live preview while the robot is being positioned, ending when the user is ready.
+
+        Without this the camera is not even open until after the prompt, so a station
+        is aimed blind and a bad one is only discovered by the fit failing 600 frames
+        later. The estimator runs here too: what you need to see before committing is
+        not that the robot is in frame, it is that *both* views lock an ellipse onto
+        it.
+
+        Two ways to end it, because there is no one way that works in both places. In
+        a cell the keyboard belongs to `input`, so the preview is pumped from a
+        background thread. In a terminal the window owns the keyboard and HighGUI must
+        stay on the main thread, so the loop runs here and any key ends it.
+    """
+
+    if sink is None:
+        input(prompt)
+        return
+
+    def step():
+        item = src.read()
+        if item is None or not sink.due():
+            return -1
+        t_cap, frames = item
+        pose = est.update(frames, t=t_cap)
+        return sink.show(_preview(frames, pose, "AIM -- both views must lock on"))
+
+    if not sink.inline:
+        print(f"{prompt.strip()} (or any key in the window)")
+        while True:
+            if step() not in (-1, None):
+                return
+    stop = threading.Event()
+
+    def pump():
+        while not stop.is_set():
+            try:
+                step()
+            except Exception:
+                return
+
+    th = threading.Thread(target=pump, daemon=True)
+    th.start()
+    try:
+        input(prompt)
+    finally:
+        stop.set()
+        th.join(timeout=2.0)
+
+
+def _collect(est, read, n_frames, filt=None, progress=True, sink=None):
     """
     Drive a source through the estimator until ``n_frames`` poses land.
 
@@ -572,7 +678,8 @@ def _collect(est, read, n_frames, filt=None, progress=True):
     """
 
     t, xyz, nrm, seen, lost = [], [], [], 0, 0
-    while len(xyz) < n_frames:
+    try:
+      while len(xyz) < n_frames:
         item = read()
         if item is None:
             break
@@ -589,6 +696,16 @@ def _collect(est, read, n_frames, filt=None, progress=True):
         nrm.append([float(v) for v in pose.normal])
         if progress and len(xyz) % 100 == 0:
             print(f"  {len(xyz)}/{n_frames} poses, {lost} lost", flush=True)
+        if sink is not None:
+            stop = "interrupt" if sink.inline else "q"
+            if sink.show(_preview(frames, pose,
+                                  f"{len(xyz)}/{n_frames} poses, {lost} lost"
+                                  f"   {stop} = stop")) == ord("q"):
+                print("  stopped early")
+                break
+    except KeyboardInterrupt:
+        # Keep the station rather than losing it: interrupting is how a cell says "q".
+        print("  interrupted")
     return t, xyz, nrm, seen, lost
 
 
@@ -636,23 +753,38 @@ def station_from_recording(rec_dir, n_frames=100000, rig_path=None, meta=None):
 
 
 def station_from_source(spec="camera:0,camera:1", n_frames=600, rig_path=None,
-                        width=1280, height=800, rotate180=True, meta=None):
+                        width=1280, height=800, rotate180=True, meta=None,
+                        preview=True, prompt=None):
     """
     One station straight off the cameras, with the robot clamped and not moving.
+
+        ``prompt`` turns on the aiming phase: the preview runs live and the station is
+        not shot until you answer it.
     """
 
+    # A caller shooting several stations passes its own sink, so the notebook shows
+    # one image that keeps updating instead of a new one stacked per station.
+    own = not isinstance(preview, sources.Sink)
+    sink = (sources.Sink("noise capture").open() if preview else None) if own else preview
     sys.path.insert(0, str(HERE.parent / "viz"))
-    import sources
     from live_viz import _stereo_estimator
 
     rig, est = _stereo_estimator(rig_path, backgrounds="running")
     cams = [c.strip() for c in spec.split(",")]
     src = sources.open_stereo(cams, max_skew_s=None, width=width, height=height,
                               grayscale=True, rotate180=rotate180)
+    steps = []
     try:
-        t, xyz, nrm, seen, lost = _collect(est, src.read, n_frames)
+        if prompt is not None:
+            _aim(src, est, sink, prompt)
+        steps = _hold_plates(est, True)     # clamped from here: do not let the plate eat it
+        t, xyz, nrm, seen, lost = _collect(est, src.read, n_frames, sink=sink)
     finally:
+        if steps:
+            _hold_plates(est, steps)
         src.close()
+        if sink is not None and own:
+            sink.close()
     print(f"{seen} frames, {len(xyz)} solved, {lost} lost")
     return measure(t, xyz, nrm, meta=dict(
         meta or {}, source=spec, n_lost=lost, n_frames=seen)), rig
@@ -738,13 +870,187 @@ def calibrate(sources_, out=DEFAULT_PATH, condition="coils_off", rig_path=None,
     return model
 
 
+class Session:
+    """
+    Button-driven station recording for a notebook. Nothing blocks the main thread.
+
+        `input()` cannot be used from a cell: it blocks the kernel's main loop, so the
+        frontend stops getting heartbeats and declares the kernel unresponsive. The
+        loop here runs on a worker instead and the cell returns immediately, which is
+        the same shape `camera/elp_capture.ipynb` uses for its live preview.
+
+        The worker owns the camera and the estimator for the whole session, so the
+        preview never stops: aim, shoot a station, move the robot, shoot the next. All
+        feedback goes to the status *widget* rather than to `print`, because output
+        written from a worker thread belongs to no cell and is simply lost.
+    """
+
+    def __init__(self, cameras, stations, frames, rig_path, condition, out,
+                 width=1280, height=800, rotate180=True):
+        import ipywidgets as W
+        from IPython.display import display
+
+        self.cameras, self.n_stations, self.frames = cameras, stations, frames
+        self.rig_path, self.condition, self.out = rig_path, condition, out
+        self.size, self.rotate180 = (width, height), rotate180
+        self.stations, self.rig, self.model = [], None, None
+        self._shoot = threading.Event()
+        self._stop = threading.Event()
+        self._buf = None
+        self._steps = []
+
+        self.sink = sources.Sink("noise capture")
+        self.sink.inline = True                 # a Session only exists in a notebook
+        self.sink.open()                        # main thread: see sources.Sink.open
+        self.status = W.HTML()
+        self.btn = W.Button(description="Shoot station", button_style="primary")
+        self.btn_stop = W.Button(description="Finish", button_style="warning")
+        self.btn.on_click(lambda _: self._shoot.set())
+        self.btn_stop.on_click(lambda _: self._stop.set())
+        display(W.HBox([self.btn, self.btn_stop]), self.status)
+
+        self._say("starting cameras...")
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _say(self, msg):
+        self.status.value = (f"<b>station {len(self.stations)}/{self.n_stations}</b> "
+                             f"&nbsp; {msg}")
+
+    def _run(self):
+        sys.path.insert(0, str(HERE.parent / "viz"))
+        from live_viz import _stereo_estimator
+
+        self.rig, est = _stereo_estimator(self.rig_path, backgrounds="running")
+        src = sources.open_stereo([c.strip() for c in self.cameras.split(",")],
+                                  max_skew_s=None, width=self.size[0],
+                                  height=self.size[1], grayscale=True,
+                                  rotate180=self.rotate180)
+        self._say("aim: both views must lock on, then press Shoot station")
+        try:
+            while not self._stop.is_set() and len(self.stations) < self.n_stations:
+                item = src.read()
+                if item is None:
+                    break
+                t_cap, frames = item
+                pose = est.update(frames, t=t_cap)
+                if self._shoot.is_set():
+                    if not self._steps:
+                        # Entering a take: the robot is about to hold still, and a
+                        # running plate would absorb it. Frozen until the station ends.
+                        self._steps = _hold_plates(est, True)
+                    self._accumulate(t_cap, pose)
+                elif self._steps:
+                    _hold_plates(est, self._steps)   # aiming again: track drift
+                    self._steps = []
+                if self.sink.due():
+                    self.sink.show(_preview(frames, pose, self._footer()))
+        finally:
+            src.close()
+            self._finish()
+
+    def _accumulate(self, t_cap, pose):
+        if self._buf is None:
+            self._buf = ([], [], [], 0)
+        t, xyz, nrm, seen = self._buf
+        seen += 1
+        if pose is not None:
+            t.append(float(pose.t))
+            xyz.append([float(v) for v in pose.xyz_mm])
+            nrm.append([float(v) for v in pose.normal])
+        self._buf = (t, xyz, nrm, seen)
+        if len(xyz) < self.frames:
+            return
+        self._shoot.clear()
+        self._buf = None
+        st = measure(t, xyz, nrm, meta=dict(source=self.cameras,
+                                            n_lost=seen - len(xyz), n_frames=seen))
+        self.stations.append(st)
+        self._say(f"z = {st['z_mm']:.1f} mm, axes "
+                  + " ".join(f"{v:.4f}" for v in st["sigma_axes_mm"])
+                  + " mm &mdash; move the robot, then Shoot again")
+
+    def _footer(self):
+        if self._buf is not None:
+            t, xyz, _, seen = self._buf
+            return f"SHOOTING  {len(xyz)}/{self.frames} poses, {seen - len(xyz)} lost"
+        return "AIM -- both views must lock on"
+
+    def _finish(self):
+        self.btn.disabled = self.btn_stop.disabled = True
+        if not self.stations:
+            self._say("stopped with no stations recorded; nothing written")
+            return
+        self.model = NoiseModel.fit(self.stations, rig=self.rig, meta={
+            "condition": self.condition, "source": "static_capture_live"})
+        path = self.model.save(self.out)
+        self._say(f"done: {len(self.stations)} station(s), wrote {path}. "
+                  f"<code>print(session.summary())</code> for the report.")
+
+    def summary(self):
+        """The report, for printing from a cell once the session has finished."""
+
+        if self.model is None:
+            return "not finished yet"
+        return report(self.model, self.rig)
+
+
+def record_live(stations=3, frames=600, cameras=None, rig_path=None,
+                condition="coils_off", out=DEFAULT_PATH, preview=True):
+    """
+    Shoot the static stations live, fit, and write the model. Returns the model.
+
+        Prompts between stations, which `calibrate` does not -- and the prompt is the
+        point: the heights have to be *different*, and only a person can move the
+        robot between them. Three or four, because the model is
+        ``sigma_depth = frac * z`` and one height cannot separate that fraction from a
+        constant.
+
+        ``cameras`` defaults to the calibrated pair, probed now. Clamp the robot and
+        leave the coils off: the measurement is the scatter around a truth that is
+        not moving, so anything that actually moves it is measured as noise.
+    """
+
+    if cameras is None:
+        import rig as rigmod
+
+        cameras = rigmod.StereoRig.load(rig_path or rigmod.DEFAULT_PATH).sources()
+        print(f"cameras: {cameras}")
+
+    if sources.in_notebook():
+        # Buttons, not `input`: a blocked main thread is a kernel the frontend
+        # reports as timed out. Returns immediately; the UI drives the rest.
+        return Session(cameras, stations, frames, rig_path, condition, out)
+
+    sink = sources.Sink("noise capture").open() if preview else None
+    got, rig = [], None
+    for i in range(stations):
+        st, rig = station_from_source(
+            cameras, n_frames=frames, rig_path=rig_path, preview=sink or False,
+            prompt=f"\nstation {i + 1}/{stations}: set the height, hold the robot "
+                   f"still, press ENTER ")
+        got.append(st)
+        print(f"  z = {st['z_mm']:.1f} mm, axes "
+              + " ".join(f"{s:.4f}" for s in st["sigma_axes_mm"]) + " mm")
+
+    if sink is not None:
+        sink.close()
+
+    model = NoiseModel.fit(got, rig=rig, meta={
+        "condition": condition, "source": "static_capture_live"})
+    print(report(model, rig))
+    print(f"\nwrote {model.save(out)}")
+    return model
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--from", dest="src", nargs="+", default=None,
                    help="recording dirs or poses.csv logs, one per height")
     p.add_argument("--record", action="store_true",
                    help="capture live instead; --cameras gives the spec")
-    p.add_argument("--cameras", default="camera:0,camera:1")
+    p.add_argument("--cameras", default=None,
+                   help="stereo spec; default is the calibrated pair, probed now")
     p.add_argument("--stations", type=int, default=3,
                    help="how many heights to prompt for when recording live")
     p.add_argument("--frames", type=int, default=600, help="poses per station")
@@ -753,6 +1059,8 @@ def main(argv=None):
     p.add_argument("--rig", type=Path, default=None)
     p.add_argument("--out", type=Path, default=DEFAULT_PATH)
     p.add_argument("--show", action="store_true", help="print the saved model, fit nothing")
+    p.add_argument("--no-preview", action="store_true",
+                   help="do not open the camera window while recording")
     a = p.parse_args(argv)
 
     if a.show:
@@ -767,19 +1075,9 @@ def main(argv=None):
         return 0
 
     if a.record:
-        stations, rig = [], None
-        for i in range(a.stations):
-            input(f"\nstation {i + 1}/{a.stations}: set the height, hold the robot "
-                  f"still, press ENTER ")
-            st, rig = station_from_source(a.cameras, n_frames=a.frames,
-                                          rig_path=a.rig)
-            stations.append(st)
-            print(f"  z = {st['z_mm']:.1f} mm, axes "
-                  + " ".join(f"{s:.4f}" for s in st["sigma_axes_mm"]) + " mm")
-        model = NoiseModel.fit(stations, rig=rig, meta={
-            "condition": a.condition, "source": "static_capture_live"})
-        print(report(model, rig))
-        print(f"\nwrote {model.save(a.out)}")
+        record_live(stations=a.stations, frames=a.frames, cameras=a.cameras,
+                    rig_path=a.rig, condition=a.condition, out=a.out,
+                    preview=not a.no_preview)
         return 0
 
     if not a.src:
@@ -921,6 +1219,75 @@ def _check():
     assert abs(s300[2] / s150[2] - 2.0) < 1e-9, (s150, s300)
     assert s150[0] == s150[1] == m.sigma_lateral_mm
     print("sigma_pos: lateral flat, depth doubles with range\n  ok")
+
+    # --- preview overlay: shape, and the two ways it must decline rather than crash
+    blank = [np.full((800, 1280), 40, np.uint8)] * 2
+    view = _preview(blank, None, "0/600 poses, 3 lost")
+    assert view.shape == (400, 1280, 3), view.shape       # both views, hstacked, 0.5x
+    assert _preview([], None, "x") is None                # nothing to draw
+    assert _preview([np.zeros((800, 1280), np.uint8),
+                     np.zeros((1080, 1920), np.uint8)], None, "x") is None
+    print("preview: pair drawn 0.5x, empty and mismatched pairs declined\n  ok")
+
+    # --- aiming: previews while `input` blocks, throttles the estimator, joins cleanly
+    import builtins
+
+    reads, calls = [0], [0]
+
+    class _Src:
+        def read(self):
+            reads[0] += 1
+            time.sleep(0.001)
+            return 0.0, blank
+
+    class _Est:
+        def update(self, f, t=None, frame_index=None):
+            calls[0] += 1
+            return None
+
+    sink = sources.Sink(hz=200.0)
+    sink.inline = True                      # widget path; no window in a self-check
+    sink.open()                             # main thread, as `record_live` does
+    real_input, builtins.input = builtins.input, lambda p="": time.sleep(0.2) or ""
+    try:
+        _aim(_Src(), _Est(), sink, "")
+    finally:
+        builtins.input = real_input
+    assert reads[0] > 10, reads
+    # The estimator is the expensive half, so it must run only when a draw is due.
+    assert 0 < calls[0] < reads[0], (calls, reads)
+    assert threading.active_count() == 1, "aim thread leaked"
+    print("aim: previews while input blocks, estimator throttled, thread joined\n  ok")
+
+    # --- Session: aim -> shoot -> station -> aim, without ever blocking a main thread
+    S = Session.__new__(Session)                 # no widgets in a self-check
+    S.cameras, S.n_stations, S.frames = "c", 2, 50
+    S.stations, S._buf = [], None
+    S._shoot, S._stop = threading.Event(), threading.Event()
+    S._say = lambda m: None
+
+    assert "AIM" in S._footer()
+    S._shoot.set()
+    rng2 = np.random.default_rng(0)
+
+    class _Pose:
+        def __init__(self, i):
+            self.t = i * 0.01
+            self.xyz_mm = rng2.normal([1.0, 2.0, 120.0], 0.05)
+            self.normal = np.array([0.0, 0.0, 1.0])
+
+    i = 0
+    while S._shoot.is_set() and i < 500:          # the guard `_run` applies
+        S._accumulate(i * 0.01, _Pose(i) if i % 10 else None)
+        i += 1
+    st = S.stations[0]
+    assert len(S.stations) == 1 and S._buf is None, S.stations
+    assert not S._shoot.is_set(), "shoot flag must clear so the next station can aim"
+    assert st["n_frames"] == i, (st["n_frames"], i)
+    assert st["n_lost"] == (i + 9) // 10, (st["n_lost"], i)   # i % 10 falsy at 0 too
+    assert len(S.stations[0]["axes"]) == 3
+    assert abs(st["z_mm"] - 120.0) < 1.0, st["z_mm"]
+    print("session: shoots one station, counts losses, returns to aim\n  ok")
 
 
 if __name__ == "__main__":

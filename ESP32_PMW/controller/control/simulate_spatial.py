@@ -20,12 +20,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import math
 import time
 
 import numpy as np
 
-from spatial_model import StepOut, make_state
+from spatial_model import make_state
 from spatial_mpc import closed_loop, default_mpc
 
 HOVER = np.array([0.0, 0.0, 0.0130])  # default target, m

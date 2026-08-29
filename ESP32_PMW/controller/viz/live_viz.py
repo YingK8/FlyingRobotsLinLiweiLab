@@ -80,6 +80,7 @@ class Tick:
     frames: list | None
     lost: int                   # cumulative lost-frame count
     viz: object                 # the LiveViz (or NullViz) to push to
+    spin: object = None         # pose/spin.SpinWitness, or None when not watched
 
 
 class NullViz:
@@ -102,6 +103,8 @@ class NullViz:
     # The coils have no firmware watchdog, so that is the only safe direction to fail.
     armed = False
     land = False
+    restart = False
+    estop = False
     mag_max = 0.0
     gain_scale = (1.0, 1.0)
     setpoint = (0.0, 0.0, 60.0)
@@ -231,6 +234,33 @@ def axis_map(axes):
     return idx, sign
 
 
+def _ref_ok(viz, ref):
+    """
+    Whether ``ref`` can be placed on ``viz.axes``, complaining once if it cannot.
+
+        ``axes`` carries two different contracts. `Viz` and `plots_spec` read it as
+        the *controlled* DOFs -- two of them, lateral and vertical, which is why the
+        defaults here are pairs like ``("x", "z")``. `stereo_frames` and
+        `hover_controller_runner.RunConfig` pass all three world axis names, meant as
+        plot labels. Feed the second into the first and there is one more axis than
+        the reference has components.
+
+        Truncating would silently put "vertical" on world y. `axis_map` says why that
+        is not acceptable: a reference drawn on the wrong axis looks like a tracking
+        error, so it is worse than no reference at all. Draw nothing, and say so.
+    """
+
+    if len(ref) == len(viz._ref_idx):
+        return True
+    if not viz._ref_warned:
+        viz._ref_warned = True
+        print(f"live_viz: reference has {len(ref)} component(s) but axes="
+              f"{viz.axes} names {len(viz._ref_idx)}. Not drawing it -- on the wrong "
+              f"axis it reads as a tracking error. Pass the two controlled axes, "
+              f"e.g. axes=('x', 'z'), naming which world axis is vertical on this rig.")
+    return False
+
+
 def ref_to_world(ref, idx, sign, measured=None):
     """
     Controlled reference (metres) -> a world point in mm.
@@ -243,7 +273,7 @@ def ref_to_world(ref, idx, sign, measured=None):
     w = np.full(3, np.nan)
     if measured is not None:
         w[:] = np.asarray(measured, dtype=float)
-    for k in range(len(idx)):
+    for k in range(min(len(idx), len(ref))):
         w[idx[k]] = sign[k] * 1e3 * float(ref[k])
     return w
 
@@ -256,7 +286,7 @@ def up_direction(rig, zero=None):
         +z, so in a zeroed frame +z *is* the rotor axis, i.e. up.
 
         Otherwise it depends on where the rig came from, and the two producers disagree.
-        `calibrate_stereo.py` and `StereoRig.monocular()` use camera A's optical frame,
+        `calib/calibrate.py` and `StereoRig.monocular()` use camera A's optical frame,
         where +y is image-down and so up is **-y**.  `StereoRig.from_spherical()` builds
         a lab frame instead -- `spherical_position` measures elevation above the
         horizontal and bearing about world +z -- where up is **+z**.
@@ -440,6 +470,8 @@ class LiveViz:
         self.estimator = estimator
         self.axes = tuple(axes)
         self._ref_idx, self._ref_sign = axis_map(self.axes)
+        self._ref_warned = False
+        self._spin = None      # last SpinWitness pushed, for the readout
         self._plots_spec = plots_spec(self.axes)
         self.trace_len = int(trace_len)
         self.plot_len = int(plot_len)
@@ -476,7 +508,8 @@ class LiveViz:
 
     # ---- the only method the control loop touches -------------------------
 
-    def push(self, pose=None, ref=None, u=None, frames=None, t=None, **stats):
+    def push(self, pose=None, ref=None, u=None, frames=None, t=None, spin=None,
+             **stats):
         """
         Hand one tick to the renderer.  Never blocks, never raises.
 
@@ -486,6 +519,8 @@ class LiveViz:
             a stalled browser must cost frames of trace, not memory.
         """
 
+        if spin is not None:
+            self._spin = spin
         self._q.append(
             Sample(
                 t=time.monotonic() if t is None else t,
@@ -656,6 +691,20 @@ class LiveViz:
             # render thread owns the widget, the control loop reads it once per
             # iteration, and nothing here ever writes into the loop's state from
             # another thread. `land` is the single exception -- see below.
+            self._estop = False
+            estop = gui.add_button("E-STOP")
+
+            @estop.on_click
+            def _(_):
+                # De-energise now and take the keys away, so the loop cannot command
+                # anything on its next pass either. getattr because this callback runs
+                # on the render thread and can fire before the widgets below exist.
+                self._estop = True
+                for w, val in ((getattr(self, "_armed", None), False),
+                               (getattr(self, "_mag_max", None), 0.0)):
+                    if w is not None:
+                        w.value = val
+
             self._armed = gui.add_checkbox("armed", False)
             self._sp_x = gui.add_slider(
                 "x (mm)", min=-60.0, max=60.0, step=1.0, initial_value=0.0)
@@ -672,7 +721,16 @@ class LiveViz:
             # Set before the button exists: the click callback runs on the render
             # thread and may fire the instant the widget is created.
             self._land = False
+            self._restart = False
             land = gui.add_button("land")
+            restart = gui.add_button("restart takeoff")
+
+            @restart.on_click
+            def _(_):
+                # After a firmware e-stop the board reboots into IDLE, and
+                # `takeoff` is only ever sent once. Without this the run has to be
+                # killed and the cameras, datum and viewer all rebuilt to retry.
+                self._restart = True
 
             @land.on_click
             def _(_):
@@ -761,7 +819,7 @@ class LiveViz:
             # axes; everything here is world mm. Convert once, on the right axes.
             rw = (
                 ref_to_world(ref, self._ref_idx, self._ref_sign)
-                if ref is not None
+                if ref is not None and _ref_ok(self, ref)
                 else np.full(3, np.nan)
             )
 
@@ -819,7 +877,7 @@ class LiveViz:
                 for client in self.server.get_clients().values():
                     client.camera.look_at = xyz
 
-        if last.ref is not None:
+        if last.ref is not None and _ref_ok(self, last.ref):
             w = ref_to_world(
                 last.ref,
                 self._ref_idx,
@@ -843,6 +901,8 @@ class LiveViz:
                 np.asarray(self._hist[k], dtype=float) for k, _ in series
             )
         self.readout.content = self._readout()
+        if self._spin is not None:
+            self.readout.content += "\n\n**rotor:** " + self._spin.summary()
 
     def _readout(self):
         def last(k):
@@ -926,6 +986,27 @@ class LiveViz:
         """True once per button press, then False again -- a one-shot latch."""
 
         pressed, self._land = self._land, False
+        return pressed
+
+    @property
+    def restart(self):
+        """True once per 'restart takeoff' press -- the same one-shot latch as `land`."""
+
+        pressed, self._restart = self._restart, False
+        return pressed
+
+    @property
+    def estop(self):
+        """
+        True once per E-STOP press -- the same one-shot latch as `land`.
+
+                The press has already cleared `armed` and `mag max` on the render
+                thread, so the loop is disarmed whether or not it reads this. What this
+                carries is the *event*, which is what makes the loop send `stop` rather
+                than merely stop sending.
+        """
+
+        pressed, self._estop = self._estop, False
         return pressed
 
     def _update_images(self, last):
@@ -1215,8 +1296,14 @@ def _diagnose_silence(frames, backgrounds, tags):
 
 def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=800,
                   port=8080, rotate180=True, backgrounds=None, zero="auto", flip=False,
-                  rotate=None, axes=("x", "y", "z"), label=None):
-    """Generator over the live stereo pipeline. Yields one `Tick` per frame."""
+                  rotate=None, axes=("x", "y", "z"), label=None, record=None):
+    """Generator over the live stereo pipeline. Yields one `Tick` per frame.
+
+    ``record`` writes the frames this loop is already reading to a flight folder,
+    in `camera/record.py`'s own layout. It has to be here rather than in a second
+    process: one USB camera has one owner, so a control run cannot be filmed by
+    running `record` alongside it. Pass a directory, or True for the default.
+    """
 
     import sources
     from filter import PoseFilter
@@ -1229,14 +1316,14 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
     except OSError as e:
         # "could not open camera index 1" does not say whether the camera is unplugged,
         # held by another process, or simply enumerated somewhere else today.
-        from elp import probe_indices
-        found = probe_indices()
+        import identify
+        here = ", ".join(f"{d.name}" for d in identify.connected()) or "none"
+        elps = identify.elp_indices(n=None)
         raise SystemExit(
-            f"{e}\n\nCameras that open and deliver a frame right now: "
-            + (", ".join(f"index {i} at {w}x{h}" for i, w, h in found) or "none")
-            + f"\nAsked for {specs}. The ELP OV9281 reports 1280x800; a 1920x1080 device "
-            f"is the built-in FaceTime camera.\nUSB cameras enumerate before it, so two "
-            f"ELPs plugged in are normally 0 and 1.") from e
+            f"{e}\n\nAsked for {specs}. Connected: {here}\n"
+            f"Indices delivering the ELP native mode: {elps or 'none'}.\n"
+            f"`StereoRig.load().sources()` probes for them; a saved index goes "
+            f"stale.") from e
     tags = [c.name or str(i) for i, c in enumerate(rig.cameras)]
     if backgrounds is None or backgrounds == "saved":
         # Default to the saved plates when they exist. Having to name them was a trap:
@@ -1303,6 +1390,22 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
     if pending is not None:
         print("live_viz: datum not set yet -- the scene re-orients once the robot "
               "holds still enough to fix one")
+    import spin as spinmod
+
+    # Per view: the blades are read in each camera independently, so the two
+    # disagreeing is itself a signal. Must see the raw frame -- `silhouette_hull`
+    # convex-hulls the 4-fold structure away.
+    witnesses = [spinmod.SpinWitness() for _ in rig.cameras]
+    rec = None
+    if record is not None and record is not False:
+        import record as recmod
+
+        rec = recmod.FlightWriter(
+            recmod.DEFAULT_DIR if record is True else record,
+            tags="".join(c.name or str(i) for i, c in enumerate(rig.cameras)),
+            meta={"source": "live_viz.stereo_frames", "specs": specs,
+                  "rotate180": bool(rotate180)})
+        print(f"recording -> {rec.dir}")
     lost, last_seen, misses = 0, None, 0
     try:
         while True:
@@ -1323,6 +1426,10 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
                 break
             misses = 0
             t_cap, frames = item
+            if rec is not None:
+                rec.add(t_cap, frames,
+                        stamps=getattr(src, "last_stamps", None),
+                        skew=getattr(src, "last_skew", 0.0) or 0.0)
             # Same poll as the replay loop: the slider is only useful live if the
             # estimator reads it, and this is the loop `run.ipynb` actually calls.
             if viz.enabled:
@@ -1332,6 +1439,12 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
                               motion=filt.pos if filt.pos.initialised else None)
             state = filt.update(pose, t=t_cap)
             lost += pose is None
+            # After update: `per_view` is where the segmentations live, and the
+            # witness needs the raw frame plus that view's own ellipse.
+            for w, fr, sg in zip(witnesses, frames,
+                                 getattr(pose, "per_view", ()) if pose else ()):
+                if sg is not None:
+                    w.update(t_cap, fr, sg.ellipse)
             if pose is not None:
                 last_seen = pose
                 if pending is not None:
@@ -1359,10 +1472,18 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
                 frames=list(frames),
                 lost=lost,
                 viz=viz,
+                spin=witnesses[0],
             )
     except KeyboardInterrupt:
         pass
     finally:
+        if rec is not None:
+            # Never let finalising the film take down the rest of the teardown --
+            # the cameras and the viewer still have to be released.
+            try:
+                rec.close(src.skew_stats() if hasattr(src, "skew_stats") else {})
+            except Exception as e:  # noqa: BLE001
+                print(f"recording not finalised: {e!r}", file=sys.stderr)
         viz.close()
         src.close()
 
@@ -1444,8 +1565,9 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
         print(f"noise model: measured, {nm.meta.get('condition', 'condition unrecorded')},"
               f" {len(nm.stations)} station(s), {nm.meta.get('created', '?')}")
     else:
-        print("noise model: none on disk, using the rendered fallbacks. "
-              "Record one with\n    python pose/noise.py --record")
+        print("noise model: none on disk, using the rendered fallbacks. Record one:\n"
+              "    uv run python controller/pose/noise.py --record   (from the repo root)\n"
+              "    noise.record_live(stations=4)                     (from run.ipynb)")
 
     if backgrounds == "running":
         import background as bgmod
@@ -1853,7 +1975,7 @@ def _self_check():
 
     assert inspect.isgeneratorfunction(stereo_frames), "stereo_frames must be a generator"
     assert [f.name for f in _dc.fields(Tick)] == [
-        "t", "xyz_mm", "pose", "frames", "lost", "viz"], _dc.fields(Tick)
+        "t", "xyz_mm", "pose", "frames", "lost", "viz", "spin"], _dc.fields(Tick)
 
     # A dead visualiser must be silently harmless at every call site.
     null = make_viz(enabled=False)

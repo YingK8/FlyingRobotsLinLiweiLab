@@ -12,6 +12,11 @@
 // Hardware knobs, tune on the rig.
 static const float HOVER_HZ = 150.0f; // ramp target; NOT a measured hover point
 static const unsigned long SPINUP_MS = 30000;
+// Ramp start, Hz. NOT 1: the coils are series-resonant near 160 Hz, so at 1 Hz the
+// capacitor blocks and only ~0.2 A flows against ~6 A at 150. Blade tracking off the
+// cameras shows the rotor dead at 1.2 Hz and turning by 2.8 Hz, so the ramp used to
+// spend its first seconds in a dead zone it could not start from.
+static const float RAMP_START_HZ = 3.0f;
 static const float SPINUP_THROTTLE = 100.0f;
 // Physical coil azimuths A,B,C,D (deg). SEED GUESS: sweep az, see which pair weakens.
 static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
@@ -55,8 +60,32 @@ static void allCoilsOff() {
 static void dispatch(String cmd) {
   cmd.trim();
   cmd.toLowerCase();
-  if (cmd == "takeoff") {
-    if (state == IDLE) { collective = SPINUP_THROTTLE; seq.start(); state = SPINUP; }
+  if (cmd == "takeoff" || cmd.startsWith("takeoff=")) {
+    // Optional ramp target: `takeoff=60` stops the sweep at 60 Hz instead of
+    // HOVER_HZ. Every takeoff failure so far has been below 60, and holding the
+    // coils at 150 to reproduce a fault that shows at 20 only heats them.
+    if (state == IDLE) {
+      float start = RAMP_START_HZ, target = HOVER_HZ;
+      if (cmd.startsWith("takeoff=")) {
+        // "takeoff=60" sets the target; "takeoff=3:60" sets start and target.
+        String arg = cmd.substring(8);
+        int colon = arg.indexOf(':');
+        if (colon >= 0) {
+          start = clampf(arg.substring(0, colon).toFloat(), 0.1f, HOVER_HZ);
+          target = clampf(arg.substring(colon + 1).toFloat(), start, HOVER_HZ);
+        } else {
+          target = clampf(arg.toFloat(), start, HOVER_HZ);
+        }
+      }
+      // Rebuild rather than reuse: the ramp is compiled once in setup(), so a
+      // different target means a different schedule.
+      seq.clear();
+      seq.addRampTask(start, target, SPINUP_MS, TaskType::PWM_FREQ, TaskMode::EASE);
+      seq.compile(25, start, INITIAL_DUTY, PHASES_CCW);
+      collective = SPINUP_THROTTLE; seq.start(); state = SPINUP;
+      Serial.printf("takeoff: ramp %.1f -> %.0f Hz over %lu ms\n",
+                    start, target, SPINUP_MS);
+    }
   } else if (cmd.startsWith("throttle=")) {
     collective = clampf(cmd.substring(9).toFloat(), 0.0f, 100.0f);
   } else if (cmd.startsWith("az=")) {
@@ -96,8 +125,8 @@ void setup() {
   // imbalance is static magnetic coupling that feedforward trims already fix (1.97 ->
   // 1.046), and the loop confounds the az sweep. Re-enable only with evidence.
 
-  seq.addRampTask(1.0f, HOVER_HZ, SPINUP_MS, TaskType::PWM_FREQ, TaskMode::EASE);
-  seq.compile(25, 1.0f, INITIAL_DUTY, PHASES_CCW);
+  seq.addRampTask(RAMP_START_HZ, HOVER_HZ, SPINUP_MS, TaskType::PWM_FREQ, TaskMode::EASE);
+  seq.compile(25, RAMP_START_HZ, INITIAL_DUTY, PHASES_CCW);
   Serial.println("flight: IDLE -- send 'takeoff' to spin up");
 }
 

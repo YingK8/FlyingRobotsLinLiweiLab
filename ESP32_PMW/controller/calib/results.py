@@ -149,7 +149,7 @@ def acceptance(stereo_info, resid, intr_a, intr_b, struct_a, struct_b, spread, u
 
 
 def build_rig(K_a, dist_a, K_b, dist_b, T_ba, spec, image_size,
-              intr_a, intr_b, stereo_info, spread):
+              intr_a, intr_b, stereo_info, spread, ids=()):
     """StereoRig in the camera-A world frame."""
     return StereoRig(
         cameras=(
@@ -158,6 +158,10 @@ def build_rig(K_a, dist_a, K_b, dist_b, T_ba, spec, image_size,
         ),
         meta={
             "source": "calib/calibrate.py",
+            # Which two devices shot this bag. A set, not an assignment: no macOS
+            # listing enumerates in OpenCV's order, so nothing can say which of
+            # these was A. Used only to catch a *different* camera in the pair.
+            "elp_ids": sorted(ids),
             "world_frame": "camera_A",
             "world_frame_note": (
                 "T_world_camA = I. +z is camera A's optical axis, NOT up. baseline_mm and "
@@ -189,7 +193,8 @@ def write_results(cal, spec, rig_path=RIG_PATH, out_dir=OUT_DIR, meta=None):
 
     rig = build_rig(cal["K_a"], cal["dist_a"], cal["K_b"], cal["dist_b"], cal["T_ba"],
                     spec, cal["image_size"], cal["intr_a"], cal["intr_b"],
-                    cal["stereo_info"], cal["spread"])
+                    cal["stereo_info"], cal["spread"],
+                    ids=cal.get("elp_ids", ()))
     rig.meta.update(meta or {})
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

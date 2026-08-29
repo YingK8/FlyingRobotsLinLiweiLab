@@ -332,7 +332,9 @@ def demo() -> None:
     else:
         print(f"zdot noise  = not measured, so the {abs(STEPOUT_ZDOT_MPS) * 1e3:.0f} "
               f"mm/s step-out threshold is unjustified.")
-        print("              Record a static calibration: python pose/noise.py --record")
+        print("              Record a static calibration:\n"
+              "                uv run python controller/pose/noise.py --record\n"
+              "                or noise.record_live(stations=4) in run.ipynb")
 
     # The calibration trap: a limiter that cannot reach hover cannot fly.
     assert f_ceil > lim.f_hover, f"{f_ceil} <= {lim.f_hover}"

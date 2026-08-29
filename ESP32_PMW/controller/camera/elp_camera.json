@@ -6,7 +6,7 @@
     "sensor": "OV9281-class monochrome global shutter",
     "backend": "AVFOUNDATION",
     "index_hint": 0,
-    "note": "system_profiler SPCameraDataType reports 'Global Shutter Camera'; OpenCV sees it at index 0 on this machine, with the built-in FaceTime at 1. Chroma is identically zero in every pixel -- it is a true mono sensor, which is why segment.py's dark appearance cannot gate on colour."
+    "note": "system_profiler SPCameraDataType reports 'Global Shutter Camera', which is how identify.py recognises the pair by identity. It does NOT give an OpenCV index: no macOS device listing enumerates in OpenCV's order, so identify.elp_indices finds them by opening each index and checking it delivers 1280x800. Chroma is identically zero in every pixel -- it is a true mono sensor, which is why segment.py's dark appearance cannot gate on colour."
   },
   "modes": [
     {"width": 1280, "height": 800, "fps": 120, "measured_fps": 121.4, "verdict": "native"},

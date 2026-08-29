@@ -166,12 +166,11 @@ def _self_check():
     heat_ratio = (rms_sq / a_sq) ** 2 / (rms_si / a_si) ** 2
     print(f"              same fundamental: sine costs {1/heat_ratio:.3f}x the heat; "
           f"same rail: square gives {4/math.pi:.3f}x the fundamental")
-    print(f"              rail binds, so the square drive already in the firmware is correct")
+    print("              rail binds, so the square drive already in the firmware is correct")
 
     # 4. A trapezoid interpolates between the two, and buys nothing either way.
     for rf in (0.05, 0.15, 0.25):
         a, rms = fundamental(trapezoid(rf))
-        assert a_si <= a / a * a_si  # trivially true; the numbers are the point
         print(f"              trapezoid rise {rf:.2f}: fundamental {a:.4f}, "
               f"heat per unit fundamental {(rms/a)**2/((rms_si/a_si)**2):.3f}x sine")
 

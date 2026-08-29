@@ -7,8 +7,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import numpy as np
-
 sys.path[:0] = [str(Path(__file__).resolve().parent)]
 from record import flights, latest_flight, new_flight, read_index, write_index
 

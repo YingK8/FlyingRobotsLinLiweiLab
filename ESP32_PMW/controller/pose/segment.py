@@ -659,50 +659,6 @@ def subpixel_boundary(
     return out
 
 
-def silhouette_points(mask, keep_fraction=_BLOB_KEEP_FRACTION):
-    """
-    Every boundary pixel of the kept blobs, as an (N, 2) array.
-
-        `silhouette_hull` keeps only hull *vertices* -- 9-31 points on the real
-        captures against 192-3072 in the contour they came from. That costs the
-        redundancy robust estimation needs: measured across densities, trimming half
-        the points to suppress the mast helps above ~32 points and **hurts** below,
-        and hull density sits on the wrong side of that line.
-
-        One-sidedness survives without the hull. The silhouette is the rim *union* the
-        rod and mount, so its outer contour follows the rim except where those
-        protrude and never falls inside it -- which is the property the robust step
-        relies on.
-
-        @return: ``(points, area_px)``, or ``(None, 0.0)``. Use `silhouette_hull` when
-            a closed shape is needed; this is for fitting, where it is not.
-    """
-
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    if n <= 1:
-        return None, 0.0
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    keep = np.nonzero(areas >= max(1.0, keep_fraction * areas.max()))[0] + 1
-    if len(keep) == 0:
-        return None, 0.0
-    if len(keep) == n - 1:
-        kept_mask = mask
-    else:
-        lut = np.zeros(n, dtype=np.uint8)
-        lut[keep] = 255
-        kept_mask = lut[labels]
-
-    # NONE, not SIMPLE: the collinear runs SIMPLE discards are exactly the
-    # redundancy the robust step needs.
-    contours, _ = cv2.findContours(kept_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    if not contours:
-        return None, 0.0
-    pts = np.vstack([c.reshape(-1, 2) for c in contours]).astype(np.float64)
-    if len(pts) < _MIN_CONTOUR_PTS:
-        return None, 0.0
-    return pts, float(areas[keep - 1].sum())
-
-
 # How many blobs are tried as the anchor for a grouping. Bounded because each
 # candidate costs a hull and a plain ellipse fit, and the robot is never the
 # eighth-largest thing in frame -- on both real captures it is the first, and the
@@ -2021,8 +1977,10 @@ def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None, mask=Non
     """
     Overlay the fitted ellipse, its axes and the ignored area on a copy.
 
-        Converts grayscale to BGR first so the overlay survives -- the same trap
-        `servo.py:199` documents.  Returns a new image; the input is untouched.
+        Converts grayscale to BGR first so the overlay survives: drawing colour onto
+        a single-channel image silently writes the first channel only, so the
+        overlay comes out as grey-on-grey.  Returns a new image; the input is
+        untouched.
 
         ``rejected`` shades the area outside the valid region; ``normal_px`` draws the
         rotor axis as an image-space segment ``((x0, y0), (x1, y1))``, which only the

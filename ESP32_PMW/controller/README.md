@@ -30,10 +30,11 @@ may depend on all four stages.
 
 ## Running it
 
-[`run.ipynb`](run.ipynb) is the driver, and the one to start from. Its three
-sections are the pipeline end to end: calibrate (`calib/calibrate.py`), record a
-flight (`camera/record.py`), then estimate and view the pose (`pose/background.py`,
-`viz/live_viz.py`).
+[`run.ipynb`](run.ipynb) is the driver, and the one to start from. One cell per
+stage, the pipeline end to end: calibrate (`calib/calibrate.py`), measure the static
+noise (`pose/noise.py`), record a flight (`camera/record.py`), estimate and view the
+pose (`pose/background.py`, `viz/live_viz.py`), then fly it
+(`control/hover_controller_runner.py`).
 
 ```bash
 cd ESP32_PMW
@@ -46,8 +47,8 @@ you want one stage on its own:
 ```bash
 cd ESP32_PMW
 
-# 1. camera: what modes does this sensor really deliver?
-uv run python controller/camera/modes.py --index 0
+# 1. camera: which physical camera is at which index right now?
+uv run python controller/camera/identify.py
 
 # 2. calibrate: board -> intrinsics -> extrinsics -> stereo_rig.json
 uv run jupyter lab controller/calib/calibrate_camera.ipynb
@@ -56,8 +57,10 @@ uv run jupyter lab controller/calib/calibrate_camera.ipynb
 uv run jupyter lab controller/pose/online_camera.ipynb
 
 # 4. control: closed loop off the camera. No CLI; drive it from Python.
-uv run python -c "import sys; sys.path.insert(0, 'controller/control'); \
-  import hover_controller_runner as r; r.fly(source='camera', dry_run=True)"
+#    StereoRig.sources() resolves A and B to whatever indices they hold today.
+uv run python -c "import sys; sys.path[:0] = ['controller/control', 'controller/calib']; \
+  import hover_controller_runner as r; from rig import StereoRig; \
+  r.fly(source='camera', camera=StereoRig.load().sources(), dry_run=True)"
 ```
 
 Two things worth knowing before the first run:

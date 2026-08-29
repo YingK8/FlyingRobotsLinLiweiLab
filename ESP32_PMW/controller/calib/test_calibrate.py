@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation
 
 HERE_ = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE_), str(HERE_.parent / "camera")]
-from calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, MIN_CORNERS, SPEC,  # noqa: E402
+from calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, SPEC,  # noqa: E402
                        fit_corners,
                        detect, intrinsics_from_dir, pair_views, refine_extrinsic,
                        seed_extrinsic, solve_board_pose)

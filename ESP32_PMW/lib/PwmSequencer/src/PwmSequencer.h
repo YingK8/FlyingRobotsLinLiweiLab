@@ -58,6 +58,9 @@ public:
   // Queue Builders
   /** @brief Reserve queue capacity for `size` tasks. */
   void reserve(size_t size);
+
+  /** Drop every queued task, so a new schedule can be built in its place. */
+  void clear();
   /** @brief Push a hand-built task (e.g. from makeTrajectoryTask()). */
   void addSequenceTask(SequenceTask task);
 

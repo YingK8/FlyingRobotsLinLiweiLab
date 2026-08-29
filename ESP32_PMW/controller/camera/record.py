@@ -41,7 +41,6 @@ import json
 import queue
 import sys
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +50,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE)]
 
+import identify  # noqa: E402
 import sources  # noqa: E402
 
 DEFAULT_DIR = HERE.parents[1] / "results" / "flights"
@@ -80,6 +80,114 @@ def new_flight(root=DEFAULT_DIR, tags="AB"):
     return out
 
 
+class FlightWriter:
+    """
+    Write a stereo take from frames someone else is already reading.
+
+        `record` owns its camera. The control loop owns *its* camera, and two owners
+        of one USB camera is not a thing -- so a flight cannot be filmed by running
+        both. This takes the frames the loop has already read and writes exactly what
+        `record` writes: one mp4 per camera, `frames.csv`, `meta.json`. That sameness
+        is the point -- `open_recording`, `read_index` and `live_viz.from_recording`
+        then replay a control run with no idea it was not shot by `record`.
+
+        Encoding runs on its own thread behind a bounded queue, as in `record`: a
+        control loop must never block on an encoder, so a queue that fills drops the
+        frame and counts it rather than stalling the flight.
+
+        `frames.csv` is written **as the frames arrive**, not at the end. The caller
+        here is a generator's `finally`, which runs under `GeneratorExit` and can be
+        cut short by a signal or interpreter shutdown; buffering the index until then
+        risks 4 GB of video that nothing can turn back into a timed stereo pair. A row
+        per frame costs nothing and survives a kill -9.
+    """
+
+    def __init__(self, out_dir=DEFAULT_DIR, tags="AB", fps=60.0, meta=None):
+        self.dir = new_flight(out_dir, tags)
+        self.tags, self.fps, self.meta = tags, float(fps), dict(meta or {})
+        self.n, self.dropped, self.errors = 0, 0, 0
+        self.writers, self.size = None, None
+        # Header up front, rows as they land: see the class docstring.
+        self._csv = open(self.dir / "frames.csv", "w", buffering=1)
+        self._csv.write("index,t_capture,skew_s,"
+                        + ",".join(f"t_{t.lower()}" for t in self.tags) + "\n")
+        self._work = queue.Queue(maxsize=QUEUE_DEPTH)
+        self._thread = threading.Thread(target=self._run, name="encode", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while True:
+            job = self._work.get()
+            try:
+                if job is None:
+                    return
+                for w, f in job:
+                    w.write(f)
+            except Exception as e:  # noqa: BLE001
+                # One bad frame must not kill the encoder. A dead encoder used to be
+                # invisible until `close` waited forever for a `task_done` that was
+                # never coming, and the take lost its meta.json.
+                self.errors += 1
+                if self.errors == 1:
+                    print(f"  encoder error (frames will be missing): {e}")
+            finally:
+                self._work.task_done()
+
+    def add(self, t, frames, stamps=None, skew=0.0):
+        """One stereo read. Never raises and never blocks: a flight outranks its film."""
+
+        if self.writers is None:
+            h, w = frames[0].shape[:2]
+            self.size = [w, h]
+            self.writers = [cv2.VideoWriter(str(self.dir / tag / f"{tag}.mp4"),
+                                            cv2.VideoWriter_fourcc(*FOURCC), self.fps,
+                                            (w, h), False) for tag in self.tags]
+            if not all(x.isOpened() for x in self.writers):
+                raise OSError(f"no {FOURCC} writer on this build")
+        try:
+            self._work.put_nowait(list(zip(self.writers, frames)))
+        except queue.Full:
+            self.dropped += 1
+        st = stamps or (t,) * len(frames)
+        self._csv.write(f"{self.n},{t:.6f},{skew:.6f},"
+                        + ",".join(f"{x:.6f}" for x in st) + "\n")
+        self.n += 1
+
+    def close(self, stats=None):
+        """
+        Finalise the take: what it means first, then flush the encoder.
+
+            Order matters, and it is the opposite of the obvious one. This runs from a
+            generator's `finally`, which can be executing while a `SystemExit` is
+            already propagating -- measured, not theorised -- so anything after a slow
+            step may simply never happen. `meta.json` is a few bytes and is what turns
+            two mp4s into a take, so it is written *before* the encoder flush and the
+            thread join that can be cut short.
+        """
+
+        self._csv.close()
+        (self.dir / "meta.json").write_text(json.dumps(
+            {**self.meta, "mode": self.size, "fps": self.fps, "n_frames": self.n,
+             "dropped": self.dropped, "encoder_errors": self.errors,
+             "skew": stats or {},
+             "created": datetime.now().isoformat(timespec="seconds")}, indent=2))
+
+        # Never `queue.join()`: it waits on a counter only the worker decrements, so a
+        # worker that died hangs the caller. Sentinel plus a bounded thread join.
+        try:
+            self._work.put(None, timeout=5.0)
+        except queue.Full:
+            pass
+        self._thread.join(timeout=30.0)
+        for w in self.writers or []:
+            w.release()
+        if self._thread.is_alive():
+            print("  encoder did not finish; the tail of the video may be missing")
+        print(f"  {self.n} frame(s) -> {self.dir}"
+              + (f", {self.dropped} dropped" if self.dropped else ""))
+        return self.dir
+
+
 def flights(root=DEFAULT_DIR):
     """Every flight folder under ``root``, oldest first."""
 
@@ -93,7 +201,7 @@ def latest_flight(root=DEFAULT_DIR):
     return found[-1] if found else Path(root)
 
 
-def record(out_dir=DEFAULT_DIR, indices=(0, 1), width=1280, height=800, fps=60.0,
+def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=60.0,
            rotate180=True, max_skew_s=None, preview=True):
     """Live preview; SPACE starts and stops recording, q quits. Returns the directory.
 
@@ -103,7 +211,9 @@ def record(out_dir=DEFAULT_DIR, indices=(0, 1), width=1280, height=800, fps=60.0
     """
 
     out_dir = Path(out_dir)
-    idx = [indices] if isinstance(indices, int) else list(indices)
+    # None means 'the ELPs, as of now'; see identify.elp_indices.
+    idx = (identify.elp_indices() if indices is None
+           else [indices] if isinstance(indices, int) else list(indices))
     tags = "AB"[:len(idx)]
 
     src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height,
@@ -146,7 +256,9 @@ def record(out_dir=DEFAULT_DIR, indices=(0, 1), width=1280, height=800, fps=60.0
 
     flight, writers, rows, recording, t0, n = None, None, [], False, 0.0, 0
     done = []
+    sink = sources.Sink("flight recorder").open() if preview else None
     try:
+      try:
         while True:
             item = src.read()
             if item is None:
@@ -179,8 +291,7 @@ def record(out_dir=DEFAULT_DIR, indices=(0, 1), width=1280, height=800, fps=60.0
                                    else f"{n} frames   SPACE = record, q = quit"),
                             (10, view.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                             (0, 0, 255) if recording else (255, 255, 255), 2, cv2.LINE_AA)
-                cv2.imshow("flight recorder", view)
-                key = cv2.waitKey(1) & 0xFF
+                key = sink.show(view)
                 if key == ord("q"):
                     break
                 if key == ord(" "):
@@ -194,9 +305,12 @@ def record(out_dir=DEFAULT_DIR, indices=(0, 1), width=1280, height=800, fps=60.0
                         close_flight(flight, writers, rows, n)
                         done.append(flight)
                         flight, writers = None, None
+      except KeyboardInterrupt:
+        # A cell has no q; interrupting must still close the flight cleanly below.
+        print("\ninterrupted")
     finally:
-        if preview:
-            cv2.destroyAllWindows()
+        if sink is not None:
+            sink.close()
         work.put(None)
         thread.join(timeout=30.0)
         if writers is not None:                 # quit while still rolling
@@ -267,7 +381,8 @@ def open_recording(rec_dir):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--out", type=Path, default=DEFAULT_DIR)
-    p.add_argument("--indices", nargs="+", type=int, default=(0, 1))
+    p.add_argument("--indices", nargs="+", type=int, default=None,
+                   help="default: whichever indices the two ELPs hold right now")
     p.add_argument("--mode", default="1280x800")
     p.add_argument("--fps", type=float, default=60.0)
     p.add_argument("--no-flip", action="store_true")

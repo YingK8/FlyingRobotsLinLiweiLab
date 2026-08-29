@@ -418,8 +418,6 @@ def _self_check():
     mpc = default_mpc(
         use_grad=False, ts=0.05, horizon=8, blocks=2, iters=1, substeps=3
     )
-    p = mpc.plant.robot
-
     # 1. The allocation realizes the commanded axis exactly, and is circular.
     mpc._pinv = np.linalg.pinv(mpc.channel_basis([0.0, 0.0, 0.013]))
     for tilt in ([0.0, 0.0], [0.1, 0.0], [-0.05, 0.12]):

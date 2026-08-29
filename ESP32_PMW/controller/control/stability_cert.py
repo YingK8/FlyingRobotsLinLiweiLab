@@ -152,51 +152,6 @@ def certify(a_mat, q=None):
     return p, float(np.linalg.cond(p))
 
 
-def roa_radius(plant, f, z_eq, a_mat, p_mat, q=None, n_dir=64, r_max=0.020, seed=0):
-    """Largest lateral offset whose sublevel set of V is still certified, in metres.
-
-    The estimate is the standard one: V decays wherever the nonlinear residual is dominated by
-    the linear term, so grow the level c until some sampled direction violates
-    dV/dt < 0, then report the lateral radius that level reaches.
-
-    # ponytail: sampled directions, not an SOS or interval certificate. It is an estimate and
-    # the docstring says so; upgrade to a verified bound only if a candidate ever survives.
-    """
-
-    q = np.eye(8) if q is None else q
-    rng = np.random.default_rng(seed)
-    st0 = _pack(sm.make_state(np.array([0.0, 0.0, z_eq])))
-
-    def vdot(st):
-        d = _pack(plant.step(_unpack(st), f, 1e-4)[0]) - st
-        d = d / 1e-4
-        e = st - st0
-        return 2.0 * e @ (p_mat @ d)
-
-    dirs = rng.normal(size=(n_dir, 8))
-    dirs /= np.linalg.norm(dirs, axis=1)[:, None]
-    # Scale so a unit direction is a physically comparable perturbation in each block.
-    scale = np.array([1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2])
-
-    lo, hi = 0.0, 1.0
-    for _ in range(40):
-        mid = 0.5 * (lo + hi)
-        ok = True
-        for d in dirs:
-            st = st0 + mid * scale * d
-            try:
-                if vdot(st) >= 0.0:
-                    ok = False
-                    break
-            except sm.StepOut:
-                ok = False
-                break
-        lo, hi = (mid, hi) if ok else (lo, mid)
-        if hi - lo < 1e-4:
-            break
-    return float(lo * scale[0] * 1.0), lo
-
-
 def min_align_tau(plant, f, z_eq, taus=None):
     """Smallest ``align_tau`` at which the linearisation becomes Hurwitz, or None.
 

@@ -348,8 +348,6 @@ def _self_check():
     mids = np.array([fr.pos[fr.channel == c].mean(0) for c in range(4)])
     assert np.allclose(np.linalg.norm(mids[:, :2], axis=1), 0.037, atol=1e-9), mids
     b_free = field_shape(fr, z_w)[0]
-    b_c4 = field_shape(c4_array(r_lo=0.037, z_lo=0.0, n_per_ring=2, z_hi=0.0,
-                                r_hi=0.037), z_w)[0]
     print(f"free builder: 4 channels x 2 coils, group centres on the 37 mm ring; "
           f"|B| {b_free*1e3:.4f} mT")
 

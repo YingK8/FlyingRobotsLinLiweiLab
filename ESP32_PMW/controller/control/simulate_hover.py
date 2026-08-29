@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from hover_model import HoverParams, make_params, nonlinear_dynamics
+from hover_model import make_params, nonlinear_dynamics
 from reference_profiles import Profile, demo_profile
 
 

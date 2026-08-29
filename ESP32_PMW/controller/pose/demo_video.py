@@ -31,6 +31,7 @@ sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera
 import background as bgmod  # noqa: E402
 import rig as rigmod  # noqa: E402
 import segment as segmod  # noqa: E402
+import spin as spinmod  # noqa: E402
 import stereo as st  # noqa: E402
 from estimator import RADIUS_BENCH_MM  # noqa: E402
 from filter import PoseFilter  # noqa: E402
@@ -67,7 +68,41 @@ def _rim_overlay(out, pose, cam, view):
                    (90, 220, 90) if ok else (60, 60, 255), -1)
 
 
-def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0):
+def _blade_overlay(out, seg, witness):
+    """
+    The ring the spin witness reads, and where it thinks the blades are.
+
+        Drawn because the witness makes a claim -- turning or not -- that is only
+        checkable by eye against the blades themselves. The ring is where the
+        intensity profile is sampled; the tick is the 4th harmonic's phase, so it
+        should sit on a blade and travel with it.
+    """
+
+    if seg is None:
+        return
+    (cx, cy), (major, _mi), _a = seg.ellipse
+    r = spinmod.R_FRAC * major / 2.0
+    phase, strength = spinmod.blade_phase(out[:, :, 0] if out.ndim == 3 else out,
+                                          seg.ellipse)
+    ok = strength >= spinmod.MIN_STRENGTH
+    cv2.circle(out, (int(cx), int(cy)), int(r),
+               (0, 220, 220) if ok else (90, 90, 90), 1, cv2.LINE_AA)
+    if ok:
+        # Harmonic phase runs BLADES times as fast as the rotor, so undo that to
+        # put the tick at a physical angle.
+        for k in range(spinmod.BLADES):
+            a = (-phase + 2.0 * np.pi * k) / spinmod.BLADES
+            p0 = (int(cx + 0.82 * r * np.cos(a)), int(cy + 0.82 * r * np.sin(a)))
+            p1 = (int(cx + 1.18 * r * np.cos(a)), int(cy + 1.18 * r * np.sin(a)))
+            cv2.line(out, p0, p1, (0, 220, 220), 2, cv2.LINE_AA)
+    if witness is not None:
+        state = {None: "spin ?", True: "SPINNING", False: "STATIONARY"}[witness.turning]
+        col = {None: (150, 150, 150), True: (0, 220, 0), False: (0, 140, 255)}[witness.turning]
+        cv2.putText(out, f"{state}  h4 {strength:.2f}  {witness.drift_rev:+.2f} rev",
+                    (12, 40), FONT, 0.9, col, 2)
+
+
+def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0, witness=None):
     """One view, with its mask, both ellipses, the axis, its dead arcs, and its ridge."""
 
     npx = None
@@ -78,6 +113,7 @@ def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0):
     # One ellipse now. There used to be two -- the mask fit in red and a per-view
     # refinement of it in green -- and the refinement was removed (`theory.md` 16.24).
     _rim_overlay(out, pose, cam, view)
+    _blade_overlay(out, seg, witness)
     label = f"{tag}"
     if seg is None:
         label += "  no fit"
@@ -89,14 +125,36 @@ def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0):
     return out
 
 
-def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=SCALE):
+def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=SCALE,
+           backgrounds="auto"):
     flight = Path(flight)
     out_path = Path(out_path or flight / "demo.mp4")
     rig = rigmod.StereoRig.load(rigmod.DEFAULT_PATH)
     cams = list(rig.cameras)
+    # Saved plates first, because that is what the *live* run used -- a demo that
+    # segments differently from the estimator being demonstrated is showing the
+    # wrong thing.
+    #
+    # A `RunningPlate` walks itself onto anything that stops moving (its own
+    # docstring says so), and a flight recording is mostly a robot holding
+    # station. Measured on 2026-08-29_161405, running against saved:
+    # 208/234 frames solved at 3.85 px rms and 53.8 px of centre scatter,
+    # against 234/234 at 1.58 px and 0.75 px. That 72x jitter was the bad fit.
+    #
+    # Freezing the running plate does NOT rescue it -- also measured, 53.98 px.
+    # The robot is in frame from the first frame, so warmup absorbs it and the
+    # freeze only preserves the contamination. Freezing helps when the plate was
+    # warmed clean; here nothing but a real empty-rig plate does.
+    tags = [c.name for c in rig.cameras]
+    plates = bgmod.load_stereo(tags) if backgrounds in ("auto", "saved") else {}
+    running = [] if plates else [bgmod.RunningPlate() for _ in rig.cameras]
+    if plates:
+        print(f"backgrounds: saved plates for {', '.join(tags)}")
+    else:
+        print("backgrounds: running plates, frozen once warm")
+        plates = dict(zip(tags, running))
     est = st.StereoPoseEstimator(
-        rig, radius_mm=radius_mm,
-        backgrounds={c.name: bgmod.RunningPlate() for c in rig.cameras},
+        rig, radius_mm=radius_mm, backgrounds=plates,
         centre_cal=CentreCalibration.load(), direct=True, never_reject=not gated,
     )
     # The same `PoseFilter` the viser path runs, so what this shows and what `live_viz`
@@ -106,6 +164,10 @@ def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=
     filt = PoseFilter()
     caps, _ = open_recording(flight)
     writer, n, solved = None, 0, 0
+    # One witness per view: the blades are read in each camera independently, so a
+    # disagreement between them is itself informative.
+    witnesses = [spinmod.SpinWitness() for _ in cams]
+    frozen = not running
     try:
         while True:
             got = [c.read() for c in caps]
@@ -127,8 +189,17 @@ def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=
                 est._view_candidates(f, c)[0] for f, c in zip(frames, cams)]
             solved += pose is not None
 
-            panels = [_panel(f, s, pose, c, est.zero, t, view=i)
-                      for i, (f, s, c, t) in enumerate(zip(frames, segs, cams, "AB"))]
+            if not frozen and all(p.ready for p in running):
+                for p in running:
+                    p.freeze()
+                frozen = True
+                print(f"  plates frozen at frame {n}")
+            for w, f, sg in zip(witnesses, frames, segs):
+                if sg is not None:
+                    w.update(n / 60.0, f, sg.ellipse)
+            panels = [_panel(f, s, pose, c, est.zero, t, view=i, witness=w)
+                      for i, (f, s, c, t, w) in
+                      enumerate(zip(frames, segs, cams, "AB", witnesses))]
             canvas = np.hstack(panels)
             canvas = cv2.resize(canvas, None, fx=scale, fy=scale)
 

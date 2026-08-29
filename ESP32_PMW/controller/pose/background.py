@@ -106,6 +106,26 @@ class RunningPlate:
 
         return self.n >= self.warmup
 
+    def freeze(self):
+        """
+        Stop adapting, keeping the plate as it stands. Returns the previous step.
+
+            For the case the class docstring calls out: a subject that stops moving is
+            walked into the plate and vanishes. Wherever the subject is *known* to be
+            about to hold still -- the static noise stations, where it is clamped on
+            purpose -- freeze the plate first and it cannot be absorbed. The cost is
+            the drift tracking that made a running plate worth having, so freeze for a
+            take and thaw after, rather than leaving it off.
+        """
+
+        was, self.step = self.step, 0.0
+        return was
+
+    def thaw(self, step=1.0):
+        """Resume adapting at ``step``."""
+
+        self.step = float(step)
+
     def update(self, gray):
         """
         Fold one frame in and return the plate as uint8, or ``None`` until warm.
@@ -314,7 +334,7 @@ def write(bg, out_path, meta_extra=None):
     cv2.imwrite(str(out_path), bg)
     meta = {
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "source": "controller/elp/background.py",
+        "source": "controller/pose/background.py",
         "mode": f"{bg.shape[1]}x{bg.shape[0]}",
         "diff_thresh": segmod.BG_DIFF_THRESH,
         "note": "Median of empty-rig frames; consumed by segment.load_background(). "
@@ -410,3 +430,46 @@ def check(index=0, mode=None, out=DEFAULT_OUT):
     else:
         print("looks like the same scene")
     return frac
+
+
+def _self_check():
+    rng = np.random.default_rng(0)
+    scene = rng.integers(30, 60, (60, 80)).astype(np.uint8)
+
+    def with_subject():
+        f = scene.copy()
+        f[25:35, 35:45] = 200          # a bright blob that never moves
+        return f
+
+    # The failure this class documents: a subject that holds still is walked into the
+    # plate, and then it is not foreground any more.
+    running = RunningPlate(step=4.0, warmup=2)
+    for _ in range(80):
+        running.update(with_subject())
+    absorbed = running.bg[25:35, 35:45].mean()
+    assert absorbed > 150, absorbed
+
+    # Frozen after warming on the empty scene, the same 80 frames cannot move it.
+    held = RunningPlate(step=4.0, warmup=2)
+    for _ in range(10):
+        held.update(scene)
+    was = held.freeze()
+    assert was == 4.0 and held.step == 0.0
+    for _ in range(80):
+        held.update(with_subject())
+    assert held.bg[25:35, 35:45].mean() < 70, held.bg[25:35, 35:45].mean()
+    # ...and the detector agrees: the frozen plate has not swallowed the subject,
+    # while the running one has.
+    assert not plate_holds_still_subject({"A": held.bg.astype(np.uint8)},
+                                         [with_subject()], tags="A")
+    assert plate_holds_still_subject({"A": running.bg.astype(np.uint8)},
+                                     [with_subject()], tags="A")
+
+    held.thaw(was)
+    assert held.step == 4.0
+    print("plate: still subject absorbed while running, held while frozen, thaw restores")
+    print("\nall checks passed")
+
+
+if __name__ == "__main__":
+    _self_check()

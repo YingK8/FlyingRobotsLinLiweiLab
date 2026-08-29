@@ -329,8 +329,8 @@ class Match:
     The cross-view branch decision for one frame.
 
         ``discrepancy_mm`` is how far apart the winning pair's two world poses were;
-        ``margin_mm`` is how much worse the runner-up pair was.  Both are logged
-        every frame.  A small margin means the two cameras could not tell the
+        ``margin`` is how many sigmas better the winner was than the runner-up.  Both
+        are logged every frame.  A small margin means the two cameras could not tell the
         branches apart -- which happens legitimately when the rotor is near face-on
         to both, where the branches merge and the choice stops mattering -- and it is
         the number to look at before believing an orientation outlier.
@@ -340,19 +340,6 @@ class Match:
     indices: tuple  # which candidate was taken from each view
     discrepancy_mm: float  # the winning pair's disagreement, as a plain distance
     margin: float  # how many sigmas better the winner was than the runner-up
-
-    @property
-    def margin_mm(self):
-        """
-        Deprecated alias kept so existing logs and callers still read.
-
-                The margin stopped being a distance when the agreement test moved to
-                Mahalanobis; it is a likelihood ratio now. Reported under both names for
-                one release rather than silently changing what a logged column means.
-        """
-
-        return self.margin
-
 
 # Angular scale for the branch-agreement test, radians. Roughly the per-view
 # normal error the monocular sweep measures, so an angular disagreement of that
@@ -1115,19 +1102,6 @@ class StereoPose:
     @property
     def t_total_ms(self):
         return self.t_seg_ms + self.t_est_ms
-
-    @property
-    def margin_mm(self):
-        """
-        Deprecated alias for `margin`, which is no longer a distance.
-
-                Kept because logs and readers still use the old name; see `Match.margin_mm`
-                for why the quantity changed units when the agreement test became
-                Mahalanobis.
-        """
-
-        return self.margin
-
 
 class StereoPoseEstimator:
     """

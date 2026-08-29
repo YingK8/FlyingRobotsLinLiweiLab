@@ -45,6 +45,11 @@ PwmSequencer::PwmSequencer(PwmController *phaseCtrl) {
 
 void PwmSequencer::reserve(size_t size) { _queue.reserve(size); }
 
+void PwmSequencer::clear() {
+  _queue.clear();
+  resetStreamingState();
+}
+
 void PwmSequencer::addSequenceTask(SequenceTask task) {
   _queue.push_back(task);
 }

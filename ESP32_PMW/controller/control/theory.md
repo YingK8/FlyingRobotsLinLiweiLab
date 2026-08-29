@@ -24,12 +24,11 @@ field while you move it.
 | 3 | `simulate_hover.py` | closed loop against the *nonlinear* truth plant |
 | 4 | `hover_controller_runner.py` | the real-time runner, and `CameraSource`: the seam |
 | 5 | `z_track.py` | altitude tracking by frequency modulation; the torque budget |
-| 6 | `servo.py` | the serial protocol client, the PID, and `coils_on()` |
-| 7 | `link.py` | `SerialComm`: the host half of the firmware link |
-| 8 | `spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
-| 9 | `spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
-| 10 | `simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
-| 11 | `open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
+| 6 | `link.py` | `SerialComm`: the host half of the firmware link |
+| 7 | `spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
+| 8 | `spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
+| 9 | `simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
+| 10 | `open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
 | 12 | `coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
 | 13 | `stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
 | 14 | `matlab/` | the original interactive sims these models were ported from |
@@ -40,26 +39,27 @@ tilt geometry in section 11.
 
 ## 4.0 Safety comes before theory
 
-**There is no firmware watchdog. The host is the only thing that turns the coils
-off.** `servo.coils_on()` is a context manager whose `finally` sends `S`; if the
-host dies without it, the coils stay energised. Nothing else in this repository
-provides that guarantee, so any new entry point that energises the coils must go
-through it.
+**Outside FLIGHT there is no firmware watchdog. The host is the only thing that
+turns the coils off.** If the host dies without sending `stop`, the coils stay
+energised, so any entry point that energises them owes the same guarantee
+`hover_controller_runner.controller_loop` gives: `stop` from a `finally`, on every
+exit path including an unhandled exception.
 
-The runner adds a second layer: a measurement watchdog (no fix for `--timeout`
-seconds -> `hover`, then `land`), first SIGINT -> `land`, second -> `stop`, and
-`stop` on any unhandled exception. These exist because the failure mode of a
-vision-driven loop is not a crash, it is a *silence*: and a silent position
-source looks exactly like a perfectly stationary robot.
+The runner layers three more on top: a measurement watchdog (no fix for `timeout`
+seconds -> `hover`, then `land`), first SIGINT -> `land`, second -> `stop`. In
+FLIGHT the firmware also holds a 500 ms command-silence watchdog, but that one is
+armed only after the first `mag=`/`freq=`, so it covers the loop and not the
+approach to it. These exist because the failure mode of a vision-driven loop is not
+a crash, it is a *silence*: and a silent position source looks exactly like a
+perfectly stationary robot.
 
-## 4.0.1 Two controllers, and which to use
+## 4.0.1 The altitude law
 
-`servo.height_controller` is an **incremental** (velocity-form) PID with an
-asymmetric rate limit derived from the torque budget. `z_track.ZTracker` is a
-**positional** controller that inverts the lift law exactly,
-$f = f_{hover}\sqrt{1 + a/g}$, with conditional anti-windup. The second is the
-better altitude law; the first is the one wired to serial. They have not been
-merged, and until they are, that split is the thing to know before changing either.
+`z_track.ZTracker` is a **positional** controller that inverts the lift law exactly,
+$f = f_{hover}\sqrt{1 + a/g}$, with conditional anti-windup. It replaced an
+incremental (velocity-form) PID with an asymmetric rate limit derived from the
+torque budget; inverting the law is the better altitude controller because the
+nonlinearity is known in closed form rather than something a gain has to absorb.
 
 ## 0. System description and modeling assumptions
 

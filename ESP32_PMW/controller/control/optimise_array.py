@@ -34,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import differential_evolution, minimize
+from scipy.optimize import differential_evolution
 
 import coil_geometry as cg
 import drive_model as dm

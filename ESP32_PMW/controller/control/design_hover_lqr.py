@@ -27,7 +27,6 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import sys
 
 import numpy as np
 from scipy.linalg import solve_discrete_are
@@ -81,7 +80,8 @@ def _noise_provenance(rate_hz):
     m = NoiseModel.load()
     if not m.measured:
         return {"measured": False,
-                "why": "no static calibration recorded; run pose/noise.py --record"}
+                "why": "no static calibration recorded; run noise.record_live() "
+                       "or controller/pose/noise.py --record"}
 
     dt = 1.0 / rate_hz
     return {

@@ -23,6 +23,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 sys.path[:0] = [str(Path(__file__).resolve().parent.parent / "camera")]
+import identify  # noqa: E402
 import sources  # noqa: E402
 
 from calibrate import (MIN_COMMON_CORNERS, MIN_CORNERS, MIN_ORIENT_SPREAD_DEG,
@@ -60,21 +61,39 @@ def annotate(image, spec, corners, ids, rvec=None, tvec=None, K=None, dist=None)
         cv2.drawFrameAxes(out, K, dist, rvec, tvec, 2.0 * spec.square_mm)
     return out
 
-NATIVE_W, NATIVE_H = 1280, 800     # ELP OV9281 native: 119 fps, full field of view
 FAST_W, FAST_H = 640, 400          # exact 0.5x rescale: 217 fps, same field of view
-# Which index is which camera: `camera/elp.py :: probe_indices`. USB cameras enumerate
-# BEFORE the built-in FaceTime, so the ELP is normally index 0.
+# Which index is an ELP: `camera/identify.py :: elp_indices`, which probes rather
+# than reading a device listing -- no macOS listing is in OpenCV's index order.
 
 
 # ---- the bag ------------------------------------------------------------------------
 def write_meta(bag, spec, indices, mode, rotate180, n_pairs, n_solo, skew):
     """What this bag is, beside the images. Its presence is what marks a bag finished."""
 
-    meta = {"board": spec.summary(), "camera_indices": list(indices), "mode": list(mode),
+    # Which devices shot this, as a set: an index means nothing after the session,
+    # and no listing can say which index was which device. Enough to detect that a
+    # different camera has since been swapped in, which is what it is for.
+    meta = {"board": spec.summary(), "camera_indices": list(indices),
+            "elp_ids": elp_ids_now(), "mode": list(mode),
             "rotate180": bool(rotate180), "n_pairs": n_pairs, "n_solo": list(n_solo),
             "skew": skew, "created": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (Path(bag) / "meta.json").write_text(json.dumps(meta, indent=2))
     return meta
+
+
+def elp_ids_now():
+    """
+    The connected ELPs' device IDs, sorted, or ``[]`` if they cannot be read.
+
+        Never fatal: a bag is still worth having if identification failed, and an
+        empty list reads downstream as "this rig has no tripwire".
+    """
+
+    try:
+        return sorted(identify.elp_ids())
+    except Exception as exc:
+        print(f"  camera identity unavailable ({exc}); bag records indices only")
+        return []
 
 
 def read_meta(bag):
@@ -235,7 +254,7 @@ def _overlay(spec, frames, looks, checks, footer):
     return view
 
 
-def capture(out_dir=PAIR_DIR, indices=(0, 1), spec=None, width=NATIVE_W, height=NATIVE_H,
+def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NATIVE_H,
             rotate180=True, max_skew_s=0.002, append=False, auto=True, rate_hz=10.0,
             exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False):
     """Live preview that shoots by itself. SPACE pauses and resumes, q quits.
@@ -267,7 +286,10 @@ def capture(out_dir=PAIR_DIR, indices=(0, 1), spec=None, width=NATIVE_W, height=
               f"board {meta['board']['board']}, shot {meta['created']}")
         print("  capture(..., override=True) re-shoots it, append=True adds to it")
         return out_dir
-    idx = [indices] if isinstance(indices, int) else list(indices)
+    # None means 'the ELPs, as of now' -- resolved here rather than by the caller,
+    # because a caller that resolved it earlier is holding a stale list.
+    idx = (identify.elp_indices() if indices is None
+           else [indices] if isinstance(indices, int) else list(indices))
     tags = "AB"[:len(idx)]
     for tag in tags:
         (out_dir / tag).mkdir(parents=True, exist_ok=True)
@@ -277,6 +299,16 @@ def capture(out_dir=PAIR_DIR, indices=(0, 1), spec=None, width=NATIVE_W, height=
            sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s,
                                width=width, height=height, grayscale=True,
                                rotate180=rotate180))
+
+    for cam, i in zip(getattr(src, "sources", [src]), idx):
+        got = cam.actual
+        if (got["width"], got["height"]) != (width, height):
+            src.close()
+            raise OSError(
+                f"camera index {i} delivered {got['width']}x{got['height']}, not "
+                f"{width}x{height}. That is not an ELP -- run camera/identify.py to "
+                f"see what is connected, or pass indices=None to resolve them here."
+            )
 
     old = [f for tag in tags for f in (out_dir / tag).glob("*.png")]
     n = len(list((out_dir / tags[0]).glob("pair_*.png"))) if append else 0
@@ -288,7 +320,11 @@ def capture(out_dir=PAIR_DIR, indices=(0, 1), spec=None, width=NATIVE_W, height=
     prev, t_prev, t_try = [None] * len(idx), None, 0.0
     period = 1.0 / rate_hz if rate_hz else 0.0
     print(f"{'auto' if auto else 'paused'}: SPACE pauses and resumes, q quits")
+    # Renders in the output cell under Jupyter, where a HighGUI window never opens.
+    # Opened on the main thread; see sources.Sink.open.
+    sink = sources.Sink("calibration capture").open()
     try:
+      try:
         while True:
             item = src.read()
             if item is None:
@@ -345,17 +381,21 @@ def capture(out_dir=PAIR_DIR, indices=(0, 1), spec=None, width=NATIVE_W, height=
             footer = (f"{tally}   AUTO {rate_hz:.0f} Hz"
                       + (f"   waiting on '{blocked}'" if blocked else "   SHOOTING")
                       if auto else f"{tally}   PAUSED")
-            footer += "   SPACE = pause, q = quit" if auto else "   SPACE = resume, q = quit"
-            cv2.imshow("calibration capture", _overlay(spec, frames, looks, checks, footer))
-
-            key = cv2.waitKey(1) & 0xFF
+            footer += ("   interrupt = stop" if sink.inline else
+                       "   SPACE = pause, q = quit" if auto else
+                       "   SPACE = resume, q = quit")
+            key = sink.show(_overlay(spec, frames, looks, checks, footer))
             if key == ord("q"):
                 break
             if key == ord(" "):
                 auto = not auto
                 print("auto capture on" if auto else "paused")
+      except KeyboardInterrupt:
+        # A cell has no q. Interrupting must still leave a finished bag behind,
+        # so it breaks the loop rather than unwinding past the writes below.
+        print("\ninterrupted")
     finally:
-        cv2.destroyAllWindows()
+        sink.close()
         stats = src.skew_stats() if hasattr(src, "skew_stats") else {}
         src.close()
 

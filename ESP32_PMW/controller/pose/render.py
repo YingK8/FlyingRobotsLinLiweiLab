@@ -64,16 +64,6 @@ CV_TO_GL = np.diag([1.0, -1.0, -1.0, 1.0])
 #: anything through it.
 BLACK_BODY = (0.055, 0.058, 0.061)
 
-#: Bronze drive coils, the clutter beside the robot.
-#:
-#: **Unused, and kept only as a record of a superseded idea.** It was chosen so the
-#: rendered chroma would land in a band measured off real coils, back when
-#: `segment.py` separated them from the robot by colour. The rig's camera is a mono
-#: OV9281 -- chroma is identically zero at every pixel -- so that gate is gone and
-#: nothing reads this constant. The citation this line used to carry, to
-#: `test/test_appearance.py`, was also wrong: that file has never contained a coil.
-
-
 @dataclass
 class LightRig:
     """

@@ -109,7 +109,7 @@ def envelope_top(coils):
 # --------------------------------------------------------------------------
 
 
-def _fz(plant, coils, f, need):
+def _fz(plant, f, need):
     """Axial force residual on the symmetry axis: the gradient force minus the lift deficit."""
 
     def g(z):
@@ -122,7 +122,7 @@ def _fz(plant, coils, f, need):
     return g
 
 
-def trim(plant, coils, f, z_lo=0.006, z_hi=0.045, n=150):
+def trim(plant, f, z_lo=0.006, z_hi=0.045, n=150):
     """Every on-axis equilibrium in [z_lo, z_hi], with its axial stiffness.
 
     `Plant.accel` raises StepOut inside the bracket wherever the field is too weak to hold
@@ -131,7 +131,7 @@ def trim(plant, coils, f, z_lo=0.006, z_hi=0.045, n=150):
     """
 
     need = plant.robot.mass * sm.GRAVITY * (1.0 - (f / plant.f_hover) ** 2)
-    g = _fz(plant, coils, f, need)
+    g = _fz(plant, f, need)
     zs = np.linspace(z_lo, z_hi, n)
     vals = np.array([g(z) for z in zs])
 
@@ -153,7 +153,7 @@ def evaluate(d=0.046, tilt_deg=15.0, f=92.0, amp=1.25, pitch=0.021, model="dipol
     coils = array(d, tilt_deg, amp, pitch, model, phase_err_deg)
     plant = sm.Plant(coils, robot, f_hover=f_hover, k_drag=k_drag, beta=beta, use_grad=True)
 
-    stable = [(z, kz) for z, kz in trim(plant, coils, f) if kz < 0.0]
+    stable = [(z, kz) for z, kz in trim(plant, f) if kz < 0.0]
     if not stable:
         return None
     z_eq, k_z = stable[-1]   # the highest stable trim, the one takeoff reaches
@@ -523,7 +523,6 @@ def run(out_dir=OUT_DIR, reuse=False):
           f"{restoring['d'].max()*1e3:.0f} mm, f {restoring['f'].min():.0f}-"
           f"{restoring['f'].max():.0f} Hz, z_eq {restoring['z_eq'].min()*1e3:.1f}-"
           f"{restoring['z_eq'].max()*1e3:.1f} mm")
-    kills = feasible if len(feasible) else loop
     clear_ok = loop[loop["clearance"] > CLEARANCE_MIN]
     print(f"  of {len(clear_ok)} clearance-ok points, lock rejects "
           f"{(clear_ok['lock'] >= LOCK_MAX).sum()} and C_net >= 0 rejects "

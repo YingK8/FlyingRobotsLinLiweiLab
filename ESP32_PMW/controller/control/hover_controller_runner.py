@@ -98,9 +98,14 @@ def replay_ticks(csv_path: str, viz):
 class CommandLink:
     """Serial link to main_flight.cpp, or a printing stand-in for dry_run."""
 
-    def __init__(self, port: str | None, dry_run: bool, log_path: str):
+    def __init__(self, port: str | None, dry_run: bool, log_path: str,
+                 ramp_hz: float | None = None):
+        self.ramp_hz = ramp_hz
         self.dry = dry_run
-        self.log = open(log_path, "w")
+        # Line buffered: the serial port cannot be opened twice, so this log is the
+        # only way to watch the link live. Block buffering makes `tail -f` lag by
+        # thousands of telemetry lines, which is the same as not having it.
+        self.log = open(log_path, "w", buffering=1)
         self.freq: float | None = None  # last frequency the firmware reported, Hz
         self.state: int | None = None  # last firmware State it reported
         if dry_run:
@@ -133,6 +138,21 @@ class CommandLink:
             if m := _FREQ_RE.search(line):
                 self.freq = float(m.group(1))
 
+    def restart(self) -> None:
+        """Reboot the firmware to IDLE and send `takeoff` again.
+
+        The firmware allows one flight per boot, so retrying after an e-stop or a
+        failed ramp means resetting the board -- not just re-sending the command.
+        """
+
+        if self.comm:
+            self.comm.reset_device()
+            time.sleep(1.5)          # wait out the boot banner, as at construction
+        self.state = None
+        self.freq = None
+        self.send("takeoff" if self.ramp_hz is None
+                  else f"takeoff={self.ramp_hz:.0f}")
+
     def close(self) -> None:
         self.log.close()
         if self.comm:
@@ -147,7 +167,8 @@ def takeoff_to_flight(ticks, link: CommandLink, args) -> tuple[float | None, boo
     true f_hover as e goes to zero. The estimator is the identification: see theory.md 6.6.
     """
 
-    link.send("takeoff")
+    link.send("takeoff" if getattr(args, "ramp_hz", None) is None
+              else f"takeoff={args.ramp_hz:.0f}")
     if link.comm is None:
         print("dry run: no firmware to ramp")
         return None, True
@@ -155,12 +176,22 @@ def takeoff_to_flight(ticks, link: CommandLink, args) -> tuple[float | None, boo
     pad: list[float] = []
     deadline = time.monotonic() + args.spinup_s + args.search_s
     print(f"spin-up: {args.spinup_s:.0f}s firmware ramp, then the loop arms on the pad")
+    print("  if it e-stops or stalls, press 'restart takeoff' in the viewer")
 
     for tick in ticks:
         link.drain()
+        if tick.viz.restart:
+            # The board is in IDLE again -- either an e-stop rebooted it or the ramp
+            # never took. Re-arm it here rather than losing the cameras and the datum.
+            print("restart: resetting the firmware and sending takeoff again")
+            pad.clear()
+            link.restart()
+            deadline = time.monotonic() + args.spinup_s + args.search_s
+            continue
         tick.viz.push(
             tick.pose, u=(0.0, 0.0, link.freq or 0.0, args.throttle, 0.0),
             t=tick.t, frames=tick.frames, lost=tick.lost, state=link.state,
+            spin=tick.spin,
         )
         if tick.xyz_mm is not None and len(pad) < PAD_SAMPLES:
             pad.append(float(tick.xyz_mm[2]))
@@ -207,10 +238,24 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None) -> None:
     ts = ctrl_x.ts
     try:
         if args.takeoff:
-            pad_z, ok = takeoff_to_flight(ticks, link, args)
-            if not ok:
+            while True:
+                pad_z, ok = takeoff_to_flight(ticks, link, args)
+                if ok:
+                    break
                 land("never reached FLIGHT")
-                return
+                print("takeoff failed. Press 'restart takeoff' in the viewer to retry, "
+                      "or Ctrl-C to give up.")
+                for tick in ticks:          # hold the cameras and the viewer alive
+                    link.drain()
+                    tick.viz.push(tick.pose, u=(0.0, 0.0, link.freq or 0.0,
+                                                args.throttle, 0.0),
+                                  t=tick.t, frames=tick.frames, lost=tick.lost,
+                                  state=link.state)
+                    if tick.viz.restart:
+                        link.restart()
+                        break
+                else:
+                    return
             if pad_z is not None:
                 args.pad_z_mm = pad_z
             link.send(f"throttle={args.throttle:.0f}")
@@ -237,6 +282,18 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None) -> None:
             viz, now = tick.viz, time.monotonic()
             # Polled once per iteration, as live_viz's own loops read viz.thresh. `land` is a
             # one-shot latch, so it must be read exactly once.
+            if viz.estop:
+                # Not `land`: landing is a ramp, and an e-stop is not. The button has
+                # already disarmed, so this is the part that de-energises the coils.
+                print("E-STOP: coils off. 'restart takeoff' re-arms the firmware.")
+                link.send("stop")
+                link.state = None
+                continue
+            if viz.restart:
+                print("restart: resetting the firmware and sending takeoff again")
+                link.restart()
+                takeoff_to_flight(ticks, link, args)
+                continue
             armed, mag_max, gain = viz.armed, viz.mag_max, viz.gain_scale
             sp_x, sp_y, sp_z = (v * 1e-3 for v in viz.setpoint)  # viz is mm, the loop is m
             if viz.land:
@@ -351,6 +408,10 @@ class RunConfig:
     timeout: float = 0.5  # watchdog: land after this long without a fix
     takeoff: bool = True
     spinup_s: float = 33.0  # firmware SPINUP_MS + margin
+    # Ramp target, Hz. 60 for testing: every takeoff failure so far sits below it,
+    # and holding the coils at 150 to reproduce a fault that shows at 20 cooks them.
+    # None uses the firmware's own HOVER_HZ.
+    ramp_hz: float = 60.0
     search_s: float = 60.0  # grace window past the ramp before FLIGHT is called lost
     pad_z_mm: float = 0.0   # measured at takeoff; setpoints are relative to it
     throttle: float = 80.0
@@ -358,7 +419,8 @@ class RunConfig:
     dry_run: bool = False  # print commands instead of opening serial
     gains: str = None  # defaults to hover_controller.json beside this file
     waypoints: str = None  # z waypoints; None reverts z to the LQR
-    viz: bool = False  # live 3-D view at http://localhost:<viz_port>
+    viz: bool = False  # live 3-D view; stub/replay only -- source='camera' always builds one
+    record: object = None  # film the run: a flight dir, or True for results/flights/
     viz_port: int = 8080
 
     def __post_init__(self):
@@ -388,6 +450,7 @@ def fly(cfg=None, **kw):
         ticks = lv.stereo_frames(
             specs=cfg.camera, rig_path=cfg.rig, width=cfg.width, height=cfg.height,
             port=cfg.viz_port, axes=tuple(cfg.axes), label="hover",
+            record=cfg.record,
         )
     else:
         own_viz = lv.make_viz(
@@ -412,7 +475,7 @@ def fly(cfg=None, **kw):
             f"f_ceiling={ztrk.f_ceil:.1f} Hz, a_max={ztrk.a_ceiling:.2f} m/s^2"
         )
 
-    link = CommandLink(cfg.port, cfg.dry_run, cfg.log)
+    link = CommandLink(cfg.port, cfg.dry_run, cfg.log, ramp_hz=cfg.ramp_hz)
     try:
         controller_loop(ticks, link, ctrl, cfg, ztrk)
     finally:

@@ -13,12 +13,13 @@ is small and specific:
 * **one call that opens either one camera or two** (`open_group`), returning a
   `MonoCamera` or a `StereoCamera`, plus `as_frames` to flatten the difference.
   That is what lets `modes.py`, `capture.py` and the notebook be written once,
-  branch-free, and it means the stereo path is exercised today by pairing the ELP
-  with the built-in FaceTime camera rather than waiting for a second ELP.
+  branch-free.
 
 macOS only in one respect: AVFoundation gives OpenCV no device *names*, so
 cameras can be addressed by index alone. `probe_indices` exists because of that
-and for no better reason.
+and for no better reason -- it answers "what opens right now", which is all an
+interactive session needs. It cannot say *which* camera is at an index; that is
+`identify.py`, and it is what the stereo pair should be resolved through.
 """
 
 from __future__ import annotations

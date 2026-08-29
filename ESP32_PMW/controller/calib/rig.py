@@ -231,6 +231,42 @@ class StereoRig:
     def b(self):
         return self.cameras[1]
 
+    def sources(self):
+        """
+        ``"camera:<i>,camera:<j>"`` for these cameras, in A,B order.
+
+                A and B are positional everywhere downstream and the index a camera
+                answers to is not, so this probes for the ELPs rather than trusting
+                ``"camera:0,camera:1"``. Order is the probe order, which is how
+                `calib.capture` defined A and B when it shot the bag: A is the first
+                ELP OpenCV enumerates, and that holds as long as neither cable moves.
+
+                The IDs the calibration stamped in are the tripwire. They cannot pick
+                an index -- no macOS device listing enumerates in OpenCV's order, see
+                `camera/identify` -- but they do catch the case that silently ruins a
+                rig: a *different* camera in the pair. A cable swap between two ELPs
+                that both remain connected is not detectable here; re-shoot the bag if
+                one has moved.
+        """
+
+        import sys
+
+        sys.path[:0] = [str(Path(__file__).resolve().parent.parent / "camera")]
+        import identify
+
+        idx = identify.elp_indices(n=len(self.cameras))
+        stamped = set(self.meta.get("elp_ids", []))
+        if stamped:
+            present = set(identify.elp_ids())
+            if stamped != present:
+                raise RuntimeError(
+                    f"these are not the cameras this rig was calibrated against.\n"
+                    f"  rig:     {sorted(stamped)}\n"
+                    f"  present: {sorted(present)}\n"
+                    f"Re-shoot the bag (run.ipynb stage 1) if the rig has changed."
+                )
+        return ",".join(f"camera:{i}" for i in idx)
+
     # ---- construction -----------------------------------------------------
 
     @classmethod

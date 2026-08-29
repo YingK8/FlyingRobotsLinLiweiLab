@@ -301,6 +301,20 @@ def load_mesh(path=MESH_PATH):
         rot[:, 1] *= -1
     aligned = x @ rot
 
+    # **`eigh` fixes the axis but not its sign**, and the sign is what decides which way
+    # up the robot is drawn. Taken from the mesh's own asymmetry rather than left to a
+    # solver: the longest thing on the axis is the takeoff rod -- 8 mm at a 0.5 mm
+    # radius, against a 3.7 mm mast stack the other side of a 10.2 mm rim -- and the rod
+    # is underneath. So the far end of the axis is *down*.
+    #
+    # Unsigned, the model came out inverted: rod up, mast down, and a scene where the
+    # duct looked right and the body pointed the wrong way. Nothing catches that
+    # numerically, because a 180 degree turn about a radial axis leaves the disc, its
+    # normal and the radius all exactly where they were.
+    if aligned[:, 2].max() > -aligned[:, 2].min():
+        rot[:, 1:] *= -1                     # negate the axis, keep the frame right-handed
+        aligned = x @ rot
+
     radial = np.hypot(aligned[:, 0], aligned[:, 1])
     rim = aligned[radial > 0.93 * radial.max()]
     # Outer radius, not mean radius: the segmenter hulls the silhouette, and a

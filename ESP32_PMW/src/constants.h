@@ -16,10 +16,10 @@ const int NUM_CHANNELS = 4;
 const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_14;
 
 #if SWIM_SETUP
-const gpio_num_t A_PWM_PIN = GPIO_NUM_27;
-const gpio_num_t B_PWM_PIN = GPIO_NUM_12;
-const gpio_num_t C_PWM_PIN = GPIO_NUM_15;
-const gpio_num_t D_PWM_PIN = GPIO_NUM_33;
+const gpio_num_t A_PWM_PIN = GPIO_NUM_14;
+const gpio_num_t B_PWM_PIN = GPIO_NUM_32;
+const gpio_num_t C_PWM_PIN = GPIO_NUM_33;
+const gpio_num_t D_PWM_PIN = GPIO_NUM_27;
 
 const gpio_num_t A_CARRIER_PIN = GPIO_NUM_NC;
 const gpio_num_t B_CARRIER_PIN = GPIO_NUM_NC; 

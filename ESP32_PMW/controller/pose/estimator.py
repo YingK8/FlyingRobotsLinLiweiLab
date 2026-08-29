@@ -65,14 +65,57 @@ from zeroing import Zero  # noqa: E402
 #: One entry per rig appearance: the effective radius depends on where the
 #: threshold cuts the boundary, and the two appearances cut different edges.
 #:
-#: `dark` is NOT fitted -- it was carried over from a dataset rendered at a
-#: different threshold, and refitting is blocked on the renderer being unable to
-#: reproduce this rig. Its metric output is uncalibrated. See
-#: `ai/notes/pose_appearance.md`.
+#: `dark` was carried over from a dataset rendered at a different threshold and was
+#: marked provisional, with refitting blocked on the renderer being unable to reproduce
+#: this rig. The renderer is not needed: two cameras 83 deg apart disagree about where
+#: the robot is by an amount that depends on the radius assumed, and that disagreement
+#: has a sharp minimum. Three flights over two days, swept independently
+#: (`fit_radius.py`), all land on 10.4 mm -- median cross-view discrepancy 2.2 / 2.4 /
+#: 3.2 mm against 5.96 at the old value, and 10.38 by 11.0 mm.
+#:
+#: **Re-fitted to 10.2 for the direct fit** (`theory.md` S16). It was tied to
+#: `segment.DARK_THRESH` because the effective radius is where a *threshold* cuts a
+#: shaded edge, and 10.4 belonged to a threshold of 220. `segment.fit_ellipse_image`
+#: does not cut anything: it settles on the rim's darkness ridge, which is a different
+#: and better-defined edge, so the constant had to move with it. The same three flights
+#: swept independently now all land on 10.2, with sharper minima than before -- median
+#: cross-view discrepancy **0.83 / 1.17 / 1.04 mm** against 2.4 / 1.5 / 1.9 at 10.4 on
+#: the mask fit. That is the number to re-run (`fit_radius.py`) if either the direct
+#: fit's constants or the lighting move.
+#:
+#: Its absolute scale still inherits the rig's, which rests on the board pitch (S14.4).
+#: `bright` now names two different things and that is a trap. 10.2446 was fitted on
+#: *renders* of a white body against a dark ground, and the render tests still use it.
+#: The bench rig as of 2026-08-28 is also `bright` -- a white ring on a black cloth --
+#: and the direct fit measures **10.05** on it, a sharp V (1.22 mm at the minimum,
+#: 9.19 at 9.5 and 9.96 at 10.5). Pass `radius_mm=` explicitly for the bench rig until
+#: the two are given separate appearance keys.
 RADIUS_BY_APPEARANCE = {
-    "bright": 10.2446,  # white body, luminance threshold
-    "dark": 10.1106,  # provisional, see above
+    "bright": 10.2446,  # white body on dark ground, fitted on renders
+    "dark": 10.2,       # direct fit on flight data, see above
 }
+
+#: The bench rig's measured radius, for `bright` footage that is not a render.
+#:
+#: **9.95, not the 10.05 first fitted.** That first sweep ran the estimator with its own
+#: gates active, so it was scored on the frames that survived a radius rather than on all
+#: of them -- the answer partly chose its own evidence. Re-swept with the cross-view gate
+#: open and only frames whose fit is strong in *both* views (ridge >= 10), the two flights
+#: agree:
+#:
+#:   radius mm      9.90   9.95   9.975  10.00  10.05  10.20
+#:   131552 median  0.91   0.50   0.77   1.15   2.05   4.81   (upright take)
+#:   092117 median  1.77   1.08   0.88   1.02   1.65   4.21
+#:
+#: Passes over 9.95-9.975; 9.95 is the sharper minimum and comes from the take flown
+#: upright, which is the one with ground truth (`theory.md` 16.15).
+#:
+#: **The half-percent mattered more than it looks.** A radius error is a systematic depth
+#: offset along each camera's own axis, and the axes point different ways, so it lands
+#: directly on cross-view discrepancy. At 10.05 only 98% of strong-fit frames came under
+#: the 5 mm gate and at 10.20 just 66%; at 9.95, 100% do. Frames with visibly perfect
+#: segmentation were being rejected for it.
+RADIUS_BENCH_MM = 9.95
 RADIUS_MM = RADIUS_BY_APPEARANCE[segmod.APPEARANCE]
 
 DEFAULT_INTRINSICS = (
@@ -167,6 +210,7 @@ class PoseEstimator:
         radius_mm=RADIUS_MM,
         zero=None,
         thresh=None,
+        background=None,
         min_area=segmod.MIN_BLOB_AREA_PX,
         dropout_s=0.25,
         verify=True,
@@ -187,6 +231,7 @@ class PoseEstimator:
         # None, not `segmod.THRESH`: the level belongs to the appearance, and
         # `segment.score_channel` resolves it at call time.
         self.thresh = thresh
+        self.background = background      # this camera's empty-rig plate, see `segment`
         self.min_area = min_area
         self.dropout_s = dropout_s
         self.verify_tol = 1e-6 if verify else None
@@ -267,7 +312,8 @@ class PoseEstimator:
 
         use_axial = segmod.AXIAL_DEFAULT if axial is None else bool(axial)
         seg = segmod.segment(
-            frame, thresh=self.thresh, min_area=self.min_area, axial=use_axial
+            frame, thresh=self.thresh, min_area=self.min_area, axial=use_axial,
+            background=self.background,
         )
         if seg is None:
             self.n_lost += 1

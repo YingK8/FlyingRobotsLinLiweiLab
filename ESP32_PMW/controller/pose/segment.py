@@ -65,13 +65,40 @@ import shape  # noqa: E402  (calib/: owns APPEARANCE)
 #   thresh 112 -> bias -0.53%, scatter 0.52%
 #   thresh 128 -> bias -0.27%, scatter 0.64%
 #   thresh 144 -> bias +0.01%, scatter 0.70%
-# A lower level catches more of the dim rim edge and localises it better, but is
-# NOT retuned here: the renders have one brightness and on real hardware the
-# useful level follows exposure, so a synthetic number would not transfer.
+# A lower level catches more of the dim rim edge and localises it better. That column
+# said so and it was left at 128 anyway, because the renders it came from have one
+# brightness and the useful level on hardware follows exposure.
 #
-# Change this (or the exposure) and refit the effective radius: the bias column
-# moves 0.75% across this range, more than the whole depth residual.
-THRESH = 128
+# **Refitted on the black backdrop, and it was worth much more than the bias column
+# suggested.** With a dark ground there is almost nothing above the level except the
+# robot -- a level of 72 keeps 80.5% of rim samples and 1.3% of the backdrop, against
+# 78.0% and 1.1% at 128, so two thirds of the range between them buys rim and costs
+# nothing. It only matters as a *seed*: the direct fit measures from the evidence map,
+# and a seed missing a quarter of the rim starts the solve on a biased ellipse.
+#
+# Swept over three flights, `never_reject`, with the frames landing more than 30 degrees
+# from the flight's own median normal as the headline -- `2026-08-28_131552` is flown
+# upright so that column is ground truth:
+#
+#   THRESH                  128    96     72     56
+#   131552  >30 deg out     10.2%  4.1    3.1    5.3
+#           under 5 mm      76.1%  72.1   77.6   66.2
+#   135533  >30 deg out     2.8%   1.4    0.4    0.6
+#           under 5 mm      94.5%  92.7   92.9   94.0
+#   092117  >30 deg out     4.3%   4.0    2.9    4.6
+#           under 5 mm      77.3%  73.9   81.5   83.2
+#           discrepancy p90 37.18  17.84  15.30  15.30
+#
+# 72 is best or tied on every flight and on both columns, and `ridge` holds or rises
+# with it (17.4 -> 18.6 on 092117), which says the extra seed area is rim rather than
+# backdrop. Passes over 56-96; below 56 the backdrop starts arriving -- at 32 a level
+# keeps 17.5% of it against 2.1% at 40.
+#
+# Change this (or the exposure) and refit the effective radius: the bias column above
+# moves 0.75% across its range, more than the whole depth residual. The renders still
+# use 128 by way of `estimator.RADIUS_BY_APPEARANCE["bright"]`, which was fitted with
+# it; this constant and that one move together.
+THRESH = 72
 MIN_BLOB_AREA_PX = 30
 
 # Opening is deliberately smaller than closing.  The projected rim wall is only
@@ -238,6 +265,13 @@ class Segmentation:
         the segmenter was allowed to look in (``None`` for appearances that look
         everywhere) -- carried so the overlay can shade what was ignored without
         recomputing it, which for the backdrop finder costs 2.4 ms a frame.
+        ``valid_from`` names which of the two produced it, because only one of them is
+        worth drawing: see `shade_rejected`.
+
+        ``evidence`` and ``ellipse_mask`` appear once `fit_ellipse_image` has been run:
+        ``ellipse`` is then the direct fit and ``ellipse_mask`` the threshold's own
+        answer, kept so the overlay can show both and the difference between them can
+        be measured. See `theory.md` 16.
     """
 
     mask: np.ndarray
@@ -249,6 +283,46 @@ class Segmentation:
     threshold: int
     t_ms: float
     valid: np.ndarray | None = None
+    valid_from: str | None = None
+    # Mean rim evidence, set only when `fit_ellipse_image` has refined `ellipse` onto
+    # the image. Finite means the ellipse is a direct fit rather than a fit to the
+    # mask, so `fit_rms_px` -- which measures the *hull* -- no longer describes it and
+    # callers must gate on this instead. NaN means the mask fit stands.
+    evidence: float = float("nan")
+    coverage: float = float("nan")
+    ridge: float = float("nan")
+    ellipse_mask: tuple | None = None
+
+
+@dataclass
+class RingFit:
+    """
+    What `fit_ellipse_image` recovered, and how well the rim supports it.
+
+        ``coverage`` is the fraction of samples carrying at least
+        `RING_COVERAGE_FLOOR` of the ring's **own** median evidence, so it says how
+        much of the rim the fit is actually resting on without reference to any
+        absolute level -- a ring at half the contrast scores the same.
+
+        ``ridge`` is the blunder test, and coverage is **not** -- that was measured
+        wrong once and it is worth saying why. Coverage normalises by the ring's own
+        median, so a fit resting on nothing still clears "half of nothing" and scores
+        ~0.5. Two frames both scored 0.52: one was a well-fitted ring two thirds hidden
+        behind the rig, the other had the whole rim in view and an ellipse plainly too
+        big for it. Coverage cannot tell those apart, and they need opposite answers.
+
+        `ridge` compares the fitted curve against curves just inside and outside it
+        (`RING_SHOULDER`), so it asks the question that actually matters: **is this
+        ellipse sitting on a ridge?** On those same two frames it reads 27.3 and 0.60.
+        Local, so a shadowed arc is judged against its own surroundings rather than
+        the frame's, and free -- two more `sample_map` calls.
+
+    """
+
+    ellipse: tuple
+    evidence: float
+    coverage: float
+    ridge: float = float("nan")
 
 
 def fit_ellipse_direct(pts):
@@ -645,16 +719,73 @@ _MAX_ANCHORS = 4
 # there is most of a decade of margin.
 SHAPE_TOL = 0.05
 
+# **This gate is close to inert, and tightening it makes things worse.** The score is
+# fit error against the convex HULL, and any compact solid blob's hull is an ellipse:
+# a rim and a solid disc both measure 0.0004. It cannot tell them apart, so on a normal
+# frame nothing is rejected and selection below falls through to size alone.
+#
+# Left loose deliberately. Swept on both 18:48 flights at threshold 180, gating on
+# radial error over the group's mask PIXELS (which does separate ring from blob,
+# 0.027 against 0.33) and breaking ties on inlier count, the result improves
+# monotonically as the gate is widened -- 184940 solves 23% at tol 0.09, 30% at 0.20,
+# 39% at 0.40 and 45% with no gate at all, against 44% for plain size. Every millimetre
+# the error criterion is allowed to reject something, the answer gets worse.
+#
+# The reason is what the candidates actually are. They are not rim-versus-clutter,
+# where fit error would win; they are partial-rim-versus-larger-partial-rim, all
+# genuinely elliptical and differing only in how much of the ring they hold. Fit error
+# cannot rank those and size can, because more of the ring is bigger. Selecting on
+# error alone is worse still (8% solved): error has no support term, so its minimum is
+# always the smallest candidate -- the roundest blob against hulls, the thinnest arc
+# against pixels, since an ellipse follows a short arc almost exactly.
+#
+# Contamination inflating the major axis was the real objection to size, and `_regrow`
+# is what answers it: reassembling the ring makes the correct group the biggest one.
+#
+# **Anchor-and-grow still cannot reject.** `_regrow` only ever adds blobs, so scenery
+# once absorbed is never shed -- on 184830 view A frame 420 this returns 607x502 where
+# the rim is 463x278, having eaten the shadow blobs beside it. Backward elimination
+# (start from every blob, drop the smallest, refit, keep the set that best explains the
+# mask) does not have that failure and is the more accurate extractor measured against a
+# leave-one-out consensus ground truth: worst-case centre error 2.7 px across both
+# 18:48 flights against 3.6 px here, and 2.0 px against 3.6 on 184940. It is not in this
+# file because it scores WORSE on the stereo solve for that same flight (23% against
+# 44%), and see the warning below for why that number cannot be trusted right now.
+#
+# **Cross-view discrepancy is not a valid objective while the extrinsic is stale.**
+# Extraction accuracy and stereo agreement came out anti-correlated across the two
+# flights: the more accurate extractor loses the stereo solve, because a biased ellipse
+# partially cancels a wrong rig and a clean one exposes it. Every millimetre figure used
+# to tune this module was measured that way, `RING_BAND` included -- re-derive it after
+# `calib/calibrate.py` succeeds. Full study: results/rim_extractor_trials.html.
 
-def _group_hull(labels, members, n):
+
+def _group_hull(labels, members, n, stats=None):
     """
     Convex hull of a set of labels, as float64 (N, 2), or ``None``.
+
+        ``stats`` from `connectedComponentsWithStats` crops the scan to the members'
+        own bounding box, which is the whole cost of this function -- `lut[labels]`
+        materialises a full-frame array and `findContours` then walks it. Grouped blobs
+        are clustered by construction, so the box is a fraction of the frame: 1.9 ms
+        to 0.1 ms on a 1280x800 label image, and `_best_group` calls this eight times.
     """
 
     lut = np.zeros(n, dtype=np.uint8)
     lut[members] = 255
+
+    x0 = y0 = 0
+    view = labels
+    if stats is not None and len(members):
+        m = np.asarray(members)
+        x0 = int(stats[m, cv2.CC_STAT_LEFT].min())
+        y0 = int(stats[m, cv2.CC_STAT_TOP].min())
+        x1 = int((stats[m, cv2.CC_STAT_LEFT] + stats[m, cv2.CC_STAT_WIDTH]).max())
+        y1 = int((stats[m, cv2.CC_STAT_TOP] + stats[m, cv2.CC_STAT_HEIGHT]).max())
+        view = labels[y0:y1, x0:x1]
+
     contours, _ = cv2.findContours(
-        lut[labels], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        lut[view], cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
     if not contours:
         return None
@@ -662,7 +793,86 @@ def _group_hull(labels, members, n):
     if len(pts) < _MIN_CONTOUR_PTS:
         return None
     hull = cv2.convexHull(pts).reshape(-1, 2).astype(np.float64)
-    return hull if len(hull) >= _MIN_CONTOUR_PTS else None
+    if len(hull) < _MIN_CONTOUR_PTS:
+        return None
+    return hull + (x0, y0)
+
+
+# How far off its own fitted ellipse a blob may sit and still be counted part of the
+# ring, as a fraction of the local radius: |r - 1| < this, with r the blob centroid's
+# radius in the ellipse's own frame.
+#
+# This exists because `max_spread` measures the wrong thing once the rim breaks up.
+# That radius comes from the *anchor blob's* bounding box, which is a whole rim when
+# the threshold keeps the rim solid and a single thin arc when it does not -- and
+# 1.35 arc-radii cannot reach across the ring to the arcs on the far side. On flight
+# 184940 at threshold 180 no candidate group spanned the real 382 px rim; the best
+# covered 314 px and the rest were quadrant-sized.
+#
+# Re-gathering on the fitted ellipse instead asks the question the shape actually
+# poses -- is this blob on the ring -- and is scale-free, so it works the same whether
+# the rim arrived in one piece or twelve.
+#
+# Swept on both 18:48 flights, every sixth stereo frame through the two-view solve,
+# at threshold 180. Solved-frame % on 184940: 37 at 0.20, 43 at 0.35, **45 at 0.50**,
+# 43 at 0.65, 42 at 0.80, 38 at 1.00, and 32 both for the old distance grouping and
+# for the no-grouping control. An interior peak, not a range edge, and it beats
+# keeping every blob -- which the old rule did not.
+#
+# 184830 reads 45% at every setting including no grouping at all, so this buys nothing
+# there. That flight is limited by its extrinsic, not by segmentation.
+#
+# **It cannot bootstrap from a single blob.** One arc does not determine the ring, so a
+# rim shattered into isolated fragments still fails -- the seed has to span enough of
+# the ring to fit an ellipse near the true one first. That is why the seed is still the
+# distance rule and this only extends it.
+RING_BAND = 0.5
+RING_REGROW_ITERS = 2
+
+
+def _on_ring(ellipse, pts, band=RING_BAND):
+    """
+    Which of ``pts`` sit on ``ellipse``, as a boolean mask.
+
+        Radius in the ellipse's own frame, so the test is one number regardless of how
+        tilted or how large the ellipse is.
+    """
+
+    (cx, cy), (major, minor), ang = ellipse
+    a, b = major / 2.0, minor / 2.0
+    if not (a > 0 and b > 0):
+        return np.zeros(len(pts), dtype=bool)
+    th = np.radians(ang)
+    c, sn = np.cos(th), np.sin(th)
+    dx, dy = pts[:, 0] - cx, pts[:, 1] - cy
+    x, y = dx * c + dy * sn, -dx * sn + dy * c
+    return np.abs(np.hypot(x / a, y / b) - 1.0) < band
+
+
+def _regrow(members, keep, labels, centroids, n, stats=None):
+    """
+    Extend a group with every kept blob lying on its own fitted ellipse.
+
+        Converges in one or two passes: a group holding half the ring already fits an
+        ellipse close enough to find the other half, and the pass after that adds
+        nothing. Returns the members unchanged if no ellipse can be fitted.
+    """
+
+    for _ in range(RING_REGROW_ITERS):
+        hull = _group_hull(labels, members, n, stats)
+        if hull is None:
+            return members
+        try:
+            ellipse = fit_ellipse_direct(hull)
+        except (cv2.error, ValueError, np.linalg.LinAlgError):
+            return members
+        if not np.isfinite(ellipse[1][0]) or ellipse[1][0] <= 0:
+            return members
+        grown = np.union1d(members, keep[_on_ring(ellipse, centroids[keep])])
+        if len(grown) == len(members):
+            break
+        members = grown
+    return members
 
 
 def _best_group(keep, labels, stats, centroids, n, max_spread):
@@ -703,8 +913,12 @@ def _best_group(keep, labels, stats, centroids, n, max_spread):
         if radius <= 0:
             continue
         d = np.hypot(*(centroids[keep] - centroids[anchor]).T)
-        members = keep[d <= max_spread * radius]
-        hull = _group_hull(labels, members, n)
+        # Distance from the anchor only seeds the group; the ring itself decides the
+        # rest. See RING_BAND for why the seed alone is not enough.
+        members = _regrow(
+            keep[d <= max_spread * radius], keep, labels, centroids, n, stats
+        )
+        hull = _group_hull(labels, members, n, stats)
         if hull is None:
             continue
         try:
@@ -720,6 +934,9 @@ def _best_group(keep, labels, stats, centroids, n, max_spread):
         if score < best_score:
             best, best_score = members, score
     if admissible:
+        # Largest, not best-scoring. Best-scoring is the fallback below and only runs
+        # when nothing is admissible -- see SHAPE_TOL for why that ordering is right
+        # and what the alternatives measure.
         return max(admissible, key=lambda t: t[0])[1]
     return best
 
@@ -860,6 +1077,38 @@ BACKDROP_ERODE = 15
 # neutral, so only brightness separates them, and the drone/rod gap is only ~35
 # counts. Keep the backdrop evenly lit, and re-measure the range -- not the
 # working point -- after any lighting change.
+# Re-measured on three flights against the empty-rig plate (`background.from_video`),
+# every eighth stereo frame through the full estimator: 190 recovers 24-30% of frames,
+# 210-220 recovers 43-59%, 230 falls away again. The gap is where the rim's near-black
+# stops being separable from the shadowed scene behind it, and 190 was cutting the rim
+# itself. 220 wins on two of the three takes and is a point behind on the third.
+# Re-measured 2026-08-26 on the two 18:48 flights, every sixth stereo frame through
+# the full two-view solve, scored on median cross-view discrepancy. Both flights vote
+# 180 independently, over a flat 170-190: 31.8 and 32.7 mm, against 43.6 / 37.2 at 150
+# and 38.9 / 120.4 at 220. The lighting moved between sessions -- at 220 camera B's rim
+# stops being separable at all and the fit lands on specks (167x61 px where the ring is
+# circular), which is what the mask overlay shows at a glance.
+#
+# **The 32 mm floor was never this constant's fault, and it was not the extrinsic
+# either.** That was the reading here, and it was wrong: it blamed the rig because no
+# threshold reached the gate. What reaches it is not thresholding at all. With
+# `fit_ellipse_image` refitting the ellipse onto the rim evidence, the frames whose fit
+# actually covers the rim agree across views to a **median 4.1 mm** -- against a 25.5 mm
+# gate -- so the extrinsic was sound the whole time and the floor was the mask.
+#
+# **This level is now a seed, not a measurement**, and that changes what it is for: it
+# has to land the direct fit's starting ellipse within its capture radius, not cut the
+# rim in the right place. Re-swept on that basis, end to end through the estimator over
+# all three flights, as frames solved:
+#
+#   100   33.3 / 12.3 / 14.7 %      190   76.0 / 54.0 / 43.7 %
+#   150   49.1 / 34.0 / 23.6 %      220   49.7 / 23.4 / 44.2 %
+#
+# 190 wins on every flight, which is the value the sweeps above and `theory.md` already
+# shipped -- the 100 it replaced came from tuning the mask as a measurement, back when
+# it was one. Median cross-view discrepancy sat at 3.3-4.0 mm at every level in that
+# table (swept before `RADIUS_BY_APPEARANCE` was re-fitted): the level decides how often
+# the fit starts close enough to converge, and no longer decides how good the answer is.
 DARK_THRESH = 190
 
 # How far a blob may sit from the largest one and still count as part of the
@@ -934,6 +1183,509 @@ def background_mask(gray, bg=None, thresh=None):
     return cv2.threshold(cv2.absdiff(gray, bg), t, 255, cv2.THRESH_BINARY)[1]
 
 
+# Rim evidence: how far a pixel stands out from the envelope around it.
+#
+# A morphological closing with a structuring element of width k fills every dark
+# feature narrower than k, so `closing - image` responds **only to dark structures
+# thinner than k**. That is the whole shadow/rim discriminator, and it is the one
+# separation a level cannot make: the rim is ~8 px thick and scores full, a cast
+# shadow is broader than the kernel, survives the closing, and scores ~0.
+#
+# The `bright` appearance is the mirror image -- `image - opening`, a top-hat -- and it
+# is the *rig-side* fix for the same problem: a shadow on a black backdrop has nothing
+# to darken, so it never enters the map at all. The kernel argument is unchanged.
+#
+# Measured over 20 frames per camera on both 18:48 flights, as mask area in pixels:
+#   level on 255-luminance   24k -> 154k as shadows come and go
+#   this, thresholded at 40  22k -> 36k, and 2.6k on the frames with no robot in view
+# The rim itself is ~28k px, so the level was spending most of its mask on shadow.
+#
+# **MORPH_RECT, not MORPH_ELLIPSE.** Rect is separable and ellipse is not: 2.64 ms
+# against **40.2 ms** at 1280x800. Same trap as the full-resolution backdrop finder,
+# and the same disqualification -- 40 ms does not fit a 16.7 ms frame.
+#
+# **What looks like occlusion at this width is mostly this constant, and widening it
+# does not help.** The rim is ~8 px of *stroke*, but what the kernel has to exceed is
+# the whole bright structure the stroke sits in, and the projected ring is not 8 px wide
+# everywhere. At the ends of the projected minor axis the near and far arcs of the duct
+# converge into a locally wide bright blob, the opening keeps it, and the top-hat
+# returns nothing. Measured on `2026-08-28_131552`, dead-sample rate around the fitted
+# ellipse: 9-11% over most of the curve, 27% at the major-axis ends, and **49.7% within
+# 20 degrees of the minor-axis ends** -- on rim whose raw luminance reads 139.6 against
+# 157.9 where it *is* found. The rim is bright and present and the map does not see it.
+#
+# A wider kernel fixes that and costs more than it is worth, because it stops
+# discriminating. Arc coverage goes to 1.000 and every end metric gets worse:
+#
+#   k                      41     49     61     81
+#   arc alive p50          0.861  --     1.000  1.000
+#   at the minor tips      0.567  --     1.000  1.000
+#   discrepancy p50, mm    0.77   1.92   2.39   ~3
+#   under the 5 mm gate    72.9%  59.8   55.4   ~53
+#   more than 30 deg out   8.8%   18.3   13.2   ~14
+#   ridge p50              35.8   29.0   23.7   --
+#
+# `ridge` is the row that explains the rest, and it falls monotonically: a kernel wide
+# enough to keep the converged arcs also keeps the body, so the map stops being a ridge
+# on the rim and the ellipse is no longer pinned to anything. This is `coverage` failing
+# as a blunder test exactly as documented on `RingFit` -- everything is "alive" when the
+# whole neighbourhood is bright. 41 stands. Recovering the converged arcs needs a
+# growth rule at constant kernel, not a wider kernel.
+RING_KSIZE = 41
+
+# How much of the plate's own response to subtract.
+#
+# **Not 1.0.** The plate removes static thin structures shaped like a rim, and on a
+# black backdrop there are few left to remove -- while a `RunningPlate` on a *hover* rig
+# converges on a robot that is barely moving and starts subtracting the robot.
+# `background.from_video`'s docstring already warns that a take where the robot hovers
+# leaves itself in the plate; the running form has the same failure and reaches it
+# faster, at a count per frame. It costs real rim: arc alive p10 on `2026-08-28_131552`
+# reads 0.603 at full subtraction, 0.667 at half and 0.703 with no plate at all.
+#
+# It is a trade, not a free win, and the three flights do not fully agree:
+#
+#                        plate x0.50            plate x1.00
+#   131552   poses       639/639                627/639
+#            under 5 mm  76.1%                  72.9%
+#            p90         34.83 mm               31.38
+#   135533   under 5 mm  **94.5%**              90.0%
+#            p90         **1.51 mm**            4.94
+#   092117   under 5 mm  77.3%                  78.8%
+#            p90         37.18 mm               **17.23**
+#   ridge p50, all three 17-24                  24-36
+#
+# 0.5 answers on every frame of all three where full subtraction loses 12, takes the
+# best average under the gate, and turns in the single largest improvement anywhere
+# here -- 135533's tail by a factor of three. `092117` prefers full subtraction on its
+# tail and is the earliest take on this backdrop, which is the case for keeping half the
+# correction rather than dropping it. The `ridge` column is the honest cost: the map is
+# a slightly weaker ridge with less of the plate taken out of it, though still ten times
+# `MIN_RING_RIDGE` at the median.
+RING_PLATE_WEIGHT = 0.5
+
+# Gaussian sigma applied to the response. Not cosmetic: `stereo.refine(mode="image")`
+# differentiates this map numerically, and an unblurred black-hat is a ridge one
+# pixel wide with no gradient to follow more than a pixel away. Roughly the rim
+# half-thickness, which is what sets the capture radius of the direct fit.
+RING_BLUR_SIGMA = 3.0
+
+# Points sampled around the predicted rim, per view, by the direct fit. Fixed rather
+# than scaled to the perimeter -- see `ellipse_points`.
+RING_SAMPLES = 180
+
+# Where the fit's reference level sits in the seed's own ring evidence. Every sample
+# is scored as a deficit from this, so it decides what "on the rim" means. High
+# enough that most of a good ring sits below it and the residual has a gradient
+# everywhere; below the maximum, so one specular sample cannot set the bar.
+RING_REF_PERCENTILE = 90
+
+# Relative step for the numerical Jacobian, and it is **not** a detail to leave at
+# the default. `least_squares` steps by ~1.5e-8 relative, which on a centre near 320
+# is 5e-6 px: the objective is a bilinearly sampled image, so that reads gradient off
+# one interpolation cell and the direction is noise. At 1e-3 the step is ~0.3 px,
+# about a third of the blur, and the fit converges. Left at the default it walked 35
+# px off a synthetic ring it had a good seed for.
+RING_DIFF_STEP = 1e-3
+
+# Extra blur for the coarse pass, in pixels. Sets the capture radius: roughly this
+# far from the rim there is still a gradient pointing at it. Large enough to cover
+# the measured seed error, small enough that the coarse answer lands inside the fine
+# pass's own basin. Zero disables the two-stage fit.
+RING_COARSE_SIGMA = 9.0
+
+# What counts as a sample "on the rim", as a fraction of the ring's own median
+# evidence. Half: the rim's response varies by a factor of two around a good ring --
+# lighting, and the wall going edge-on -- so a tighter floor measures the lighting
+# rather than the fit, and a looser one counts samples that are on nothing.
+RING_COVERAGE_FLOOR = 0.5
+
+# How far inside and outside the fitted curve `ridge` looks, as a fraction of the axes.
+# Far enough to clear the rim's own width at the sizes seen here (the rim is ~8 px on a
+# 400-500 px major, so 0.14 lands ~30 px off it), close enough to stay on the same
+# lighting. The statistic is a ratio, so its exact value matters less than that both
+# shoulders miss the rim.
+RING_SHOULDER = 0.14
+
+# **Bounding how far the fit may move from its seed was tried and is a net loss.** The
+# motivation was good: over 2026 views of `2026-08-28_135533` a healthy refinement
+# shrinks the major 2.8% (the mask hulls the rim's outer edge, the evidence ridge is its
+# centre-line) and moves the centre 4.0 px, p90 6.8 -- while on `2026-08-28_131552` the
+# same medians hold and the tails do not, major p10 -11.2%, centre p90 55 px and max
+# **466 px**, from frames where the mask seed collapsed to a 14 px major on a ~400 px
+# ring. Rejecting those and reporting the seed instead:
+#
+#   drift / scale bound    off     0.50/0.40  0.30/0.25  0.10/0.15
+#   131552  discrepancy p90  26.58   26.58      26.58      11.22
+#           more than 30 deg 4.4%    4.2        4.7        8.6
+#   135533  discrepancy p90  1.54    5.01       5.01       4.69
+#           more than 30 deg 0.6%    3.1        3.1        2.8
+#
+# Only the tightest bound helps anything, only on one flight, and it costs orientation
+# on both. The reason is that a large move is not the same as a wrong move: a seed at
+# 252 px on a 415 px ring needs a +65% correction, and that is the fit doing exactly its
+# job. Drift does not separate recovery from runaway, and the seed is the worse report
+# either way -- its axis ratio is biased by hulling the outer edge, which lands straight
+# on the tilt.
+
+# The seed level, as a fraction of the evidence map's own `RING_SEED_PERCENTILE`.
+#
+# A percentile rather than the maximum, so a single specular pixel cannot set the scale.
+# Swept on the black-backdrop flight: 0.25-0.35 all give major 452-456 px at ratio 0.91
+# on the same frame, 0.15 lets the cloth folds in (major 527) and 0.50 starts eating the
+# rim (398). 0.30 is the midpoint of the range that passes.
+RING_SEED_FRACTION = 0.30
+RING_SEED_PERCENTILE = 99.9
+
+# How far a blob may sit from the largest and still count as part of the robot, in
+# multiples of its radius. The same rule and the same value as `DARK_MAX_SPREAD`, which
+# it replaces on this path -- the justification there is about the rim being hollow and
+# arriving as arcs, which is a property of the robot and not of the appearance.
+RING_MAX_SPREAD = 1.35
+
+# Normalising the response by the local bright envelope -- `(closing - g) / closing`,
+# the multiplicative shadow model -- was tried and **rejected**. The intent was to
+# even out the evidence where a shadow falls across the rim and lowers its contrast.
+# It does not: along-ring p10 as a fraction of the median went 43% -> 51% on one
+# frame and was unchanged or worse on the other thirteen. The evidence around a rim
+# is intrinsically uneven, and normalising the map does not change that -- what
+# handles it is the robust loss in the direct fit, not a better map.
+
+
+def ring_weight(gray, background=None, ksize=None, sigma=None, roi=None,
+                appearance=None, plate_weight=None):
+    """
+    Rim evidence as a float32 map: bright on the thin rim, ~0 elsewhere.
+
+        The direct fit's whole input. **Never thresholded** -- a weak arc is meant to
+        contribute little, not to be decided about, which is the point of dropping the
+        binary mask (`theory.md` 16).
+
+        ``background`` subtracts the plate's own response, which removes the static
+        thin dark lines between the coil formers. Those are the one thing shaped like
+        the rim, so the plate is what tells them apart, not the kernel.
+
+        ``roi`` is an ``(x, y, w, h)`` window to compute in, for when a predicted pose
+        says where to look: 0.37 ms on 450x450 against 2.64 ms full-frame. The map is
+        returned full-size with zeros outside, so sampling coordinates never shift.
+
+        ``appearance`` sets the polarity, and it is the only appearance-aware thing in
+        this path -- everything downstream reads the map and neither knows nor cares.
+        ``dark`` (dark rim) takes the black-hat, ``closing - image``; ``bright`` (light
+        rim on a dark ground) takes the top-hat, ``image - opening``. Same kernel, same
+        argument, mirrored: an opening removes light features narrower than ``k``, so
+        subtracting it leaves only those. Defaults to `APPEARANCE`.
+    """
+
+    k = RING_KSIZE if ksize is None else ksize
+    s = RING_BLUR_SIGMA if sigma is None else sigma
+    pw = RING_PLATE_WEIGHT if plate_weight is None else float(plate_weight)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    appearance = APPEARANCE if appearance is None else appearance
+    if appearance not in ("dark", "bright"):
+        raise ValueError(f"unknown appearance {appearance!r}; use 'bright' or 'dark'")
+    op = cv2.MORPH_CLOSE if appearance == "dark" else cv2.MORPH_OPEN
+
+    def response(img):
+        # In float so the plate subtraction below can go negative. cv2's MORPH_BLACKHAT
+        # and MORPH_TOPHAT are the same two expressions on uint8, but they saturate the
+        # difference of two responses at zero, which loses that sign.
+        m = cv2.morphologyEx(img, op, kernel).astype(np.float32)
+        f = img.astype(np.float32)
+        return cv2.subtract(m, f) if appearance == "dark" else cv2.subtract(f, m)
+
+    def plate_response(img, box):
+        # The plate does not change, and its closing is 2.6 ms of every frame. Keyed
+        # on the array's own buffer, holding a reference so the id cannot be recycled
+        # onto a different plate -- the estimator passes the same array every frame.
+        key = (id(img), box, k, appearance)
+        hit = _PLATE_RESPONSE_CACHE.get(key)
+        if hit is None:
+            if len(_PLATE_RESPONSE_CACHE) > 4:
+                _PLATE_RESPONSE_CACHE.clear()
+            x, y, ww, hh = box if box else (0, 0, img.shape[1], img.shape[0])
+            hit = (img, response(img[y:y + hh, x:x + ww]))
+            _PLATE_RESPONSE_CACHE[key] = hit
+        return hit[1]
+
+    usable = background is not None and background.shape == gray.shape
+
+    if roi is None:
+        w = response(gray)
+        if usable and pw:
+            w -= pw * plate_response(background, None)
+        return cv2.GaussianBlur(w, (0, 0), s)
+
+    box = _clamp_roi(roi, gray.shape, pad=k)
+    x, y, ww, hh = box
+    out = np.zeros(gray.shape, np.float32)
+    if ww <= 0 or hh <= 0:
+        return out
+    patch = response(gray[y:y + hh, x:x + ww])
+    if usable and pw:
+        patch -= pw * plate_response(background, box)
+    out[y:y + hh, x:x + ww] = cv2.GaussianBlur(patch, (0, 0), s)
+    return out
+
+
+def ellipse_points(ellipse, n=RING_SAMPLES):
+    """
+    ``n`` points evenly spaced in parameter angle around an ellipse's perimeter.
+
+        Even in *parameter*, not arc length, so a point count means the same thing at
+        every eccentricity. The direct fit relies on that: a fixed count is what makes
+        its objective a mean rather than a line integral, and a line integral would
+        grow with the perimeter and reward inflating the ellipse.
+    """
+
+    (cx, cy), (major, minor), ang = ellipse
+    t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    a, b, th = major / 2.0, minor / 2.0, np.radians(ang)
+    return np.column_stack([
+        cx + a * np.cos(t) * np.cos(th) - b * np.sin(t) * np.sin(th),
+        cy + a * np.cos(t) * np.sin(th) + b * np.sin(t) * np.cos(th),
+    ])
+
+
+def sample_map(weight, pts):
+    """
+    Bilinear reads of ``weight`` at ``pts``, zero outside the frame.
+
+        `cv2.remap` on a ``(1, N)`` map rather than a loop or fancy indexing: 2 us for
+        360 points, which is what lets the direct fit evaluate its residual a hundred
+        times a frame. Off-frame reads return 0 -- the same as "no evidence here",
+        which is the right answer for a rim arc that has left the image.
+    """
+
+    pts = np.asarray(pts, dtype=np.float32).reshape(1, -1, 2)
+    return cv2.remap(
+        weight, pts[..., 0].copy(), pts[..., 1].copy(),
+        cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0.0,
+    ).ravel()
+
+
+def fit_ellipse_image(weight, seed, n=None, ref=None, f_scale=None, max_iter=60,
+                      coarse=None):
+    """
+    Refine one ellipse onto the rim evidence in a single view. No mask, no rig.
+
+        The threshold's replacement as a *measurement*. `segment` decides per pixel and
+        then fits whatever survived; this fits the ellipse directly to the evidence and
+        never decides about a pixel at all -- a shadowed arc contributes little instead
+        of being admitted or dropped, which is what the level cannot express (see
+        `ring_weight`, and `theory.md` 16).
+
+        Extrinsic-free on purpose. It improves the per-view ellipse that `stereo.match`,
+        the gates and `solve_from_major` all read, so it pays off with one camera and
+        without a rig; `stereo.refine(mode="image")` is the two-view form, which needs
+        both and buys occlusion cover on top.
+
+        ``seed`` is an ``((cx, cy), (major, minor), angle_deg)`` from `segment` or from
+        the previous frame. It must be inside the capture radius -- measured at ~5% in
+        scale and ~25 px in centre, since the objective falls away outside the rim's
+        own width -- the coarse pass is what widens that. Returns a `RingFit`, or
+        ``None`` if the solve failed outright.
+    """
+
+    from scipy.optimize import least_squares
+
+    n = RING_SAMPLES if n is None else n
+
+    # Coarse pass first, on a heavily blurred copy. The rim is a few pixels thick, so
+    # on the map as given the objective is flat more than about five pixels away and a
+    # seed further out than that has nothing to descend -- which is not a corner case:
+    # the mask seeds this replaces were measured 10-20 px and 5% out on real frames,
+    # and one of the three scored 5.5 against a peak of 34. Blurring widens the basin
+    # to the seed and costs one extra solve on a map nobody keeps.
+    coarse = RING_COARSE_SIGMA if coarse is None else coarse
+    if coarse > 0:
+        got = fit_ellipse_image(
+            _box_blur(weight, coarse), seed,
+            n=n, f_scale=f_scale, max_iter=max_iter, coarse=0.0,
+        )
+        if got is not None:
+            seed = got.ellipse
+
+    def evidence(p):
+        return sample_map(weight, ellipse_points(((p[0], p[1]), (p[2], p[3]), p[4]), n))
+
+    p0 = np.array(
+        [seed[0][0], seed[0][1], seed[1][0], seed[1][1], seed[2]], dtype=np.float64
+    )
+    if not np.all(np.isfinite(p0)) or min(p0[2], p0[3]) <= 0:
+        return None
+
+    e0 = evidence(p0)
+    if ref is None:
+        ref = float(np.percentile(e0, RING_REF_PERCENTILE))
+    ref = max(float(ref), 1e-6)
+    # Half the reference: a sample carrying nothing is then a clear outlier rather
+    # than merely a large residual, which is the whole job of the loss here.
+    f_scale = math.sqrt(ref / 2.0) if f_scale is None else f_scale
+
+    def residual(p):
+        if min(p[2], p[3]) <= 1.0:
+            return np.full(n, math.sqrt(ref))
+        return np.sqrt(np.maximum(ref - evidence(p), 0.0))
+
+    try:
+        sol = least_squares(
+            residual, p0, method="trf", loss="cauchy", f_scale=f_scale,
+            x_scale="jac", diff_step=RING_DIFF_STEP,
+            max_nfev=max_iter * 6, xtol=1e-4, ftol=1e-4, gtol=1e-4,
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+
+    q = sol.x
+    if min(q[2], q[3]) <= 1.0 or not np.all(np.isfinite(q)):
+        return None
+    # Never hand back something the seed already beat. The objective is not convex --
+    # a rim arc, a coil edge and the rod are all dark curves -- so a seed far enough
+    # out can descend into the wrong one, and there is no cheaper test for that than
+    # the score itself. Costs one comparison and makes the contract "at least the seed".
+    e1 = evidence(q)
+    if float(np.mean(e1)) < float(np.mean(e0)):
+        return _ring_fit(weight, conic.normalise_ellipse(seed), e0, n)
+    return _ring_fit(
+        weight, conic.normalise_ellipse(((q[0], q[1]), (q[2], q[3]), q[4])), e1, n
+    )
+
+
+
+def ring_seed(weight, frac=None, pct=None, max_spread=None, min_area=MIN_BLOB_AREA_PX):
+    """
+    A seed ellipse straight from the evidence map. No plate, no level on luminance.
+
+        This is what lets the whole of S15 drop out of the direct path. That machinery
+        -- `valid_region`, the plate, `backdrop_mask`, a level on 255-luminance -- exists
+        to answer "where may the robot be?" on a scene where the clutter looks like the
+        robot. On the evidence map it does not: a top-hat keeps thin bright structures,
+        and the bench, the cloth folds and the room are all broad. So the map answers
+        that question itself and nothing upstream of it is needed.
+
+        The level is a fraction of the map's **own** high percentile, not of its
+        maximum: one specular pixel should not set the scale. Otsu was tried here and is
+        too permissive -- the map is 95% near-zero, so Otsu puts the level in the noise
+        and the hull spans the frame (72k px on, major 1377 where the ring is ~450).
+
+        `max_spread` is not optional here for the same reason it is not in the dark
+        path: the rim is hollow and arrives as arcs, and without a spread limit
+        `silhouette_hull` pools every speck in the frame. With it, the same frame gives
+        major 452 px at ratio 0.91.
+
+        Returns ``(ellipse, mask, hull, area_px)`` or ``None``.
+    """
+
+    frac = RING_SEED_FRACTION if frac is None else frac
+    pct = RING_SEED_PERCENTILE if pct is None else pct
+    max_spread = RING_MAX_SPREAD if max_spread is None else max_spread
+
+    # Subsampled: a full `np.percentile` over a 1280x800 float map sorts a million
+    # values and costs ~30 ms, which was most of a frame. Every fourth pixel in each
+    # axis leaves 64k, and the map is smooth at that scale, so the estimate is the same
+    # number for a fortieth of the time.
+    level = frac * float(np.percentile(weight[::4, ::4], pct))
+    mask = (weight >= max(level, 1e-6)).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _OPEN_KERNEL)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _CLOSE_KERNEL)
+
+    hull, area = silhouette_hull(mask, max_spread=max_spread)
+    if hull is None or area < min_area:
+        return None
+    fit = fit_ellipse(hull)
+    if fit is None:
+        return None
+    return fit[0], mask, hull, area
+
+
+def segment_ring(gray, background=None, appearance=None, thresh=None, weight=None):
+    """
+    `Segmentation` from the evidence map alone: `ring_weight` -> `ring_seed`.
+
+        The seed for a rig with **no plate**. Where one exists `segment` is the better
+        seed and this is not used: measured over 456 views, seeding the direct fit from
+        the plate mask clears the ridge gate on 94% against 92%, and costs 5.4 ms
+        against 7.6. The plate is simply more information than one frame carries.
+
+        A separate function rather than another branch inside `segment` because that
+        one is the mask pipeline -- three appearances, every constant fitted against it
+        -- and the two have nothing in common but their return type.
+
+        ``weight`` reuses a map the caller has already built, which it usually has.
+    """
+
+    gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY) if gray.ndim == 3 else gray
+    t0 = time.perf_counter()
+    if weight is None:
+        weight = ring_weight(gray, background=background, appearance=appearance)
+    got = ring_seed(weight)
+    if got is None:
+        return None, weight
+    ellipse, mask, hull, area = got
+    rms = _sampson_distance(ellipse, hull)
+    return Segmentation(
+        mask=mask,
+        contour=hull,
+        ellipse=ellipse,
+        area_px=area,
+        n_points=len(hull),
+        fit_rms_px=float(np.sqrt(np.mean(rms ** 2))),
+        threshold=int(thresh or 0),
+        t_ms=(time.perf_counter() - t0) * 1e3,
+    ), weight
+
+
+def _ring_fit(weight, ellipse, samples, n):
+    """`RingFit` from an ellipse and its sampled evidence."""
+
+    (cx, cy), (a, b), ang = ellipse
+    d = RING_SHOULDER
+    shoulders = [
+        sample_map(weight, ellipse_points(((cx, cy), (a * f, b * f), ang), n))
+        for f in (1.0 - d, 1.0 + d)
+    ]
+    # The *stronger* shoulder, not their mean: an ellipse that has drifted off the rim
+    # usually has the rim on one side of it, and averaging in the empty side hides that.
+    off = float(np.median(np.maximum(*shoulders)))
+    med = float(np.median(samples))
+    return RingFit(
+        ellipse=ellipse,
+        evidence=float(np.mean(samples)),
+        coverage=float(np.mean(samples >= RING_COVERAGE_FLOOR * med)) if med > 0 else 0.0,
+        ridge=med / max(off, 1e-6),
+    )
+
+
+def _box_blur(img, sigma):
+    """
+    Two box passes standing in for a Gaussian of ``sigma``.
+
+        Only the coarse pass uses this. There the blur is a *capture radius* rather
+        than a shape, so the kernel's exact profile does not matter and the cost does:
+        12.3 ms for a sigma-9 Gaussian on a 1280x800 float map against 3.7 ms here.
+        The fine pass keeps the Gaussian, since that map is what the reported fit is
+        measured against.
+    """
+
+    w = max(3, int(round(math.sqrt(3.0 * sigma * sigma + 1.0))) | 1)
+    return cv2.blur(cv2.blur(img, (w, w)), (w, w))
+
+
+_PLATE_RESPONSE_CACHE = {}
+
+
+def _clamp_roi(roi, shape, pad=0):
+    """``(x, y, w, h)`` grown by ``pad`` and clipped to the frame."""
+
+    x, y, w, h = (int(round(v)) for v in roi)
+    x0 = max(0, x - pad)
+    y0 = max(0, y - pad)
+    x1 = min(shape[1], x + w + pad)
+    y1 = min(shape[0], y + h + pad)
+    return x0, y0, x1 - x0, y1 - y0
+
+
 def backdrop_mask(gray, lum=None, sd_max=None, scale=None, erode=None):
     """
     The white backdrop: the one bright, smooth region, convex-hulled.
@@ -989,7 +1741,7 @@ def backdrop_mask(gray, lum=None, sd_max=None, scale=None, erode=None):
     )
 
 
-def valid_region(gray):
+def valid_region(gray, bg=None, with_source=False):
     """
     Where the robot may be, as a uint8 mask, or ``None`` if it cannot be told.
 
@@ -1002,11 +1754,13 @@ def valid_region(gray):
         nothing is the correct answer, not a failure to produce one.
     """
 
-    m = background_mask(gray)
-    return m if m is not None else backdrop_mask(gray)
+    m = background_mask(gray, bg=bg)
+    source = "background" if m is not None else "backdrop"
+    m = m if m is not None else backdrop_mask(gray)
+    return (m, source) if with_source else m
 
 
-def score_channel(frame, appearance=None, thresh=None, region=None):
+def score_channel(frame, appearance=None, thresh=None, region=None, background=None):
     """
     ``(single_channel, level)`` where the robot is bright above ``level``.
 
@@ -1024,6 +1778,22 @@ def score_channel(frame, appearance=None, thresh=None, region=None):
 
     if appearance == "bright":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        # Gate on the plate when there is one. This branch used to return the frame
+        # ungated, which threw away a region that had already been computed -- and on
+        # the black-backdrop rig that is the whole failure: the bench at the frame edge
+        # reads 252 against the robot's 240, so *no* level separates them, while the
+        # plate difference alone segments the robot almost exactly (identical seed to
+        # within 3 px of the evidence map's own). The level was never too high; it was
+        # being asked to do a job the region does.
+        #
+        # Only from a plate, never `backdrop_mask`: that finder looks for the bright
+        # smooth region, which on a dark backdrop is the robot itself or nothing. And
+        # unlike `dark`, no region is not a refusal here -- the renders every `bright`
+        # constant was fitted on have no plate and no clutter, and must keep working.
+        if region is None and background is not None:
+            region = background_mask(gray, bg=background)
+        if region is not None:
+            gray = cv2.bitwise_and(gray, region)
         return gray, int(THRESH if thresh is None else thresh)
 
     if appearance == "dark":
@@ -1031,7 +1801,7 @@ def score_channel(frame, appearance=None, thresh=None, region=None):
         # colour to give and the chroma gate this used to apply was measured
         # inoperative on it. A three-channel frame is collapsed rather than split.
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-        region = valid_region(gray) if region is None else region
+        region = valid_region(gray, bg=background) if region is None else region
         if region is None:
             return None, int(DARK_THRESH if thresh is None else thresh)
         dark = cv2.bitwise_and(cv2.bitwise_not(gray), region)
@@ -1040,7 +1810,7 @@ def score_channel(frame, appearance=None, thresh=None, region=None):
     raise ValueError(f"unknown appearance {appearance!r}; use 'bright' or 'dark'")
 
 
-def clutter_mask(frame):
+def clutter_mask(frame, background=None):
     """
     Everything the segmenter will ignore -- the complement of `valid_region`.
 
@@ -1056,10 +1826,35 @@ def clutter_mask(frame):
     """
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    region = valid_region(gray)
+    region = valid_region(gray, bg=background)
     if region is None:
         return np.full(gray.shape, 255, np.uint8)
     return cv2.bitwise_not(region)
+
+
+def threshold_mask(frame, thresh=None, appearance=None, background=None,
+                   region=None, with_channel=False):
+    """
+    The binary mask `segment` fits to, without the hull or the fit.
+
+        Exposed on its own because the mask is most worth seeing on the frames that
+        yield no pose at all -- and those return ``None`` from `segment`, taking the
+        mask with them. A frame that failed with an empty mask and one that failed
+        with a mask full of clutter have nothing in common but the ``None``.
+
+        Returns the mask, or ``(channel, mask, level)`` with ``with_channel``. The
+        mask is ``None`` when the appearance needs a valid region and none was found.
+    """
+
+    gray, level = score_channel(
+        frame, appearance, thresh, region=region, background=background
+    )
+    mask = None
+    if gray is not None:
+        _, mask = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _OPEN_KERNEL)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _CLOSE_KERNEL)
+    return (gray, mask, level) if with_channel else mask
 
 
 def segment(
@@ -1069,6 +1864,7 @@ def segment(
     subpixel=False,
     axial=None,
     appearance=None,
+    background=None,
 ):
     """
     Threshold, clean up, hull the silhouette, fit the rim ellipse.
@@ -1088,7 +1884,12 @@ def segment(
 
         ``appearance`` selects how the robot is told apart from its background; see
         `score_channel`. ``thresh=None`` takes that appearance's own default level,
-        since 128 is meaningful for luminance and meaningless for chroma.
+        since 128 is meaningful for luminance and meaningless for chroma -- pass a
+        number only to override it, never to restate it.
+
+        ``background`` is this camera's own empty-rig plate. A stereo pair needs one
+        each, so the module-level `BACKGROUND_PATH` cannot serve both, and without it
+        `valid_region` falls back to the slower `backdrop_mask`.
     """
 
     t0 = time.perf_counter()
@@ -1097,20 +1898,29 @@ def segment(
     # result: the overlay shades it every frame, and re-deriving it would cost
     # another 2.4 ms under the backdrop finder.
     region = None
+    region_from = None
     max_spread = None
-    if (APPEARANCE if appearance is None else appearance) == "dark":
+    app = APPEARANCE if appearance is None else appearance
+    if app == "dark":
         g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-        region = valid_region(g)
+        region, region_from = valid_region(g, bg=background, with_source=True)
         max_spread = DARK_MAX_SPREAD
+    elif app == "bright" and background is not None:
+        # Computed here rather than inside `score_channel` for the same reason as the
+        # dark branch: the overlay shades it every frame and it is kept on the result.
+        g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        region = background_mask(g, bg=background)
+        region_from = "background" if region is not None else None
+        max_spread = RING_MAX_SPREAD
 
-    gray, level = score_channel(frame, appearance, thresh, region=region)
-    if gray is None:
+    gray, mask, level = threshold_mask(
+        frame, thresh=thresh, appearance=appearance, background=background,
+        region=region, with_channel=True,
+    )
+    if mask is None:
         # No valid region could be established -- see `valid_region`. Refusing is
         # the answer; an ungated threshold here hulls the whole frame.
         return None
-    _, mask = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _OPEN_KERNEL)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, _CLOSE_KERNEL)
 
     hull, area = silhouette_hull(mask, max_spread=max_spread)
     if hull is None or area < min_area:
@@ -1142,6 +1952,7 @@ def segment(
         threshold=level,
         t_ms=(time.perf_counter() - t0) * 1e3,
         valid=region,
+        valid_from=region_from,
     )
 
 
@@ -1163,13 +1974,7 @@ def undistort_ellipse(ellipse, camera_matrix, dist_coeffs, n_samples=180):
     if dist_coeffs is None or not np.any(dist_coeffs):
         return ellipse
 
-    (cx, cy), (major, minor), ang = ellipse
-    t = np.linspace(0, 2 * np.pi, n_samples, endpoint=False)
-    a, b, th = major / 2.0, minor / 2.0, np.radians(ang)
-    xs = cx + a * np.cos(t) * np.cos(th) - b * np.sin(t) * np.sin(th)
-    ys = cy + a * np.cos(t) * np.sin(th) + b * np.sin(t) * np.cos(th)
-
-    src = np.column_stack([xs, ys]).astype(np.float64).reshape(-1, 1, 2)
+    src = ellipse_points(ellipse, n_samples).reshape(-1, 1, 2)
     dst = cv2.undistortPoints(src, camera_matrix, dist_coeffs, P=camera_matrix)
     return fit_ellipse_direct(dst.reshape(-1, 2))
 
@@ -1181,7 +1986,7 @@ REJECT_ALPHA = 0.35
 REJECT_BGR = (0, 0, 255)
 
 
-def shade_rejected(out, region, alpha=REJECT_ALPHA, colour=REJECT_BGR):
+def shade_rejected(out, region, alpha=REJECT_ALPHA, colour=REJECT_BGR, source=None):
     """
     Tint everything outside ``region`` in place, and return ``out``.
 
@@ -1189,9 +1994,15 @@ def shade_rejected(out, region, alpha=REJECT_ALPHA, colour=REJECT_BGR):
         overlay -- both show an ellipse in the wrong place -- and they have opposite
         fixes. Shading what was ignored separates them at a glance, which is the only
         reason the region is carried on `Segmentation` rather than recomputed.
+
+        Only worth drawing for the **backdrop** region, which answers "where may the
+        robot be" and leaves most of the frame admissible. A background-plate region
+        answers a different question -- "what is not the empty rig" -- and its
+        complement is everything that did not move, some 95% of the frame. Tinting
+        that says nothing and hides the image underneath, so it is skipped.
     """
 
-    if region is None:
+    if region is None or source == "background":
         return out
     off = region == 0
     if not off.any():
@@ -1202,7 +2013,11 @@ def shade_rejected(out, region, alpha=REJECT_ALPHA, colour=REJECT_BGR):
     return out
 
 
-def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
+MASK_ALPHA = 0.45
+MASK_BGR = (255, 0, 255)
+
+
+def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None, mask=None):
     """
     Overlay the fitted ellipse, its axes and the ignored area on a copy.
 
@@ -1212,9 +2027,26 @@ def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
         ``rejected`` shades the area outside the valid region; ``normal_px`` draws the
         rotor axis as an image-space segment ``((x0, y0), (x1, y1))``, which only the
         caller can compute since it needs the camera matrix and the 3-D pose.
+
+        ``mask`` tints the thresholded binary mask -- the thing the ellipse was
+        actually fitted to. Drawn under the ellipse and over the image, so a mask that
+        misses the rim, or one that has swallowed the rod, is visible against the
+        pixels that produced it. This is the first thing to look at when the pose is
+        wrong: a clean rim tint with a bad pose means the fault is downstream of the
+        segmenter, not in it.
+
+        ``True`` takes `Segmentation.mask`; an **array** is tinted as given, which is
+        the only way to see the mask on a frame that produced no `Segmentation` at
+        all -- pass `threshold_mask`'s. Those are the frames worth looking at.
     """
 
     out = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR) if frame.ndim == 2 else frame.copy()
+    m = seg.mask if (mask is True and seg is not None) else mask
+    if m is not None and m is not False:
+        on = m > 0
+        out[on] = (
+            out[on] * (1.0 - MASK_ALPHA) + np.array(MASK_BGR, np.float32) * MASK_ALPHA
+        ).astype(np.uint8)
     if seg is None:
         cv2.putText(
             out, "no detection", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
@@ -1222,7 +2054,7 @@ def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
         return out
 
     if rejected:
-        shade_rejected(out, seg.valid)
+        shade_rejected(out, seg.valid, source=seg.valid_from)
 
     cv2.ellipse(out, seg.ellipse, colour, 1)
     (cx, cy), (major, minor), ang = seg.ellipse
@@ -1255,3 +2087,38 @@ def draw(frame, seg, colour=(0, 255, 0), rejected=True, normal_px=None):
         1,
     )
     return out
+
+
+def _self_check():
+    """The mask overlay agrees with the fit, and survives a frame with no detection."""
+
+    img = np.full((400, 400), 10, np.uint8)
+    cv2.ellipse(img, (200, 200), (120, 70), 20, 0, 360, 240, 14)
+
+    mask = threshold_mask(img, appearance="bright", thresh=128)
+    seg = segment(img, appearance="bright", thresh=128)
+    assert np.array_equal(seg.mask, mask), "helper and segment must threshold alike"
+
+    # The tint has to reach the image in both cases -- the no-detection one is the
+    # whole point, and it is the one that used to return before drawing anything.
+    assert not np.array_equal(draw(img, seg, mask=True), draw(img, seg))
+    assert not np.array_equal(draw(img, None, mask=mask), draw(img, None))
+
+    # A seed spanning part of a broken rim must pull in the rest of it. This is what
+    # the distance rule cannot do: the far arcs are further from the anchor than the
+    # anchor's own bounding box, so only the ellipse can reach them.
+    broken = np.zeros((400, 400), np.uint8)
+    for a0 in (0, 100, 200, 300):
+        cv2.ellipse(broken, (200, 200), (150, 110), 0, a0, a0 + 55, 255, 6)
+    n, labels, _, centroids = cv2.connectedComponentsWithStats(broken, 8)
+    keep = np.arange(1, n)
+    seed = keep[:2]                                  # two arcs, roughly half the ring
+    grown = _regrow(seed, keep, labels, centroids, n)
+    assert len(grown) > len(seed), "the seed did not reach the far arcs"
+    major = fit_ellipse_direct(_group_hull(labels, grown, n))[1][0]
+    assert major > 250, f"regrouped ring is too small: major {major:.0f} px"
+    print("segment self-check ok")
+
+
+if __name__ == "__main__":
+    _self_check()

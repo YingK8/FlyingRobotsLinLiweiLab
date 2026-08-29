@@ -13,7 +13,7 @@ robot in a cluttered frame in the first place (§15).
 
 | # | file | what it does |
 |---|---|---|
-| 1 | `segment.py` | frame -> silhouette -> fitted rim ellipse. Start here; §15 is about this file |
+| 1 | `segment.py` | frame -> silhouette -> fitted rim ellipse, then refitted onto the image. §15 and §16 are about this file |
 | 2 | `conic.py` | ellipse -> circle pose. The geometric core, §12 |
 | 3 | `estimator.py` | ties 1+2 together, applies the calibrations, resolves the ambiguity |
 | 4 | `stereo.py` | the same from two views, which kills the ambiguity outright |
@@ -21,12 +21,19 @@ robot in a cluttered frame in the first place (§15).
 | 6 | `uncertainty.py` | predicts this frame's error so the estimator can decline |
 | 7 | `bounds.py` | the Cramer-Rao floors of §13: what no estimator can beat |
 | 8 | `render.py`, `render_stereo.py` | the renderer: ground truth to measure all of the above against |
+| 9 | `background.py` | the empty-rig plate the mask subtracts, and its staleness check (§15.3, §15.8) |
+| 10 | `fit_radius.py` | the rim radius, recovered from cross-view disagreement (§15.9) |
+| 11 | `calibrate_zero.py`, `recorder.py` | the datum, and capture to disk for offline replay |
+| 12 | `test_ring_fit.py`, `test_timing.py` | the ring fit and the per-stage budget of §17.5 |
 
 The dependency runs 1 -> 2 -> 3 -> 4; `bounds.py` and the renderer are how the
 claims in this chapter were measured rather than asserted.
 
-**Read §15 first if you are debugging a live frame**, and §12 first if you are
-debugging a number. §13 is the one to read when something seems *too* good.
+**Read §15 and §16 first if you are debugging a live frame** -- §15 is the mask, §16 is why
+the mask is now only a seed, and §12 first if you are
+debugging a number. §13 is the one to read when something seems *too* good, and **§17 when
+a hover bias tracks velocity** -- the two cameras do not fire together, and at hover that
+is the largest lateral error there is.
 
 ## 12. The observation model: what a camera can see of the robot
 
@@ -266,12 +273,12 @@ implemented and measured.
 |---|---|
 | Cone $Q$, back-projection, the two branches | `pose/conic.py`: `cone_from_circle`, `backproject` |
 | Silhouette extraction, convex hull (§12.4) | `pose/segment.py`: `silhouette_hull` |
-| Wall model $\rho = \cos\theta + k\sin\theta$ (§12.3a) | `pose/calibration.py`: `TiltCalibration`, `model="cylinder"` |
-| Resolution floor $2\arctan k$ (§12.5) | `pose/calibration.py`: `resolution_floor_deg` |
+| Wall model $\rho = \cos\theta + k\sin\theta$ (§12.3a) | `calib/shape.py`: `TiltCalibration`, `model="cylinder"` |
+| Resolution floor $2\arctan k$ (§12.5) | `calib/shape.py`: `resolution_floor_deg` |
 | Branch matching, Mahalanobis (§12.6a) | `pose/stereo.py`: `match`, `_agreement` |
-| Information-form fusion (§12.6b) | `pose/stereo.py`: `fuse`; `pose/rig.py`: `position_covariance` |
-| Measured tables in §12.2, §12.5 | `pose/validation/sweep_stereo.py`, `results/pose_validation/` |
-| Deviation-vs-$t$ diagnostic (§12.3, §12.5) | `pose/validation/scene3d.py`: `deviation_panel` |
+| Information-form fusion (§12.6b) | `pose/stereo.py`: `fuse`; `calib/rig.py`: `position_covariance` |
+| Measured tables in §12.2, §12.5 | `ai/validation/sweep_stereo.py`, `results/pose_validation/` |
+| Deviation-vs-$t$ diagnostic (§12.3, §12.5) | `ai/validation/scene3d.py`: `deviation_panel` |
 
 
 ---
@@ -605,9 +612,9 @@ $$\text{photons} \;\to\; \text{edge position} \;\to\;
 \text{ellipse parameters} \;\to\; \text{pose}$$
 
 Implementation: `controller/pose/bounds.py`. Every formula below is checked
-against Monte Carlo in `controller/pose/test_bounds.py` (60+ assertions), and the
+against Monte Carlo in `ai/tests/test_bounds.py` (60+ assertions), and the
 real system is placed against the result by
-`controller/pose/validation/limits.py`.
+`ai/validation/limits.py`.
 
 **Assumptions (C1–C3).** C1: additive Gaussian sensor noise of standard
 deviation $\sigma_n$ per pixel, independent between pixels. C2: the boundary is a
@@ -876,7 +883,7 @@ failures counted separately rather than folded into a residual.
 391 rendered frames at 1280×800 (199 `core`, 192 `edge`), tilt 0–70°, range
 170–340 mm, with the analytic ground-truth ellipse available for every one, at
 the **shipped** configuration (axial weighting on: journal Iteration 14).
-`controller/pose/validation/limits.py`.
+`ai/validation/limits.py`.
 
 This is a **harsher sample than §12's headline band**, deliberately: it spans the
 full tilt range including the degenerate ends, and it includes the `edge`
@@ -1194,22 +1201,1181 @@ implemented and measured** against both real captures.
 | ranking blob groupings by shape alone | **Fails**: a disc is a perfect ellipse; returns a 64 px coil over the 125 px robot |
 | full-resolution backdrop mask | **Disqualified on cost**: 48.4 ms, i.e. 20 Hz, against an 8.3 ms camera period |
 
-### 15.8 Correspondence with the implementation
+### 15.8 Tuned on flight footage, not on renders
+
+Three flights (2026-08-25 and 2026-08-26, 4295 frames) went through the stereo estimator
+end to end and returned a `poses.csv` with a header and **no rows**. Four separate causes,
+each measured rather than argued.
+
+**The appearance default was the old rig.** `shape.APPEARANCE` still said `bright`, and the
+rig on the bench is a black rim against white foam. `bright` thresholds luminance at 128 on
+a scene whose median is 144, so the hull took the backdrop -- an ellipse covering 62% of the
+frame at 14.6 px fit RMS -- and every downstream gate refused it, correctly. The default is
+now `dark`.
+
+**128 was being passed explicitly into the dark path.** `StereoPoseEstimator` defaulted
+`thresh=segmod.THRESH`, so the appearance's own level never applied. Left alone, the same
+600 frames returned 194 poses against 5. `segment` documents `thresh=None` as "this
+appearance's level"; restating the constant defeated it.
+
+**No background plate existed, and one file cannot serve two cameras.** S15.3 calls
+background subtraction the whole answer, and `BACKGROUND_PATH` is a single path, so a stereo
+pair fell back to `backdrop_mask` -- which cannot separate the rim from the shadowed gap
+between the foam blocks behind it, because both are dark and they touch. The plate does not
+need a trip to the bench: the rig is bolted down and the robot is not, so a temporal median
+over the take *is* the empty scene (`background.from_video`). One per camera, written beside
+each video, and `segment(background=...)` takes it.
+
+**`DARK_THRESH` was cutting the rim itself.** With plates in place, every eighth stereo frame
+through the full estimator:
+
+| `DARK_THRESH` | 190 | 210 | 220 | 230 |
+|---|---|---|---|---|
+| 2026-08-25_135344 | 24% | 52% | 48% | 23% |
+| 2026-08-26_123311 | 30% | 43% | **59%** | 41% |
+| 2026-08-26_123409 | 26% | 39% | **49%** | 44% |
+
+190 is worst on all three. 220 it is.
+
+Together: **0 poses to 46--57% of frames**, at 27 ms per stereo frame.
+
+### 15.9 The rim radius, measured without a renderer
+
+`RADIUS_BY_APPEARANCE["dark"]` was marked provisional, carried from a dataset rendered at a
+different threshold, with refitting "blocked on the renderer being unable to reproduce this
+rig". The renderer is not needed. Two cameras $83°$ apart each back-project the rim to a
+position of its own, and those agree only at the right radius: too small and each puts the
+robot too close *along its own axis*, and the axes point different ways, so the error does
+not cancel. Sweeping it gives a sharp V.
+
+| radius mm | 9.8 | 10.1 | 10.3 | **10.4** | 10.5 | 10.7 | 11.0 |
+|---|---|---|---|---|---|---|---|
+| discrepancy mm | 11.15 | 5.99 | 3.03 | **2.19** | 2.70 | 5.61 | 10.69 |
+
+All three flights, two days apart, minimise at 10.4 mm with near-identical curves -- three
+measurements of one quantity, not a fit to one. Cross-view disagreement falls from 5.96 mm
+to 2.1--2.7 mm.
+
+Two caveats travel with the number. It is **tied to `DARK_THRESH`**, because the effective
+radius is where the threshold cuts a shaded edge -- 10.4 belongs to 220, and moving one
+moves the other. And its absolute scale inherits the rig's, which rests on the board pitch
+([ch. 2 S14.4](../calib/theory.md)); a 1% error there is 0.1 mm here. `fit_radius.py` re-runs
+the sweep on any flight already on disk.
+
+Both caveats need re-reading after §16. The threshold no longer cuts the rim -- the direct
+fit locks onto the darkness ridge instead -- so the radius is tied to a different quantity
+now and wants re-measuring. §16.5 is also why a later sweep that found *no* minimum here
+should not have been believed.
+
+**Sub-pixel refinement makes it worse here**, and this is the one place that surprised.
+`subpixel_boundary` measured bias $-0.0858 \to -0.0012$ px on a synthetic soft-edged disc,
+and on this footage it moves the discrepancy from 2.54 to 3.01 mm at no gain in fit RMS.
+That disc was filled; this rim is a thin ring with an edge on each side, so re-locating a
+hull point onto "the intensity edge" can move it onto the inner one. It stays off.
+
+### 15.10 Correspondence with the implementation
 
 | Model element | Code |
 |---|---|
-| Chroma vacuity on a mono sensor (§15.2) | recorded in `segment.py`, `score_channel` docstring; asserted by `test/test_appearance.py::test_dark_needs_no_colour` |
+| Chroma vacuity on a mono sensor (§15.2) | recorded in `segment.py`, `score_channel` docstring; asserted by `ai/tests/test_appearance.py::test_dark_needs_no_colour` |
 | Background subtraction $M_{\text{valid}}$ (§15.3) | `segment.background_mask`, `segment.load_background` |
-| Median empty-rig frame, staleness check (§15.3) | `controller/elp/background.py`, `--check` |
+| Median empty-rig frame, staleness check (§15.3) | `controller/pose/background.py`, `--check` |
 | Bright-and-smooth backdrop, convex hull (§15.4) | `segment.backdrop_mask` |
 | Region selection, and refusal when there is none (§15.4) | `segment.valid_region`, `segment.segment` returning `None` |
 | Rod removed by brightness (§15.4) | `segment.DARK_THRESH` |
 | Spread gate $\kappa$ (§15.5) | `segment.DARK_MAX_SPREAD`, `silhouette_hull(max_spread=)` |
 | Admissibility $\rho_{\max}$ then size (§15.5) | `segment._best_group`, `segment.SHAPE_TOL` |
-| Margins (§15.6) | `test/test_elp_captures.py`, swept per constant |
+| Margins (§15.6) | `ai/tests/test_elp_captures.py`, swept per constant |
 | Rejected area, shown to the operator | `segment.shade_rejected`, `segment.clutter_mask`, `online_camera.ipynb` [§3](../control/theory.md) (ch.4)–4 |
+| Empty-rig plate per camera (§15.8) | `background.from_video`, `for_flight`, `segment(background=)` |
+| Rim radius from cross-view disagreement (§15.9) | `pose/fit_radius.py`, `estimator.RADIUS_BY_APPEARANCE` |
+| Ellipse fitted to the image, not the mask (§16) | `segment.ring_weight`, `segment.fit_ellipse_image`, `stereo.refine(mode="image")` |
+| Seed from the map, no plate or region (§16.10) | `segment.ring_seed`, `segment.segment_ring` |
 
 The region is carried on `Segmentation.valid` rather than recomputed, because the live
 overlay shades it every frame and §15.4 costs 2.4 ms to derive. A wrong pose and a wrong
 *rejection* are indistinguishable in a plain ellipse overlay and have opposite fixes, which
 is the whole reason the ignored area is drawn at all.
+
+## 16. Fitting the ellipse to the image instead of to a mask
+
+§15 ends at a mask: a level is chosen, every pixel is sorted into robot or not, and an
+ellipse is fitted to whatever survived. On the recorded flights that fails, and the failure
+is not a badly chosen level. It is the sorting.
+
+### 16.1 Why no level works
+
+Two measurements on the flight footage, and they close the question between them.
+
+**The evidence around the rim is intrinsically uneven.** Sampling 180 points around the
+fitted ring, the bottom decile carries essentially zero contrast -- in all fourteen frames
+tested, in both an absolute map and an illumination-normalised one. A shadow falls across
+part of the rim, a coil hides another part, the duct wall goes edge-on and unlit on a
+third. A single global level must either drop those arcs or admit everything as dark as
+they are, and what is as dark as they are is the shadows.
+
+**The mask is contamination-limited, not level-limited.** Over 20 frames per camera the
+mask's area swings 24k -> 154k px as shadows enter and leave. The rim is ~28k px of that.
+The convex hull of §15.5 then spans the shadow with the rim, and the fitted ellipse follows.
+
+So the level is being asked to answer a question it cannot: *is this pixel rim?* -- when
+the only answerable question is *does this ellipse lie on the rim?*
+
+### 16.2 The rim is thin and shadows are not
+
+One separation survives that the level cannot express. Let `C_k` be a morphological
+closing with a structuring element of width `k`. `C_k` fills every dark feature narrower
+than `k`, so
+
+    W = C_k(I) - I
+
+is non-zero **only on dark structures thinner than k**. The rim is ~8 px across and scores
+in full; a cast shadow is broader than the kernel, survives its own closing, and scores
+zero. This is the black-hat, and it is the whole shadow/rim discriminator.
+
+Two implementation facts are load-bearing:
+
+- The structuring element must be `MORPH_RECT`. Rect is separable and ellipse is not:
+  2.6 ms against **40.2 ms** on a 1280x800 frame. The same disqualification as the
+  full-resolution backdrop finder of §15.4.
+- Subtracting the plate's own response, `W = (C_k(I) - I) - (C_k(B) - B)`, removes the
+  static thin dark lines between the coil formers. Those are the one thing in the scene
+  shaped like the rim, so the plate is what tells them apart -- the kernel cannot.
+
+`W` is **never thresholded**. It is a weight.
+
+**Rejected: normalising by the local envelope.** Shadow is multiplicative, so
+`(C_k(I) - I) / C_k(I)` should be illumination-invariant and should even out a rim that a
+shadow has dimmed. It does not. Along-ring p10 as a fraction of the median went 43% -> 51%
+on one frame and was unchanged or worse on the other thirteen. The unevenness of §16.1 is
+not an illumination artefact that a better map removes; it is arcs that are genuinely not
+visible, and what handles those is the loss, not the map.
+
+### 16.3 The ellipse as the segmenter
+
+Given `W`, fit the ellipse directly. For parameters `p` and `N` samples `x_i(p)` around
+the predicted perimeter, minimise
+
+    S(p) = sum_i rho( max(0, w_ref - W(x_i(p))) )
+
+Four choices in that line, each measured:
+
+**Fixed `N`, not a line integral.** A sum along arc length grows with the perimeter, so the
+optimiser inflates the ellipse to collect more darkness. Sampling a fixed count evenly in
+*parameter* angle makes `S` a mean, and the bias disappears.
+
+**The residual is `sqrt` of the deficit.** Least squares then sums the deficits themselves,
+so minimising `S` maximises the summed evidence -- linear in `W`. A plain `w_ref - W`
+residual is quadratic and penalises a *bright* sample, which is backwards.
+
+**`w_ref` comes from the seed's own p90, not from a constant.** The response scales with
+contrast and contrast moves with the lighting. An absolute level here would be `DARK_THRESH`
+again, in a new place.
+
+**`rho` is robust, and here that is not optional.** In `refine(mode="ellipse")` a robust
+loss is inert -- the per-view ellipse fit has already pooled the boundary, so there are no
+outliers left. Here nothing has pooled anything: the residuals are individual samples, and
+§16.1 says a tenth of them carry nothing. Cauchy bounds what a dead sample can do to five
+parameters.
+
+**Coarse to fine, because the rim is thin.** `S` is flat more than about five pixels from
+the rim, and the mask seeds this replaces are 18-28 px out. One pass on a heavily blurred
+copy of `W` widens the basin to the seed; the fine pass then lands it. Without it the fit
+walked 35 px off a synthetic ring it had a good seed for.
+
+The Jacobian step is the one numerical detail worth writing down. `least_squares` steps by
+~1.5e-8 relative, which on a centre near 320 is 5e-6 px: `W` is bilinearly sampled, so that
+reads the gradient off a single interpolation cell and the direction is noise. At 1e-3 the
+step is ~0.3 px, about a third of the blur, and it converges.
+
+### 16.4 Coverage: the blunder test this path needs
+
+§15's gate is `fit_rms_px / a`, the hull's distance from the fitted ellipse. It cannot be
+used here, because the hull is exactly what the shadow contaminated -- the gate would reject
+the frames the direct fit was added to rescue.
+
+The replacement is **coverage**: the fraction of samples carrying at least half the ring's
+*own* median evidence. It is scale-free by construction, so a ring at half the contrast
+scores the same, and it catches the characteristic failure of this objective -- a fit that
+has slid onto scattered dark specks keeps a respectable mean and loses its coverage.
+
+It predicts cross-view agreement sharply. Over 798 stereo fits on three flights:
+
+| coverage floor | frames kept | median discrepancy | under the 25.5 mm gate |
+|---|---|---|---|
+| none | 100% | 53.8 mm | 22% |
+| 0.5 | 96% | 52.3 mm | 23% |
+| 0.6 | 22% | 30.0 mm | 47% |
+| 0.7 | 8% | **4.1 mm** | 94% |
+| 0.8 | 6% | 4.0 mm | 98% |
+
+### 16.5 What that table overturns
+
+The `DARK_THRESH` sweep recorded in `segment.py` ended by concluding that a ~32 mm floor in
+cross-view discrepancy "is the extrinsic, and no threshold reaches it" -- `fit_radius.py`
+had stopped finding the sharp V of §15.9 and the two flights disagreed about the radius.
+**That was wrong.** Where the rim is genuinely covered the two views agree to 4.1 mm. The
+extrinsic was sound the whole time; the floor was the mask, and it was invisible as such
+because every threshold produced a confident ellipse on a contaminated hull -- including
+the ones `fit_radius.py` was sweeping.
+
+The general lesson is worth more than the number: *a statistic computed from a corrupted
+intermediate cannot diagnose what corrupted it.* Cross-view discrepancy was being read as a
+statement about the rig when it was a statement about the segmenter, and nothing in the
+number distinguished the two. The distinguishing measurement is the one that skips the
+intermediate -- here, asking the image directly whether the ellipse is on the rim.
+
+### 16.6 Tracking, and what the level is now for
+
+Seeded from the mask every frame, coverage reaches 0.7 on 24/26/43% of frames across the
+three flights. Seeded from each view's own last accepted fit, on 56/44/49%. The mask seed
+is a cold start and the coarse pass spends itself covering its error; a seed one frame old
+starts on the rim.
+
+So `DARK_THRESH` survives, with a different job. It no longer decides where the rim is --
+it decides how often the direct fit starts close enough to converge. Re-swept on that
+basis, end to end, as frames solved:
+
+| `DARK_THRESH` | flight 1 | flight 2 | flight 3 |
+|---|---|---|---|
+| 100 | 33.3% | 12.3% | 14.7% |
+| 150 | 49.1% | 34.0% | 23.6% |
+| **190** | **76.0%** | **54.0%** | **43.7%** |
+| 220 | 49.7% | 23.4% | 44.2% |
+
+190 wins on every flight -- the value §15.6 already shipped, and the 100 it replaced came
+from tuning the mask back when the mask was the measurement. Swept at the old radius, median
+cross-view discrepancy sat at 3.3-4.0 mm at *every* level in that table: the level moves how
+many frames solve and not how good the answer is, which is exactly what it means for it to
+be a seed.
+
+### 16.7 The effective radius moves with the edge
+
+§15.9's radius is *tied to `DARK_THRESH`* because the effective radius is where a
+threshold cuts a shaded edge. The direct fit cuts nothing -- it settles on the rim's
+darkness ridge -- so the constant had to be re-measured, and the first paired comparison
+said so before the sweep did: on frames both paths solved, position agreed to 0.14 mm while
+cross-view discrepancy was 1.5 mm *worse* for the direct fit. Agreement that good with
+disagreement that bad is a radius error, not a fitting error.
+
+`fit_radius.py`, re-run with the direct fit active, is unambiguous:
+
+| radius mm | 10.0 | 10.1 | **10.2** | 10.3 | 10.4 | 10.5 |
+|---|---|---|---|---|---|---|
+| 2026-08-26_184830 | 4.19 | 2.47 | **0.83** | 1.55 | 3.26 | 5.03 |
+| 2026-08-26_184940 | 3.54 | 2.07 | **1.17** | 2.45 | 4.14 | 5.93 |
+| 2026-08-27_090057 | 3.68 | 2.06 | **1.04** | 1.97 | 3.71 | 5.50 |
+
+All three land on 10.2 with sharper minima than §15.9's -- and the V is back, which
+§16.5 predicted: the sweep that had stopped finding one was sweeping contaminated ellipses.
+
+### 16.8 What it is worth
+
+Each path at its own best radius -- the mask fit at 10.4, the direct fit at 10.2 -- over
+every sixth stereo frame of three flights:
+
+| flight | solved, mask | solved, direct | discrepancy, frames **both** solve |
+|---|---|---|---|
+| 2026-08-26_184830 | 95 / 171 (56%) | 130 / 171 (76%) | 2.43 -> **0.79 mm** |
+| 2026-08-26_184940 | 63 / 235 (27%) | 127 / 235 (54%) | 1.54 -> **0.88 mm** |
+| 2026-08-27_090057 | 88 / 394 (22%) | 174 / 394 (44%) | 1.86 -> **0.90 mm** |
+
+Roughly double the frames, at a third of the cross-view disagreement, and the direct fit
+is the better of the two on 96-98% of the frames they share. The frames only it solves are
+not marginal ones scraping past the gate: their median discrepancy is 1.03-1.14 mm, and all
+of them are under it.
+
+The comparison is paired on purpose. Comparing medians over each path's own solved set
+compares different frames -- the direct fit admits harder ones, which pulls its median the
+wrong way and reads as a regression. That is how the first version of this table was wrong.
+
+### 16.9 Two views at once, and what is left
+
+`stereo.refine(mode="image")` is the same objective with one pose and both views'
+samples in one residual vector: five world parameters, `2N` residuals. This is the form
+that covers occlusion properly. An arc missing in A contributes a bounded residual there
+and is constrained by the same arc in B, because both views share the parameters. Neither
+`mode="ellipse"` nor `mode="hull"` can do that -- both compress a view to a fitted ellipse
+*before* the joint solve, by which point the occlusion has already corrupted what the solve
+is handed.
+
+What remains open:
+
+- **Cost.** ~57 ms per stereo pair against a 16.7 ms period at 60 fps: `ring_weight` at
+  7 ms/view, and up to two `least_squares` solves. Fine for replay, not yet for the live
+  loop. The tracked path skips the coarse pass; the cold path is what costs, and most
+  frames are still cold. One joint solve would replace two per-view ones.
+- **Solve rate.** 44-76%. The frames that fail are largely ones where the rim is not in
+  view to be found -- camera B loses it entirely for stretches of these takes -- but that
+  has not been separated from fits that simply did not converge.
+
+### 16.10 The rig-side fix, and what it deletes
+
+On 2026-08-28 the rig changed: a **white ring against a black cloth backdrop**, the
+mirror of everything above. It is the better answer to §16.1, and it is a rig fix rather
+than a code fix -- *a shadow cast on a black backdrop has nothing to darken*, so it never
+enters the image, let alone the map.
+
+The code change is one line of polarity. A closing fills dark features narrower than `k`;
+an opening removes *light* ones. So `ring_weight` takes the top-hat `image - opening` for
+`bright` and the black-hat `closing - image` for `dark`, and nothing downstream can tell
+which it was handed.
+
+**The level is what fails on this rig, and the region is what saves it.** The bench at the
+frame edge reads 252 against the robot's 240, so no level on luminance separates them --
+but the plate difference alone segments the robot almost exactly. The `bright` branch of
+`score_channel` was returning the frame *ungated*, discarding a region it had already been
+handed, so the level was being asked to do a job the region does. Gated, the same frame
+gives 58k mask pixels instead of 322k and a major axis of 449 px instead of 3242. That is a
+plain defect, and four lines fix it.
+
+Only from a plate, never `backdrop_mask`: that finder looks for the bright *smooth*
+region, which on a dark backdrop is the robot itself or nothing. And unlike `dark`, no
+region is not a refusal here -- the renders every `bright` constant was fitted on have no
+plate and no clutter, and must keep working.
+
+**Where there is no plate, §15 drops out entirely.** All of it exists to answer *where may
+the robot be?* on a scene whose clutter resembles the robot. On the evidence map it does
+not: the bench, the cloth folds and the room are all **broad**, and the top-hat keeps only
+what is thin. So the map answers that question itself and `ring_seed` takes the seed
+straight from it.
+
+Which to seed from is measured. Over 456 views the three candidates -- the region alone,
+the region and the level, and the evidence map -- agree on the seed ellipse to within 3 px.
+The plate mask wins on the two things that then differ: it clears the ridge gate on **94%**
+of views against 92%, and costs **5.4 ms** against 7.6.
+
+**And the plate need not be captured.** A stored plate has two costs that only appear on
+the bench -- someone must take it with the robot out of frame, and it is silently wrong the
+moment the rig is nudged. `background.RunningPlate` estimates it from the stream instead,
+as a per-pixel running median by sign steps (`bg += step * sign(frame - bg)`), O(1) memory
+and no frame history. It is also the only honest option for the live loop, since
+`from_video`'s median is a whole-take statistic. Scored on the ridge gate over 416 views it
+matches a stored plate -- **94% against 95%** -- with a *higher* median ridge (29.4 against
+19.9), because it follows drift a fixed plate cannot. 4.3 ms a view, against 6.3 ms for
+`cv2.createBackgroundSubtractorMOG2`, which scores the same. It shares `from_video`'s one
+failure: a true hover in one spot walks the plate onto the robot.
+
+Two things had to be got right for the seed:
+
+- **Not Otsu.** The map is ~95% near-zero, so Otsu puts the level down in the noise: 72k
+  px on, hull major 1377 px where the ring is 455. The level is a fraction of the map's
+  own 99.9th percentile instead -- a percentile and not the maximum, so one specular pixel
+  cannot set the scale. 0.25-0.35 all give major 452-456 at ratio 0.91; 0.30 ships.
+- **The spread limit is still required.** It was applied only to `dark` before, but its
+  justification -- the rim is hollow and arrives as arcs -- is a property of the robot.
+  Without it `silhouette_hull` pools every speck: same frame, major 1193 instead of 452.
+
+Measured on `2026-08-28_092117`, every sixth stereo frame, radius re-fitted to 10.05 mm:
+
+| | |
+|---|---|
+| both views seeded | 228 / 228 |
+| solved, `RunningPlate` (no capture step) | **185 / 228 (81%)** |
+| solved, stored plate | 181 / 228 (79%) |
+| solved, evidence map alone (no plate) | 156 / 228 (68%) |
+| median cross-view discrepancy | **1.8 mm** |
+| cost | 66-77 ms per stereo pair |
+
+**Optical flow was considered here and is not needed.** The background diff it would have
+replaced is itself gone, and the question it answered -- *which pixels are the robot?* --
+is no longer asked of any static reference. Nor would it recover the frames that still
+fail: of the 43 that remain, 21 are a view whose ridge is below the gate, and inspecting
+them shows the same thing every time -- **the ring has left camera B's field of view or is
+cut by the frame border**, ridge 1.1-2.5 in B against 16-26 in A on the same frame. A
+motion cue cannot find a ring that is not in the picture. That is a framing fix: aim B, or
+widen it. The other 21 are frames both views fitted and then disagreed.
+
+### 16.11 What the two fits do to each axis
+
+Overlay the mask fit and the direct fit and the *major* axes differ, which looks wrong: if
+the correction were only for the body's thickness it should touch the minor axis alone.
+Measured over 427 views, both axes move, and by different amounts:
+
+| | mask fit | direct fit | shrink |
+|---|---|---|---|
+| major | 413.9 px | 401.7 px | 10.9 px (2.6%) |
+| minor | 303.2 px | 282.9 px | 20.7 px (6.9%) |
+
+Both are correct, for two different reasons.
+
+The **major** axis shrinks because the two fits measure different edges. The mask fit is
+fitted to a convex hull, which is a superset of the rim projection (§12.4) -- the rim's
+*outer* envelope. The direct fit settles on the evidence ridge, the rim's *centre-line*.
+The gap between them is the wall, and it is constant across tilt bands (10.4-12.7 px) as a
+constant should be. This is the same fact as §16.7, and it is why the effective radius
+belongs to the fitting method and had to be re-measured.
+
+The **minor** shrinks twice as far because of the mast and magnet. They protrude along the
+rotor axis, so under tilt they push the silhouette outward in the *short* direction -- the
+one-sided contamination of §12.4, which `AXIAL_WEIGHT_POWER` suppresses and does not
+eliminate. The direct fit never sees them: they are not on the rim ridge.
+
+So constraining the direct fit to keep the hull's major axis would put the wall thickness
+back in as a bias. What does follow is that `TiltCalibration` no longer describes this
+statistic. It was fitted against `cv2.fitEllipseDirect` output on renders (`a = 1.0736` at
+`radius_mm = 10.2446`) and corrects for a widening the direct fit has already removed.
+Measured it is nearly inert -- median discrepancy 1.81 mm as shipped against 1.77 mm with
+an identity calibration -- so it does no harm, but it belongs to the old rig and wants
+refitting rather than trusting.
+
+### 16.12 The bulge breaks the two-fold ambiguity, but only side-on
+
+A circle's projection determines its pose only up to a reflection: `conic.backproject`
+returns two candidates and something else has to choose (§12). The robot is **not** a bare
+circle -- the mast and magnet sit on one side of the rim plane -- so under tilt the
+silhouette's two halves, split along the major axis, are not mirror images. The fatter half
+is the one the body leans toward.
+
+Fitting each half's minor semi-axis separately, with the centre, major axis and angle held
+at the full fit's values, measures that directly. Over 281 views the asymmetry is small and
+rises monotonically as the robot turns side-on, which is where the ambiguity actually bites:
+
+| axis ratio | median \|b_upper − b_lower\| |
+|---|---|
+| 0.77-0.91 (face-on) | 1.8 px |
+| 0.66-0.77 | 2.6 px |
+| 0.39-0.66 (side-on) | 3.1 px, 1.5% of the minor |
+
+At 1.5% of the minor axis it is far too small to *correct* the pose with -- taking the
+smaller half as the true rim moves the minor by less than the fit's own scatter. As a
+**sign** it is worth much more. Checked against the orientation the two-view solve resolves
+independently, over 246 views:
+
+| | agreement |
+|---|---|
+| all views | 57% -- a coin flip |
+| side-on (ratio < 0.7) | 76% |
+| side-on and \|Δ\| > 1 px | 80% |
+| side-on and \|Δ\| > 3 px | **85%** |
+
+The magnitude gate is what makes it useful: it abstains face-on, where the protrusions
+point at the camera and project to a dot, and speaks up side-on. 57% to 85% is the
+difference between a cue and a coin, and it is bought entirely by knowing when to say
+nothing.
+
+85% is not enough to arbitrate alone, and it is not needed as one in stereo -- two views
+84 degrees apart already settle the reflection. Its value is monocular, and as a prior
+where `_choose` currently has only the previous frame to go on: a dropout longer than
+`dropout_s` leaves the estimator with no opinion at all, and this gives it one exactly when
+the geometry is worst.
+
+### 16.13 Which way is up, and why the scene was tilted
+
+Two separate ambiguities get conflated under "orientation", and they degenerate in
+opposite places.
+
+**The mirror pair** is what `conic.backproject_ellipse` returns and what `_choose` and
+`stereo.match` resolve. Both solutions share $|n \cdot v|$ *exactly* -- verified to 1e-16
+across tilts from 0.5 to 89 degrees -- so the pair differs by a rotation about the viewing
+ray and **never encodes which face is seen**. Their separation is 5.8 deg near face-on,
+peaks at 84.5 deg near 45 deg tilt, and falls back to 7.5 deg at 89 deg: ill-conditioned at
+*both* ends, best in the middle.
+
+**Up or down** is $\operatorname{sign}(n \cdot v)$, and the rim carries no information
+about it at all -- a circle is unoriented. `stereo.orient` does not measure it; it asserts
+it, flipping the normal to agree with a reference on the assumption the robot hovers
+rotor-up.
+
+That assumption is safe here, and continuity says why. $n \cdot v$ is continuous in time,
+so it can only change sign through $n \cdot v = 0$: the rotor axis perpendicular to the
+viewing ray, the ring projecting to a line, axis ratio going to zero. **Edge-on, never
+face-on** -- face-on is $|n \cdot v| = 1$, the state furthest from a flip, and no
+trajectory reaches one without the other. Three caveats travel with that: it is a
+continuous-time guarantee and not a sampling one, so a fast flip can cross between frames
+at 60 fps; a dropout breaks the observed continuity; and it is per-camera, each crossing at
+its own instant.
+
+Measured, the flight never comes close. Axis ratio bottoms out at 0.395 (camera B) and
+0.479 (A) -- **no frame within 23 degrees of edge-on** -- so the up/down state provably
+cannot have changed, and `orient`'s assertion is not a risk on this data. This also says
+the side-on failures are *not* orientation errors: at ratio 0.39-0.66 the fit is degrading,
+which is a different problem.
+
+**The world frame is not gravity aligned, and in the scene that shows up as a 90 degree
+error.** `rig.meta["world_frame"]` is `camera_A` -- camera A sits at the identity extrinsic
+-- so the world frame *is* a camera optical frame, where up is **-y**. `live_viz.up_direction`
+reports that faithfully and viser is told `set_up_direction("-y")`. But the mesh's rotor
+axis, and so the rod, points along the estimated normal, which in camera-A optical
+coordinates runs roughly along the *viewing* direction. -y-up against +z-up is exactly a 90
+degree rotation about x, which is what the robot lying on its side in the viewer actually
+is. `up_direction`'s own docstring says as much: guessing wrong lays the robot on its side.
+
+Neither the mesh nor the pose maths is at fault, and both were checked rather than assumed.
+`render.load_mesh` leaves the rim in the x-y plane -- 1.36 mm of z spread, which is the
+wall's own thickness -- with its centre on the origin and the rotor axis on +z. And
+`normal -> (theta, phi) -> render.pose_matrix -> normal` round-trips to **0.0000 degrees**
+over a spread of attitudes.
+
+The datum is the fix, and the same one the tilt needs. On `2026-08-28_092117` the robot's
+median tilt from world +z reads **38 degrees**, which is not the robot leaning but the
+frame being tipped. `live_viz.prime_zero` builds a `zeroing.Zero` from the first stable
+poses -- collected until `AUTO_ZERO_FRAMES` of them agree to `AUTO_ZERO_TOL_DEG`, so the
+datum is not built from scatter -- and `Zero.apply` puts that attitude on +z. Median tilt
+then reads 16.7 degrees, a hover attitude rather than a frame error, and `up_direction`
+returns `+z` so the rod stands upright with the grid under it. `up_direction` and
+`camera_in_datum` already follow the datum, so the rest of the scene needs no changes --
+`zero="auto"` on `from_recording` and `from_stereo` is the whole of it.
+
+**The live path must not wait for it.** A replay can prime the datum before the scene
+exists, because its frames run out; a camera's do not. A session is normally started
+*before* the robot is in shot, so priming there blocks `make_viz` outright -- no viser
+URL, no output, nothing to interrupt, which reads as a crash rather than a wait. So
+`from_stereo` brings the viewer up in whatever frame the rig provides and re-orients when
+the first stable poses arrive, via `_DatumPrimer` and `LiveViz.set_zero`. `prime_zero`
+carries a frame cap for the same reason, so no caller can hang on it.
+
+**The datum's sign is a choice, not a measurement**, and `flip=True` is how to make the
+other one. §16.13 above is why: a circle is unoriented, so `stereo.orient` asserts the
+hemisphere rather than measuring it, and on this rig its reference points *away from
+camera A* rather than up. Whether that agrees with the rod depends on which side of the
+robot camera A sits, which nothing in the pipeline knows. Measured either way on
+`2026-08-28_092117`, the pose normal's z-component reads +0.962 unflipped and -0.962
+flipped, so 96% of frames put the rod up one way and down the other. Look at the scene; if
+the rod hangs down, flip it. The bulge cue of §16.12 is what would settle it without
+looking, and it is not built.
+
+It is averaged and gated because the datum is subtracted from every later measurement, so
+noise in it becomes a fixed bias on the whole run rather than something that averages out
+(`calib/zeroing.py`). On this flight it settles in 12 poses at 2.63 deg spread.
+
+**Referencing the *first* stable pose is the request, not necessarily the best datum.** The
+median tilt improves but the tail does not -- p95 goes 52.4 to 69.3 deg and the maximum 76.9
+to 88.3 -- because the first pose need not represent the run's mean attitude, and because
+the tail contains estimation blunders as well as real excursions. A datum from the run's
+median attitude would centre the distribution instead; it is a one-line change to
+`prime_zero` and has not been measured.
+
+### 16.14 Correct ellipse, wrong normal
+
+The symptom is specific and it localises: the ellipse drawn on the frame is right, the
+rotor axis in the scene is not. Everything between them is
+`backproject -> branch choice -> tilt_cal -> orient`, and the radius is not in it -- the
+cone fixes the normal from the ellipse's *shape*, and the radius only scales the distance
+along it.
+
+`TiltCalibration` is the culprit, for the reason §16.11 gives. It describes the gap
+between a **hull silhouette** and the true rim: the mast and magnet widen the silhouette's
+short direction, and the calibration widens the model to match. The direct fit produces no
+silhouette. It settles on the rim's own evidence ridge and never sees the protrusions, so
+the correction is applied to a widening that is already gone and the minor axis is
+inflated twice. Tilt is $\arccos(b/a)$, so all of that error lands on the normal and none
+of it on the drawn ellipse.
+
+The measurement needs no ground truth: the two views each back-project their own normal,
+and they should agree. Over the flight, as the angle between them:
+
+| tilt calibration | cross-view normal angle, median | p90 |
+|---|---|---|
+| as shipped (`a = 1.0736`, fitted on renders) | **9.58 deg** | 23.94 |
+| identity | **2.46 deg** | 17.75 |
+
+2.46 deg is the per-view scatter floor of §12.12 (2.6 deg at 40-50 deg tilt), so identity
+is not merely better, it reaches the noise. Position barely moves across the same change --
+1.81 against 1.77 mm -- which is exactly why this hid: every gate in the pipeline watches
+position, and the cross-view discrepancy gate passed it.
+
+So `StereoPoseEstimator` neutralises the calibration when `direct=True`. It is not a
+preference: on this path the statistic the calibration was fitted to does not exist. A
+tilt calibration for the direct fit would have to be measured against the *ridge*, and
+nothing has been.
+
+### 16.15 A constant normal as ground truth
+
+`2026-08-28_131552` was flown deliberately upright, moving only along one axis. That
+makes it worth more than another flight: **the true rotor axis is constant, so the
+scatter of the estimated one is the error**, with no renderer and no second instrument.
+Nothing else in this chapter has that.
+
+Run as it stood, the take exposed a failure the previous flights hid. Orientation was
+bimodal -- 126 frames scattered by 9 degrees about their own mean and 39 by 68 -- and the
+outliers are the **branch flip**: both views take the mirrored conic solution *together*,
+so they agree with each other and are jointly wrong. §16.13 measured the two solutions as
+furthest apart near 45 degrees of tilt, at 84.5 degrees, and both cameras sit at 43-45
+here, so a flip costs almost a right angle.
+
+Two things do not catch it. The branch **margin** reads 28.3 sigma on flipped frames
+against 25.8 on good ones -- the matcher is confidently wrong, not undecided. And
+`MAX_DISCREPANCY_MM` at 25.5 mm is far too loose, because a flip moves *position* by only
+8.5 mm against 2.0 for a good frame. The gate was sized against segmentation blunders,
+which separate by 60x and need no precision; this blunder separates by 4x and needs some.
+
+Retuning it to 5 mm, and adding `MAX_JUMP_DEG_PER_S` for what survives:
+
+| | kept | normal scatter, median / p90 | >20 deg out |
+|---|---|---|---|
+| as it stood (25.5 mm, no jump gate) | 77% | 9.45 / 68.85 deg | 24% |
+| 8 mm + jump gate | 58% | 1.24 / 4.80 | 3% |
+| **5 mm + jump gate** | **55%** | **0.57 / 2.38** | **1%** |
+
+The jump gate is a physical bound, not a filter: 84 degrees in the 50 ms between sampled
+frames is 1700 deg/s, and nothing here turns faster than 60. It stands aside after
+`DROPOUT_S` so a track can still re-acquire.
+
+**The remaining coverage loss is honest, and it is the ellipse's fault rather than the
+gates'.** On rejected frames the worse view's ridge reads 5.3 median against 38.7 on
+accepted ones, and 71% of them have a view below 10 against 5% of accepted. No branch
+selection rescues a fit that is not on the rim -- and on those frames every pairing scores
+badly, which is why the 28-sigma margin is not a tie a temporal prior could break. Coverage
+here is bounded by how often both views see the ring well, which returns to §16.10's
+finding about camera B's framing.
+
+**The overlay arrow was reading the wrong frame.** `normal_segment_px` projected
+`pose.xyz_mm` with the intrinsics alone, which is correct only while the world frame *is*
+that camera's optical frame and no datum is set -- true when it was written, false since
+`prime_zero` began installing one. So the arrow pointed somewhere plausible and wrong in
+camera A, was meaningless in camera B, and was gated to view 0 for that reason rather than
+fixed. It now undoes the datum to reach the world, applies each camera's own extrinsic,
+and then projects, so it is drawn in both views.
+
+Its tail is pinned to that view's fitted ellipse centre. The projected centre should land
+there anyway, and pinning is still worth it: the ellipse is in distorted pixels and the
+projection is an ideal pinhole, and any residual datum or extrinsic error otherwise shows
+up as the arrow floating off the robot -- which reads as a direction error rather than the
+position error it is. Pinned, the arrow shows only what it can actually say.
+
+The check that it is right needs no ground truth: the rotor axis projects along the
+direction of foreshortening, so the arrow must lie on the ellipse's **minor axis**.
+Measured over 60 frames it sits **0.28 degrees** off in camera A and 0.42 in camera B,
+with the tail exactly on the centre -- and identically with and without a datum, which is
+the real test, since an image projection cannot depend on an arbitrary choice of world
+frame.
+
+For the scene, the same take makes the datum sharp: `prime_zero` settles at **0.47 deg**
+spread against 2.63 on `092117`, `up_direction` reports `+z`, the mean axis comes out
+`[0.017, 0.005, 0.9998]`, and 81% of poses sit within 2 degrees of vertical. An upright
+take is the right thing to prime a datum from, and worth recording deliberately.
+
+### 16.16 Perfect segmentation, no detection: it was the radius
+
+A frame whose rings are plainly well fitted in both views, and no pose. The counters say
+where: `n_rejected_fit = 0`, `n_rejected = 80`. Every one is the cross-view consistency
+check, which is not an optimisation and cannot be blamed on the ellipse fit's five free
+parameters. Two *correct* ellipses that disagree in 3D means the geometry between them is
+wrong.
+
+It was the radius. §16.7's method was right and its execution was not: that sweep ran the
+estimator with its own gates active, so each radius was scored on the frames that survived
+it -- the answer partly chose its own evidence. Re-swept with the gate open and only
+frames whose fit is strong in *both* views, the two flights agree:
+
+| radius mm | 9.90 | **9.95** | 9.975 | 10.00 | 10.05 | 10.20 |
+|---|---|---|---|---|---|---|
+| `131552` median discrepancy | 0.91 | **0.50** | 0.77 | 1.15 | 2.05 | 4.81 |
+| `092117` median discrepancy | 1.77 | 1.08 | 0.88 | 1.02 | 1.65 | 4.21 |
+
+Half a percent of radius mattered far more than it looks, because a radius error is a
+systematic depth offset along *each camera's own axis*, and the axes point different ways,
+so none of it cancels and all of it lands on cross-view discrepancy. At 10.05 only 98% of
+strong-fit frames came under the 5 mm gate, at 10.20 just 66%; at 9.95, **100%** do.
+Median discrepancy end to end falls 2.06 -> 0.51 mm on the upright take.
+
+**A gate is only as good as the constant it is gating on.** Tightening
+`MAX_DISCREPANCY_MM` to 5 mm was right, but with a 1% radius error it was rejecting good
+frames for a fault they did not have. The two changes had to be made together, and the
+lesson is that a precision gate and the constants feeding it are one system.
+
+### 16.17 Why the fusion is Gaussian and the ambiguity is not
+
+Position is already fused probabilistically and there is nothing to add. Each view carries
+an anisotropic Gaussian about its own optical axis --
+$\Sigma = \sigma_{lat}^2 I + (\sigma_{depth}^2 - \sigma_{lat}^2) dd^T$, tight across the
+ray and loose along it -- `_agreement` is the Mahalanobis distance under
+$(\Sigma_a + \Sigma_b)^{-1}$, `fuse` combines in information form, and `filter.PoseFilter`
+is a constant-velocity Kalman on top.
+
+**Orientation is not, and softening the gate to covariance inflation would be a mistake.**
+The tempting move is to keep every frame and let a wider covariance say how much to trust
+it. Measured, the band it would admit is not noisy-but-usable:
+
+| cross-view discrepancy | share of frames | normal deviation, median | more than 20 deg out |
+|---|---|---|---|
+| under 5 mm (kept) | 62% | 6.2 deg | 8% |
+| 5-15 mm | 13% | **70.9 deg** | **79%** |
+| over 15 mm | 13% | 84.2 deg | 93% |
+
+Four fifths of that middle band are branch flips. Their error is not Gaussian and no
+covariance describes it: the posterior has **two components about 84 degrees apart**
+(§16.13), and a single inflated Gaussian straddling both is wrong everywhere -- fat, and
+centred where neither mode is. §13's note that the two-fold ambiguity is a genuine
+bimodality rather than a numerical failure is the same statement.
+
+The correct probabilistic treatment is a **mixture**, not a wider unimodal covariance, and
+using the second component needs a consumer that can carry two hypotheses until one dies.
+`StereoPose` returns one pose, so that is an architectural change rather than a tuning one.
+Until then the hard gate is crude but not wrong: when the components cannot be separated,
+declining beats picking.
+
+### 16.18 Answering on every frame
+
+The gates here decline rather than report a pose they cannot stand behind, and for a
+controller that is right. For looking at footage, fitting constants, or any consumer that
+would rather have a pose and a quality number than a hole, it is not.
+`StereoPoseEstimator(never_reject=True)` stands all of them down -- discrepancy, fit rms,
+ridge, the predicted-error model, and `require_stereo`, so a frame with one view lost still
+answers from the other.
+
+Two things had to be fixed before that was worth having, and both were real defects that
+only showed up once nothing was being hidden by a rejection.
+
+**The plate was cold on the first frame.** `RunningPlate` starts as a copy of the frame it
+is given, so subtracting it leaves an empty evidence map and the segmenter finds nothing.
+That cost the first frame of every run, and no amount of relaxing gates recovers it -- the
+data was gone. `update` now returns ``None`` until `WARMUP_FRAMES`, which callers already
+read as "no plate", and the top-hat runs unaided until then. It also lifted the *gated*
+solve rate on `2026-08-28_135533` from 86.4% to 89.9%.
+
+**Reporting policy and tracking policy are different questions.** Relaxing `min_ridge` to
+zero also relaxed the test deciding whether a fit was good enough to seed the next frame,
+so a collapsed fit became the next seed and the track never recovered: camera A sat at a
+158 px major where the ring is 250, for hundreds of frames. Track maintenance now uses its
+own fixed `_track_ridge`, independent of what is being reported. The difference is not
+small:
+
+| | frames with a pose | discrepancy median | p90 |
+|---|---|---|---|
+| gated | 89.9% | 0.59 mm | 1.30 mm |
+| `never_reject`, tied thresholds | 100% | 1.03 mm | 269.53 mm |
+| `never_reject`, separated | **100%** | **0.65 mm** | **4.94 mm** |
+
+The third row is the point: answering on every frame costs almost nothing in the median
+once the track cannot poison itself, and the frames that are genuinely poor are still
+labelled as such rather than dropped. `discrepancy_mm` and the per-view `ridge` ride on
+every result, so a consumer can sort by them -- which is the same information the gate
+used, handed on instead of acted on.
+
+`pose/demo_video.py` renders a whole flight with every overlay on it, running this mode by
+default and marking which frames the gates would have taken, because a solve rate does not
+show *which* frames were lost or why.
+
+### 16.19 What the two cameras are actually for
+
+The occlusion argument for stereo had never been measured, only asserted. Sampling the
+**world** rim circle at 180 angles and reading each camera's evidence map at the
+projection of every one of them, over 395 frames of `2026-08-28_135533`:
+
+| fraction of the rim with evidence | p5 | p25 | p50 | p75 |
+|---|---|---|---|---|
+| camera A alone | 0.726 | 0.814 | 0.900 | 0.956 |
+| camera B alone | 0.656 | 0.819 | 0.917 | 0.956 |
+| **either camera** | **0.922** | **0.983** | **1.000** | 1.000 |
+| both at once | 0.574 | 0.733 | 0.783 | 0.856 |
+
+A view is missing a fifth of the rim or more on **36% of frames**; on exactly those the
+union median is **0.989**. Both views are under 80% on 4.3%, and even there the union
+median is 0.867. Union coverage against cross-view discrepancy correlates **-0.384**:
+the frames that go wrong are the frames the union does not cover.
+
+That is the 83-degree axis separation doing the one thing a second camera is uniquely
+for. It is not averaging and it is not depth -- it is that the two cameras lose
+*different arcs*, so between them the rim is nearly always whole.
+
+**Which settles the shape of the fix: nothing fits a semi-circle.** The tempting reading
+of the table is to fit each visible half separately and merge them, and that is strictly
+worse -- a 180-degree arc pins an ellipse's axes very poorly, and merging two
+badly-conditioned fits does not recover what neither had. One world circle, sampled by
+world angle, with both views' samples in a single residual vector, already *is* the
+fusion: five parameters, `2N` residuals, and an arc missing in A carried by the same arc
+in B because they share the parameters.
+
+Two implementation facts made that real rather than notional:
+
+- **`refine(mode="image")` was dead code.** It had been written for exactly this and
+  nothing ever called it. `update` ran `mode="ellipse"`, which compresses each view to
+  one fitted ellipse *before* the joint solve -- the occlusion has already corrupted the
+  measurement by then, which is the failure the mode existed to avoid. The evidence maps
+  were built in `_view_candidates` and dropped on the floor.
+- **Samples must be indexed by world angle, not by each view's image parameter angle.**
+  Sampling each predicted ellipse independently makes sample `k` a different physical
+  point in each view, which is enough to solve a pose and useless for saying which arc
+  is missing. `_rim_points` builds the points once in the disk plane and both views
+  project the same ones. It also samples uniformly on the disk, where parameter-angle
+  sampling of a projected ellipse bunches near the minor-axis ends -- exactly where a
+  side-on frame has least to spare.
+
+`union_coverage` rides on every pose. It is reported and not gated: below roughly 200
+degrees of union the five parameters are weakly determined however they are weighted,
+and that is worth knowing rather than declining.
+
+### 16.20 Most of the "occlusion" was the level, the kernel and the plate
+
+The dead arcs of §16.19 are real and the word for them was wrong. Sampling the raw frame
+along the refined rim, the luminance inside a dead arc reads **139.6** against **157.9**
+where the rim is found: the rim is *bright and present*, and `ring_weight` does not
+respond to it. An earlier reading of 66.8 against 153.8 was taken on a coarser pose,
+before refinement, and was sampling beside the rim rather than on it.
+
+Where it fails is specific. Dead-sample rate around the fitted ellipse, by angle from
+the major axis, on `2026-08-28_131552`:
+
+| from the major axis | 0-10 | 10-70 | 70-80 | 80-90 |
+|---|---|---|---|---|
+| dead | 27.0% | 9-11% | 26.7% | **49.7%** |
+
+Half the samples die at the **ends of the projected minor axis**. That is where the near
+and far arcs of the duct converge in the image: the ring stops being a thin line and
+becomes a locally wide bright blob, so a 41 px opening keeps it and the top-hat returns
+nothing. The 27% at the major-axis ends is the mast and duct wall doing the same thing.
+
+**Widening the kernel fixes the coverage and breaks the estimate.**
+
+| k | 41 | 49 | 61 | 81 |
+|---|---|---|---|---|
+| arc alive p50 | 0.861 | -- | 1.000 | 1.000 |
+| at the minor tips | 0.567 | -- | 1.000 | 1.000 |
+| discrepancy p50, mm | **0.77** | 1.92 | 2.39 | ~3 |
+| under the 5 mm gate | **72.9%** | 59.8 | 55.4 | ~53 |
+| more than 30 deg out | **8.8%** | 18.3 | 13.2 | ~14 |
+| `ridge` p50 | **35.8** | 29.0 | 23.7 | -- |
+
+`ridge` is the row that explains the rest. A kernel wide enough to keep the converged
+arcs is wide enough to keep the body, so the map stops being a ridge along the rim and
+the ellipse is no longer pinned to anything. Coverage reads 1.000 precisely because
+everything nearby is bright -- the same failure `RingFit` documents for `coverage` as a
+blunder test, arriving from a new direction. **41 stands**, and recovering the converged
+arcs needs a growth rule at constant kernel rather than a wider kernel.
+
+The plate is the second half. A `RunningPlate` is a running median converging on whatever
+does not move, and on a *hover* rig what does not move is partly the robot --
+`background.from_video` already warns that a take where the robot hovers leaves itself in
+the plate, and the running form reaches that state faster, at a count a frame. Arc alive
+p10 on `2026-08-28_131552`: **0.603** at full subtraction, 0.667 at half, 0.703 with no
+plate at all. `RING_PLATE_WEIGHT = 0.5` splits it; the constant carries the three-flight
+table and the one flight that disagrees.
+
+The third half, and the largest of the three, is the **level itself**. `THRESH = 128` was
+carried over from renders and never refitted, on the stated reasoning that a synthetic
+brightness would not transfer. On a black backdrop it transfers badly in a specific
+direction: there is nothing above the level except the robot, so the level is free to
+fall a long way. A level of 72 keeps 80.5% of rim samples against 78.0% at 128, and 1.3%
+of the backdrop against 1.1%. The rim it buys is not free rim -- it is the *shaded* rim,
+whose luminance p25 is 138 with the level sitting at 128.
+
+It only ever seeds -- the direct fit measures from the evidence map -- and it still moved
+everything, because a seed missing a quarter of the rim starts the solve on a biased
+ellipse:
+
+| frames more than 30 deg out | 128 | 96 | **72** | 56 |
+|---|---|---|---|---|
+| `131552` | 10.2% | 4.1 | **3.1** | 5.3 |
+| `135533` | 2.8% | 1.4 | **0.4** | 0.6 |
+| `092117` | 4.3% | 4.0 | **2.9** | 4.6 |
+
+`ridge` holds or rises with it (17.4 to 18.6 on `092117`), which is what says the extra
+seed area is rim and not backdrop, and `092117`'s discrepancy p90 falls from 37.18 mm to
+15.30. The effective radius did not need refitting with it: `RADIUS_BENCH_MM` was fitted
+against the *direct* fit, which never sees this level, and discrepancy p50 moved by less
+than 0.05 mm on all three flights.
+
+Three of the four things called occlusion in §16.19 were this section. What survives as
+genuine two-view cover is the arc a camera has actually lost, and §16.19's union table
+still measures that -- it is simply a smaller share of the problem than it first looked.
+
+### 16.21 The occluder has no edge to find
+
+The natural next step is to detect the occluder rather than infer it: an object covering
+the rim has a boundary, the boundary is long and straight where the rim is curved, and
+curvature along a contour separates them with nothing to tune in absolute units. The
+statistics of the dead arcs all point that way. Over 329 views carrying more than 10%
+dead samples:
+
+- **Contiguous.** The longest single dead run holds a median **67%** of all dead samples,
+  and **100%** at p75 -- one block, not scatter.
+- **Sharp.** At a run's boundary the evidence changes by a median of **0.46** of the ring
+  median between adjacent samples: it halves in one or two samples, 2 to 4 degrees.
+- **Dark.** Raw luminance inside a dead arc averages **66.8** against **153.8** on live
+  arc. The white rim is covered, not fading out.
+- Median dead fraction where present is 0.20, p90 0.34 -- a 72 to 122 degree sector.
+
+Every one of those is consistent with an occluder, and the inference is still wrong.
+Tested directly: a straight edge at least 0.6 rim-radii long, landing within 12 px of
+where a dead run begins or ends, found by Canny and a probabilistic Hough over an ROI
+around the rim, on the 147 views with a dead run of 50 degrees or more --
+
+**0 of 147.**
+
+Relaxing to any line of 30 px within 20 px gives 84%, which is not evidence of anything:
+at that threshold a cluttered ROI is full of lines. The reason is structural rather than
+photometric. `ring_weight` is a top-hat, so the map it produces contains **only the thin
+rim**; an occluder's boundary never enters the mask a contour could be traced along, and
+the rim's own silhouette is cut by the occluder over a few pixels of stroke, not a
+traceable run. A curvature detector was written, measured, and deleted.
+
+What the dead arcs are fixed to is a weaker signal than an occluder would give. Their
+world direction has |mean| ≈ 0.5 over a flight -- a preferred direction, not a fixed one
+-- and they sit on the near side of the rim relative to the camera by a median
+$\hat{d}\cdot\hat{l} \approx -0.29$, consistently in both views. A fixed illuminant plus
+the duct's own geometry fits that better than anything in the rig, and it is a lighting
+fix rather than a code one.
+
+The two-view union in §16.19 does not care. It never needed to know *why* an arc is dead.
+
+### 16.22 The sliding window, and why it has to be told when to speak
+
+§16.17 concluded that the residual error is a **mixture** -- the mirrored branch about 84
+degrees away, taken by both views together so no measure of cross-view agreement
+separates them -- and that using it "needs a consumer that can carry two hypotheses until
+one dies". Time is that consumer: the true branch moves like a robot and the mirror jumps
+a quarter turn between frames. `match` takes a `prior_normal` from a 15-frame median of
+recent normals and scores it in the same sigmas as everything else.
+
+**Applied to every frame it makes things worse, monotonically.** On
+`2026-08-28_131552` -- flown upright, so the normal is ground truth -- the share of
+frames landing more than 30 degrees from the flight's median normal went 26.8% ungated,
+to 27.4% at a 15 degree prior, 37.3% at 10, and **45.0% at 8**, with the median frame's
+own scatter blowing out from 0.84 to 7.50 degrees.
+
+The reason is a loop, not a tuning error. The window is fed the estimator's output, so a
+prior strong enough to change a decision is strong enough to manufacture the evidence
+for its next decision. Nothing inside that loop can break it.
+
+What breaks it is a signal from outside. The frames in question are separable *before*
+anything is done about them:
+
+| on `2026-08-28_131552` | good frames | quarter-turn frames |
+|---|---|---|
+| cross-view discrepancy, p50 | 0.58 mm | 23.21 mm |
+| cross-view discrepancy | p90 2.86 | p10 6.20 |
+| best pairing's agreement score, p50 | 1.09 | 1002 |
+| union coverage, p50 | 0.94 | 0.81 |
+
+Discrepancy separates them almost cleanly at the 5 mm that `MAX_DISCREPANCY_MM` already
+sits at. So the window is asked **only about frames that gate has already flagged**, and
+the three quarters that are self-consistent are left exactly as they were:
+
+| prior sigma | off | 25 | 15 | 10 | 6 | 4 | **3** | 2 |
+|---|---|---|---|---|---|---|---|---|
+| more than 30 deg out | 26.8% | 26.6 | 26.2 | 25.4 | 12.4 | 8.6 | **8.1** | 7.0 |
+| scatter p90, deg | 88.31 | 88.27 | 88.17 | 88.08 | 41.38 | 16.94 | **16.94** | 16.70 |
+| scatter p50, deg | 0.84 | 0.84 | 0.84 | 0.84 | 0.82 | 0.83 | **0.83** | 0.83 |
+
+The last row is what makes it honest: the median frame does not move. The whole gain is
+taken on frames that were wrong, and it is worth a factor of three. Passes over 2-4;
+3.0 is the midpoint and coincides with `SIGMA_NORMAL_RAD`, so the window is trusted
+about as far as one camera is.
+
+The gate that decides when to ask is `_suspect_mm`, fixed at the module constant and
+deliberately *not* `max_discrepancy_mm` -- that one is reporting policy and `never_reject`
+drives it to `None`. "Is this worth reporting" and "is this worth a second opinion" are
+different questions, the same split as `_track_ridge` against `min_ridge` in §16.18, and
+tying them together has now caused a bug twice.
+
+**What it costs, said plainly.** On a re-arbitrated frame the estimator takes a pairing
+the geometry ranked *worse*, so cross-view discrepancy on `2026-08-28_131552` goes from
+p90 30.59 mm to 31.38. That is the intended trade and not a side effect: the best
+agreement score on those frames runs from 134 to 1002 where a good frame reads 1.09, so
+no pairing is consistent and the ranking between them carries no information. Continuity
+does. The orientation is three times better and the cost is a number that was already
+telling you not to trust the frame.
+
+### 16.23 The seed is smooth and biased, the fit is sharp and noisy
+
+Watching the overlay rather than the statistics turns up something no summary column
+says: on `2026-08-28_131552` the red seed ellipse tracks the rim convincingly while the
+green direct fit does not. Run end to end with each as the measurement:
+
+| on `131552` | discrepancy p50 / p90 | under 5 mm | more than 30 deg out | frame-to-frame angle p90 |
+|---|---|---|---|---|
+| direct fit, r = 9.95 | **0.68** / 26.58 mm | 77.6% | 4.4% | **11.70 deg** |
+| mask seed, r = 9.95 | 4.52 / **5.91** mm | 73.6% | **2.5%** | **1.92 deg** |
+
+The seed is six times steadier and its discrepancy spread is *tight* -- 4.52 to 5.91 --
+which is the signature of an offset rather than of noise. It is the effective-radius
+problem of §16.7 again: the mask hulls the rim's outer edge, the evidence ridge is its
+centre-line, and the two want different constants. Swept, the seed path minimises at
+**10.10-10.20** and there it beats the direct fit almost everywhere:
+
+| mask seed radius | 9.95 | 10.10 | 10.20 | 10.30 | 10.40 |
+|---|---|---|---|---|---|
+| discrepancy p50 | 4.52 | 1.89 | **1.15** | 1.92 | 3.71 |
+| under 5 mm | 73.6% | **96.7** | **96.7** | 94.5 | 74.8 |
+| more than 30 deg out | 2.5% | **2.8** | 5.2 | 7.5 | 23.5 |
+
+96.7% under the gate against the direct fit's 77.6%, at a sixth of the jitter, for the
+price of a median that is three times worse. **But it does not generalise**: on
+`2026-08-28_135533` the direct fit at 9.95 gives p90 1.54 mm, 0.6% out and 2.24 deg of
+jitter, and the seed at 10.10 gives 4.27, 1.5% and 2.75. The two flights want opposite
+answers, so neither is simply better.
+
+**What separates them is the seed collapsing.** The medians agree on both flights -- a
+healthy refinement shrinks the major 2.8% and moves the centre 4 px -- and only the tails
+differ:
+
+| | major, p10 | axis ratio, p10 | centre move p90 / max | smallest seed major |
+|---|---|---|---|---|
+| `135533` | -3.7% | -0.063 | 6.8 / 108.7 px | 252 px |
+| `131552` | **-11.2%** | **-0.264** | **55 / 466 px** | **14 px** |
+
+A 14 px major on a ~400 px ring. The objective's capture radius is ~25 px, so from there
+the fit cannot descend back onto the rim; it wanders, and 466 px of wandering is where
+that flight's discrepancy tail and its 11.7 degrees of frame-to-frame jitter come from.
+
+**Bounding the drift does not fix it and was removed** -- see `RING_MAX_DRIFT` in
+`segment.py`, which now records the sweep as a negative result. The reason is worth
+keeping: a large move is not a wrong move. A seed at 252 px on a 415 px ring needs a
++65% correction and that is the fit doing its job, so drift cannot separate recovery from
+runaway, and falling back to the seed is the worse report anyway because its axis ratio
+bias lands straight on the tilt. Preferring the tracked fit over a collapsed cold one by
+`ridge` was also tried, and measured neutral (p90 26.58 to 26.59): when a re-acquire
+fires the tracked fit is already weak, so the cold fit usually wins that comparison
+honestly.
+
+What does help is temporal, and it is a filter rather than a fit. `pose/demo_video.py`
+was drawing the raw per-frame estimate where `live_viz` runs `filter.PoseFilter`, so the
+overlay looked far worse than anything downstream ever sees:
+
+| frame-to-frame angle p90 | raw | filtered |
+|---|---|---|
+| `131552` | 11.70 deg | **4.30** |
+| `135533` | 2.24 deg | **1.89** |
+
+Both now show the same signal. The ellipses stay per-frame and unfiltered on purpose --
+the point of the overlay is to see which frames are weak, and smoothing those is exactly
+what would hide them.
+
+The open move, unmeasured: the two estimates are complementary rather than competing --
+the seed is steady and biased, the fit is sharp and noisy -- so taking the centre from
+one and the axis ratio from the other, or refusing to refine a seed whose own `ridge` is
+already gone, are both worth a sweep.
+
+### 16.24 Where it stands
+
+All three flights, `never_reject`, `RunningPlate`, the two-view image fit and the gated
+window prior:
+
+| | poses | discrepancy p50 / p90 | under 5 mm | more than 30 deg out | union p50 / p5 |
+|---|---|---|---|---|---|
+| `2026-08-28_131552` | **639/639** | 0.68 / 26.58 mm | 77.6% | **3.1%**, from 26.8 | 0.939 / 0.911 |
+| `2026-08-28_135533` | **1013/1013** | 0.63 / **1.54** mm | 92.9% | **0.4%**, from 5.7 | 1.000 / 0.933 |
+| `2026-08-28_092117` | **1365/1365** | 0.90 / 15.30 mm | 81.5% | **2.9%**, from 13.6 | 0.978 / 0.803 |
+
+Every frame of every flight carries a pose, and the quarter-turn frames are down by
+between four and fourteen times. Roughly a third of that is the gated window prior
+(§16.22) and the rest is the seed level (§16.20) -- and the level was the one nobody was
+looking at, because it had a comment saying it had been considered and left alone.
+
+A factor of three on every flight, from the same constant, and none of it taken out of
+the frames that were already right.
+
+Cost is **75-78 ms per stereo pair** against 60 for the mask-fit path and a 16.7 ms
+period at 60 fps. The two-view image solve is the difference, and it was taken
+deliberately: this path is for replay and for the viser view, not yet for the control
+loop, which keeps `direct=False`. The saving §16.9 hoped for -- one joint solve replacing
+the two per-view ones -- has **not** been taken: `_view_candidates` still fits each view
+before `update` fits both, so the joint solve is currently added to them rather than
+substituted for them. That is the obvious next thing and it is worth about 20 ms.
+
+## 17. Timing in the live loop: pricing the skew instead of avoiding it
+
+[§16](../calib/theory.md) (ch. 2) removes inter-camera skew from calibration by refusing to
+photograph a moving board. None of that transfers here. The robot is what the rig measures,
+and it does not hold still. The loop cannot re-read for a better-aligned pair either:
+§16.3's 2 ms threshold costs seven frames out of eight, which at 119 fps is a 60 ms wait.
+Nor can it buffer a future frame and interpolate between the two, because latency is the
+quantity this pipeline exists to minimise.
+
+What remains is to be *honest* about it. The grabber records each camera's own capture time,
+so the rig measures the skew on every frame. That turns an unknown error into a known one,
+and the covariance can carry it.
+
+### 17.1 The correction
+
+View $i$ observes the robot at its own time $t_i$. Write $\Delta_i = t_{\text{ref}} - t_i$
+with $t_{\text{ref}}$ the mean of the stamps, and let $\hat v$ be the filter's velocity
+estimate with covariance $P_{vv}$. A Taylor expansion about $t_i$ gives
+
+$$x_i(t_{\text{ref}}) = x_i(t_i) + v\,\Delta_i + \tfrac{1}{2}a\,\Delta_i^2 + O(\Delta_i^3)$$
+
+Substituting $\hat v$ for the unknown $v$ and dropping the acceleration term leaves a
+first-order correction whose error has two sources: the velocity estimate is uncertain, and
+the acceleration term was discarded. Both are known quantities, so both are charged:
+
+$$\boxed{\;\Sigma_i' = \Sigma_i + P_{vv}\,\Delta_i^2 + \left(\tfrac{1}{2}a_{\max}\Delta_i^2\right)^2 I\;}$$
+
+The first term is the view's own measurement noise (§12.2's anisotropic ellipsoid, tight
+across the optical axis and loose along it). The second is the shift's uncertainty, growing
+as $\Delta^2$. The third bounds the unmodelled acceleration. It uses **the same $a_{\max}$ that sets the
+filter's process noise**, so one number governs both. The two cannot drift apart and quietly
+disagree about how violently the robot can manoeuvre.
+
+Only then does the existing information-weighted fusion run. It does not discard a skewed
+view. It weights that view down by exactly its own degradation, which is what fusing in
+information form is for.
+
+### 17.2 Why consistency, not accuracy, is the test
+
+An inflated covariance is trivially "safe": multiply it by ten and no gate will ever fire
+spuriously. It is also useless, because the filter will then ignore good measurements. The
+quantity that must be right is the **normalised error**
+
+$$\text{NIS} = e^\top \Sigma'^{-1} e, \qquad \mathbb{E}[\text{NIS}] = 3$$
+
+for a three-degree-of-freedom position. `test_timing.py` measures it over 400 trials at 8 ms
+of skew, one full frame period, which is the worst case rather than the median. The robot
+translates at 40 mm/s:
+
+| | position error | normalised error |
+|---|---|---|
+| uncorrected | 0.220 mm | 6.53 |
+| shift and inflate | 0.125 mm | 2.88 |
+
+The error nearly halves, which is the visible result. The important number is the second
+column: uncorrected fusion is overconfident by $2.2\times$, and after correction the
+covariance is honest to within the sampling noise of the experiment. A filter fed the first
+row believes skewed frames and lets them pull the state. Fed the second, it weights them
+correctly and absorbs the error.
+
+### 17.3 Does it even matter at hover?
+
+Worth computing rather than assuming, because §13 sets a floor no estimator beats and a
+correction below that floor is decoration. The displacement between the two views is
+$v\Delta$. Compare it against §12.2's anisotropic noise: $\sigma_{\text{lat}} = 0.078$ mm
+across the optical axis, and $\sigma_{\text{depth}} = 0.857$ mm along it.
+
+| speed | $\Delta$ | $v\Delta$ | vs $\sigma_{\text{lat}}$ | vs $\sigma_{\text{depth}}$ |
+|---|---|---|---|---|
+| 15 mm/s (hover) | 7.71 ms | 0.116 mm | **1.5×** | 0.13× |
+| 22 mm/s (hover) | 7.71 ms | 0.170 mm | **2.2×** | 0.20× |
+| 40 mm/s (transient) | 7.71 ms | 0.308 mm | **4.0×** | 0.36× |
+
+The answer is the opposite of the comfortable one. **At ordinary hover speeds the skew is
+already the dominant lateral error.** It is one and a half to two times the noise floor of
+the channel the estimator measures *best*. It is negligible only against depth, and only because
+depth is ten times worse to start with. Being small next to the pipeline's weakest number is
+not a defence.
+
+This inverts the usual intuition about the two channels. §12.2 establishes depth as the weak
+axis by construction, so attention goes there. But depth is weak from *geometry*, which no
+timing fix changes. The lateral channel is precise enough that a few milliseconds of skew is
+the largest thing left in it. An uncorrected 0.17 mm lateral bias then sits underneath every
+hover measurement, correlated with velocity, which is exactly the shape a controller mistakes
+for real motion.
+
+Running at $640\times400$ would cut $\Delta$ to 2.39 ms and bring hover back under the floor
+(0.5–0.7×). That is a genuine second lever if the lateral channel ever becomes the binding
+constraint, at the cost of §12's corner precision. The correction costs a handful of
+floating-point operations per frame and needs no such trade.
+
+### 17.4 What does not work
+
+* **Reusing the calibration fix.** Corner-level time alignment needs the frames on either
+  side of the one it corrects. That costs a frame of latency, in the loop where latency is
+  the cost function.
+* **Rejection sampling for a low-skew pair.** §16.3's 2 ms threshold delivers 16 pairs/s out
+  of 119. A control loop cannot drop seven frames in eight to get a prettier one.
+* **Assuming simultaneity.** Until this section, `StereoPoseEstimator.update` called its
+  frames "simultaneous" and stamped them with a single `t`. That assumption is wrong by up
+  to a full frame period. It stayed invisible because the error it produces looks exactly
+  like measurement noise, until you compute the NIS.
+
+### 17.5 Correspondence with the implementation
+
+| Model element | Code |
+|---|---|
+| Per-camera capture times | `sources.StereoCamera.last_stamps` |
+| First-order shift, inflation terms (§17.1) | `stereo.fuse(stamps=, velocity=, vel_cov=)` |
+| Velocity covariance $P_{vv}$ | `filter._ConstantVelocity.rate_cov` |
+| Shared $a_{\max}$ | `filter.ACCEL_MM_S2`, imported by `stereo` |
+| Skew carried into the log | `StereoPose.skew_ms` |
+| Consistency check (§17.2) | `pose/test_timing.py` |
+| Calibration's opposite choice | [§16](../calib/theory.md) (ch. 2) |

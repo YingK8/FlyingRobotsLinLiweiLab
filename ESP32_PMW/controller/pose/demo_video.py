@@ -75,16 +75,16 @@ def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0):
         npx = normal_segment_px(pose, cam, zero, centre_px=seg.ellipse[0])
     mask = seg.mask if (show_mask and seg is not None) else None
     out = segmod.draw(frame, seg, normal_px=npx, mask=mask)
-    if seg is not None and seg.ellipse_mask is not None:
-        (cx, cy), (a, b), ang = seg.ellipse_mask
-        cv2.ellipse(out, (int(cx), int(cy)), (int(a / 2), int(b / 2)), ang,
-                    0, 360, (80, 80, 255), 2)
+    # One ellipse now. There used to be two -- the mask fit in red and a per-view
+    # refinement of it in green -- and the refinement was removed (`theory.md` 16.24).
     _rim_overlay(out, pose, cam, view)
     label = f"{tag}"
-    if seg is not None and np.isfinite(seg.ridge):
-        label += f"  ridge {seg.ridge:5.1f}"
-    else:
+    if seg is None:
         label += "  no fit"
+    elif seg.mask is None:
+        label += "  seed from the last frame"
+    else:
+        label += f"  {seg.area_px / 1000:.0f}k px"
     cv2.putText(out, label, (12, out.shape[0] - 16), FONT, 0.9, (255, 255, 255), 2)
     return out
 

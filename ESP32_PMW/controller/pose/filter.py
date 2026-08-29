@@ -47,6 +47,26 @@ SIGMA_NORMAL = 0.022  # unit-vector components, ~= sin(1.24 deg)
 ACCEL_MM_S2 = 500.0
 ACCEL_NORMAL = 5.0  # unit-vector components per s^2, scaled the same way
 
+#: How far a measurement may sit from the filter's prediction before it is refused, in
+#: sigmas of the innovation's own covariance, and how many refusals may run consecutively.
+#:
+#: The estimator hands over frames that are simply wrong -- a quarter-turn branch flip is
+#: 84 degrees out and an ellipse fitted to a collapsed seed can be hundreds of
+#: millimetres out (`pose/theory.md` 16.23) -- and fusing one drags the track for as long
+#: as the filter takes to recover. `S = H P H' + R` already says how far a measurement
+#: is *allowed* to fall, so the test costs a solve of a 3x3 that was being computed
+#: anyway and thrown away.
+#:
+#: Refusing is not dropping. The state has already been predicted forward, so a refused
+#: frame keeps the constant-velocity extrapolation, which is the right answer for one
+#: frame at 60 fps and the reason the model is there.
+#:
+#: `MAX_GATED` is the safety catch: a manoeuvre the model did not anticipate would
+#: otherwise be refused forever, with the filter growing more confident in its own
+#: extrapolation every frame. A gate that can lock on is worse than no gate.
+GATE_SIGMA = 4.0
+MAX_GATED = 5
+
 
 class _ConstantVelocity:
     """
@@ -63,10 +83,12 @@ class _ConstantVelocity:
         self.P = np.diag([p0_pos] * 3 + [p0_vel] * 3).astype(float)
         self.accel = float(accel)
         self.initialised = False
+        self.n_gated = 0
 
     def reset(self):
         self.x[:] = 0.0
         self.initialised = False
+        self.n_gated = 0
 
     def _predict_matrices(self, dt):
         f = np.eye(6)
@@ -87,9 +109,25 @@ class _ConstantVelocity:
         self.x = f @ self.x
         self.P = f @ self.P @ f.T + q
 
-    def update(self, z, sigma):
+    def update(self, z, sigma, gate=None):
         """
         Fuse a measurement with per-channel standard deviations ``sigma``.
+
+            ``gate`` rejects a measurement whose innovation is more than that many
+            sigmas from where the filter expected it, in the innovation's own metric --
+            `y' S^-1 y` normalised by the three degrees of freedom, where ``S`` is the
+            innovation covariance this already computes and then threw away. A rejected
+            frame is not a lost frame: the state has already been predicted forward by
+            the caller, so the filter simply keeps the extrapolation, which is what a
+            constant-velocity model is for.
+
+            Bounded by `MAX_GATED` consecutive rejections, after which the measurement
+            is taken regardless. Without that, a genuine manoeuvre the model did not
+            anticipate would be rejected forever -- the filter would grow more confident
+            in its extrapolation every frame while drifting further from the robot, and
+            a gate that can lock itself on is worse than no gate.
+
+            Returns ``(value, accepted)``.
         """
 
         z = np.asarray(z, dtype=np.float64)
@@ -102,16 +140,26 @@ class _ConstantVelocity:
             self.x[3:] = 0.0
             self.P[:3, :3] = r
             self.initialised = True
-            return self.x[:3].copy()
+            self.n_gated = 0
+            return self.x[:3].copy(), True
 
         h = np.zeros((3, 6))
         h[:, :3] = np.eye(3)
         y = z - h @ self.x
         s = h @ self.P @ h.T + r
+        if gate is not None and self.n_gated < MAX_GATED:
+            try:
+                d = float(y @ np.linalg.solve(s, y)) / 3.0
+            except np.linalg.LinAlgError:
+                d = 0.0
+            if d > gate * gate:
+                self.n_gated += 1
+                return self.x[:3].copy(), False
+        self.n_gated = 0
         k = self.P @ h.T @ np.linalg.inv(s)
         self.x = self.x + k @ y
         self.P = (np.eye(6) - k @ h) @ self.P
-        return self.x[:3].copy()
+        return self.x[:3].copy(), True
 
     @property
     def value(self):
@@ -120,6 +168,18 @@ class _ConstantVelocity:
     @property
     def rate(self):
         return self.x[3:].copy()
+
+    @property
+    def rate_cov(self):
+        """
+        Covariance of `rate`, which is what an extrapolation costs.
+
+            Shifting a measurement by ``dt`` using this velocity adds
+            ``rate_cov * dt**2`` to its covariance -- see `stereo.fuse`, which uses it
+            to price the skew between two free-running cameras.
+        """
+
+        return self.P[3:, 3:].copy()
 
     def peek(self, dt):
         """
@@ -154,6 +214,7 @@ class PoseFilter:
         sigma_depth_frac=SIGMA_DEPTH_FRAC,
         sigma_normal=SIGMA_NORMAL,
         max_coast_s=0.15,
+        gate=GATE_SIGMA,
     ):
         self.pos = _ConstantVelocity(accel_mm_s2, p0_pos=100.0, p0_vel=1e4)
         self.nrm = _ConstantVelocity(accel_normal, p0_pos=1.0, p0_vel=100.0)
@@ -161,6 +222,10 @@ class PoseFilter:
         self.sigma_depth_frac = sigma_depth_frac
         self.sigma_normal = sigma_normal
         self.max_coast_s = max_coast_s
+        # `None` disables the innovation gate and fuses every frame, which is what the
+        # filter did before.
+        self.gate = gate
+        self.n_gated = 0
         self._t = None
         self._last_seen = None
 
@@ -208,14 +273,16 @@ class PoseFilter:
             self.sigma_depth_frac * z,
         )
 
-        self.pos.update(np.asarray(pose.xyz_mm, dtype=np.float64), sigma_pos)
+        _, took_pos = self.pos.update(
+            np.asarray(pose.xyz_mm, dtype=np.float64), sigma_pos, gate=self.gate)
         n = np.asarray(pose.normal, dtype=np.float64)
         # Keep the measurement on the same side as the current estimate: the
         # normal's sign is not observable, and a flip would read as a huge
         # innovation and knock the filter over.
         if self.nrm.initialised and float(n @ self.nrm.value) < 0:
             n = -n
-        self.nrm.update(n, (self.sigma_normal,) * 3)
+        _, took_nrm = self.nrm.update(n, (self.sigma_normal,) * 3, gate=self.gate)
+        self.n_gated += not (took_pos and took_nrm)
 
         self._last_seen = now
         return self._state()
@@ -241,3 +308,34 @@ class PoseFilter:
         n = self.nrm.peek(dt)
         norm = np.linalg.norm(n)
         return self.pos.peek(dt), self.pos.rate, (n / norm if norm > 1e-9 else n)
+
+
+def _check():
+    """The gate refuses one bad frame and yields to a real manoeuvre."""
+
+    class _P:
+        def __init__(self, x, t):
+            self.xyz_mm = np.asarray(x, dtype=np.float64)
+            self.normal = np.array([0.0, 0.0, 1.0])
+            self.t = t
+
+    f = PoseFilter()
+    for i in range(30):
+        f.update(_P([i * 0.5, 0.0, 200.0], i / 60.0))
+    settled = f.pos.value.copy()
+
+    f.update(_P([500.0, 500.0, 200.0], 30 / 60.0))
+    moved = float(np.linalg.norm(f.pos.value - settled))
+    assert f.n_gated == 1, f"outlier was fused, n_gated={f.n_gated}"
+    assert moved < 5.0, f"a refused frame still dragged the track {moved:.1f} mm"
+
+    # Sustained, so it is a manoeuvre and not an outlier: MAX_GATED has to let it in.
+    for i in range(31, 31 + 2 * MAX_GATED + 4):
+        f.update(_P([500.0, 500.0, 200.0], i / 60.0))
+    moved = float(np.linalg.norm(f.pos.value - settled))
+    assert moved > 100.0, f"the gate locked on: track moved only {moved:.1f} mm"
+    print("filter self-check ok (gate refuses an outlier, yields to a manoeuvre)")
+
+
+if __name__ == "__main__":
+    _check()

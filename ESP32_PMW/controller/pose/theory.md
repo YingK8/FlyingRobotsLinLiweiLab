@@ -2238,144 +2238,80 @@ the seed is steady and biased, the fit is sharp and noisy -- so taking the centr
 one and the axis ratio from the other, or refusing to refine a seed whose own `ridge` is
 already gone, are both worth a sweep.
 
-### 16.24 Where it stands
+### 16.24 Removing the per-view refinement
+
+Watching all three flights decided it. The direct fit's advantage is on frames where the
+scene has *other* contours for the mask to be confused by, and its disadvantage is on
+occlusion -- which is the failure mode this rig actually has. Removed: `_view_candidates`
+no longer refines each view against the evidence map, and the mask fit is what gets
+reported.
+
+The two-view joint solve stays. It is a different thing from the ellipse that was drawn
+in green -- one world pose against both views' samples, which is what `union_coverage`
+is measured from -- and it is what still uses `ring_weight`.
+
+`RADIUS_BENCH_MM` moves 9.95 to **10.20** with it. The effective radius is a property of
+which edge the measurement cuts (S16.7): 9.95 belonged to the darkness ridge, the rim's
+centre-line, and the mask hulls its outer edge. That is not a detail -- at 9.95 only 34.7%
+of `135533` clears the 5 mm gate, at 10.20 it is 95.3%.
+
+| | poses | discrepancy p50 / p90 | under 5 mm | more than 30 deg out | ms/pair |
+|---|---|---|---|---|---|
+| `131552` before | 639/639 | 0.68 / 26.58 mm | 77.6% | **3.1%** | 87 |
+| `131552` after | 639/639 | 1.15 / **2.60** | **95.1%** | 5.0% | **47** |
+| `135533` before | 1013/1013 | 0.63 / **1.54** | 92.9% | **0.4%** | 103 |
+| `135533` after | 1013/1013 | 1.21 / 2.70 | **95.3%** | 2.0% | **51** |
+| `092117` before | 1365/1365 | 0.92 / 15.30 | 81.5% | **2.9%** | 167 |
+| `092117` after | 1365/1365 | 1.78 / **4.22** | **91.0%** | 3.3% | **49** |
+
+The trade is consistent and worth stating plainly: **position gets worse in the median
+and much better in the tail**, orientation gets slightly worse everywhere, and the whole
+thing runs at half the cost. The median column is the direct fit doing exactly what it
+was built to do; the p90 column is it coming apart on the frames where the seed collapses
+(S16.23), and the tail is what a controller feels. Two of the three flights more than
+halve their p90 and one triples it.
+
+Two smaller pieces went with it. The tracked-seed fallback was rebuilt without the direct
+fit -- when segmentation finds nothing, the previous frame's ellipse seeds the joint
+solve, which the robot's own speed justifies at 60 fps and which is worth the ten frames
+a flight it recovers. And the re-arbitration count collapses (114 to 1 on `131552`),
+because the window prior only fires on frames the discrepancy gate flags and there are
+now far fewer of those -- the prior is still there and now has almost nothing to do.
+
+### 16.25 A gate on the filter, not only on the estimator
+
+`filter.PoseFilter` fused every measurement it was given. It already computed the
+innovation `y` and its covariance `S = H P H' + R` and then discarded both, so the test
+costs one 3x3 solve: refuse a measurement more than `GATE_SIGMA` from where the filter
+expected it, in the innovation's own metric.
+
+Refusing is not dropping. The state has been predicted forward already, so a refused
+frame keeps the constant-velocity extrapolation -- which is the right answer for one
+frame at 60 fps and the reason a velocity model is there at all. `MAX_GATED` bounds the
+run: a manoeuvre the model did not anticipate would otherwise be refused forever, the
+filter growing more confident in its own extrapolation while drifting away from the
+robot. A gate that can lock on is worse than no gate, and `filter._check` is the
+assertion that it cannot.
+
+### 16.26 Where it stands
 
 All three flights, `never_reject`, `RunningPlate`, the two-view image fit and the gated
 window prior:
 
-| | poses | discrepancy p50 / p90 | under 5 mm | more than 30 deg out | union p50 / p5 |
+| | poses | discrepancy p50 / p90 | under 5 mm | more than 30 deg out | ms/pair |
 |---|---|---|---|---|---|
-| `2026-08-28_131552` | **639/639** | 0.68 / 26.58 mm | 77.6% | **3.1%**, from 26.8 | 0.939 / 0.911 |
-| `2026-08-28_135533` | **1013/1013** | 0.63 / **1.54** mm | 92.9% | **0.4%**, from 5.7 | 1.000 / 0.933 |
-| `2026-08-28_092117` | **1365/1365** | 0.90 / 15.30 mm | 81.5% | **2.9%**, from 13.6 | 0.978 / 0.803 |
+| `2026-08-28_131552` | **639/639** | 1.15 / 2.60 mm | **95.1%** | 5.0% | 47 |
+| `2026-08-28_135533` | **1013/1013** | 1.21 / 2.70 mm | **95.3%** | 2.0% | 51 |
+| `2026-08-28_092117` | **1365/1365** | 1.78 / 4.22 mm | **91.0%** | 3.3% | 49 |
 
-Every frame of every flight carries a pose, and the quarter-turn frames are down by
-between four and fourteen times. Roughly a third of that is the gated window prior
-(§16.22) and the rest is the seed level (§16.20) -- and the level was the one nobody was
-looking at, because it had a comment saying it had been considered and left alone.
+Every frame of every flight carries a pose, better than nine in ten of them come under
+the 5 mm gate against 77-93% before, and the whole pipeline runs at roughly half its
+former cost -- 47-51 ms a stereo pair against 75-167. It is still three times the 16.7 ms
+period at 60 fps, so this remains a replay and viser path rather than a control one, but
+the gap is now one optimisation rather than three.
 
-A factor of three on every flight, from the same constant, and none of it taken out of
-the frames that were already right.
-
-Cost is **75-78 ms per stereo pair** against 60 for the mask-fit path and a 16.7 ms
-period at 60 fps. The two-view image solve is the difference, and it was taken
-deliberately: this path is for replay and for the viser view, not yet for the control
-loop, which keeps `direct=False`. The saving §16.9 hoped for -- one joint solve replacing
-the two per-view ones -- has **not** been taken: `_view_candidates` still fits each view
-before `update` fits both, so the joint solve is currently added to them rather than
-substituted for them. That is the obvious next thing and it is worth about 20 ms.
-
-## 17. Timing in the live loop: pricing the skew instead of avoiding it
-
-[§16](../calib/theory.md) (ch. 2) removes inter-camera skew from calibration by refusing to
-photograph a moving board. None of that transfers here. The robot is what the rig measures,
-and it does not hold still. The loop cannot re-read for a better-aligned pair either:
-§16.3's 2 ms threshold costs seven frames out of eight, which at 119 fps is a 60 ms wait.
-Nor can it buffer a future frame and interpolate between the two, because latency is the
-quantity this pipeline exists to minimise.
-
-What remains is to be *honest* about it. The grabber records each camera's own capture time,
-so the rig measures the skew on every frame. That turns an unknown error into a known one,
-and the covariance can carry it.
-
-### 17.1 The correction
-
-View $i$ observes the robot at its own time $t_i$. Write $\Delta_i = t_{\text{ref}} - t_i$
-with $t_{\text{ref}}$ the mean of the stamps, and let $\hat v$ be the filter's velocity
-estimate with covariance $P_{vv}$. A Taylor expansion about $t_i$ gives
-
-$$x_i(t_{\text{ref}}) = x_i(t_i) + v\,\Delta_i + \tfrac{1}{2}a\,\Delta_i^2 + O(\Delta_i^3)$$
-
-Substituting $\hat v$ for the unknown $v$ and dropping the acceleration term leaves a
-first-order correction whose error has two sources: the velocity estimate is uncertain, and
-the acceleration term was discarded. Both are known quantities, so both are charged:
-
-$$\boxed{\;\Sigma_i' = \Sigma_i + P_{vv}\,\Delta_i^2 + \left(\tfrac{1}{2}a_{\max}\Delta_i^2\right)^2 I\;}$$
-
-The first term is the view's own measurement noise (§12.2's anisotropic ellipsoid, tight
-across the optical axis and loose along it). The second is the shift's uncertainty, growing
-as $\Delta^2$. The third bounds the unmodelled acceleration. It uses **the same $a_{\max}$ that sets the
-filter's process noise**, so one number governs both. The two cannot drift apart and quietly
-disagree about how violently the robot can manoeuvre.
-
-Only then does the existing information-weighted fusion run. It does not discard a skewed
-view. It weights that view down by exactly its own degradation, which is what fusing in
-information form is for.
-
-### 17.2 Why consistency, not accuracy, is the test
-
-An inflated covariance is trivially "safe": multiply it by ten and no gate will ever fire
-spuriously. It is also useless, because the filter will then ignore good measurements. The
-quantity that must be right is the **normalised error**
-
-$$\text{NIS} = e^\top \Sigma'^{-1} e, \qquad \mathbb{E}[\text{NIS}] = 3$$
-
-for a three-degree-of-freedom position. `test_timing.py` measures it over 400 trials at 8 ms
-of skew, one full frame period, which is the worst case rather than the median. The robot
-translates at 40 mm/s:
-
-| | position error | normalised error |
-|---|---|---|
-| uncorrected | 0.220 mm | 6.53 |
-| shift and inflate | 0.125 mm | 2.88 |
-
-The error nearly halves, which is the visible result. The important number is the second
-column: uncorrected fusion is overconfident by $2.2\times$, and after correction the
-covariance is honest to within the sampling noise of the experiment. A filter fed the first
-row believes skewed frames and lets them pull the state. Fed the second, it weights them
-correctly and absorbs the error.
-
-### 17.3 Does it even matter at hover?
-
-Worth computing rather than assuming, because §13 sets a floor no estimator beats and a
-correction below that floor is decoration. The displacement between the two views is
-$v\Delta$. Compare it against §12.2's anisotropic noise: $\sigma_{\text{lat}} = 0.078$ mm
-across the optical axis, and $\sigma_{\text{depth}} = 0.857$ mm along it.
-
-| speed | $\Delta$ | $v\Delta$ | vs $\sigma_{\text{lat}}$ | vs $\sigma_{\text{depth}}$ |
-|---|---|---|---|---|
-| 15 mm/s (hover) | 7.71 ms | 0.116 mm | **1.5×** | 0.13× |
-| 22 mm/s (hover) | 7.71 ms | 0.170 mm | **2.2×** | 0.20× |
-| 40 mm/s (transient) | 7.71 ms | 0.308 mm | **4.0×** | 0.36× |
-
-The answer is the opposite of the comfortable one. **At ordinary hover speeds the skew is
-already the dominant lateral error.** It is one and a half to two times the noise floor of
-the channel the estimator measures *best*. It is negligible only against depth, and only because
-depth is ten times worse to start with. Being small next to the pipeline's weakest number is
-not a defence.
-
-This inverts the usual intuition about the two channels. §12.2 establishes depth as the weak
-axis by construction, so attention goes there. But depth is weak from *geometry*, which no
-timing fix changes. The lateral channel is precise enough that a few milliseconds of skew is
-the largest thing left in it. An uncorrected 0.17 mm lateral bias then sits underneath every
-hover measurement, correlated with velocity, which is exactly the shape a controller mistakes
-for real motion.
-
-Running at $640\times400$ would cut $\Delta$ to 2.39 ms and bring hover back under the floor
-(0.5–0.7×). That is a genuine second lever if the lateral channel ever becomes the binding
-constraint, at the cost of §12's corner precision. The correction costs a handful of
-floating-point operations per frame and needs no such trade.
-
-### 17.4 What does not work
-
-* **Reusing the calibration fix.** Corner-level time alignment needs the frames on either
-  side of the one it corrects. That costs a frame of latency, in the loop where latency is
-  the cost function.
-* **Rejection sampling for a low-skew pair.** §16.3's 2 ms threshold delivers 16 pairs/s out
-  of 119. A control loop cannot drop seven frames in eight to get a prettier one.
-* **Assuming simultaneity.** Until this section, `StereoPoseEstimator.update` called its
-  frames "simultaneous" and stamped them with a single `t`. That assumption is wrong by up
-  to a full frame period. It stayed invisible because the error it produces looks exactly
-  like measurement noise, until you compute the NIS.
-
-### 17.5 Correspondence with the implementation
-
-| Model element | Code |
-|---|---|
-| Per-camera capture times | `sources.StereoCamera.last_stamps` |
-| First-order shift, inflation terms (§17.1) | `stereo.fuse(stamps=, velocity=, vel_cov=)` |
-| Velocity covariance $P_{vv}$ | `filter._ConstantVelocity.rate_cov` |
-| Shared $a_{\max}$ | `filter.ACCEL_MM_S2`, imported by `stereo` |
-| Skew carried into the log | `StereoPose.skew_ms` |
-| Consistency check (§17.2) | `pose/test_timing.py` |
-| Calibration's opposite choice | [§16](../calib/theory.md) (ch. 2) |
+The largest single contributor was none of the algorithms: `THRESH` had been carried over
+from renders with a comment explaining that it had been considered and left alone, and it
+was cutting through a quarter of the rim. The second was `RADIUS_BENCH_MM` describing an
+edge the pipeline had stopped measuring. Both were constants with reasons attached, and
+the reasons had expired.

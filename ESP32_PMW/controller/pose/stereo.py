@@ -1373,55 +1373,31 @@ class StereoPoseEstimator:
             plate = plate.update(gray)
 
         if self.direct:
-            # The evidence map answers "where may the robot be?" itself, so none of the
-            # mask pipeline is load-bearing here. A plate still helps where one exists:
-            # it subtracts static thin structures and gives the better seed.
+            # The evidence map, for the *joint* two-view solve only. Refining each view
+            # separately against it was removed: watching the overlay, the per-view fit
+            # comes apart exactly where the seed does, and the seed is the steadier of
+            # the two by six times. See `theory.md` 16.23 and 16.24.
             w = segmod.ring_weight(gray, background=plate)
-            # The plate mask is the better seed where a plate exists -- see
-            # `segment_ring`. Without one the evidence map seeds itself.
-            tracked = self._prev_ellipse.get(cam.name)
-            if plate is not None:
-                seg = segmod.segment(frame, thresh=self.thresh,
-                                     min_area=self.min_area, background=plate)
-            else:
-                seg = segmod.segment_ring(gray, weight=w)[0]
-
-            if seg is None and tracked is not None:
-                # Segmentation found nothing, but the rim was here a frame ago and the
-                # evidence map does not need a mask to be fitted to. Refitting from the
-                # tracked ellipse answers where dropping the view would not, and the
-                # `ridge` it comes back with says whether the answer is worth anything.
-                got = segmod.fit_ellipse_image(w, tracked, coarse=0.0)
-                if got is not None:
-                    seg = segmod.Segmentation(
-                        mask=None, contour=segmod.ellipse_points(got.ellipse),
-                        ellipse=got.ellipse, area_px=0.0,
-                        n_points=segmod.RING_SAMPLES, fit_rms_px=float("nan"),
-                        threshold=0, t_ms=0.0,
-                    )
-            if seg is None:
-                return None, [], None, w
-
-            # Seed from this view's own last good fit before the map's own seed. Tracked,
-            # the seed is a frame old and needs no coarse pass; cold, it does.
-            got = (segmod.fit_ellipse_image(w, tracked, coarse=0.0)
-                   if tracked is not None else None)
-            # Re-acquire against `_track_ridge`, never `min_ridge`. They answer different
-            # questions -- "is this worth reporting" and "is this worth seeding the next
-            # frame from" -- and `never_reject` drives the first to zero. Tied together,
-            # a collapsed fit became the next seed and the track never recovered: on
-            # `2026-08-28_135533` camera A sat at a 158 px major where the ring is 250.
-            if got is None or got.ridge < self._track_ridge:
-                got = segmod.fit_ellipse_image(w, seg.ellipse)
-
-            if got is not None:
-                seg.ellipse_mask = seg.ellipse
-                seg.ellipse = got.ellipse
-                seg.evidence, seg.coverage, seg.ridge = (
-                    got.evidence, got.coverage, got.ridge
+            seg = (segmod.segment(frame, thresh=self.thresh, min_area=self.min_area,
+                                  background=plate)
+                   if plate is not None else segmod.segment_ring(gray, weight=w)[0])
+            if seg is None and self._prev_ellipse.get(cam.name) is not None:
+                # Segmentation found nothing this frame, but the rim was here a frame
+                # ago and the robot cannot have gone far in 1/60 s. Answering from the
+                # previous ellipse is worth the ten frames per flight it recovers, and
+                # the joint solve still measures the pose against *this* frame's
+                # evidence map -- only the seed is a frame old.
+                seg = segmod.Segmentation(
+                    mask=None, ellipse=self._prev_ellipse[cam.name],
+                    contour=segmod.ellipse_points(self._prev_ellipse[cam.name]),
+                    area_px=0.0, n_points=segmod.RING_SAMPLES,
+                    fit_rms_px=float("nan"), threshold=0, t_ms=0.0,
                 )
-            keep = got is not None and got.ridge >= self._track_ridge
-            self._prev_ellipse[cam.name] = got.ellipse if keep else None
+            if seg is None:
+                self._prev_ellipse[cam.name] = None
+                return None, [], None, w
+            self._prev_ellipse[cam.name] = seg.ellipse
+
         else:
             w = None
             seg = segmod.segment(frame, thresh=self.thresh, min_area=self.min_area,

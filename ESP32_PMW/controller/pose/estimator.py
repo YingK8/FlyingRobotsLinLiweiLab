@@ -97,25 +97,25 @@ RADIUS_BY_APPEARANCE = {
 
 #: The bench rig's measured radius, for `bright` footage that is not a render.
 #:
-#: **9.95, not the 10.05 first fitted.** That first sweep ran the estimator with its own
-#: gates active, so it was scored on the frames that survived a radius rather than on all
-#: of them -- the answer partly chose its own evidence. Re-swept with the cross-view gate
-#: open and only frames whose fit is strong in *both* views (ridge >= 10), the two flights
-#: agree:
+#: **10.2, not the 9.95 fitted against the direct fit.** This constant tracks whichever
+#: ellipse is actually reported, and the effective radius is a property of *which edge
+#: the measurement cuts* (S16.7). 9.95 belonged to `segment.fit_ellipse_image`, which
+#: settles on the rim's darkness ridge -- its centre-line. That fit has been removed
+#: (`theory.md` 16.24) and the mask fit reports instead, which hulls the rim's **outer**
+#: edge, so the constant moves outward with it. Swept with the mask fit reporting:
 #:
-#:   radius mm      9.90   9.95   9.975  10.00  10.05  10.20
-#:   131552 median  0.91   0.50   0.77   1.15   2.05   4.81   (upright take)
-#:   092117 median  1.77   1.08   0.88   1.02   1.65   4.21
+#:   radius mm            9.95   10.10  10.20
+#:   131552  under 5 mm   74.6%  98.1   98.1
+#:           discrepancy p50  4.50   1.85   1.08
+#:   135533  under 5 mm   34.7%  95.9   95.3
+#:           discrepancy p50  5.35   2.73   1.21
 #:
-#: Passes over 9.95-9.975; 9.95 is the sharper minimum and comes from the take flown
-#: upright, which is the one with ground truth (`theory.md` 16.15).
-#:
-#: **The half-percent mattered more than it looks.** A radius error is a systematic depth
-#: offset along each camera's own axis, and the axes point different ways, so it lands
-#: directly on cross-view discrepancy. At 10.05 only 98% of strong-fit frames came under
-#: the 5 mm gate and at 10.20 just 66%; at 9.95, 100% do. Frames with visibly perfect
-#: segmentation were being rejected for it.
-RADIUS_BENCH_MM = 9.95
+#: Both flights agree, and the sharpness of it is the point: at 9.95 barely a third of
+#: `135533` clears the 5 mm gate and at 10.20 it is 95%. 10.10 is marginally better on
+#: orientation (>30 deg out 3.2/1.5% against 3.7/2.0) and 10.20 clearly better on
+#: position, so 10.20 is taken. It lands where `RADIUS_BY_APPEARANCE["dark"]` already
+#: sits, which is the same measurement on the same kind of edge.
+RADIUS_BENCH_MM = 10.2
 RADIUS_MM = RADIUS_BY_APPEARANCE[segmod.APPEARANCE]
 
 DEFAULT_INTRINSICS = (

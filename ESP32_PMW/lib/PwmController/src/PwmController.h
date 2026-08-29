@@ -10,6 +10,17 @@
 
 #define FREQ_FILTER_SIZE 5
 
+// Gate polarity of the commutation ("phase") pin, set per board in
+// platformio.ini. 1 = the pin feeds an external inverter before the driver's
+// direction input (PWM_amp: NC7SVU04 -> VNH5019 INA/INB), so driving the coil
+// means outputting LOW. 0 = the pin drives the direction input directly
+// (DRV8874 PH in PH/EN mode, which makes its own complement internally).
+// Getting this wrong inverts every channel: the field still rotates, but every
+// coil is 180 deg out of the commanded phase.
+#ifndef GATE_ACTIVE_LOW
+#define GATE_ACTIVE_LOW 1
+#endif
+
 struct PhaseParams {
   unsigned long startUs;
   unsigned long endUs;

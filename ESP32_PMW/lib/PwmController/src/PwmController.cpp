@@ -6,6 +6,15 @@
 #define APB_CLK_FREQ 80000000UL
 #endif
 
+// See GATE_ACTIVE_LOW in PwmController.h.
+#if GATE_ACTIVE_LOW
+#define GATE_ON_LEVEL 0
+#define GATE_OFF_LEVEL 1
+#else
+#define GATE_ON_LEVEL 1
+#define GATE_OFF_LEVEL 0
+#endif
+
 namespace {
 bool configureCarrierTimerForFreq(ledc_mode_t mode,
                                   ledc_timer_t timer,
@@ -107,10 +116,10 @@ void PwmController::begin(float initialFreqHz) {
         gpio_reset_pin(_pins[i]);
         gpio_set_direction(_pins[i], GPIO_MODE_OUTPUT);
         
-        // FIX 1: Set idle state to HIGH (1). 
-        // Because of the logic inverter, setting this HIGH ensures the H-Bridge receives LOW, 
-        // protecting it from phantom-powering via ESD diodes.
-        gpio_set_level(_pins[i], 1); 
+        // Idle = not driving. On the inverter boards that is HIGH (the bridge
+        // receives LOW), which also protects it from phantom-powering via the
+        // ESD diodes; on a direct-drive board it is LOW.
+        gpio_set_level(_pins[i], GATE_OFF_LEVEL); 
     }
 
     setGlobalFrequency(initialFreqHz);
@@ -210,9 +219,8 @@ void IRAM_ATTR PwmController::_timerCallback(void* arg) {
                       (timeInCycle >= start || timeInCycle < end) : 
                       (timeInCycle >= start && timeInCycle < end);
         
-        // ACTIVE LOW LOGIC: Due to the NC7SZ04P5X inverter, to turn the H-Bridge ON (HIGH), 
-        // the ESP32 must output LOW (0). To turn it OFF, the ESP32 outputs HIGH (1).
-        gpio_set_level(self->_pins[i], active ? 0 : 1);
+        // Polarity is board-dependent; see GATE_ACTIVE_LOW in PwmController.h.
+        gpio_set_level(self->_pins[i], active ? GATE_ON_LEVEL : GATE_OFF_LEVEL);
     }
 }
 
@@ -403,6 +411,11 @@ void PwmController::enableCurrentSense(const gpio_num_t *adcPins,
                                          const float *sensPerVolt,
                                          float overcurrentTripA) {
     if (!adcPins || !sensPerVolt) return;
+    // No CS wiring on this rig (constants.h maps the ADC pins to GPIO_NUM_NC):
+    // stay off rather than filter analogRead(-1) zeros into a fake 0 A that the
+    // balance loop would then "correct" toward.
+    for (int i = 0; i < _numChannels && i < 4; i++)
+        if (adcPins[i] == GPIO_NUM_NC) return;
     if (!_sense) _sense = new CurrentSense(adcPins, sensPerVolt);
     _sense->seed(); // coils must be OFF here (forceAllGatesLow + carriers at 0)
     _overcurrentTripA = overcurrentTripA;

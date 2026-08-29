@@ -45,7 +45,44 @@ Analysis / automation Python lives in `ai/` (run with `uv run python ai/<script>
 
 ## Channel Map
 
-Authoritative source: [`src/constants.h`](src/constants.h).
+Authoritative source: [`src/constants.h`](src/constants.h). Two maps, selected by
+`SWIM_SETUP`.
+
+**Swim rig — DRV8874 on an Adafruit ESP32 Feather V2, `SWIM_SETUP=1`,
+`GATE_ACTIVE_LOW=0`:**
+
+| Index | Name | PH pin (direction) | EN pin (carrier) | CCW phase |
+|---|---|---|---|---|
+| 0 | A | GPIO 14 (D14) | GPIO 26 (A0) | 90° |
+| 1 | B | GPIO 32 (D32) | GPIO 25 (A1) | 270° |
+| 2 | C | GPIO 33 (D33) | GPIO 21 (MISO) | 180° |
+| 3 | D | GPIO 27 (D27) | GPIO 4 (A5) | 0° |
+
+Two Feather traps the `isOutputCapable` `static_assert` in `constants.h` now
+catches at compile time: the **A2/A3/A4** labels are GPIO 34/39/36, which are
+input-only on the ESP32 and cannot drive anything, and GPIO 5/12/15 are
+boot-strap pins — a boot-time high on an `EN` line energizes that coil before
+`setup()` runs.
+
+The DRV8874 runs in **PH/EN mode**, which needs `PMODE` tied logic low and
+`nSLEEP` high; `PMODE` is latched on the `nSLEEP` rising edge, so it cannot be
+changed while running. `PWM_PINS` drive `PH` (direction), `CARRIER_PINS` drive
+`EN` at `PWM_FREQ` (5 kHz) for amplitude, and the driver gates the two together
+in silicon:
+
+| nSLEEP | EN | PH | OUT1 | OUT2 | |
+|---|---|---|---|---|---|
+| 1 | 0 | X | L | L | Brake — **0 % carrier is a real off** |
+| 1 | 1 | 0 | L | H | Reverse |
+| 1 | 1 | 1 | H | L | Forward |
+
+`EN/IN1` and `PH/IN2` carry internal 100 kΩ pulldowns, so the outputs stay
+Hi-Z until the ESP32 configures its pins — boot is safe. `IPROPI` reports
+450 µA/A with no shunt resistor, which is how current sense (and with it the PI
+balance loop, inert on swim today) would come back: pick `RIPROPI`, route it to
+an ADC pin, and set `ADC_PINS` / `SENS`.
+
+**Flight rig — VNH5019 + NC7SVU04, `SWIM_SETUP=0`, `GATE_ACTIVE_LOW=1`:**
 
 | Index | Name | PWM pin | Carrier pin | Current-sense ADC | CCW phase |
 |---|---|---|---|---|---|
@@ -53,6 +90,11 @@ Authoritative source: [`src/constants.h`](src/constants.h).
 | 1 | B | GPIO 25 | GPIO 26 | GPIO 39 | 270° |
 | 2 | C | GPIO 18 | GPIO 19 | GPIO 34 | 180° |
 | 3 | D | GPIO 22 | GPIO 23 | GPIO 35 | 0° |
+
+Here the phase pin feeds an inverter before `INA`/`INB`, so energizing a coil
+means driving the pin **low** — that is what `GATE_ACTIVE_LOW` selects. Set it
+wrong and every channel sits 180° from its commanded phase: the field still
+rotates, so it fails quietly.
 
 Rotation order (CCW): A → C → B → D. CW swaps A and B to 270°/90°; both phase
 sets live in `src/drive_common.h` as `PHASES_CCW` / `PHASES_CW`.

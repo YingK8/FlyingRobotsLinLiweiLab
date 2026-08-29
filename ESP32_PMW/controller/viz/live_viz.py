@@ -624,8 +624,14 @@ class LiveViz:
             # Polled by the loop, not pushed through a callback: every other control
             # here is read the same way, and a callback would be writing the
             # estimator's threshold from the render thread while the loop reads it.
+            # The range brackets the default rather than being fixed at [100, 250].
+            # It was fixed, and when `segment.THRESH` moved to 72 for the black
+            # backdrop the slider refused its own initial value, `add_slider` raised,
+            # and the whole GUI was disabled -- a constant in one module silently
+            # turning off the viewer in another.
+            lo, hi = self._thresh_range()
             self._thresh = gui.add_slider(
-                "threshold", min=100, max=250, step=1,
+                "threshold", min=lo, max=hi, step=1,
                 initial_value=self._default_thresh(),
             )
             self.show_mask = gui.add_checkbox("mask", True)
@@ -856,6 +862,13 @@ class LiveViz:
 
         return int(segment.DARK_THRESH if segment.APPEARANCE == "dark"
                    else segment.THRESH)
+
+    @classmethod
+    def _thresh_range(cls):
+        """Slider bounds that always contain the default, whatever it has been set to."""
+
+        d = cls._default_thresh()
+        return min(40, d), max(250, d)
 
     @property
     def thresh(self):

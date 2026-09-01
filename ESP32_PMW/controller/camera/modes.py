@@ -36,9 +36,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. camera is stage 1 of 4.
-sys.path[:0] = [str(HERE)]
 
-import elp as cammod  # noqa: E402
+from controller.camera import elp as cammod
 
 RESULTS = HERE.parents[1] / "results" / "elp"
 

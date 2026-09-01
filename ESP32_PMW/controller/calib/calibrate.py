@@ -365,8 +365,6 @@ def calibrate_intrinsics(
             f"camera {name}: {len(obj_pts)} usable views, need {MIN_VIEWS}"
         )
 
-    # Two passes: incidence needs a pose, a pose needs K, and K is what is being solved.
-    # The first fit is only ever used to measure the angles the second one drops.
     rms, K, dist, rvecs, _, std_K, _, per_view = cv2.calibrateCameraExtended(
         obj_pts, img_pts, image_size, None, None
     )
@@ -614,7 +612,7 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
     """A capture bag -> a gated result. Everything downstream reads the returned dict."""
 
     views_a, views_b, image_size = load_views(spec, pair_dir)
-    from capture import read_meta
+    from controller.calib.capture import read_meta
     elp_ids = read_meta(pair_dir).get("elp_ids", [])
     print(f"image size {image_size}\n")
 
@@ -628,7 +626,7 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
     )
     print()
 
-    from results import acceptance, stereo_residuals, structure_report, uncertainty_um
+    from controller.calib.results import acceptance, stereo_residuals, structure_report, uncertainty_um
 
     resid = stereo_residuals(
         pairs,
@@ -724,7 +722,7 @@ def main(argv=None):
         f"board {spec.name}: {spec.square_mm} mm squares, {spec.marker_mm} mm markers"
     )
     if not a.no_capture:
-        from capture import capture  # cameras only when actually shooting
+        from controller.calib.capture import capture  # cameras only when actually shooting
 
         capture(
             a.bag,
@@ -736,8 +734,8 @@ def main(argv=None):
         )
 
     cal = run_calibration(spec, a.bag)
-    from results import write_results
-    from plots import coverage_figure, figures, undistort_figure
+    from controller.calib.results import write_results
+    from controller.calib.plots import coverage_figure, figures, undistort_figure
 
     coverage_figure(spec, a.bag, a.out)
     figures(cal["pairs"], cal["image_size"], cal["resid"], out_dir=a.out)

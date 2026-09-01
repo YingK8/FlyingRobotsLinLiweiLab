@@ -18,8 +18,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from calibrate import HERE, SPEC, make_spec  # noqa: E402
+from controller.calib.calibrate import HERE, SPEC, make_spec
 
 PAGES = {"letter": (215.9, 279.4), "a4": (210.0, 297.0)}
 

@@ -37,10 +37,9 @@ import cv2
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. camera is stage 1 of 4.
-sys.path[:0] = [str(HERE)]
 
-import sources  # noqa: E402
-from sources import default_backend  # noqa: E402
+from controller.camera import sources
+from controller.camera.sources import default_backend
 
 DEFAULT_PATH = HERE / "elp_camera.json"
 

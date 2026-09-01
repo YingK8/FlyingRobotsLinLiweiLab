@@ -20,16 +20,15 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 HERE_ = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE_), str(HERE_.parent / "camera")]
-from calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, SPEC,  # noqa: E402
+from controller.calib.calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, SPEC,
                        fit_corners,
                        detect, intrinsics_from_dir, pair_views, refine_extrinsic,
                        seed_extrinsic, solve_board_pose)
-from capture import (_look, _pose_key, _rough_K, capture, gates,  # noqa: E402
+from controller.calib.capture import (_look, _pose_key, _rough_K, capture, gates,
                      read_meta, solo_ok, write_meta)
-from rig import StereoRig  # noqa: E402
-import sources  # noqa: E402
-from zeroing import frame_from_normal  # noqa: E402
+from controller.calib.rig import StereoRig
+from controller.camera import sources
+from controller.calib.zeroing import frame_from_normal
 
 def scale_check(pairs, K_a, dist_a, K_b, dist_b, T_ba, spec, holdout=None):
     """Triangulated corner distances vs. the board's known geometry, in mm."""

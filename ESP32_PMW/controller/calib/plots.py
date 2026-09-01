@@ -10,13 +10,12 @@ import cv2
 import matplotlib
 import numpy as np
 
-sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from calibrate import MAX_INCIDENCE_DEG, OUT_DIR, PAIR_DIR, load_views  # noqa: E402
-from results import MAX_RMS_PX  # noqa: E402
+from controller.calib.calibrate import MAX_INCIDENCE_DEG, OUT_DIR, PAIR_DIR, load_views
+from controller.calib.results import MAX_RMS_PX
 
 if not sys.stdout.isatty():
     matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 
 def coverage_figure(spec, pair_dir, out_dir=None):

@@ -22,11 +22,10 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-sys.path[:0] = [str(Path(__file__).resolve().parent.parent / "camera")]
-import identify  # noqa: E402
-import sources  # noqa: E402
+from controller.camera import identify
+from controller.camera import sources
 
-from calibrate import (MIN_COMMON_CORNERS, MIN_CORNERS, MIN_ORIENT_SPREAD_DEG,
+from controller.calib.calibrate import (MIN_COMMON_CORNERS, MIN_CORNERS, MIN_ORIENT_SPREAD_DEG,
                        MAX_INCIDENCE_DEG, NATIVE_H, NATIVE_W, PAIR_DIR,
                        SPEC, board_incidence_deg, board_normal, detect, fit_corners,
                        orientation_spread_deg, solve_board_pose)

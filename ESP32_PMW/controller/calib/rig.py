@@ -251,8 +251,7 @@ class StereoRig:
 
         import sys
 
-        sys.path[:0] = [str(Path(__file__).resolve().parent.parent / "camera")]
-        import identify
+        from controller.camera import identify
 
         idx = identify.elp_indices(n=len(self.cameras))
         stamped = set(self.meta.get("elp_ids", []))
@@ -554,6 +553,31 @@ class StereoRig:
         )
         known = {"cameras", "convention"}
         return cls(cameras=cams, meta={k: v for k, v in d.items() if k not in known})
+
+
+def check_mode(width, height, path=None):
+    """Does the calibrated rig match the camera mode you are about to fly?
+
+    Intrinsics are resolution-specific: fx, fy, cx, cy all scale with the frame. A
+    UNIFORM rescale is handled at runtime by `StereoPoseEstimator._match_scale`, which
+    applies `rig.scaled()` -- exact, since the distortion coefficients are dimensionless.
+    So this warns for real only on a mode that is not a uniform rescale of the calibrated
+    one: 800x600 and 640x480 change the aspect ratio and would need separate fx and fy
+    factors, which `_match_scale` refuses rather than fudges.
+    """
+
+    rig = json.loads(Path(path or DEFAULT_PATH).read_text())
+    got = tuple(rig.get("image_size") or ())
+    if got == (width, height):
+        print(f"rig calibrated at {width}x{height} -- matches")
+        return True
+    if got and abs(width / got[0] - height / got[1]) < 1e-3:
+        print(f"rig calibrated at {got[0]}x{got[1]}, flying {width}x{height} "
+              f"-- uniform {width / got[0]:.3f}x, rescaled exactly at runtime")
+        return True
+    print(f"*** MISMATCH: rig calibrated at {got} but flying {width}x{height}, "
+          f"which is not a uniform rescale. Re-run the calibration cell. ***")
+    return False
 
 
 def report(

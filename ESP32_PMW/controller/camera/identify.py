@@ -40,10 +40,9 @@ from collections import namedtuple
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE)]
 
-import elp  # noqa: E402
-import sources  # noqa: E402
+from controller.camera import elp
+from controller.camera import sources
 
 Device = namedtuple("Device", "name unique_id")
 

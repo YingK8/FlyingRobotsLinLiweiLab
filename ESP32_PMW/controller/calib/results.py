@@ -16,9 +16,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path[:0] = [str(Path(__file__).resolve().parent)]
-from calibrate import OUT_DIR, RIG_PATH, SQUARE_MM, pose_matrix  # noqa: E402
-from rig import Camera, StereoRig  # noqa: E402
+from controller.calib.calibrate import OUT_DIR, RIG_PATH, SQUARE_MM, pose_matrix
+from controller.calib.rig import Camera, StereoRig
 
 # Two kinds of gate, and only one of them is a matter of taste.
 #

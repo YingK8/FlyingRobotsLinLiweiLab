@@ -46,18 +46,6 @@ import numpy as np
 
 DEFAULT_PATH = Path(__file__).resolve().parent / "tilt_calibration.json"
 
-# Which rig appearance is in force. Defined here rather than in `pose/segment.py`,
-# where it is used most, because it is the key the *calibration files* are named
-# by -- every appearance carries its own fitted constants -- and calibration runs
-# before estimation. `segment.py` re-exports it, so `segment.APPEARANCE` still
-# resolves everywhere it always did.
-#
-# Read at import. Setting POSE_APPEARANCE after importing the pose package leaves
-# the previous appearance's radius and calibration in force, silently.
-# `dark` is the rig on the bench: a black rim against the white foam backdrop. This said
-# `bright` long after the rig changed, and it is most of why an offline run returned a
-# poses.csv with a header and no rows -- `bright` thresholds at 128 on a scene whose median
-# is 144, so the hull takes the backdrop and every downstream gate refuses it.
 APPEARANCE = os.environ.get("POSE_APPEARANCE", "bright")
 
 
@@ -103,12 +91,8 @@ class TiltCalibration:
         form. Measured on renders of the rim ring alone, ``excess/sin(theta)`` is
         constant at 0.47-0.63 mm across 15-70 degrees of tilt, giving k ~ 0.059.
 
-        This matters beyond tidiness. The previous model was a quadratic in the
-        *angle*, which cannot represent the above and left a residual that crossed
-        zero twice; 84% of the remaining shape-error variance was still a
-        deterministic function of tilt. The cylinder model is also monotone by
-        construction on ``[0, 90 - atan k]``, correct at ``theta = 0`` without
-        needing that imposed, and extrapolates -- a fitted curve does none of these.
+        The model is monotone by construction on ``[0, 90 - atan k]``, correct at
+        ``theta = 0`` without needing that imposed, and extrapolates.
 
         **What it does not cover.** The mast adds a separate, much sharper
         contamination that switches on near 57 degrees of tilt (measured: the peak

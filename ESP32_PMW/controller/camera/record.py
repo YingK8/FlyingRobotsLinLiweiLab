@@ -22,8 +22,7 @@ is otherwise idle waiting for the next pair.
 
 Each take is its own **flight**: SPACE starts one, SPACE stops it, and it lands in a dated
 folder of its own with a directory per camera. Takes are not comparable -- a different trim,
-a different day -- and writing them together used to concatenate them into one video with
-no record of where one ended.
+a different day -- so they must not share a directory.
 
     results/flights/2026-08-25_133327/A/A.mp4
                                      /B/B.mp4
@@ -46,12 +45,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE)]
 
-import identify  # noqa: E402
-import sources  # noqa: E402
+from controller.camera import identify
+from controller.camera import sources
 
 DEFAULT_DIR = HERE.parents[1] / "results" / "flights"
 FOURCC = "avc1"          # H.264 in an .mp4. See the module docstring for why lossy is
@@ -61,12 +60,17 @@ QUEUE_DEPTH = 64         # bounded: an encoder that falls behind must drop and s
 
 
 # ---- one folder per flight ----------------------------------------------------------
+def _skew(src):
+    """Capture-skew stats, or {} for a source that does not track them."""
+
+    return src.skew_stats() if hasattr(src, "skew_stats") else {}
+
+
 def new_flight(root=DEFAULT_DIR, tags="AB"):
     """A dated folder for one take, with a directory per camera. ``root/YYYY-mm-dd_HHMMSS``.
 
     One take is one flight, and takes are not comparable: a different trim, a different
-    board, a different day. Writing them into one directory used to concatenate them into
-    a single video with no record of where one ended.
+    board, a different day.
     """
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -124,9 +128,6 @@ class FlightWriter:
                 for w, f in job:
                     w.write(f)
             except Exception as e:  # noqa: BLE001
-                # One bad frame must not kill the encoder. A dead encoder used to be
-                # invisible until `close` waited forever for a `task_done` that was
-                # never coming, and the take lost its meta.json.
                 self.errors += 1
                 if self.errors == 1:
                     print(f"  encoder error (frames will be missing): {e}")
@@ -222,39 +223,9 @@ def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=60.0,
                                width=width, height=height, grayscale=True,
                                rotate180=rotate180))
 
-    work = queue.Queue(maxsize=QUEUE_DEPTH)
-    dropped = [0]
+    meta = {"camera_indices": idx, "rotate180": bool(rotate180)}
 
-    def _writer():
-        while True:
-            job = work.get()
-            try:
-                if job is None:
-                    return
-                for w, f in job:
-                    w.write(f)
-            finally:
-                work.task_done()      # so close_flight can wait for the encoder to drain
-
-    thread = threading.Thread(target=_writer, name="encode", daemon=True)
-    thread.start()
-
-    def close_flight(flight, writers, rows, n):
-        """Finish one take: flush the encoder, close the files, write what they mean."""
-
-        work.join()                             # every queued frame written before release
-        for w in writers or []:
-            w.release()
-        if flight is None:
-            return
-        write_index(flight, tags, rows, src.skew_stats() if hasattr(src, "skew_stats") else {})
-        (flight / "meta.json").write_text(json.dumps(
-            {"camera_indices": idx, "mode": [width, height], "fps": fps,
-             "rotate180": bool(rotate180), "n_frames": n, "dropped": dropped[0],
-             "created": datetime.now().isoformat(timespec="seconds")}, indent=2))
-        print(f"  {n} frame(s) -> {flight}")
-
-    flight, writers, rows, recording, t0, n = None, None, [], False, 0.0, 0
+    fw, recording, t0 = None, False, 0.0
     done = []
     sink = sources.Sink("flight recorder").open() if preview else None
     try:
@@ -268,25 +239,13 @@ def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=60.0,
             frames = list(payload) if isinstance(payload, (list, tuple)) else [payload]
 
             if recording:
-                if writers is None:
-                    h, w = frames[0].shape[:2]
-                    flight = new_flight(out_dir, tags)
-                    writers = [cv2.VideoWriter(str(flight / tag / f"{tag}.mp4"),
-                                               cv2.VideoWriter_fourcc(*FOURCC), fps,
-                                               (w, h), False) for tag in tags]
-                    if not all(x.isOpened() for x in writers):
-                        raise OSError(f"no {FOURCC} writer on this build")
-                try:
-                    work.put_nowait(list(zip(writers, frames)))
-                except queue.Full:
-                    dropped[0] += 1
-                stamps = getattr(src, "last_stamps", None) or (t,) * len(frames)
-                rows.append((n, t, getattr(src, "last_skew", 0.0), stamps))
-                n += 1
+                fw.add(t, frames, getattr(src, "last_stamps", None),
+                       getattr(src, "last_skew", 0.0))
 
             if preview:
                 view = np.hstack([f if f.ndim == 3 else
                                   cv2.cvtColor(f, cv2.COLOR_GRAY2BGR) for f in frames])
+                n = fw.n if fw else 0
                 cv2.putText(view, (f"REC {t - t0:5.1f}s  {n} frames" if recording
                                    else f"{n} frames   SPACE = record, q = quit"),
                             (10, view.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
@@ -297,53 +256,32 @@ def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=60.0,
                 if key == ord(" "):
                     recording = not recording
                     t0 = t
-                    if recording:
-                        rows, n = [], 0
+                    if recording:               # each take is its own flight folder
+                        fw = FlightWriter(out_dir, tags, fps, meta)
                         print("recording")
-                    else:                       # each take is its own flight folder
-                        print(f"stopped at {n} frames")
-                        close_flight(flight, writers, rows, n)
-                        done.append(flight)
-                        flight, writers = None, None
+                    else:
+                        print(f"stopped at {fw.n} frames")
+                        done.append(fw.close(_skew(src)))
+                        fw = None
       except KeyboardInterrupt:
         # A cell has no q; interrupting must still close the flight cleanly below.
         print("\ninterrupted")
     finally:
         if sink is not None:
             sink.close()
-        work.put(None)
-        thread.join(timeout=30.0)
-        if writers is not None:                 # quit while still rolling
-            close_flight(flight, writers, rows, n)
-            done.append(flight)
-        stats = src.skew_stats() if hasattr(src, "skew_stats") else {}
+        if fw is not None:                      # quit while still rolling
+            done.append(fw.close(_skew(src)))
+        stats = _skew(src)
         src.close()
 
     print(f"\n{len(done)} flight(s) in {out_dir}")
-    if dropped[0]:
-        print(f"  {dropped[0]} dropped: the encoder could not keep up")
     if stats:
         print(f"  capture skew: {stats}")
     return done
 
 
-def write_index(out_dir, tags, rows, stats=None):
-    """``frames.csv``: what turns two videos back into a timed stereo pair."""
-
-    path = Path(out_dir) / "frames.csv"
-    with open(path, "w") as fh:
-        for k, v in (stats or {}).items():
-            fh.write(f"# skew_{k}, {v}\n")
-        fh.write("index,t_capture,skew_s,"
-                 + ",".join(f"t_{tag.lower()}" for tag in tags) + "\n")
-        for i, t, skew, stamps in rows:
-            fh.write(f"{i},{t:.6f},{skew:.6f},"
-                     + ",".join(f"{x:.6f}" for x in stamps) + "\n")
-    return path
-
-
 def read_index(rec_dir):
-    """``(stamps, skews)`` from `write_index`, or ``(None, None)`` when it is missing.
+    """``(stamps, skews)`` from ``frames.csv``, or ``(None, None)`` when it is missing.
 
     ``stamps`` is one row per frame and one column per camera. Without it the videos can
     still be replayed, but every pair has to be assumed simultaneous, which is the
@@ -353,15 +291,12 @@ def read_index(rec_dir):
     path = Path(rec_dir) / "frames.csv"
     if not path.exists():
         return None, None
-    lines = [l for l in path.read_text().splitlines() if l and not l.startswith("#")]
-    if len(lines) < 2:
+    # comment="#" also reads the older takes, which prefixed a "# skew_n, 1082" line.
+    df = pd.read_csv(path, comment="#")
+    if df.empty:
         return None, None
-    cols = lines[0].split(",")
-    per_cam = [c for c in cols if c.startswith("t_") and c != "t_capture"]
-    rows = [l.split(",") for l in lines[1:]]
-    stamps = np.array([[float(r[cols.index(c)]) for c in per_cam] for r in rows])
-    skews = np.array([float(r[cols.index("skew_s")]) for r in rows])
-    return stamps, skews
+    per_cam = [c for c in df.columns if c.startswith("t_") and c != "t_capture"]
+    return df[per_cam].to_numpy(float), df["skew_s"].to_numpy(float)
 
 
 def open_recording(rec_dir):
@@ -375,6 +310,8 @@ def open_recording(rec_dir):
     if not videos:
         raise FileNotFoundError(f"no video in {rec_dir}")
     stamps, _ = read_index(rec_dir)
+    if stamps is None:
+        print(f"{rec_dir}: no frames.csv, so the two views are assumed simultaneous")
     return [cv2.VideoCapture(str(v)) for v in videos], stamps
 
 

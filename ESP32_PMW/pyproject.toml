@@ -24,6 +24,12 @@ dependencies = [
     "viser>=1.1.0",
 ]
 
-# No Python package to build -- this project is just scripts under controller/ and ai/.
-[tool.uv]
-package = false
+# `controller` is a real package, so every module says where its imports come from
+# (`from controller.pose import stereo`) instead of prepending sys.path by hand. uv installs
+# it editable, which is what keeps `python controller/control/z_track.py` working too.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["controller"]

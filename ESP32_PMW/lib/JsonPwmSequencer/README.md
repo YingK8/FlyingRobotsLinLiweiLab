@@ -60,7 +60,7 @@ are logged as a warning at load time but don't abort the rest of the file.
 | `addPhaseRampTask` | `channels`, `from`, `to`, `duration_ms`, `shape` | S-curve ramp of one channel's phase, others unchanged (`shape` optional) |
 | `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention |
 | `activateChannels` | `mask` (0-15 bitmask), `value` (ON carrier duty %) | instantly set carrier duty to `value` for masked channels, `0` for the rest |
-| `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation (`labelForStep()`); no hardware effect, does not advance the queue |
+| `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation; no hardware effect, does not advance the queue |
 
 For every per-channel method (`addDutyCycleTask`, `addPhaseTask`,
 `addCarrierDutyCycleTask`, and `addPhaseRampTask`), the target `"channels"` is a

@@ -62,7 +62,6 @@ void loop() {
 - Use `setDutyCycle(channel, value)` and `setPhase(channel, degrees)` to adjust at runtime.
 
 ### How to Synchronize Multiple Boards
-- Use `enableSync(syncPin)` on all boards.
 - Designate one board as master (output sync), others as clients (input sync).
 
 ### How to Change Frequency or Duty Cycle Dynamically
@@ -98,19 +97,13 @@ Lifecycle:
   field is held static rather than rotating.
 - `void run();` — drift compensation, current sampling, trip check, balance. Call
   every `loop()`.
-- `void shutdown(unsigned long rampMs = 2000);` — ramp the coils down and stop.
 - `bool rampDownStep(float stepPct);` — one step of a manual ramp-down.
 
 Drive:
 - `void setGlobalFrequency(float newHz);`
-- `void setFrequency(int channel, float newHz);`
 - `void setDutyCycle(int channel, float dutyPercent);`
 - `void setPhase(int channel, float degrees);`
 - `float getFrequency() const;` — global, no argument; `0` in DC mode.
-- `bool isDC() const;`
-- `float getPhase(int channel) const;`
-- `float getDutyCycle(int channel) const;`
-- `void enableSync(gpio_num_t syncPin);`
 
 Carrier:
 - `void initCarrierPWM(const gpio_num_t *pins, float freqHz, const float *dutyPercents);`
@@ -120,11 +113,8 @@ Carrier:
 Current sense and balance (both opt-in, see §4a):
 - `void enableCurrentSense(const gpio_num_t *adcPins, const float *sensPerVolt, float overcurrentTripA = 0.0f);`
 - `void enableCurrentBalance(const BalanceConfig &cfg = BalanceConfig(), float startDuty = 50.0f);`
-- `void setBalanceGains(float kp, float ki, float kd);`
-- `void setBalanceRamp(float pctPerMs);`
 - `const float *measuredCurrents() const;` — `float[4]` in amps, or `nullptr`.
-- `float carrierCeiling(int channel) const;`
-- `bool balanceActive() const;` / `bool currentSenseActive() const;`
+- `bool balanceActive() const;`
 - `bool overcurrentTripped() const;` — true once the latch has fired.
 
 ### 4a. Current sense and the balance loop

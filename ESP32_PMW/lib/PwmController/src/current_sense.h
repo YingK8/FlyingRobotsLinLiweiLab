@@ -26,9 +26,6 @@ public:
   // loop: the ESP32 ADC needs real settling time between conversions.
   void update(float dtMs);
 
-  // Re-zero against the current reading (coils OFF) to track warm-up drift; stop
-  // once the run starts to freeze calibration.
-  void recalibrateZero();
 
   float i_meas[N];
 

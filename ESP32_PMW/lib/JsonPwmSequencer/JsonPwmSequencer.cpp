@@ -15,12 +15,6 @@ const float PHASES_CCW[4] = {90.0f, 270.0f, 180.0f, 0.0f};
 JsonPwmSequencer::JsonPwmSequencer(PwmController *phaseCtrl)
     : PwmSequencer(phaseCtrl) {}
 
-const char *JsonPwmSequencer::labelForStep(size_t i) const {
-  if (i >= _stepLabels.size())
-    return "";
-  return _stepLabels[i].c_str();
-}
-
 bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
   File file = SPIFFS.open(filename, "r");
   if (!file) {

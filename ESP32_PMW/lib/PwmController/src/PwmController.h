@@ -10,6 +10,9 @@
 
 #define FREQ_FILTER_SIZE 5
 
+/// Upper bound for the callback's on-stack snapshot of PhaseParams.
+#define PWMC_MAX_CHANNELS 8
+
 struct PhaseParams {
   unsigned long startUs;
   unsigned long endUs;
@@ -29,17 +32,12 @@ public:
 
   // Configuration
   void setGlobalFrequency(float newHz);              ///< All channels, Hz.
-  void setFrequency(int channel, float newHz);       ///< One channel, Hz.
   void setDutyCycle(int channel, float dutyPercent); ///< 0-100%.
   void setPhase(int channel, float degrees);         ///< 0-360 deg.
 
   // Getters
   float getFrequency() const;            ///< Global frequency (Hz); 0 in DC mode.
-  bool isDC() const { return _dcMode; }  ///< True when the field is held static (freq <= 0).
-  float getPhase(int channel) const;     ///< Phase (deg).
-  float getDutyCycle(int channel) const; ///< Duty (%).
 
-  void enableSync(gpio_num_t syncPin); ///< Sync PWM to an external pulse on syncPin.
 
   // Carrier PWM (multi-channel). pins[]/dutyPercents[] per channel; freqHz shared.
   void initCarrierPWM(const gpio_num_t *pins, float freqHz,
@@ -78,35 +76,19 @@ public:
   void enableCurrentBalance(const BalanceConfig &cfg = BalanceConfig(),
                             float startDuty = 50.0f);
 
-  // Runtime balance tuning (the current_pid serial rig: kp=/ki=/kd=/ramp=).
-  void setBalanceGains(float kp, float ki, float kd);
   
-  void setBalanceRamp(float pctPerMs);
 
   /** @brief Latest filtered per-channel current (A), or nullptr if sensing is
    *  off. Valid for the lifetime of the controller. */
   const float *measuredCurrents() const;
 
-  /** @brief The per-channel carrier ceiling the schedule last commanded while
-   *  balance is active (what setCarrierDutyCycle stored), or the live carrier
-   *  duty when balance is off. */
-  float carrierCeiling(int channel) const;
 
   bool balanceActive() const { return _balance != nullptr; }
 
-  bool currentSenseActive() const { return _sense != nullptr; }
 
   /** @brief True once an overcurrent trip has latched all carriers off. */
   bool overcurrentTripped() const { return _tripped; }
 
-  /**
-   * @brief Gracefully de-energize all coils: ramp every carrier duty down to 0
-   *        over rampMs, then stop the periodic phase timer so all output halts.
-   *        The controller/timer remain allocated (unlike the destructor).
-   *        BLOCKING (uses delay()); for a non-blocking ramp use rampDownStep().
-   * @param rampMs Duration of the linear ramp-down in milliseconds.
-   */
-  void shutdown(unsigned long rampMs = 2000);
 
   /**
    * @brief One monotonic ramp-down step for a non-blocking safety ramp. Reads
@@ -128,9 +110,6 @@ private:
   static void IRAM_ATTR _timerCallback(void *arg);
   static void IRAM_ATTR _onSyncInterrupt();
   void updatePhaseParams(int channel);
-  // Actually write a carrier duty to the LEDC hardware (the body that
-  // setCarrierDutyCycle used to be). setCarrierDutyCycle now routes through here
-  // for passthrough, or stashes a ceiling for the balance loop to drive.
   void _writeCarrier(int channel, float dutyPercent);
   // Sense/balance work done inside run() when opted in.
   void _serviceCurrentLoop();
@@ -164,6 +143,7 @@ private:
 
   // State Arrays
   float *_phaseOffsetsPct;
+  static float _wrapPct(float degrees);
   float *_dutyCycles;
   PhaseParams *_params;
   float _globalFreqHz; // New global frequency variable

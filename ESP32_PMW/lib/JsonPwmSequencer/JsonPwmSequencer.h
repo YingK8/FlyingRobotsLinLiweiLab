@@ -20,9 +20,6 @@ public:
    */
   bool loadFromJsonFile(const char *filename);
 
-  /** @brief Telemetry label for queue step `i`, or "" if none / out of range.
-   *  Callers poll labelForStep(currentIndex()) each loop() and print on change. */
-  const char *labelForStep(size_t i) const;
 
 private:
   std::vector<String> _stepLabels;

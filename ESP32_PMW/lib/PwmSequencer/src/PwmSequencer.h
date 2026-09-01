@@ -113,13 +113,6 @@ public:
    *  callers track per-step data in parallel with the queue. */
   size_t currentIndex() const { return _currentFrameIdx; }
 
-  /** @brief Carrier duty (%) the schedule last COMMANDED for channel `i`, or NAN
-   *  if none yet. This is the sequencer's intent, independent of what wrote the
-   *  actual carrier register: a current-balance overlay reads it as the
-   *  per-channel ceiling to regulate beneath. Held across WAIT steps. */
-  float getCommandedCarrier(int i) const {
-    return (i >= 0 && i < 4) ? _currentCarrierDutyCycles[i] : NAN;
-  }
 
 private:
   PwmController *_phaseCtrl;

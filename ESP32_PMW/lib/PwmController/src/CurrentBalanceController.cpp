@@ -25,10 +25,6 @@ void CurrentBalanceController::step(const float *iMeas, float dtMs,
                                     const float *ceiling, float *dutyOut) {
   const float rateScale = dtMs / _cfg.nominalTickMs;
 
-  // A channel is "active" only if the schedule commands a (non-NAN) carrier
-  // level for it. Untouched channels stay NAN (see JsonPwmSequencer) -> park
-  // them off and exclude from the balance math. maxCeil = the largest commanded
-  // carrier, used to normalize the per-channel ratios below.
   bool active[N];
   int firstActive = -1;
   float maxCeil = 0.0f;

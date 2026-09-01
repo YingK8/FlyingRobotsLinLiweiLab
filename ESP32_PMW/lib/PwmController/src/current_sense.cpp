@@ -35,7 +35,3 @@ void CurrentSense::update(float dtMs) {
     i_meas[i] = _sensPerVolt[i] * (_csMv[i] - _adcZeroMv[i]) / 1000.0f;
 }
 
-void CurrentSense::recalibrateZero() {
-  for (int i = 0; i < N; i++)
-    _adcZeroMv[i] = _csMv[i];
-}

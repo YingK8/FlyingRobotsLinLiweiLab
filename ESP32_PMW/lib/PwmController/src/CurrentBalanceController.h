@@ -63,11 +63,6 @@ public:
   // channel starts equal at (e.g. 50%).
   void reset(float startDuty);
 
-  // One control step (no I/O; caller applies dutyOut to hardware).
-  //   iMeas[N]   filtered per-channel current (A)
-  //   dtMs       real interval since the previous call
-  //   ceiling[N] per-channel max duty (%) the schedule commands (NAN => parked)
-  //   dutyOut[N] written: new per-channel carrier duty
   void step(const float *iMeas, float dtMs, const float *ceiling,
             float *dutyOut);
 
@@ -78,10 +73,6 @@ public:
     _cfg.kd = kd;
   }
   void setRamp(float pctPerMs) { _cfg.minRampPctPerMs = pctPerMs; }
-  const BalanceConfig &config() const { return _cfg; }
-  int latchedMinIndex() const { return _idxMin; }
-  bool holdFrozen() const { return _holdFrozen; }
-  float holdTarget() const { return _holdTarget; }
 
 private:
   BalanceConfig _cfg;

@@ -25,13 +25,15 @@ field while you move it.
 | 4 | `hover_controller_runner.py` | the real-time runner, and `CameraSource`: the seam |
 | 5 | `z_track.py` | altitude tracking by frequency modulation; the torque budget |
 | 6 | `link.py` | `SerialComm`: the host half of the firmware link |
-| 7 | `spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
-| 8 | `spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
-| 9 | `simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
-| 10 | `open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
-| 12 | `coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
-| 13 | `stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
-| 14 | `matlab/` | the original interactive sims these models were ported from |
+| 6b | `takeoff_report.py` | per-attempt takeoff metrics: liftoff knee, capture verdict, L/C refit. Section 18 |
+| 6c | `robust_cert.py` | exact gain/phase margins of the shipped gains, over mass and COM. Section 20 |
+| 7 | `ai/design/spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
+| 8 | `ai/design/spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
+| 9 | `ai/design/simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
+| 10 | `ai/design/open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
+| 12 | `ai/design/coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
+| 13 | `ai/design/stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
+| 14 | `ai/matlab/` | the original interactive sims these models were ported from |
 
 Sections 1–11 are the scalar altitude plant, one input and one axis. Sections 12–15 are the
 three-dimensional one, and are self-contained apart from the inertia in section 3 and the
@@ -39,19 +41,32 @@ tilt geometry in section 11.
 
 ## 4.0 Safety comes before theory
 
-**Outside FLIGHT there is no firmware watchdog. The host is the only thing that
-turns the coils off.** If the host dies without sending `stop`, the coils stay
-energised, so any entry point that energises them owes the same guarantee
-`hover_controller_runner.controller_loop` gives: `stop` from a `finally`, on every
-exit path including an unhandled exception.
+**As of 2026-08-29 there is no watchdog anywhere. Nothing stops the coils on its
+own.** The only things that de-energise them are the viser `stop` button,
+`controller/control/safe_off.py`, and the GPIO14 reset button on the board. If the
+host dies, the USB is unplugged, or a camera hangs, the coils stay driven until
+someone presses that button; the bench supply's 10 A limit is the only other ceiling.
 
-The runner layers three more on top: a measurement watchdog (no fix for `timeout`
-seconds -> `hover`, then `land`), first SIGINT -> `land`, second -> `stop`. In
-FLIGHT the firmware also holds a 500 ms command-silence watchdog, but that one is
-armed only after the first `mag=`/`freq=`, so it covers the loop and not the
-approach to it. These exist because the failure mode of a vision-driven loop is not
-a crash, it is a *silence*: and a silent position source looks exactly like a
-perfectly stationary robot.
+This was deliberate. Every automatic backstop was removed at the operator's
+instruction: the firmware's 500 ms command-silence watchdog (reported not to work in
+practice), the host's no-position-fix land, the armed-with-no-fix land, the step-out
+land, and the never-reached-FLIGHT land. What remains is manual: the `stop` and `land`
+buttons, SIGINT, and `stop` from a `finally` on every exit path including an unhandled
+exception -- which every entry point that energises the coils still owes.
+
+**The consequence is that the operator's stop button is now the safety system**, so it
+has to be correct in a way it was not. The panel's `takeoff`/`estop`/`land` flags are
+one-shot latches cleared on read, and the loop used to read them several times per tick
+behind short-circuits -- which is why stop did nothing during spin-up, why a takeoff
+press was sometimes swallowed, and why the coils sometimes restarted unasked. The rule
+that fixes all of it, and the thing not to regress: **read each latch exactly once per
+tick, into a local, at the top of one loop.** `controller/control/test_panel.py` is the
+regression guard.
+
+The original argument for the watchdogs still stands and is worth recording, since it
+is the case for putting them back: the failure mode of a vision-driven loop is not a
+crash, it is a *silence*, and a silent position source looks exactly like a perfectly
+stationary robot.
 
 ## 4.0.1 The altitude law
 
@@ -775,7 +790,7 @@ holds and the §7–§8 model is the complete story.
 §7's model is one-dimensional by construction: A3 makes the field uniform, so it applies pure
 torque, and lateral motion has nowhere to come from. Drop A3 and the picture changes
 completely. `matlab/MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` simulates the
-plant that results, and `control/spatial_model.py` is its port. The differences are
+plant that results, and `ai/design/spatial_model.py` is its port. The differences are
 structural, not incremental:
 
 | | §7–§8 | this section |
@@ -1101,7 +1116,7 @@ MATLAB does not run in this environment, so `spatial_model.py` cannot be checked
 trajectories against the original. It is pinned by invariants instead, all of which run on:
 
 ```bash
-uv run python controller/control/spatial_model.py
+uv run python ai/design/spatial_model.py
 ```
 
 They cover geometry, the field and its analytic gradient, the torque and force structure, and
@@ -1311,7 +1326,7 @@ of its role.
 
 ### 13.6 Running it
 
-`control/simulate_spatial.py` drives the loop in two modes over the same plant and controller.
+`ai/design/simulate_spatial.py` drives the loop in two modes over the same plant and controller.
 
 **Headless** (the default) runs a scripted target sequence, hold, 6 mm across, 4 mm up, then
 a diagonal, writes `spatial_mpc_sim.png`, and asserts the settling, constraint and
@@ -1351,7 +1366,7 @@ radius $d$, outward coil tilt $\theta$ and drive frequency $f$, and found geomet
 quasi-static lateral stiffness goes negative. This section derives what that quantity is a
 limit of, why it is not sufficient, and what the sufficient condition actually is.
 
-`control/open_loop_sweep.py` is the executable form. It reuses §12's model unchanged.
+`ai/design/open_loop_sweep.py` is the executable form. It reuses §12's model unchanged.
 
 ### 14.1 Where the lateral restoring force comes from
 
@@ -1600,9 +1615,9 @@ everywhere, not just at the three points it was checked on.
 | the pinned numbers in §14.3 | `open_loop_sweep._self_check` |
 
 ```bash
-uv run python controller/control/open_loop_sweep.py --self-check
-uv run python controller/control/open_loop_sweep.py            # about 25 minutes
-uv run python controller/control/open_loop_sweep.py --reuse    # cached stage A, seconds
+uv run python ai/design/open_loop_sweep.py --self-check
+uv run python ai/design/open_loop_sweep.py            # about 25 minutes
+uv run python ai/design/open_loop_sweep.py --reuse    # cached stage A, seconds
 ```
 
 ---
@@ -1832,11 +1847,11 @@ existing four; the steady ring draws constant current and needs a bench supply, 
 | the search, and the Pareto front | `optimise_array.py` |
 
 ```bash
-uv run python controller/control/coil_geometry.py --self-check
-uv run python controller/control/drive_model.py --self-check
-uv run python controller/control/stability_cert.py --self-check
-uv run python controller/control/optimise_array.py --self-check
-uv run python controller/control/optimise_array.py
+uv run python ai/design/coil_geometry.py --self-check
+uv run python ai/design/drive_model.py --self-check
+uv run python ai/design/stability_cert.py --self-check
+uv run python ai/design/optimise_array.py --self-check
+uv run python ai/design/optimise_array.py
 ```
 
 ## 16. What the measurement noise does to the loop
@@ -1901,12 +1916,1678 @@ The gain file records the noise it assumed. Gains that cannot be audited against
 conditions they were tuned for are the same failure as a constant with an expired
 reason attached, which [ch. 3 §16.26](../pose/theory.md) had already paid for twice.
 
+## 17. Starting from rest: capture, and two ideas that do not work
+
+Sections 4 and 5 model a rotor that is *already* synchronised, and so does every
+simulation in this repository -- the GUI starts at $\delta(0)=\arcsin(1/M)$,
+$\omega(0)=2\pi f_0$ (section 5.3). Capture from rest is unmodelled, and it is the thing
+that actually fails: takeoff locks at 5 Hz on some runs and not others.
+
+**Intermittency is the diagnosis.** A torque shortfall fails the same way every time. A
+capture failure fails at random, because whether a stationary rotor is caught by a field
+that is already rotating depends on the angle it happens to be resting at. Starting the
+ramp at $f_{start}$ asks the rotor to absorb $f_{start}$ of slip instantly at $t=0$; from
+the swing equation, $\dot\delta = 2\pi f_f - \omega$ with $\omega(0)=0$, so $\delta$ runs
+at $2\pi f_{start}$ and there is only a torque *pulse* of duration $\sim 1/(2 f_{start})$
+in which to be caught before the field runs away. Capture is therefore a race, decided by
+the initial angle.
+
+**Align-and-ramp removes the race.** Hold a *static* field first. The rotor is pulled to
+the one stable angle of that field, so its initial condition stops being random. Then
+begin rotating from exactly that angle with $f \to 0^+$: initial slip is zero and capture
+is by construction, not by luck. This is the classical open-loop start for a PMSM without
+position feedback, and it needs no sensing whatsoever.
+
+The hold must outlast the ring-down, not merely the movement. Section 5.5 puts the phase
+mode at $\omega_n \approx 121$ rad/s (19.2 Hz) with $\zeta \approx 0.0245$ -- about 20
+cycles, so several hundred milliseconds.
+
+**It does not work on this hardware, and the reason is the same series capacitor that
+shapes everything else in section 18.** Align-and-ramp was implemented as an `ALIGN` state
+in `src/main_flight.cpp` and measured on 2026-08-29: the entire hold logged $I = 0.00$ A on
+all four channels. A static field is DC, a capacitor in series with each coil blocks DC by
+construction, and a coil carrying no current pulls the rotor nowhere. The alignment was not
+weak, it was absent -- the rotor sat wherever it already was and the ramp started from the
+same random angle as before.
+
+The argument above is not wrong; it is inapplicable. The classical PMSM open-loop start
+assumes a coil that can be driven at DC, and this one cannot. Reviving it needs hardware:
+a bypass across the series capacitor during start-up, or a switched bank. The `ALIGN` state
+has been deleted rather than left at `ALIGN_MS = 0`, because a disabled state that reads as
+implemented is worse than no state at all. What survives is the one mechanism that does
+work -- `PwmController::setGlobalFrequency`'s `leavingDc` branch resumes rotation at the
+angle being held -- which is still what makes a start from $f \to 0^+$ continuous.
+
+### 17.1 Why the coils cannot be run at resonance at every rotation rate
+
+The obvious wish is to drive the coils near their electrical resonance -- where current,
+and so torque, is greatest -- regardless of how fast the field is turning. In this
+topology that is not available, and the reason is structural rather than a limitation of
+the firmware.
+
+Each coil carries a square wave at the field frequency with a fixed phase offset equal to
+its azimuth, $i_k(t) = I\sin(2\pi f t - \alpha_k)$, so
+
+$$\mathbf{B}(t) = \sum_k A\, i_k(t)\, \hat u_k \propto (\cos 2\pi f t,\ \sin 2\pi f t)$$
+
+a vector of constant magnitude rotating at $f$. **The coil current alternates at exactly
+the field rotation rate.** Resonance is a property of the electrical frequency, so the
+two are the same number and cannot be chosen independently.
+
+The natural workaround -- hold the electrical frequency at resonance $f_c$ and rotate
+slowly by modulating each coil's amplitude, $A_k(t) = \cos(2\pi f_s t - \alpha_k)$ --
+fails for a different reason:
+
+$$\mathbf{B}(t) = \sin(2\pi f_c t)\sum_k A_k(t)\hat u_k = \sin(2\pi f_c t)\,\mathbf{B}_s(t)$$
+
+This is a slowly-rotating vector multiplied by a scalar that **changes sign every half
+cycle** of the carrier. The rotor cannot respond at $f_c$, so it sees the carrier-cycle
+average of the torque, which is zero. The rotor buzzes; it does not turn. Decoupling
+rotation rate from electrical frequency needs hardware -- a switched capacitor bank, or a
+bypass across the series capacitor during start-up -- not a drive waveform.
+
+### 17.2 Why field-oriented control is not available here
+
+FOC would end the question of synchronism outright: reference the field to the *measured*
+rotor angle and step-out becomes impossible by construction. It is blocked by sensing, not
+by software.
+
+Commutation needs **signed per-phase current, sampled synchronously with the PWM**. The
+VNH5019 `CS` pin gives an unsigned magnitude, and it is sampled asynchronously at about
+1 kHz (`PwmController::_serviceCurrentLoop`, gated on `dtSenseMs >= 1.0f`) -- roughly 7
+samples per electrical cycle at 150 Hz. That is enough to regulate *amplitude*, which is
+what `CurrentBalanceController` does, and not enough to resolve an angle.
+
+The only rotor-angle observable in the system is vision, and section 12 of `pose/theory.md`
+shows why it cannot serve: roll about the spin axis is unobservable from the rim, and the
+blades alias above $\text{fps}/8$. `controller/pose/spin.py` reads blade phase where it is
+valid and refuses to answer where it is not. Angle-referenced control therefore waits on
+either a rotor-angle sensor or per-phase current sensing; neither exists on this board.
+
+## 18. The spin-up ramp, and what it can and cannot explain
+
+The ramp from rest to hover is the only fully open-loop part of a flight: nothing measures
+the rotor while it runs, so every failure inside it is inferred after the fact from what
+the field was doing when the robot stopped following. This section computes what the ramp
+is allowed to do, compares that against what it actually does, and finds the two disagree
+in a way that rules out the obvious explanation.
+
+The reported symptom, 2026-08-29: **the robot steps out consistently at 40-60 Hz, and the
+frequency then jumps to about 100 Hz.**
+
+### 18.1 The two constraints, and they are not the same constraint
+
+A ramp $f(t)$ from rest has to satisfy two different things, at two different moments.
+
+**Capture, at $t = 0$.** The field starts at $f_{start}$ against a rotor at $\omega = 0$, so
+the swing equation $\dot\delta = 2\pi f_f - \omega$ gives $\dot\delta(0) = 2\pi f_{start}$:
+the whole starting frequency appears instantly as slip. There is a single torque pulse of
+duration $\sim 1/(2 f_{start})$ in which to be caught. Equating the impulse available to the
+momentum needed gives the pull-in frequency of section 17,
+
+$$f_{pull} = \sqrt{\frac{\tau_{max}}{4\pi J}}$$
+
+implemented as `z_track.pull_in_hz`. Capture requires $f_{start} < f_{pull}$.
+
+**Following, for $t > 0$.** Once locked, the rotor must supply drag *and* angular
+acceleration out of the same torque budget, at a load angle bounded by $s_{lim}$:
+
+$$k_{drag} f^2 + 2\pi J \dot f \;\le\; s_{lim}\,\tau_{max}(f)
+\qquad\Longrightarrow\qquad
+\dot f_{max}(f) = \frac{s_{lim}\,\tau_{max}(f) - k_{drag} f^2}{2\pi J}$$
+
+implemented as `TorqueLimits.f_dot_max`. Note $\tau_{max}$ is a function of $f$, not a
+constant: the coil is a series RLC and its current -- and so its torque -- rises with
+frequency below resonance. This is why the ceiling is a curve and not a number.
+
+### 18.2 The EASE curve has one closed-form property that matters
+
+The firmware ramps with `TaskMode::EASE`, the symmetric sigmoid
+
+$$\sigma(t) = \frac{t^k}{t^k + (1-t)^k}, \qquad f(t) = f_0 + \Delta f \,\sigma(t)$$
+
+Differentiating at the midpoint, where $t^k = (1-t)^k = 2^{-k}$:
+
+$$\sigma'(1/2) = \frac{u'v - uv'}{(u+v)^2}\bigg|_{t=1/2}
+= \frac{k\,2^{2-2k}}{2^{2-2k}} = k$$
+
+**The peak ramp rate is exactly $k$ times the average rate**, $\dot f_{peak} = k\,\Delta f/T$,
+and it occurs at the midpoint of the ramp in time -- which for a sigmoid is the midpoint in
+frequency too. $k = 1$ is exactly linear. This is the whole tuning surface of the curve, and
+it is why `k` is exposed on the wire (`takeoff=<start>:<end>:<ms>:<k>`) rather than compiled in.
+
+For $3 \to 160$ Hz over 40 s at $k=2$:
+
+| $t/T$ | 0.20 | 0.30 | 0.40 | 0.50 | 0.60 | 0.70 | 0.80 |
+|---|---|---|---|---|---|---|---|
+| $f$, Hz | 12.2 | 27.4 | 51.3 | 81.5 | 111.7 | 135.6 | 150.8 |
+
+At $k=1$ the same endpoints give a straight 34.4 / 50.1 / 65.8 / 81.5 / 97.2 / 112.9 / 128.6.
+
+### 18.3 The margins, computed
+
+**Recomputed 2026-08-30** against `TorqueLimits` as it now stands (`F_STEPOUT_HZ = 225`
+MEASURED, `RESISTANCE_OHM = 6.9`, `CAPACITANCE_F = 400` uF, `s_lim = 0.8`, $k_{drag}$ from
+`hover_model.fit_k_drag`). The figures this section carried until then were computed
+against `f_stepout = 190` and `R = 1.7`, both of which the same changeset replaced -- so
+every number below moved, and the conclusions moved with two of them:
+
+| $f$, Hz | 4 | 6 | 10 | 20 | 30 | 50 | 80 | 120 | 160 |
+|---|---|---|---|---|---|---|---|---|---|
+| $\dot f_{max}$, Hz/s | 51.7 | 77.1 | 126.7 | 240.5 | 335.3 | 461.3 | 519.8 | 446.6 | 267.4 |
+| commanded, Hz/s | 0.72 | 1.37 | 2.29 | 3.96 | 5.20 | 6.89 | 7.8 | 7.4 | ~1 |
+| margin | 72x | 56x | 55x | 61x | 64x | 67x | 67x | 60x | large |
+
+**The ramp is nowhere near its following limit -- roughly 40x clear at every point,
+including the 40-60 Hz band where the failure is reported.** For the mid-ramp slope to be
+the binding constraint at 50 Hz, $\tau_{max}$ would have to be overestimated by a factor of
+about 45.
+
+Capture is a different story:
+
+$$\tau_{max}(3\ \text{Hz}) = 1.03\times10^{-6}\ \text{N m}
+\quad\Longrightarrow\quad f_{pull} = 4.94\ \text{Hz}$$
+
+against a 3.0 Hz start. **A margin of 1.65x, and it is still the tightest number anywhere
+on the ramp by a factor of forty** -- the ranking survived the constant change even though
+both numbers moved (it was 4.17 Hz and 1.4x at `f_stepout = 190`).
+
+And `z_track.py` contains **two torque models that disagree about where capture is even
+possible.** `takeoff_start_hz` takes torque linear in $f$ from an anchor
+$\tau_{ref} = 5 k_{drag} f_{160}^2$ (the 5 is a bare margin factor with no citation) and
+puts the crossing $f_{pull}(f) = f$ at **7.9 Hz**. `TorqueLimits.tau_max(f)`, built from
+`coil_gain(f)` and anchored on `F_STEPOUT_HZ`, now puts the same crossing at **8.07 Hz**.
+
+**The two models used to disagree by 1.4x; at the measured `F_STEPOUT_HZ = 225` they
+agree to within 2%.** That is the single largest change in this section, and it retires
+the argument that follows from the disagreement -- there is no longer a "failing side of
+one model and the limit of the other":
+
+| ramp start | $f_{pull}/f_{start}$ by `tau_max` | capturable by `takeoff_start_hz` |
+|---|---|---|
+| 2.8 Hz | 1.70x | yes |
+| 3.0 Hz | 1.65x | yes |
+| 5.0 Hz | 1.27x | yes |
+| 6.0 Hz | 1.16x | yes |
+| 7.9 Hz | 1.01x -- marginal | marginal (this is its crossing) |
+
+**Every run before 2026-08-29 started at 7.9 Hz**, because the host asked
+`model_start_hz` -> `takeoff_start_hz` for the number and sent `takeoff=7.9:150`. At the
+retired `f_stepout = 190` that start computed as 0.85x -- on the failing side -- which is
+what motivated dropping it. At the measured 225 it computes as 1.01x: **marginal rather
+than doomed.** So the 7.9 Hz start is no longer an explanation for those failures, and
+this section no longer offers one; what it offers is a start with real margin. The ramp
+start is now `constants.RAMP_START_HZ = 2.0`, reached through `ramp.DEFAULT`'s first
+segment, and the model call is gone from the host. The firmware carries no start of its
+own any more: `RAMP_START_HZ` and the `takeoff=` form that used it were deleted
+2026-08-31, so there is exactly one number and the host owns it.
+
+Starting low also costs nothing that matters. The old worry was that a low start pushes with
+almost nothing (0.2 Hz drew a measured 0.00 A), but 18.3 shows the following margin is ~40x
+throughout, so time spent climbing out of the weak band is not time the rotor can fall behind
+in. And 3.0 Hz sits just under the 25 fps alias limit, which is the only reason the capture
+question is answerable at all. Because $f_{pull} \propto \sqrt{\tau_{max}}$,
+capture fails if $\tau_{max}$ is overestimated by 2.7x. That is a wider door than the 1.9x
+this said at `f_stepout = 190`, and the anchor is no longer a guess: `F_STEPOUT_HZ = 225`
+is labelled MEASURED, from ramps to 240 and 230 Hz where lift peaked near 180-210 and
+collapsed in the 220-240 bin. The residual uncertainty has moved off the step-out and onto
+$C$ -- see 18.6, and `f_ceiling()` is now 201.2 Hz, not the ~167 the code comment quoted.
+
+### 18.4 What this rules out, and what it leaves
+
+The hypothesis this section was written to test -- that the S-curve's steep middle
+coincides with the 40-60 Hz band and tears the rotor out of sync -- **is not supported**.
+The coincidence is real (the steepest part of a $k=2$ ramp does sit near the reported
+band) but the magnitude is wrong by a factor of forty. Recorded here as a negative result
+so it is not re-derived.
+
+Three explanations survive, and they are distinguishable by measurement rather than by
+argument:
+
+1. **Capture never happened.** The rotor is never caught at 3 Hz, so it never turns at all.
+   The field then sweeps past a stationary rotor, and an observer watching the telemetry
+   sees the drive frequency climb through 40-60 Hz and on to 100 while nothing flies. On
+   this reading the "step-out frequency" is not a property of the rotor at all; it is
+   simply where someone notices. Section 17's intermittency argument predicts exactly this,
+   and the blade tracking already reports the rotor dead at 1.2 Hz and turning by 2.8 Hz --
+   which puts `RAMP_START_HZ = 3.0` barely on the right side of the line.
+2. **$\tau_{max}$ is overestimated.** Everything above is anchored on `F_STEPOUT_HZ`, a
+   guess. If the true torque scale is smaller, capture fails first (it needs only 1.9x) and
+   the following margin shrinks with it.
+3. **The target was below the hover point** -- certainly true, and independent of any model.
+   See 18.5.
+
+The discriminator is the rotor, not the altitude -- but the sensor available is weaker
+than one would like, and its weakness is asymmetric in a way that happens to be useful.
+
+`f_hz` in the flight log is the *commanded field*. `spin` is `pose/spin.py`'s
+`SpinWitness.turning`, and it is deliberately **not** a rate: above $\text{fps}/8$ the
+blade phase aliases and the rate is unrecoverable, so the class returns a three-state
+motion latch instead of a confident wrong number. The asymmetry is the point:
+
+- **`turning` is provable at any speed.** A median per-frame phase step above threshold
+  means the rotor moved, whatever the aliasing does to the magnitude.
+- **`stopped` is only emitted below $\text{fps}/8$.** At a multiple of $\text{fps}/4$ a
+  spinning rotor renders an identical frame every time, so a still phase is evidence of
+  nothing unless the commanded field is known to be below the alias limit.
+- **blank is unknown**, and must never be read as stopped.
+
+With `stereo_frames` building the witness at 25 fps the alias limit is 3.125 Hz -- which
+sits a hair above `RAMP_START_HZ = 3.0`. So the sensor is decisive in *both* directions
+exactly over the pull-in window, which is the one place 18.3 says the margin is thin, and
+decisive in *one* direction (motion, not stillness) for the rest of the ramp. Hypothesis 1
+is therefore falsifiable as stated: if the rotor is never captured, the opening rows read a
+confident `stopped`.
+
+What no camera in this rig can do is measure rotor *rate* through 40-160 Hz. Even
+`spin.probe()`'s 210 fps single-camera path aliases above $210/8 \approx 26$ Hz. The
+strongest mid-ramp statement available is a lower bound: the highest $f$ at which a
+`turning` row appears. `takeoff_report.py` reports that bound and the three-state capture
+verdict, and does not attempt to infer a step-out frequency from blanks.
+
+**The instrument was inoperative until 2026-08-29, and nobody noticed.** `turning` returns
+`False` only inside `if self.field_hz is not None and self.field_hz <= self.alias_limit_hz`,
+and `live_viz.stereo_frames` called `w.update(t, frame, ellipse)` with no `field_hz` at all.
+So the confident-standstill branch was unreachable in every run this rig has ever flown: the
+witness could report TURNING or unknown, never STOPPED. The capture question was not
+unanswered, it was unanswerable. The runner now assigns `tick.spin.field_hz = link.freq`
+each tick -- the frequency the *firmware reports*, not the one the host intended, so the
+gate stays shut until telemetry actually arrives.
+
+The alias limit also needs the true frame rate, and the honest value is not the camera's.
+The pose pipeline is compute-bound rather than clocked -- segmenting a stereo pair costs
+about 50 ms against a sensor that can deliver 119 fps -- so passing the capture rate would
+inflate $\text{fps}/8$ roughly fivefold and manufacture confident `stopped` verdicts across
+a band where nothing is resolvable. That is the dangerous direction to be wrong in. The rate
+is therefore measured in the loop as an EWMA of the frame interval and pushed onto the
+witness, which self-calibrates and errs safe: a dropped frame lengthens the interval, lowers
+the estimate, and narrows the band in which `stopped` will be committed.
+
+**This leaves a narrow but real measurement window at the start of the ramp**, bounded on
+three sides by numbers that are now all known:
+
+$$\underbrace{2.8\ \text{Hz}}_{\text{torque floor: rotor dead below}}
+\;<\; \underbrace{3.0\ \text{Hz}}_{\texttt{RAMP\_START\_HZ}}
+\;<\; \underbrace{3.1\ \text{Hz}}_{\text{alias limit at 25 fps}}
+\;<\; \underbrace{4.2\ \text{Hz}}_{f_{pull}}$$
+
+The ramp start has to clear the torque floor (blade tracking puts the rotor dead at 1.2 Hz
+and turning by 2.8 Hz) and stay under $f_{pull}$ for capture. It should *also* stay under
+the alias limit for the first samples, or the one measurement that settles hypothesis 1 is
+never taken. At 25 fps all four constraints are satisfiable and 3.0 Hz sits inside the
+window, with about 0.1 Hz to spare on the measurement side. If the achieved pipeline rate
+turns out lower than 25 fps the alias limit falls below the ramp start and the window
+closes -- in which case lower the first segment's start frequency in `ramp.DEFAULT`
+toward 2.9, which improves the capture margin and the measurability at the same time. Do
+not widen it by lying to the witness about fps.
+
+### 18.5 A ramp that stops below the hover point cannot lift the robot
+
+The one defect here that needs no model. Takeoff is observed at about 160 Hz. The firmware
+carried `HOVER_HZ = 150.0f`, and used that single constant for two different jobs: the
+default ramp target, *and* the upper clamp on the `takeoff=` argument. So a host asking for
+`takeoff=3:160` was silently given `takeoff=3:150`, and no amount of ramp shaping or loop
+tuning could have produced a flight. It also poisoned identification downstream, because
+`_anchor_controller` read back the frequency the ramp reached and re-centred the whole
+controller on it -- anchoring the loop to the number where the ramp was cut off rather than
+to a hover point.
+
+Two constants doing two jobs is the failure. The default target and the ceiling are now
+separate concerns: the target is a default (`HOVER_HZ = 160.0f`), and there is no ceiling
+at all -- the host owns every real limit, per section 4's division of labour.
+
+### 18.6 The capacitor that is not where the model puts it
+
+`z_track.py` carries $L = 1.4$ mH (confirmed) and $C = 400\ \mu$F (fitted). Together:
+
+$$f_0 = \frac{1}{2\pi\sqrt{LC}} = 213\ \text{Hz}, \qquad
+Q = \frac{1}{R}\sqrt{\frac{L}{C}} = 0.27$$
+
+Both numbers are hard to reconcile with the rest of the repository. $Q = 0.27$ is
+R-dominated -- there is no resonance to speak of -- whereas `S_LIM = 0.8` is justified
+against "the $Q \sim 22$ phase swing at ramp ends", and takeoff is reported to happen at
+160 Hz "around the resonance of the coils". $L$ is the trusted value, so $C$ is the
+suspect, and its provenance says why: it was fitted from a 0.2-60 Hz ramp, the one band
+where the capacitive term dominates and the inductive term barely participates. The fit
+could not have constrained $L$, and a $C$ fitted with $L$ unconstrained is only as good as
+the band it was taken in.
+
+A ramp to 160 Hz is the first data this rig has through 100-200 Hz, which is exactly the
+band that separates the two. `takeoff_report.py` refits both from $|I|(f)$ over the ramp
+and reports the implied $f_0$ and $Q$ beside the current constants. Until that lands, the
+resonance is unknown and any statement that 160 Hz is "at resonance" is unsupported.
+
+### 18.7 Correspondence with the implementation
+
+| Quantity | Where |
+|---|---|
+| $\sigma(t)$, EASE, $\sigma'(1/2) = k$ | `PwmSequencer::applyCurve`, `TaskMode::EASE` |
+| ramp schedule, 25 ms grid | `PwmSequencer::compile`, `run` |
+| the profile: shape, validation, `seq=` encoding | `controller/control/ramp.py` -- **the only place a ramp is defined** |
+| the numbers it is built from | `controller/control/constants.py`, `RAMP_*` |
+| `seq=clear` / `seq=ramp:...` / `seq=go` | `dispatch` in `src/main_flight.cpp` |
+| the profile a run actually flew | `# ramp: <label>`, first line of that run's CSV |
+| $\dot f_{max}(f)$ | `z_track.TorqueLimits.f_dot_max` |
+| $f_{pull}$ | `z_track.pull_in_hz`, bracketed by `takeoff_start_hz` |
+| $f$ commanded vs rotor turning | `f_hz` vs `spin` in `results/takeoff/*.csv` -- `spin` is the witness latch (`turning`/`stopped`/blank), deliberately NOT a rate |
+| liftoff knee, capture verdict, $L$/$C$ refit | `controller/control/takeoff_report.py` |
+
+**`seq=` is the only ramp path, and the second one was deleted rather than repaired.**
+Until 2026-08-31 the firmware carried its own spin-up: a bare `takeoff` command with
+`RAMP_START_HZ` / `HOVER_HZ` / `CLIMB_MS` compiled in, plus a `takeoff=<a>:<b>:<c>:<d>`
+parser. Three defects came with it, and all three were properties of the path existing at
+all rather than of any one line:
+
+1. The ramp compiled in `setup()` was **dead**. `PwmSequencer::compile` only records
+   initial state and does nothing until `start()`, and every start path re-added and
+   re-compiled first.
+2. The `takeoff=` parser was **unused** by the host -- a strict subset of `seq=`, one
+   segment, always `TaskMode::EASE`.
+3. A bare `takeoff` ramped **linear, k=1**, because the parser's default `p[3] = 1.0f`
+   disagreed with the `2.0f` in the dead `setup()` copy. By 18.3 that crosses the ~4.9 Hz
+   pull-in window in 0.2 s and never captures the rotor: the command spun the field and
+   left the rotor sitting still.
+
+Deleting the path removed all three at once and took `HOVER_HZ`, `CLIMB_MS` and
+`RAMP_START_HZ` with it, so no frequency is defined in two places. The cost, accepted
+deliberately: **the board can no longer be spun up from a serial monitor without the
+Python host.** `seq=clear` / `seq=ramp:` / `seq=go` is the only way in, and
+`link._note_drive` no longer counts `takeoff` as drive -- if a second spin-up path is
+ever added it must be re-added there, or its heat goes unaccounted.
+
+The general lesson is the one worth keeping: two ways to express the same ramp will drift,
+and the copy nobody runs is the one that drifts furthest. It had a different curve
+exponent from its twin fifteen lines away, and nothing caught it because nothing ran it.
+
+### 18.8 MEASURED 2026-08-29: the rotor DOES track to 170 Hz -- and still does not fly
+
+This section first concluded that the rotor pulls out at 25 Hz and the rig was
+torque-starved by an order of magnitude. **That was wrong**, and the way it was wrong is
+worth keeping, because the same mistake is easy to repeat.
+
+**The retracted result.** A stepped sweep -- hold a frequency, probe, jump to the next --
+showed clean tracking to 20 Hz and OSCILLATING by 27 Hz. Read as a pull-out limit, it
+implied 2.4% of the thrust needed at 160 Hz. But an abrupt step between two *held*
+frequencies is not the same experiment as a ramp: it demands the whole slip instantly,
+exactly the capture race of 18.1, and it fails far below the frequency a smooth ramp
+sustains. Ramp-rate tests then showed 40 Hz reached comfortably at 4-19 Hz/s and lost only
+at 76 Hz/s, which already contradicted the 25 Hz figure.
+
+**The test that settled it, and it uses the blur as evidence rather than fighting it.**
+Above roughly 50 Hz the blades smear within one 4.8 ms exposure -- 90 degrees of rotation,
+a full blade pitch -- so `blade_phase` finds no harmonic and `probe` returns nothing. That
+silence is itself a measurement:
+
+| condition | samples in 4 s | inference |
+|---|---|---|
+| coils off, rotor still | 408 | the probe works |
+| **holding 170 Hz** | **0** | blades smeared, so rotor **> ~50 Hz** |
+
+and the coast-down confirms it directly. Cutting the drive at 170 Hz and probing for 6 s
+caught the rotor decelerating through the measurable band -- 14.3 Hz at 2.6 s, 10.7 at 3.8,
+4.7 at 4.9, 2.35 at 5.7 -- 1187 samples of a real spin-down. A rotor that had been sitting
+still reads a flat zero instead. **The rotor is synchronised at 170 Hz.**
+
+The deceleration is also informative. Aerodynamic drag alone gives $\dot f \propto -f^2$,
+so $1/f$ would rise linearly; it does not. The measured rate is closer to constant,
+-3 to -5 Hz/s across the band, which is the signature of a **Coulomb friction** torque
+rather than aerodynamic load. That is a bearing, not the air.
+
+**So torque is not the problem, and neither is the ramp, the start frequency, the ramp
+shape nor the controller.** The rotor spins where it is told, in the right direction
+(18.9), and produces no measurable lift: $z_{max} = 0.1$-$0.3$ mm against a 0.07 mm pad
+scatter, across four ramps to 160, 170 and 200 Hz. The open question moved from *does it
+spin* to *why does spinning produce no thrust* -- blade pitch, blade area, rotor mass, or a
+mechanical restraint on the body.
+
+**Two instrument lessons, both already written down and both still catching people.**
+`SpinWitness.turning` reported `turning` at every frequency, which is correct and useless:
+it is a motion latch, and a rotor rocking 10 degrees is moving (18.4). And a sweep stepped
+from a standing start at 5 Hz reads OSCILLATING at every later frequency, because pull-in
+is ~4.2 Hz and every step after the first inherits a stationary rotor. Capture low, ramp
+smoothly, and use the blur.
+
+**An attempt to measure blade drag from the coast-down FAILED. Recorded so it is not
+retried the same way.** The idea was sound -- with the drive cut, the only torques left are
+aerodynamic and friction, so the spin-down curve is the load -- and a first pass appeared to
+give $k_{drag} \approx 5.9\times10^{-11}$, some 7x under
+`hover_model.fit_k_drag`'s $3.91\times10^{-10}$. **That number is withdrawn.** A dedicated
+run releasing from 170, 120 and 80 Hz, with the camera held open so $t=0$ was exact, showed
+the method does not work:
+
+| t after release (s) | from 170 Hz | from 120 Hz | from 80 Hz |
+|---|---|---|---|
+| 0.2 | -- | 29.6 | 2.4 |
+| 0.4 | 32.6 | 2.9 | 2.4 |
+| 0.8 | 2.6 | 3.3 | 25.9 |
+| 1.5 | 33.2 | 21.9 | 8.4 |
+| 3.0 | 16.3 | 30.0 | 21.1 |
+
+Three releases from wildly different speeds give interleaved, non-monotonic garbage. The
+cause is the instrument, not the rotor: above $\text{fps}/8 \approx 26$ Hz the blade phase
+aliases, `np.unwrap` then picks the smallest step consistent with each pair of frames, and
+differentiating that yields a number that looks like a rate and is not one. **A plausible
+decreasing sequence out of `gradient(unwrap(phase))` is not evidence** -- the earlier
+"14.3, 10.7, 4.7, 2.35 Hz" coast came from the same computation and cannot be trusted
+either.
+
+What survives is the part that does not depend on a rate at all: **holding 170 Hz yields
+zero blade samples against 408 on a still rotor**, and an absence of signal is unambiguous
+where an aliased rate is not. The blades are smeared, so the rotor is turning fast. The
+rotor tracks; the aerodynamic coefficient remains unmeasured on this rig.
+
+Measuring it properly needs an instrument that resolves rate above 26 Hz, and this rig has
+none: exposure is not controllable through OpenCV on macOS (AVFoundation returns -1 and
+every `set` fails), and the 320x240 / 364 fps mode is a sensor crop in which the rotor
+overflows the frame and blade strength collapses from 0.545 to 0.033. A tachometer, an
+optical interrupter, or a camera moved back far enough to use the cropped mode would each
+close it.
+
+**Coil measurements that survived the retraction.** Current peaks near 170 Hz -- 0.95 A at
+20-40 Hz, 4.08 A at 160-180, falling to 2.93 A by 200-220 -- so series resonance is about
+174 Hz, not the 213 Hz that $L = 1.4$ mH with $C = 400\,\mu$F predicts, and driving above
+~180 Hz *reduces* torque. The best fit from the 120 s ramp is $L = 2.49$ mH,
+$C = 334\,\mu$F, $f_0 = 174$ Hz, $Q = 0.40$. Separately, at $f > 140$ Hz the four channels
+drew 3.39, 4.70, 4.73 and 3.77 A at equal commanded duty -- a 39% spread, so the rotating
+field is measurably elliptical, and this is the first real evidence for re-enabling
+`CurrentBalanceController`.
+
+### 18.9 The reappearance test: a rate-free way to bound rotor speed
+
+Every attempt in 18.8 to measure rotor rate above $\text{fps}/8 \approx 26$ Hz failed,
+because aliasing turns `gradient(unwrap(phase))` into confident noise. The way out is to
+stop asking for a rate and ask a question the instrument can actually answer.
+
+**The blades smear at a known speed.** With a 4-blade rotor the phase pattern repeats every
+90 degrees, and the exposure is one frame period, 4.8 ms at 210 fps. The signal disappears
+when the rotor turns a full blade pitch within one exposure:
+
+$$f_{smear} = \frac{360/B}{360\,t_{exp}} = \frac{1}{B\,t_{exp}} \approx 52\ \text{Hz}$$
+
+So **presence or absence of blade signal is a clean threshold detector at 52 Hz**, and an
+absence cannot be aliased the way a rate can.
+
+**The test.** Cut the drive and time how long until blade signal reappears. A rotor released
+at $f_0$ must coast from $f_0$ down to $f_{smear}$ first, and the torque that implies is
+$\tau = 2\pi I (f_0 - f_{smear})/t_{reappear}$ -- a number to compare against what the
+system could possibly supply. Measured 2026-08-29:
+
+| released at | signal returns | implied braking torque |
+|---|---|---|
+| 170 Hz | 0.06 s | $4.1\times10^{-5}$ N m |
+| 120 Hz | 0.11 s | $1.3\times10^{-5}$ N m |
+| 80 Hz | 0.01 s | $5.8\times10^{-5}$ N m |
+
+Peak available *drive* torque is of order $10^{-6}$ N m. These demand ten to a hundred times
+that, from a rotor that is coasting with no drive at all. **The rotor was never at the
+commanded frequency.** The times are also unordered in $f_0$, which is what you see when the
+rotor sits at the same speed in every case: just above 52 Hz, where the signal returns almost
+at once.
+
+**So the rotor saturates near 52-60 Hz however hard the field is driven**, and that finally
+explains the flights. Lift goes as $f^2$, so a rotor pinned at ~55 Hz against a hover point
+near 160 Hz delivers $(55/160)^2 \approx 12\%$ of the thrust needed -- and $z_{max}$ across
+ramps to 160, 170, 200 and 250 Hz was 0.1 to 1.0 mm against 0.07 mm of pad scatter.
+
+**The mechanism is friction, not the drive.** The rotor rides a bearing on the takeoff rod.
+A Coulomb torque there caps rotor speed independently of drive frequency -- which is exactly
+the signature of a ceiling that does not move when the field is pushed from 80 to 250 Hz --
+and the same friction opposes the vertical motion directly. It also explains why the drive
+side kept looking healthy: capture works, tracking to 20 Hz is exact, and the coils reach
+their resonance current. None of that is the binding constraint.
+
+Two remedies need no hardware change. Reducing the friction itself is the direct one. The
+other is **dither**: `dither=<hz>:<pct>` in `src/main_flight.cpp` modulates the collective,
+and so the axial force, at a few tens of Hz. It shakes field *strength*, not direction, so
+it adds an axial ripple without steering the disk -- the standard way to break stiction.
+Off by default.
+
+### 18.10 Why optical rotor-rate measurement is dead above 26 Hz here
+
+Three separate attempts to measure rotor rate above $\text{fps}/8 \approx 26$ Hz failed,
+each in a different way, and all three produced numbers that looked like data. Recorded
+together so the fourth attempt is not made.
+
+**1. Aliased rate.** `gradient(unwrap(phase))` above the alias limit yields a plausible
+decreasing sequence that is pure noise -- see 18.8.
+
+**2. Readable-or-not as a binary.** `MIN_STRENGTH = 0.15` is a low bar, and a partly
+smeared rotor still clears it. A demo video settled it: at 20 Hz blade strength is 0.683
+with blades clearly resolved; at 90 Hz it is 0.268 -- visibly smeared into a near-uniform
+disc -- yet still counted "readable", which made a fast rotor look slow.
+
+**3. Strength as a continuous smear proxy. This one is the trap worth naming.** Strength is
+not monotonic in rotor speed, because a $B$-fold blade pattern is **strobed** by the frame
+rate: it looks frozen whenever the rotor rate is a multiple of $\text{fps}/B$, and smeared
+between those nodes. At 210 fps with 4 blades the comb sits at 52.5, 105, 157 Hz. Measured:
+
+| field Hz | 20 | 40 | 60 | 80 | 100 | 130 |
+|---|---|---|---|---|---|---|
+| strength | 0.690 | 0.541 | **0.020** | 0.188 | **0.218** | **0.010** |
+| nearest node | 0 | 52.5 | 52.5 | 105 | 105 | 105 |
+
+Strength collapses between nodes (60 Hz, 130 Hz) and **recovers** near them (100 Hz, close
+to the 105 Hz node). A rising strength therefore means the rotor moved *closer to a strobe
+node*, not that it slowed down. Any monotonic reading of this curve is wrong.
+
+**What is left.** Absence of signal remains trustworthy -- it cannot be aliased upward --
+so the 52 Hz smear threshold still gives a one-sided bound (18.9). Everything else needs a
+different instrument. The cheapest fix is **one asymmetric mark on a single blade**: it
+makes the pattern period 360 degrees instead of $360/B$, moving the alias limit from
+$\text{fps}/8$ to $\text{fps}/2 = 105$ Hz and collapsing the strobe comb to a single node,
+which would cover the whole flight band. Failing that, a tachometer or an optical
+interrupter. Exposure control is not an option: AVFoundation on macOS returns -1 for both
+exposure properties and rejects every `set`.
+
+**Consequence for the experiment programme:** rotor speed is not observable in the flight
+band, so **$z$ is the only metric**. Ramp profile, duration and target frequency are swept
+against lift directly.
+
+### 18.11 The takeoff-to-closed-loop handover
+
+Four phases, and the seam is phase 3.
+
+1. **Datum wait.** `takeoff=True` does not command the ramp. The host holds it until
+   `PRIME_FIXES` consecutive position fixes, so the ramp never begins before the estimator
+   has the robot -- a ramp commanded at $t=0$ once logged no usable samples at all.
+2. **Open-loop ramp.** The host sends one `takeoff=<start>:<end>:<ms>:<k>` and then goes
+   passive: while `state != FLIGHT` it drains telemetry, logs and draws, and commands
+   nothing. The firmware's sequencer owns the trajectory.
+3. **The latch.** `seq.isDone()` sets FLIGHT; the host sees `state=2`, sends `throttle=`,
+   and anchors the controller (below).
+4. **Closed loop**, gated on the operator's `armed` checkbox *and* `enable_freq_cmd`.
+
+**What keeps it smooth.** Nothing is automatic -- `armed` starts off and `mag max` starts
+at 0, so a human chooses the moment. The frequency slew limit bounds the rate of change at
+`freq_slew * ts` (6.7 Hz per tick at 200 Hz/s and 30 Hz). Anti-windup is conditional, and
+slew deliberately does not freeze the integrator because it is a transient rather than a
+clamp. Underneath, `PwmController::setGlobalFrequency` applies a phase-continuity
+correction, so a frequency change never jumps the field angle out from under the rotor --
+which is what makes step changes survivable at all. The state predictor bridges dropouts so
+a lost frame does not enter the loop as a step.
+
+**What does not keep it smooth, without help.** The gains carry `f_hover` from their design
+point, and the control law is $u = [0, f_{hover}] + u_{ff} - Kx$, with `prev_f_field`
+initialised to the same constant. So the first closed-loop command is the *design*
+frequency, not the frequency the ramp actually reached. Ramping to 170 Hz and then arming
+would walk the drive down toward the design point at the full slew rate. `_anchor` closes
+this by setting `f_hover` and `prev_f_field` -- and `ZTracker.f_hat` -- from the frequency
+the firmware reports at the latch.
+
+**Anchor the trim, not the band.** An earlier version of this also narrowed
+`freq_min`/`freq_max` to $\pm 25\%$ of the reached frequency. That band is a control
+envelope, not a physical limit, and it was removed with the other caps -- but removing it
+took the trim anchoring with it, which is a different thing wearing the same name. The trim
+is where the loop *starts*; the band is how far it may *go*. Only the first belongs to the
+handover.
+
+### 18.13 MEASURED 2026-09-01: the departure is a growing whirl, not a push
+
+Three runs with the transparent pole, all open loop, all ending with the robot leaving the
+tracked volume. The operator's description was "very non-vertical ... more like it spun
+out", and the pose log agrees: over the last 0.3 s of tracking the robot moves further
+sideways than up, then vanishes.
+
+**It is not a static lateral force.** The departure azimuth, measured against the pad
+centre, was different every run:
+
+| run | departure azimuth | field at departure |
+|---|---|---|
+| 07:49:56 | 160.3 deg | 104 Hz |
+| 07:59:13 | 4.4 deg | 117 Hz |
+| 08:01:21 | 276.5 deg | 89 Hz |
+
+A fixed coil imbalance would push the same way every time. This does not, so trimming a
+constant lateral bias cannot be the fix.
+
+**It is a whirl.** Tracking the azimuth of the displacement rather than its endpoint, the
+robot *orbits* while its radius grows:
+
+| run | radius, last 0.3 s | azimuth swept | whirl rate |
+|---|---|---|---|
+| 07:49:56 | 0.16 -> 2.24 mm | +25.6 deg | +0.24 rev/s |
+| 07:59:13 | 0.14 -> 1.89 mm | -111.8 deg | **-1.05 rev/s** |
+| 08:01:21 | 0.08 -> 2.30 mm | +535.5 deg | **+5.03 rev/s** |
+
+Run 3 completed one and a half orbits while spiralling out. Run 2 whirled the *other way*.
+The radius e-folds in roughly 90 ms in all three. This is a conical whirl about the takeoff
+rod whose amplitude grows until the robot escapes, and the escape direction is simply
+wherever it is in the orbit when amplitude wins -- which is why the azimuths look random.
+
+**Why ramp shape did not matter.** 18.2's dwell argument predicted that passing through the
+unstable band faster would help, and the operator proposed exactly that. Tested: 30 s ramp
+(2.17 s dwell in 90-120 Hz) against 10 s (0.72 s). `f_liftoff` and `f_break` were identical
+at 98 and 116 Hz. Three times less exposure changed nothing, because the growth time is
+~90 ms and every ramp spends far longer than that anywhere near onset. **The dwell-time
+hypothesis is dead.** A first reading of those two runs suggested the departure was instead
+locked to 116 Hz; the third run broke at 88 Hz and killed that too. Both hypotheses died on
+small-n evidence, which is the standing lesson of this section.
+
+**Why the controller cannot be expected to fix it.** 19 records that the 10 Hz structural
+mode is not dampable by a loop whose closed-loop poles sit at 0.16-0.78 Hz. The whirl
+measured here reaches 5 rev/s, six to thirty times faster than those poles, and 19.1 shows
+the binding constraint is the 65 Hz pose pipeline rather than the command clock -- so a
+faster control clock does not buy it back either. Arming lateral is worth doing to learn
+whether a given frequency is below whirl onset, but it should not be expected to suppress
+the whirl itself.
+
+**QUALIFIED the same day, by the operator watching the 85 Hz run.** Their description was
+"enough for the robot to leave the flying pad, but not enough lift to hover -- it just
+fell", and the pose log agrees: the run ends at z = -14.5 mm, *below* the pad, not above
+it. So at 85 Hz the failure is **insufficient thrust**, and the azimuth sweep tabulated
+above is at least partly a robot falling and tumbling off the rod rather than a bearing
+whirl growing under it. The orbital numbers are real measurements; the *whirl*
+interpretation of them is not established, and this section should not be read as though
+it were. What is solid: the departure direction is not repeatable, so a static lateral
+bias is not the cause.
+
+Two failure modes may coexist, and the runs so far cannot separate them: above ~100 Hz the
+robot is flung (operator: "still got flung out"), at 85 Hz it lifts and falls back. If so
+the rig has no operating window -- too little thrust below, instability above.
+
+**The thrust ceiling has a known mechanical cause.** 17 records that the rotor saturates
+just above ~52 Hz however hard the field is driven, because of friction at the takeoff rod.
+Lift goes as *rotor* speed squared, not field frequency, so once the rotor stops tracking
+the field, raising the field buys nothing -- which is exactly the measured trend here:
+z_max fell monotonically from 8.7 mm at an 85 Hz target to 0.9 mm at 210 Hz. That makes rod
+friction, not ramp shape and not the controller, the first thing to attack. If the rotor
+cannot be made to spin faster than ~60 Hz, no ramp and no controller will hover this rig
+as built.
+
+### 18.14 MEASURED 2026-09-01: the thrust axis is tilted ~4.6 deg, and that is the problem
+
+The best-tracked liftoff of the day (`results/takeoff/20260901_082621.csv`, 6.6 % lost,
+2233 pad samples at 0.05 mm scatter) lifted at 126 Hz and peaked 7.1 mm. Differentiating
+the pose with a Savitzky-Golay filter (0.15 s window, quadratic, resampled to 200 Hz) over
+the liftoff window gives:
+
+| | |
+|---|---|
+| vertical velocity | -0.3 mm/s |
+| vertical acceleration | -0.006 g, i.e. **T/mg = 0.994** |
+| lateral velocity | **68.3 mm/s** |
+| lateral acceleration | 0.079 g |
+
+**The rig has the thrust to hover and is pointing it sideways.** Vertical thrust balances
+weight almost exactly while the robot accelerates laterally at 0.08 g. Taking the ratio,
+`atan(0.079/0.994)` puts the thrust axis **4.6 deg off vertical**.
+
+The tilt is not noise, and it is not a disturbance: it **grows with thrust**, which is the
+signature of a fixed angular offset rather than a random push.
+
+| field | lateral accel | implied tilt |
+|---|---|---|
+| 124 Hz | 0.009 g | 0.5 deg |
+| 124 Hz | 0.044 g | 2.6 deg |
+| 134 Hz | 0.086 g | 4.8 deg |
+| 134 Hz | 0.097 g | 5.7 deg |
+
+Candidate causes, none yet distinguished: centre of mass offset from the spin axis, blade
+plane not perpendicular to that axis, or the robot seated at an angle on the rod. All three
+are mechanical and none is addressable from the host.
+
+**RETRACTION of 18.13's whirl reading.** 18.13 reported the departure as a growing conical
+whirl at up to 5 rev/s and concluded, citing 19, that the control loop was six to thirty
+times too slow to damp it. **The spectrum does not support that.** A Hann-windowed FFT of
+the lateral position over the last 3 s before departure puts essentially all the power
+below 2 Hz -- peaks at 0.67, 1.00 and 1.67 Hz, which at that window length is the
+resolution floor, i.e. slow drift. There is no 5 Hz whirl and no excitation of the 10 Hz
+structural mode. The "1.5 orbits in 0.3 s" measured in 18.13 is a robot tumbling after it
+had already left the pad, not an instability growing before it.
+
+This reverses the practical conclusion. A sub-2 Hz drift against closed-loop poles at
+0.16-0.78 Hz is marginal but reachable, so **lateral control is worth considerably more
+than 18.13 claimed**. The recurring error in both 18.13 and this correction is the same
+one 18.8 records: reading a mechanism off a handful of samples taken after the event of
+interest, rather than measuring it during.
+
+**What blocks testing it.** Across five runs on 2026-09-01 the lateral loop never armed
+once, because `hover_controller_runner` gates arming on the firmware reporting FLIGHT and
+the robot always departed before `seq.isDone()`. The restriction is host-side only:
+`main_flight.cpp` runs `applyMixer()` in `case SPINUP` as well as `case FLIGHT`, so `az=`
+and `mag=` are honoured throughout the ramp. Arming during the climb would put the
+controller in the loop before the robot leaves the pad, which is where a 4.6 deg tilt and
+a 1 Hz drift have to be met.
+
+### 18.15 MEASURED 2026-09-01: the robot sits crooked, by 1.6 deg toward ~146 deg
+
+18.14 inferred a ~4.6 deg thrust tilt from accelerations. The rotor normal is now logged
+directly (`tilt_deg`, `tilt_az_deg`, added to `constants.CSV_COLUMNS` the same day -- the
+estimator had produced `Pose.theta_deg`/`phi_deg` every frame since the start and nothing
+had ever written them down). Measured through a full ramp:
+
+| field | tilt | tilt azimuth | azimuth concentration |
+|---|---|---|---|
+| 0-5 Hz, no thrust | **1.46 deg** | 189 deg | 0.63 |
+| 20-50 Hz | 2.27 deg | 150 deg | 0.96 |
+| 50-80 Hz | 2.42 deg | 156 deg | 0.95 |
+| 100-110 Hz | **3.08 deg** | 143 deg | **0.97** |
+
+Two separable components. **A static ~1.5 deg that is there before any meaningful thrust**
+-- the robot is seated crooked on the rod -- and a thrust-proportional part that roughly
+doubles it by 105 Hz. The azimuth converges on ~145-155 deg and stays there: concentration
+0.97 means a fixed direction, not a precession and not a wander.
+
+The static part is confirmed independently by `mixer_sign.py`: four 2 s holds, commanding
+`az` at 0/90/180/270 deg with `mag=0.15` at a seated 70 Hz, returned tilt azimuths of
+145.9, 142.5, 151.2 and 146.1 deg -- the same direction every time, magnitude fixed near
+1.6 deg. Four independent measurements agreeing within 9 deg.
+
+**The datum-zeroing objection, and why the growth survives it.** `calibrate_zero` sets the
+datum from a reference *pose*, not from gravity, and warns that a near-face-on reference
+recovers the axis about 10 deg off (10.4 deg at 0, 2.3 deg by 10). So the *absolute* tilt
+carries the datum's own axis error and 1.5 deg is inside it. The *growth* with thrust does
+not: a datum error is a constant rotation, so it offsets every reading equally and cancels
+in the difference. 1.46 -> 3.08 deg is real however the zero was taken.
+
+**NEGATIVE RESULT: that mixer_sign run cannot calibrate the mixer, by construction.**
+`HOLD_HZ = 70` was chosen below the 98-126 Hz liftoff band so the robot would stay on the
+pad. Seated on the rod it is mechanically constrained and cannot tilt in response to `az=`
+at all, so the four holds measured its resting tilt four times rather than the disk's
+response. The safety margin removed the degree of freedom being measured. `applyMixer`'s
+"Verify sign on rig" is therefore STILL unverified, and no feedforward trim should be built
+until it is -- a trim on the wrong sign doubles the tilt rather than cancelling it.
+
+**What this points at.** A software trim spends lateral authority on every flight to cancel
+something a mechanical adjustment removes once, and the direction is now known well enough
+to check on the bench: ~146 deg, which is between coils B (90) and C (180), nearer C.
+
+### 18.16 Why the mixer's authority may not be measurable on this rig
+
+`applyMixer`'s "Verify sign on rig" is still unverified after two attempts, and the reason
+is structural rather than a bad script.
+
+To measure whether `az=`/`mag=` moves the rotor normal, the robot must be free enough to
+tilt and present enough to measure. Those two conditions do not overlap:
+
+| hold | outcome | why no measurement |
+|---|---|---|
+| 70 Hz | seated hard on the rod | constrained; four holds at az 0/90/180/270 returned the SAME tilt azimuth (145.9, 142.5, 151.2, 146.1 deg) -- its resting tilt, measured four times |
+| 115 Hz | departed during the ramp | gone before the sweep began; operator confirmed "the frequency was too high, it took off/spun off" |
+
+Liftoff has been measured between 98 and 126 Hz across runs on the same day, so the band
+where the robot is unloaded but still on the pad is a few Hz wide and moves between runs.
+That is the same narrow window 18.14 records between lift and departure.
+
+**Useful consequence for whoever tries next.** `az` pointed exactly at a coil axis is
+already individual amplitude control -- `applyMixer` uses `max(0, cos(az - COIL_AZ))`, so
+the target coil drops by `MIX_GAIN*mag`, both neighbours sit at `cos(+-90) = 0`, and the
+opposite coil's `cos(180) = -1` is clamped away. No per-channel firmware command is needed
+to drop one coil at a time, which is worth knowing before anyone adds one.
+
+**If the window proves unusable**, the remaining routes are: identify during the ramp with
+short perturbations rather than holds, accepting that the disk may not settle; or give up
+on characterising lateral authority in flight and remove the tilt at its source. 18.15
+measures that source as a 1.6 deg seating offset toward ~146 deg, which needs no rig time
+to investigate and no lateral authority to fix.
+
+### 18.17 MEASURED 2026-09-01: f_hover is ~101 Hz, and the f^2 law dies above ~110 Hz
+
+`z_track`'s plant law is `z_ddot = g*((f_robot/f_hover)^2 - 1)`, so `f_hover` is
+recoverable from any flight that logs both z and f: `f_hover = f / sqrt(1 + z_ddot/g)`.
+Differentiating z with Savitzky-Golay (0.15 s, quadratic, resampled to 200 Hz) over the
+samples that are clear of the pad, across four runs:
+
+| run | f where z_ddot = 0 |
+|---|---|
+| 2->210 / 30 s | 90 Hz |
+| capture + 8->210 / 20 s | 114 Hz |
+| capture + 8->120 / 14 s | 107 Hz |
+| capture + 8->210, armed on ramp | 95 Hz |
+
+**Measured f_hover = ~101 Hz.** Against `design_hover_lqr.f_hover` = 160, `z_track`'s
+starting `f_hat` = 190, and `RAMP_TARGET_HZ` = 210. 18.12 argued those three numbers were
+different quantities and all correct; that argument stands, but **all three sit roughly
+twice the frequency at which this rig actually balances its weight**.
+
+Thrust goes as f^2, so a 210 Hz target commands about `(210/101)^2 = 4.3x` weight. With the
+4.6 deg tilt of 18.14 that surplus becomes `4.3*sin(4.6 deg) = 0.35 g` of lateral force --
+which is why every high-target run left the tracked volume in under a second, and why
+LOWER targets measured MORE lift (8.7 mm at an 85 Hz target against 0.9 mm at 210). The rig
+was never thrust-starved. It was grossly over-driven.
+
+**And the f^2 law itself does not hold above ~110 Hz.** Binning the same run by height:
+
+| z above pad | f | 1 + z_ddot/g |
+|---|---|---|
+| 0.3-1 mm | 104 Hz | 1.0000 |
+| 1-3 mm | 124 Hz | 1.0018 |
+| 6-20 mm | 134 Hz | **0.9731** |
+
+Thrust is flat then FALLING where the model predicts a 66 % rise from 104 to 134 Hz. A fit
+of `1 + z_ddot/g` against `f^2` returns a negative slope, so `f_hover` cannot even be
+extracted that way over this band. The tilt does not explain it: `cos(3 deg) = 0.9986`,
+against a measured 2.7 % drop.
+
+The likely cause is the rotor ceasing to track the field somewhere near 110-125 Hz, after
+which driving faster does not spin it faster. NOT ESTABLISHED: the 6-20 mm bin is where the
+robot was departing, and a tumbling robot's z_ddot is not thrust. 62 samples. Distinguishing
+these needs a run that HOLDS a frequency in 100-130 Hz while airborne, which is exactly the
+band 18.16 records as hard to hold.
+
+**Operator observation the same day, which agrees:** with coil A dropped the robot "flew off
+in a much more stable manner", and "by keeping the drone vertical, the drone is able to take
+off more stably and at a lower frequency". Both follow directly from the numbers above.
+
+### 18.12 Three "hover frequencies", and why they disagree
+
+Three files carried a number for where this rig flies, all dated 2026-08-29, spread over
+50 Hz. They are three different quantities and all three are right:
+
+| Value | Where | What it actually is |
+|---|---|---|
+| 160 Hz | `design_hover_lqr.f_hover` | The **linearisation point** for the gains. `_anchor` overwrites the trim at runtime with the frequency the ramp reached, so this only has to be close enough for the linearisation. |
+| 190 Hz | `z_track.F_HOVER_HZ` | The tracker's **starting** $\hat f$, which it then adapts. Liftoff measured at 180-185, lift peaking 190-210. |
+| 210 Hz | `constants.RAMP_TARGET_HZ` | The **ramp target**, and the best measured so far -- this is the one that flew. |
+
+Only the last is "where it hovers". The others were labelled as though they were, which is
+how the same day's measurements came to look like a contradiction. None of them needed
+changing; the labels did.
+
+## 19. Loop rate: what it cost, and what it bought
+
+Written 2026-08-30. The 10 Hz structural mode from 14 is not dampable by a loop whose
+closed-loop poles sit at 0.16-0.78 Hz and which steps at an effective 20 Hz. The work
+below was aimed at 200 Hz. It reached 200 Hz of **command** and 65 Hz of **measurement**,
+and the second number is the one that matters.
+
+### 19.1 The decomposition nobody had written down
+
+Mean command age is $T_s/2$. Against the slowest closed-loop pole at 0.78 Hz:
+
+| | $T_s/2$ | phase lag at 0.78 Hz |
+|---|---|---|
+| control at 30 Hz | 16.7 ms | 4.7 deg |
+| control at 200 Hz | 2.5 ms | 0.7 deg |
+| pose pipeline at 20 Hz | 50 ms | 14 deg |
+| pose pipeline at 65 Hz | 15 ms | 4.3 deg |
+
+**The 200 Hz control clock is worth about 4 degrees. The pipeline is worth about 10.**
+That ranking is the whole reason the effort went into segmentation rather than into the
+clock, and it is worth re-deriving before anyone spends a session raising the clock again.
+
+### 19.2 The pipeline, measured
+
+Replay of `results/flights/2026-08-29_231418`, first 250 frames (246 solved), through
+`live_viz.from_recording(viz=NullViz(), speed=0)`. Median ms per stereo pair:
+
+| | segment | estimate | wall | rate |
+|---|---|---|---|---|
+| baseline | 27.8 | 16.8 | 48.0 | 20.8 Hz |
+| \+ plate-response cache fixed | 21.6 | 17.7 | 41.3 | 24.2 Hz |
+| \+ evidence map windowed on the previous ellipse | 16.0 | 18.1 | 35.5 | 28.2 Hz |
+| \+ the two views in parallel | 8.9 | 17.1 | 28.1 | 35.6 Hz |
+| \+ centre-cal displacement cached | 8.9 | 12.3 | 23.2 | 43.0 Hz |
+| \+ 640x400 | 3.0 | 10.5 | 15.4 | 64.8 Hz |
+| \+ rim shape cached on the normal | 3.2 | 9.3 | 14.5 | 69.0 Hz |
+| \+ plate cache made per-camera (19.5) | 3.1 | 9.2 | 14.1 | 70.7 Hz |
+| \+ `REFINE_TOL` 1e-5 -> 1e-4 | 3.2 | 7.4 | 12.4 | 80.6 Hz |
+| \+ batched Jacobian (19.4) | 3.0 | 5.9 | **10.6** | **93.9 Hz** |
+
+That last column includes decoding the recording's mp4 inline, which the live loop does
+not -- `sources.MonoCamera` decodes on its grabber thread. The cost the control loop
+actually pays is `est.update`, which `StereoPose` already times: **3.2 ms segment + 6.2 ms
+solve = 9.4 ms, i.e. ~107 Hz.**
+
+**A caveat on all of these, found late.** `from_recording` hardcodes `backgrounds="running"`
+while the live `stereo_frames` defaults to the *saved* plates. On this recording the
+running plate walks onto a station-keeping robot -- the failure `background.RunningPlate`'s
+own docstring and `demo_video.py`'s comment both warn about -- so `segment()` returns
+`None` on **100% of frames at every resolution**, and the pose comes from the tracked
+`_prev_ellipse` seed plus the joint image-mode solve. That is a designed fallback and it
+produces good fits (the demo overlay puts the rim on the rim, 1.9 mm discrepancy), but it
+means the numbers above under-represent the mask path, which bails early instead of
+completing. The *relative* improvements are sound -- every row ran the same path -- and the
+solve, which is 2/3 of the budget, is unaffected. The absolute segmentation figure would be
+larger on a session with a good plate. Re-measure with saved plates before quoting 107 Hz
+as the live rate.
+
+Solve count was 246/250 at every step, so none of it was bought by dropping frames. The
+same code at 1280x800 is 22.4 ms and 44.7 Hz, so a little over half the total win is the
+resolution and the rest is arithmetic that was being repeated.
+
+**Where the remaining time is.** `refine` is 9.2 of it, and `refine` is dominated by
+its *numerical Jacobian*: `least_squares` reports ~9.6 residual evaluations a frame, but
+`evidence` is entered ~47 times, because 5 parameters differenced two-point cost 5 extra
+evaluations each and those are not counted in `nfev`. **Roughly 80% of the solve is
+finite differences.** An analytic Jacobian would take that ~47 back toward ~10 -- it needs
+the image gradient of the evidence map times the pixel-vs-pose derivative, which is
+tractable and is the single largest remaining item. It is not attempted here: it changes
+the descent direction, and the diff was already large.
+
+The two cheap consequences of that structure were taken. `_rim_points` recomputes the
+tangent basis and two outer products per evaluation, but **three of the five perturbations
+move only the centre**, which shifts the rim rigidly -- so the normal-dependent part is
+cached (`_rim_shape`, keyed on the normal's bytes: exact, verified bit-identical over 3000
+random poses). And `_tangent_basis` no longer calls `np.cross`: identical arithmetic, but
+for a 3-vector `np.cross` spends most of its time in axis bookkeeping, which showed up as
+124k `normalize_axis_tuple` calls in the profile.
+
+**The plate-response cache had never once hit.** `segment.ring_weight` cached the plate's
+41x41 opening on `id(img)`, with a comment asserting the estimator passes the same array
+every frame. It does not: `background.RunningPlate.update` returns
+`self.bg.astype(np.uint8)`, a fresh array every call, and a `RunningPlate` is the live
+default. So the cache paid the 2.6 ms per view it existed to avoid, every frame, and the
+`id()` key held a reference to each dead plate so the ids could not even be recycled. It
+is keyed on the plate's own frame counter now. Note that a *stable* id would have been
+worse than the miss: it would have pinned a response to a plate that moves.
+
+**The ROI was already written and wired to nothing.** `ring_weight` has taken an `roi`
+argument, with `_clamp_roi` and a measured "0.37 ms on 450x450 against 2.64 ms
+full-frame" in its own docstring, for as long as it has existed. No caller ever passed
+one -- while `stereo._prev_ellipse` was already carrying the previous frame's ellipse per
+camera, used only as a fallback seed. The window is that ellipse's major axis times
+`ROI_MARGIN`, squared (the rim rotates between frames, and a box that hugs the minor axis
+clips it when it does), and absent or failed tracking falls back to the whole frame -- a
+tracker that cannot re-acquire is worse than a slow one.
+
+### 19.3 Getting past 90 Hz: the solve's stopping rule, not its arithmetic
+
+Once `refine` is 70% of the pair, the question is not how fast an evaluation is but how
+many there are. Four knobs, all measured on the same 250 frames:
+
+| setting | Hz (`update`) | nfev | `refine_rms_px` | `discrepancy_mm` | solved | pose shift |
+|---|---|---|---|---|---|---|
+| `xtol=ftol=gtol` 1e-5 | 81 | 9 | 4.7468 | 1.4619 | 246 | -- |
+| **1e-4** | **98** | **7** | **4.7552** | **1.4619** | **246** | **0.127 mm** |
+| 1e-3 | 114 | 3 | 4.7554 | 1.4619 | 246 | 0.157 mm |
+| `max_iter` 6 or 4 | 71 | 9 | -- | -- | 246 | 0.000 mm |
+| `x_scale=1.0` | 73 | 9 | -- | -- | 246 | 0.133 mm |
+
+`max_iter` does nothing because the cap is never reached -- the seed is good and the solve
+converges in about seven evaluations, so `MAX_REFINE_ITER` has been protecting against a
+case that does not occur. **The stopping tolerance was the only real knob**, and 1e-4 pays
+17 Hz for 0.18% of a 4.7 px residual, with `discrepancy_mm` -- an independent cross-view
+consistency measure, and the one that would expose a genuinely worse fit -- unchanged to
+four decimals. 1e-3 keeps paying, but the pose keeps moving while the rms stops following,
+which is the signature of stopping early rather than converging. That is where it stops.
+
+**The finite-difference step went the other way, which is worth recording.** The intuition
+was that scipy's default relative step (~1.5e-8) is far below the smoothness scale of a
+bilinearly-sampled, Gaussian-blurred evidence map, so the Jacobian would be float noise and
+a larger step would converge faster. Measured, a larger step converges to a *better*
+residual and takes *more* iterations:
+
+| `diff_step` | Hz | nfev | `refine_rms_px` |
+|---|---|---|---|
+| default (~1.5e-8) | 81 | 9 | 4.7468 |
+| 1e-6 | 66 | 12 | 4.7662 |
+| 1e-5 | 43 | 17 | 4.5879 |
+| 1e-4 | 36 | 20 | 4.4241 |
+| 1e-3 | 34 | 19 | 4.4305 |
+
+So the default step is not noise-limited, and a coarser Jacobian is a **quality** knob
+pointing away from speed: 7% better rms for 2.3x the time. Left alone. Noted because the
+opposite is a natural thing to assume and it costs a session to find out.
+
+### 19.4 The numerical Jacobian, and why a GPU is the wrong instrument
+
+With `REFINE_TOL` at 1e-4 the solve still enters `evidence` about five times per reported
+`nfev`, because five parameters differenced two-point cost five extra evaluations an
+iteration. The instinct is to make the arithmetic faster. **The arithmetic is not the
+cost.** Projecting and distorting one view's samples, measured on this rig:
+
+| points | time | per point |
+|---|---|---|
+| 45 | 22.9 us | 508 ns |
+| 180 | 40.9 us | 227 ns |
+| 900 | 132.6 us | 147 ns |
+| 3600 | 457.5 us | 127 ns |
+
+That is **~15 us of fixed per-call overhead plus ~120 ns a point** -- consistent with the
+earlier `sample_n` sweep, where cutting the point count 4x bought only 27% of the time. The
+solve is bound by the *number of numpy and cv2 calls on small arrays*, not by floating-point
+work.
+
+Two things follow. First, **the fix is to batch, not to accelerate**: the five perturbations
+are evaluated in one pass over `5n` points instead of five passes over `n` (`evidence_many`,
+and a `jac` supplied to `least_squares` instead of letting it difference). Five 180-point
+calls cost 205 us; one 900-point call costs 133. Measured end to end, the solve goes 7.6 ->
+6.2 ms, `est.update` 10.1 -> 9.4 ms.
+
+Getting scipy's step rule exactly right mattered more than expected: it uses
+`rel * sign(x) * max(1, |x|)`, and dropping the **sign** steps the negative parameters the
+wrong way. With the sign, median `refine_rms_px` is 4.7569 against scipy's own 4.7552
+(0.036%) with `discrepancy_mm` identical; without it, 4.7661. The pose still moves 0.137 mm,
+which is the flat-optimum behaviour seen throughout this chapter rather than a worse fit.
+
+Second, **a GPU kernel would make this slower, not faster.** The arrays are 180x2 doubles,
+about 3 kB; a kernel launch plus a round trip is 5-10 us against a whole evaluation that
+costs tens of microseconds on the CPU. GPUs win when arithmetic intensity is high and the
+data is already resident, and here it is neither: the evidence maps would have to be
+uploaded every frame, and the solve is a sequential trust region -- each iteration depends
+on the last, so there is nothing to run wide. The only genuinely parallel axis is the five
+Jacobian columns, and that is exactly what batching already exploits on the CPU for free.
+The honest GPU-shaped opportunity is upstream, in segmentation, where full-frame morphology
+and connected components are data-parallel -- but segmentation is now 3.0 ms of a 9.4 ms
+pair, so the ceiling on that whole direction is 3 ms.
+
+**The remaining structural item is still an analytic Jacobian** -- image gradient of the
+evidence map times the pixel-vs-pose derivative -- which removes the five extra evaluations
+rather than batching them. Not attempted *here*; done in **19.12**, where it turned out to
+be an accuracy result first and a speed result only through the stopping tolerance, because
+the forward-difference step this section trusted is noise.
+
+### 19.5 What was measured and NOT taken
+
+Two speedups were rejected on measurement, and the measurements are the point:
+
+**Fewer rim samples in `refine`.** `refine` already takes `sample_n`; nobody passes it.
+Dropping 180 to 120 buys 4 ms and moves the pose 0.19 mm median; 45 buys 8 ms for 0.26 mm.
+Against a bias floor of 0.185-0.274 mm that is not free. The principled objection is
+Nyquist: the evidence map is Gaussian-blurred at sigma = 3, so features are 6-9 px wide,
+and 120 samples around a 450 px ring is one every 12 px. 180 is properly sampled and 120
+is not. **Rejected.**
+
+**320x240.** 70.9 Hz against 64.8 for 640x400 -- 6 Hz more -- for a per-axis bias of
+0.205/0.169 mm, over the floor rather than under it. 640x400 costs 0.110/0.119/0.065 mm
+spread against the 0.119 mm `pose/theory.md` 315-327 predicts, which is the rare case of a
+prediction landing exactly. **Rejected: twice the error for 6 Hz.**
+
+One was taken **with** a measured cost. The centre-cal displacement in `refine`'s evidence
+residual cost two conic decompositions per view per evaluation -- 222 `cone_from_circle`
+calls a frame, more than the projection it corrects -- and `least_squares` spends 6 of
+every 7 evaluations on finite differences at effectively the same pose. Caching it on a
+quantised pose collapses those. It costs 0.14 mm median, because the Jacobian loses the
+displacement's own derivative; tightening the quantum to 1e-6 mm does not recover it, so
+collapsing the finite differences IS the effect. What justifies keeping it: `refine_rms_px`
+moves 5.112 to 5.126, 0.3% on a 5 px residual, with `discrepancy_mm` and `margin`
+unchanged. The optimum is flat over that 0.14 mm. 17.0 -> 12.5 ms.
+
+### 19.6 The control clock, and why it is a thread
+
+`stereo_frames` is a generator, so capture, segmentation, triangulation and the control
+body all ran on one thread and the controller could not step faster than a pair took to
+segment. The pose source now runs on its own thread behind a drop-oldest single slot --
+the same shape as `sources.MonoCamera`, and for the same stated reason: for feedback a
+stale pose is worse than no pose, so a queue that buffers backlog would be actively
+harmful. **The counter, not the slot, is what says "new".**
+
+The control loop stays on the main thread. That is not a preference:
+
+- `signal.signal` can only be installed on, and delivered to, the main thread. SIGINT's
+  `land()` running on main while a worker sits mid-`link.send` puts two threads on one
+  pyserial handle and half-writes a `stop`.
+- The generator's `close()` runs from the producer's own `finally`. Calling it from the
+  consumer while the producer is suspended inside it raises "generator already executing".
+- The existing `finally` already ordered `land()` -> `send("stop")` -> close. `_PoseFeed`
+  duck-types onto that with no edit, which keeps the coils de-energising *before* anything
+  joins a thread that may be blocked in a 2 s camera read. Preserve that order.
+
+One rule decides every site in the loop: **anything that consumes a frame is gated on
+`fresh`; anything that commands the coils runs on the clock.** Ungating a frame consumer
+is not a tidiness point. At 500 Hz one held fix satisfies `PRIME_FIXES = 15` in 30 ms and
+ramps the coils on a single frame.
+
+The predictor advances from `t_pred`, its own clock, not from the last control step --
+they are different rates now. Setting `t_pred` to `tick.t`, the shutter stamp, means the
+next step propagates the pose forward by its full pipeline age. That is the latency
+compensation `filter.predict_ahead` was written for and never wired to, and here it is
+free. `StatePredictor` rather than `predict_ahead` because it is the model-forward, which
+`predictor.py`'s own assert shows beats a kinematic coast at every gap length -- and
+because `filt` lives on the pose thread now, so reading it from the control loop would be
+a torn-state hazard for no gain.
+
+Measured end to end against a 65 Hz source: **199.8 Hz**.
+
+### 19.7 Parallelising the views made the pipeline non-reproducible
+
+Found by accident, while checking that an "exact" change really was exact: **two identical
+replays of the same recording disagreed by up to 0.34 mm** (median 0, p95 0.24) -- most
+frames bit-identical, a minority flipping. Forcing the view pool to one worker made it
+bit-identical again, so the two-worker pool from 19.2 introduced it.
+
+The per-view segmentation output was identical between runs; the *evidence maps* were not.
+`segment.ring_weight`'s plate-response cache was one module-global dict that cleared itself
+whenever it exceeded four entries. With two views on two threads, one view's insert could
+evict the other's live entry -- and because the cache holds a response computed against a
+particular plate generation, a mid-block recompute produced the response for a *different*
+generation. **Which plate the map was built against therefore depended on thread
+interleaving.** Not a crash, not a wrong answer, just an answer that would not reproduce.
+
+Fixed by giving each caller its own slot, replaced in place, with no eviction rule at all:
+the threads never touch the same key, each get/set is a single GIL-atomic dict op, and the
+cache is bounded by the number of cameras rather than by a magic 4.
+
+Two things worth carrying forward. **A shared cache with a global eviction rule is not
+thread-safe just because every individual operation is** -- the eviction is what couples
+the callers, and it coupled two views that were otherwise independent. And
+**reproducibility is a measurement instrument**: this was invisible until a change that
+should have moved nothing was measured and appeared to move 0.39 mm. Every accuracy figure
+in 19.2 and 19.3 was taken before the fix and therefore carries up to ~0.24 mm of this
+noise on top of the effect being measured. They were re-taken after it. The resolution
+comparison in particular came out unchanged -- per-axis spread 0.118/0.117/0.066 mm
+against the 0.119 mm predicted -- which is why the conclusion stands.
+
+### 19.8 The gains at 200 Hz are a null change
+
+Discrete LQR converges to the continuous-time LQR as $T_s \to 0$, so with $Q$ and $R$
+fixed the closed loop is invariant and only $K$ walks toward its continuous limit:
+
+| rate | closed-loop pole rates, Hz |
+|---|---|
+| 30 | 0.162 0.162 0.552 0.552 0.780 0.780 |
+| 100 | 0.162 0.162 0.552 0.552 0.780 0.780 |
+| 200 | 0.162 0.162 0.552 0.552 0.780 0.780 |
+| 400 | 0.162 0.162 0.552 0.552 0.780 0.780 |
+
+$K[0]$ goes from `[58.31 17.47 0 0 42.72 0]` to `[65.23 18.99 0 0 48.83 0]`, about 12%.
+The pole check at `design_hover_lqr.py` passes with 43x margin instead of 6.4x. Everything
+downstream re-derives from `ts`: `freq_slew * ts` is still 200 Hz/s, the integrator is
+still per-second, `VelocityEstimator`'s alpha comes from its 5 Hz cutoff.
+
+`_noise_provenance` records a velocity sigma 2.8x larger (0.94 -> 2.63 mm/s on z),
+because differentiating pose noise at 5 ms rather than 33 ms amplifies it as
+$\sqrt{\text{rate}}$. **That number is provenance only -- it does not feed the design --
+and it is pessimistic**, because it assumes an independent measurement every 5 ms and
+there is not one: between poses `StatePredictor.predict` moves position by exactly
+$v\,dt$, so the differencer sees its own velocity back and injects nothing. The real
+defect is narrower: on the step a fix lands, `VelocityEstimator.update` divides the
+innovation by `self.ts` rather than the true pose interval, an over-large kick partly
+cancelled by the smaller alpha. Not fixed pre-emptively. If the bench shows chatter on the
+rate channel, the ladder is: drop the clock to ~2x the measured pose rate; then thread a
+real `dt` through `VelocityEstimator.update`; then raise `tau`.
+
+### 19.9 The phase-lock check had been measuring the sample grid
+
+Scenario c (plant hovering at 143 Hz against a design at 160) appeared to regress from
+46.6 deg to 73.5 deg on the 200 Hz redesign. It had not. `simulate_hover` integrates the
+plant finely -- `solve_ivp`, `max_step = ts/8` -- but **recorded** `delta` once per control
+step, so the metric measured whatever $T_s$ happened to sample. Recording the peak across
+the sub-step instead:
+
+| control rate | 30 | 50 | 60 | 80 | 100 | 130 | 200 |
+|---|---|---|---|---|---|---|---|
+| scenario c, deg (before) | 46.6 | 72.2 | 74.4 | 69.6 | 72.1 | 73.8 | 73.5 |
+| scenario c, deg (after) | 74.2 | 74.2 | 74.4 | 74.4 | 74.3 | 74.3 | 74.3 |
+
+**The excursion was always 74 degrees.** The 30 Hz simulation stepped over the peak, and a
+gate at 60 deg had been passing a scenario that violated it for as long as the gate has
+existed. The 200 Hz design is not a regression; the measurement got honest.
+
+The gate now separates the two questions it had conflated: lock is *physically* lost at 90
+deg, where $\sin\delta$ peaks and the rotor slips a pole, and 60 deg is the margin we
+want. Above 60 reports THIN, above 90 fails. Scenario c reports THIN, which is true and
+which a permanently red check would have taught nobody.
+
+### 19.10 Serial at 200 Hz: deadbands, not baud
+
+Three commands a step at ~29 bytes is 4.4-5.8 kB/s, 38-50% of 115200 8N1, with 29 bytes
+taking 2.5 ms to shift out of a 5 ms budget. Raising the baud and coalescing the commands
+are both reflashes. Extending the `AZ_DEADBAND_DEG` pattern that already existed is five
+lines of Python: 1 deg of azimuth, 0.005 of magnitude, 0.05 Hz against a 200 Hz/s slew
+ceiling. Measured on a 65 Hz source at 200 Hz control: **92 B/s, 0.8% of the line.**
+
+`RESEND_S = 0.5` is not a heartbeat for its own sake. With deadbands in and no firmware
+watchdog and no ack, a corrupted `mag=` line would otherwise stand until the next value
+crossed a deadband -- which in a steady hover is never.
+
+### 19.11 What this does not buy
+
+At 65 Hz pose the Nyquist limit is 32 Hz and the 10 Hz mode gets six samples a cycle. That
+is enough to **observe** it and log it honestly. It is not enough to damp it: the closed
+loop is still at 0.78 Hz, thirteen times slower than the mode.
+
+The prize is one step further on and deliberately not taken here.
+`design_hover_lqr.py` detunes the Bryson weights to 0.78 Hz explicitly *for latency
+robustness* -- "tighter designs pass on paper and fail in closed loop, at 1.33 Hz through
+a ~2.2 Hz limit cycle from one frame of latency". That justification was written against a
+50 ms pipeline. At 15 ms it largely evaporates and a tighter design becomes admissible.
+**That is a separate, measured change, and bundling it into the diff that made it possible
+would have made both unreviewable.**
+
+### 19.12 The analytic Jacobian, and the finite-difference step that was noise
+
+Written 2026-09-01, closing 19.4's "remaining structural item".
+
+The analytic Jacobian is in, as `stereo.refine.jac_analytic`. For
+`residual = sqrt(max(ref - E, 0))` the chain is
+
+$$\frac{\partial\,\text{res}}{\partial p}
+ = -\frac{1}{2\,\text{res}}\;\nabla_{\!\text{pix}} w \;
+   \frac{\partial\,\text{pix}}{\partial\,\text{rim}}\;
+   \frac{\partial\,\text{rim}}{\partial p}$$
+
+Only two factors are still differenced, and neither touches the image: `d(rim)/d(normal)`
+in 3-space (two cached `_rim_shape` lookups) and `d(raw pixel)/d(ideal pixel)`, a smooth
+polynomial with no image data in it, batched over `3n` points in one call. The three
+centre columns of `d(rim)/dp` are exactly the identity -- the same fact `_rim_shape` was
+already cached on -- and the pinhole term is closed form off the camera-frame point
+`_project_ideal` had already computed.
+
+**It did not do what it was expected to do.** The prediction in 19.4 was speed: take ~47
+`evidence` entries a frame back toward ~10. Measured at the shipped `REFINE_TOL` of 1e-4
+it went the other way -- `nfev` **7 -> 10** and `est.update` **6.9 -> 9.3 ms** -- while
+`refine_rms_px` **improved 5.1642 -> 4.7890** with `discrepancy_mm` identical to four
+decimals. That is not a slower Jacobian. That is a *better* one, and 19.3 had already
+written down what a better Jacobian looks like on this problem without recognising it:
+
+> a coarser Jacobian is a **quality** knob pointing away from speed: 7% better rms for
+> 2.3x the time.
+
+**The claim to retract is 19.3's "the default step is not noise-limited".** It is.
+Measured columnwise cosine between the analytic Jacobian and forward differences at
+scipy's own step:
+
+| reference step | cosine per column |
+|---|---|
+| `rel = 1e-6` | 0.95 0.98 1.00 0.96 0.97 |
+| `rel = 1.5e-8` (scipy's default) | 0.13 0.22 0.79 0.31 0.12 |
+
+At `1.5e-8` relative on a centre near 300 mm the perturbation is ~4.5e-5 px, and
+`segment.sample_map` casts its coordinates to **float32**, whose resolution near a
+300 px coordinate is ~3e-5 px. **The step is smaller than the pixel coordinate it
+perturbs**, so the difference is float32 rounding, not signal. The shipped solve has been
+descending on noise that happens to be uncorrelated enough to terminate early.
+
+The cleanest demonstration is synthetic and is now the self-check in `stereo._self_check`.
+Plant a pose, render its rim into two noiseless evidence maps, seed 1.5 mm and 0.05 rad
+away, and recover it:
+
+| Jacobian | median error | max |
+|---|---|---|
+| analytic | **0.030 mm** | 0.52 mm |
+| batched forward differences | 2.33 mm | 3.53 mm |
+
+Fifty times worse, on a scene with no noise, no plate and no occlusion. Nothing but the
+derivative is different between those two rows.
+
+**The speed comes back through the tolerance, because a tolerance is only meaningful
+against the Jacobian that produced the gradient.** `REFINE_TOL` 1e-4 was tuned in 19.3
+against the noisy one. Re-swept against the analytic one, on the same 250 frames:
+
+| | est ms | nfev | `refine_rms_px` | `discrepancy_mm` | `union_coverage` | solved |
+|---|---|---|---|---|---|---|
+| batched FD, 1e-4 (was shipped) | 6.9 | 7 | 5.1642 | 0.4641 | 0.8611 | 246 |
+| analytic, 1e-4 | 7.8 | 10 | 4.7890 | 0.4641 | 0.8278 | 246 |
+| **analytic, 1e-3** | **4.1** | **4** | **4.9089** | **0.4641** | **0.8778** | **246** |
+| analytic, 3e-3 | 3.2 | 3 | 5.1027 | 0.4641 | 0.8833 | 246 |
+| analytic, 1e-2 | 2.4 | 2 | 5.4185 | 0.4641 | 0.9000 | 246 |
+
+`REFINE_TOL_ANALYTIC = 1e-3` is taken. It needs no trade argued for it: against the
+baseline it is **40% faster and better on every quality axis at once** -- rms lower,
+coverage higher, `discrepancy_mm` unmoved, 246 solved. The pose moves 0.24 mm median
+against a bias floor of 0.185-0.274 mm, which is the flat-optimum behaviour seen
+throughout this chapter rather than a worse fit.
+
+3e-3 is still better than the baseline and is left available. **1e-2 is where it stops**:
+`refine_rms_px` crosses the baseline and the pose shift jumps 0.25 -> 0.34 mm while the
+rms stops following, which is 19.3's own signature of stopping early rather than
+converging.
+
+The tolerance is a **separate constant**, not a retune of `REFINE_TOL`, because
+`mode="ellipse"` still runs on `jac="2-point"` and must keep the tolerance that was
+measured against it.
+
+**One negative result worth the line it costs.** The first implementation took the image
+gradient from `cv2.Sobel` on the evidence map. That is the gradient of the wrong function:
+`sample_map` reads **bilinearly**, so the surface the solver descends is piecewise-linear
+between pixel centres, while Sobel is a 3x3-smoothed estimate of a different one. Swapping
+it for a central difference *of the sampled field* -- all five reads batched into one
+remap over `5n` points -- is the consistent thing to do and is what ships. It changed the
+columnwise cosines by less than 1e-4, because `RING_BLUR_SIGMA = 3` leaves the map smooth
+enough that the two agree anyway. Consistent for a reason that did not turn out to matter,
+kept because the next person to widen the blur would find that it does.
+
+Reproducibility (19.7's instrument) holds: two replays are bit-identical across all 246
+poses and every non-timing column.
+
+**What is still open.** `est.update` is now ~3.2 ms segment + ~4.1 ms solve. Segmentation
+and the solve are within a factor of two of each other for the first time, so the next
+honest look is at segmentation -- and that is the one data-parallel stage, which is where
+19.4 said the GPU-shaped opportunity actually lives. The ceiling on it is still ~3 ms.
+
+### 19.13 500 Hz, and the wire that made the clock moot
+
+Written 2026-09-01. The clock went to 500 Hz because it was asked for. **19.1's ranking
+still holds and nothing here overturns it**: against the 0.78 Hz closed loop, 200 Hz of
+command was worth 0.7 deg of phase lag and 500 Hz takes that to 0.28. The clock was never
+the expensive term. What follows is what it actually cost to hold, and the one thing found
+along the way that *was* worth more than the clock.
+
+**The wire was the larger delay, and nobody had put it next to the clock.** 19.10 measured
+the serial line as a *bandwidth* problem and solved it with deadbands: 92 B/s, 0.8% of
+115200. But 29 bytes at 115200 8N1 is **2.5 ms on the wire**, and that is latency, not
+bandwidth. Set beside 19.1's table:
+
+| | mean command age | wire | total |
+|---|---|---|---|
+| 200 Hz, 115200 | 2.5 ms | 2.5 ms | 5.0 ms |
+| 500 Hz, 115200 | 1.0 ms | 2.5 ms | 3.5 ms |
+| **500 Hz, 921600** | **1.0 ms** | **0.31 ms** | **1.3 ms** |
+
+Raising the clock alone buys 1.5 ms of the 5.0; the baud buys 2.2 ms more for a one-line
+change on each side. 19.10 deferred it only because it was a reflash, and reflashes were
+allowed again on 2026-09-01. `SERIAL_BAUD` in `src/constants.h` and
+`link.SerialComm.BAUD` must match, and **a mismatch is silent** -- there is no handshake
+and no ack, so the firmware simply never parses a command and the coils hold their last
+value. The deadbands stay: they now exist for the latency of a line and because every
+byte not sent is a byte that cannot arrive corrupted.
+
+**What a 2 ms period actually broke.** Four things, none of them the arithmetic:
+
+- **The pacing sleep was capped at a flat 2 ms**, which *is* the period at 500 Hz. Every
+  sleep overshot the next step and the grid resynced on every tick. Now `ts / 4`.
+- **Two "nothing was sent" log lines ran every tick** -- the disarmed and
+  `enable_freq_cmd=False` paths, i.e. the default ones -- into a line-buffered file. 500
+  flushes a second to say nothing changed. Rate-limited to `WITHHELD_LOG_S = 0.5`, the
+  same period as `RESEND_S`, since both answer "is this thing still alive".
+- **The CSV row was line-buffered**, one flush a tick. Block-buffered now; `fh.close()`
+  in the existing `finally` flushes the tail on every exit that runs Python at all.
+- **`drain()` read one byte per syscall.** A 120-byte telemetry line cost 120 syscalls in
+  whichever tick it landed in. One read of `in_waiting` now, which means the framer must
+  handle several lines in one buffer and a CRLF split across two reads -- both covered by
+  `link.demo()`.
+
+**Measured, 10 s against a real-time 100 Hz pose source:**
+
+| design | achieved | dt med | dt p95 | dt max | overrun |
+|---|---|---|---|---|---|
+| 200 Hz | 198.4 Hz | 5.00 ms | 5.17 ms | 70.67 ms | 0.2% |
+| **500 Hz** | **498.5 Hz** | **2.00 ms** | **2.08 ms** | **16.70 ms** | **0.1%** |
+| 1000 Hz | 989.4 Hz | 1.00 ms | 1.04 ms | 13.69 ms | 0.3% |
+
+500 Hz is *cleaner* than 200 was. The rare tens-of-ms outlier is a GC or scheduler stall
+and is not rate-dependent -- which is precisely why the loop now **counts overruns and
+prints dt percentiles on exit**. It used to resync in silence, so a loop that never made
+its period looked exactly like one that always did. macOS sleep granularity (~1 ms) was
+expected to force a busy-wait and did not; that rung is still available and unclimbed.
+
+**The gains are the null change 19.8 predicted.** At 500 Hz the closed-loop poles are
+0.162 / 0.552 / 0.780 Hz -- identical to 30, 100, 200 and 400. Only `K` walks, to
+`[66.01 19.16 0 0 49.53 0]`.
+
+**The defect that stopped being deferrable.** 19.8's ladder put "thread a real `dt`
+through `VelocityEstimator.update`" second, behind dropping the clock. Raising the clock
+instead makes it worse in exact proportion: the estimator divided a fix's jump by the
+*control* period, so it reported a rate too large by `pose_interval / ts` -- 2x at 200 Hz,
+**5x at 500**. Fixed properly rather than scaled: a tick with no new fix passes `dt=None`
+and the estimate is **held**, because between fixes the position comes from
+`StatePredictor`, which moved it by exactly `v * dt`, so re-differencing returns the
+velocity that produced it -- no information, only filter lag. `alpha` follows `dt` too, or
+the rate dependence comes back from the other side. `simulate_hover._check_velocity_estimator`
+is the guard: constant truth, fixes every k-th tick, k from 2 to 20, at both 5 ms and 2 ms.
+
+**One thing the rate change silently broke, found by looking.** `Scenario.latency_frames`
+counted *control steps*, so "1 frame of latency" meant 5 ms at 200 Hz and 2 ms at 500.
+Raising the clock made every latency scenario easier while claiming to test the same
+thing -- the same class of error as 19.9's phase-lock check measuring its own sample grid.
+It is `latency_s` now, in seconds, and scenario b carries 19.1's measured 15 ms. All seven
+scenarios pass at 500 Hz with the honest number.
+
+### 19.14 The tighter design 19.11 promised, and why it is not taken
+
+Written 2026-09-01. 19.11 named a prize:
+
+> `design_hover_lqr.py` detunes the Bryson weights to 0.78 Hz explicitly *for latency
+> robustness* [...] That justification was written against a 50 ms pipeline. At 15 ms it
+> largely evaporates and a tighter design becomes admissible.
+
+**Measured, it does not.** The sweep is one knob -- `design(authority=)`, which scales
+Bryson's `u_max` so `r = 1/(u_max * a)^2`; larger means a bigger command is acceptable,
+which buys bandwidth. Every scenario, at the honest 15 ms of 19.1:
+
+| `authority` | fastest pole | at 15 ms | what fails |
+|---|---|---|---|
+| **1.0 (shipped)** | **0.780 Hz** | **PASS** | -- |
+| 1.15 | 0.836 | PASS | -- |
+| 1.30 | 0.889 | PASS | -- |
+| 1.50 | 0.955 | PASS | -- |
+| 1.75 | 1.032 | FAIL | `d_klat4.0x`: mag saturated 41% of the run (limit 20%) |
+| 2.0 | 1.103 | FAIL | `d_klat4.0x`: saturated 51%, and settling 2.08 mm against 2.0 |
+| 4.0 | 3.011 | FAIL | `b`: the noise-plus-latency scenario |
+
+**The ceiling is not latency.** It is `d_klat4.0x` -- the scenario where the plant's
+lateral gain is four times the design's -- and it fails on **actuator saturation**, which
+is a statement about authority against an uncertain plant and has nothing to do with delay.
+Latency only becomes the binding term above `authority = 4`, well past where the loop has
+already saturated. So 19.11's argument was right about latency and wrong about the
+conclusion: removing the latency objection does not make a tighter design admissible,
+because latency was not what was holding it.
+
+**The honest headroom is 0.78 -> 0.955 Hz**, 22%, and it is still 10x slower than the 10 Hz
+structural mode from 14. It does not change what the loop can damp. It is available
+(`authority=1.5`) and **not taken**, for a reason the table makes plain: the binding
+scenario exists because `k_lat = 0.05` is a **seed, not a measurement** -- the code says so
+at the parameter. The margin being spent is the margin that exists precisely because
+nobody has measured the plant gain. Spending it to buy 22% of a bandwidth that is still an
+order of magnitude short of the mode is the wrong trade.
+
+**Measure `k_lat` first.** That is a better session than this one was: it collapses the
+`d_klat` family from a 0.25x-4x uncertainty sweep to a number, and whatever headroom is
+real would then be visible instead of insured against.
+
+**One thing worth recording about the design as it stands.** At 25 ms, `d_klat4.0x` fails
+at `authority = 1.0` too. The shipped controller's latency margin on the gain-mismatch
+scenario is therefore between 15 and 25 ms -- narrower than "detuned for latency
+robustness" suggests, and worth knowing before anything lengthens the pipeline again.
+
+## 20. Robust stability: what mass and a centre-of-mass offset can and cannot do
+
+18.14 measured a thrust axis 4.6 deg off vertical, growing with thrust, and named three
+candidate causes without distinguishing them: a centre-of-mass offset from the spin axis, a
+blade plane not perpendicular to that axis, or the robot seated at an angle on the rod. This
+section asks the control question that sits behind them -- over what range of mass and
+thrust-axis error is the shipped controller still asymptotically stable? -- and finds on the
+way that **spin-averaging rules out the first two candidates by two orders of magnitude.**
+
+The answer is exact rather than sampled, because this plant is unusually cooperative.
+
+### 20.1 The uncertainty is rank-one, and the closed loop is affine in it
+
+`hover_model.linearize_reduced` returns a state matrix with **no uncertain entries at all** --
+a double-integrator pair -- and puts every parameter into two scalars of $B$:
+
+$$b_\ell = g\,k_{lat}, \qquad b_v = \frac{2g}{f_h}.$$
+
+$A$ is nilpotent blockwise, so the ZOH discretisation is exact and *linear* in each scalar,
+$B_{d,i} = [\,T_s^2/2,\ T_s\,]^\top b$, and `augment_integrators` appends rows that contain no
+parameter either. The shipped $K$ has off-block entries of order $10^{-13}$, so the six-state
+augmented loop splits into two three-state SISO loops, each of the form
+
+$$\boxed{\ M_i(b) \;=\; A_{a,i} \;-\; b\,\mathbf v\,\mathbf k_i^\top,
+\qquad \mathbf v = [\,T_s^2/2,\ T_s,\ 0\,]^\top,\ A_{a,i}\ \text{parameter-free}.\ }$$
+
+A **rank-one, exactly affine** perturbation. Its characteristic polynomial is
+$\chi_{ol}(z) + b\,N(z)$ with $N(z) = \mathbf k_i^\top\operatorname{adj}(zI - A_{a,i})\mathbf v$:
+a textbook root locus in $b$. So the certified set of gains is a genuine stability boundary,
+found by bisection to machine precision, and **no LMI, no polytopic over-bound and no norm
+bound is needed** -- none of the conservatism those tools carry applies here.
+
+`robust_cert._self_check` verifies the affineness numerically rather than trusting this
+paragraph, and checks that rebuilding through the design code reproduces the shipped
+closed-loop poles (0.162, 0.552, 0.780 Hz) to $10^{-9}$.
+
+| axis | certified gain multiplier | down | up |
+|---|---|---|---|
+| lateral | $[0.0802,\ 106.46]$ | 21.9 dB | 40.5 dB |
+| vertical | $[0.1097,\ 156.60]$ | 19.2 dB | 43.9 dB |
+
+### 20.2 Mass enters one scalar, and thrust binds long before stability
+
+The 1-D plant never forms $k_T$: lift is written $g\big((f/f_h)^2-1\big)$, so mass appears
+*only* through $f_h = \sqrt{m_R g/k_T}$, and
+
+$$b_v = \frac{2g}{f_h} \;\propto\; \frac{1}{\sqrt{m_R}}
+\qquad\Longrightarrow\qquad
+\frac{m}{m_{nom}} = \left(\frac{b_{v,nom}}{b_v}\right)^{2}.$$
+
+A heavier robot is a *lower* loop gain. The map is monotone, so the certified interval in
+$b_v$ maps to a certified interval in mass with no slack introduced:
+
+$$\frac{m}{m_{nom}} \in [\,4.1\times10^{-5},\ 83.1\,].$$
+
+**That number is true and useless, which is the finding.** $f_h$ scales as $\sqrt{m}$, so a
+mass ratio of only $(f_{stepout}/f_h)^2 = (225/160)^2 = 1.98$ already drives the required
+hover frequency onto `F_STEPOUT_HZ`. **Thrust and step-out bind before stability does, by a
+factor of 42.** Mass uncertainty is not a stability problem on this rig and no robustness
+effort should be spent on it; 6.5's exchange rate -- a relative error $\varepsilon$ in $f_h$
+is indistinguishable from $-\varepsilon$ in the command -- remains the operative statement,
+and it is about *authority*, not stability.
+
+### 20.3 A centre-of-mass offset cannot produce a steady tilt
+
+This is the part 18.14 needed and did not have.
+
+**A free body feels no gravity torque about its own centre of mass.** Once the robot is off
+the pad, gravity acting at the COM has zero moment arm about the COM, so a COM offset cannot
+tilt it directly. The only path is the **thrust line**: thrust acts at the blades'
+aerodynamic centre, and if the COM is displaced from that line by $d$ transverse to the spin
+axis, the moment about the COM is
+
+$$\tau_0 = d\,T = d\,m_R g\,\frac{T}{m_R g}.$$
+
+Proportional to thrust -- which is exactly 18.14's measured signature, and the reason that
+section reads the growth with thrust as evidence *for* a fixed geometric offset.
+
+**But $d$ is body-fixed, and the body spins.** In the lab frame that torque rotates at
+$\omega$, so it drives 11.3's tilt block at the spin frequency itself:
+
+$$I_t\ddot\chi + (iI_s\omega + c_t)\dot\chi + \kappa_t\chi = \tau_0 e^{i\omega t}
+\qquad\Longrightarrow\qquad
+\chi(t) = \frac{\tau_0\,e^{i\omega t}}{\kappa_t - (I_s+I_t)\omega^2 + i c_t\omega}.$$
+
+The response is a **synchronous coning whose mean over one revolution is zero**, not a steady
+tilt. It is off resonance by construction: nutation sits at $(I_s/I_t)\omega = 1.65\,\omega$
+and never at $\omega$, so nothing amplifies it. At 126 Hz the inertia term
+$(I_s+I_t)\omega^2 = 3.38\times10^{-3}$ exceeds $\kappa_t = 2.45\times10^{-5}$ by 138x, so
+$\kappa_t$ drops out and
+
+$$\boxed{\ |\chi| \;\simeq\; \frac{m_R g\,d}{(I_s+I_t)\,\omega^2}\ }$$
+
+Dropping $c_t$ makes this an **upper** bound on the response (12.8 sets it to zero; 11.3 shows
+a plausible value is three orders too small to matter). Evaluated:
+
+| $f$ | coning per mm of offset | offset needed for 4.6 deg |
+|---|---|---|
+| 126 Hz (measured liftoff) | 0.0140 deg | **329 mm** |
+| 160 Hz (design point) | 0.0086 deg | 532 mm |
+| 210 Hz (ramp target) | 0.0050 deg | 918 mm |
+
+**A COM offset is ruled out.** Producing the measured 4.6 deg would take a 329 mm offset on a
+robot a few millimetres across -- wrong by two and a half orders of magnitude. A generous
+1 mm offset buys 0.014 deg, which is below the pose estimator's own scatter.
+
+**The same argument kills the second candidate.** A blade plane tilted by $\gamma$ from the
+spin axis is also body-fixed, so its thrust vector sweeps a cone at $\omega$ and its lateral
+component averages to zero over a revolution, leaving only an $O(\gamma^2)$ loss of vertical
+thrust. Any body-fixed asymmetry is annihilated by spin-averaging; that is what spinning is
+*for*.
+
+**What survives is a lab-frame tilt of the spin axis**, 18.14's third candidate, and the
+azimuth data already says so. `mixer_sign.py` measured the rotor normal sitting 1.5 deg off
+the datum axis at rest and growing to 3.1 deg by 105 Hz **in a fixed azimuth near 150 deg,
+with concentration 0.97**. A body-fixed defect would present an azimuth advancing at the spin
+rate; a concentration of 0.97 about one lab direction is a lab-frame misalignment. And a spin
+axis tilted by $\beta$ in the lab gives lateral acceleration $g(T/m_Rg)\sin\beta$, growing
+with thrust just as the measurement shows, with no body-fixed offset required.
+
+**This is a more hopeful reading than 18.14's.** That section concluded "all three are
+mechanical and none is addressable from the host". If the surviving mechanism is instead a
+lab-frame tilt that *grows with drive* -- 1.5 deg at rest, 3.1 deg by 105 Hz -- then part of
+it is a drive-dependent field asymmetry, and a field asymmetry **is** addressable from the
+host, through the same mixer trim `mixer_sign.py` was written to calibrate. The test that
+separates them is already specified there: a seating angle is present at zero drive, a field
+asymmetry is not.
+
+### 20.4 The three channels a COM offset does open
+
+Recorded so the ruling-out above is not read as "COM offset is harmless":
+
+1. **A constant lateral acceleration bias.** The augmented integrator on $x$ rejects it in
+   steady state, so it is not a stability question -- but it is spent inside `mag_max`, and
+   6.6 prices exactly this trade for the vertical axis. 18.14's 0.079 g is 8 % of a
+   one-$g$ authority budget. `simulate_hover.Scenario.dist_accel` is the channel for it and
+   is currently set non-zero nowhere.
+2. **A once-per-rev component at 50-230 Hz.** Against closed-loop poles at 0.162-0.780 Hz
+   this is two decades out of band. It is a vibration question, not a control question.
+3. **A rotation of the lateral input direction.** The only one of the three that can
+   destabilise, and the subject of 20.5.
+
+### 20.5 Input rotation is exactly a phase margin
+
+The runner drives **both** lateral axes with the same $K$ row 0, so the two axes are
+identical. Collect them into $\xi = x + iy$ as 14.2 does: a common rotation $\psi$ between
+the commanded lateral direction and the realised one is then exactly a **complex loop gain**
+$b_\ell\,\kappa\,e^{i\psi}$ on the same three-state loop. The certified set is a region in the
+complex gain plane -- its real-axis extent is a gain margin, its angular extent a phase
+margin -- and because $A_{a,i}$, $\mathbf v$ and $\mathbf k$ are real, the region is symmetric
+under conjugation, so $|\psi|$ is the whole story.
+
+$$\boxed{\ |\psi| < 69.4^\circ\ \text{at nominal gain}\ }$$
+
+| $\psi$ | 0 | 15 | 30 | 45 | 60 | 67.5 |
+|---|---|---|---|---|---|---|
+| $\kappa_{lo}$ | 0.080 | 0.137 | 0.224 | 0.366 | 0.637 | 0.900 |
+| $\kappa_{hi}$ | 106.5 | 102.8 | 92.1 | 75.0 | 52.7 | 39.9 |
+
+**This is the margin that is actually short.** 12.8 measured, on the spatial model, that
+"commanding a field tilt of 0.1 in $+x$ moves the spin axis into $+y$ at 72 deg from the
+command after 50 ms". 72 deg is **outside** the certified 69.4 deg, by 2.6 deg. The two
+numbers come from different models and should not be over-read as a prediction of failure,
+but they are the same quantity, they are the same size, and the gain-margin columns show the
+region collapsing fast past 60 deg: at $\psi = 67.5^\circ$ the tolerable gain band has
+narrowed from $[0.08,\,106]$ to $[0.90,\,39.9]$, and its lower edge has climbed to within
+10 % of nominal. A loop that is 21.9 dB from its low-gain boundary at $\psi = 0$ is 0.9 dB
+from it at 67.5 deg.
+
+**The correction is free, which is the practical point.** A known rotation is removed by
+rotating the command, and `mixer_sign.py` already prints the required trim in exactly that
+form ("a trim must use `az = P + 180 - off`"). The 69.4 deg is therefore tolerance on the
+*residual* after calibration, which is ample. Uncalibrated, it is not. **Run `mixer_sign.py`
+to conclusion before arming the lateral loop** -- it has never been run to conclusion, and
+across five runs on 2026-09-01 the lateral loop never armed once.
+
+### 20.6 What this does not show
+
+13.5 states the trap this section has to avoid: certifying a linearised model against itself
+measures the control law and nothing else. Four limits, in the order they bite:
+
+1. **Two of the parameters are not measured.** $k_{lat}$ is still the seed guess of
+   `hover_model.py:70`, and the mixer rotation is unmeasured. A wide certified region is
+   permission to arm the loop and identify them, not evidence the rig sits inside it.
+2. **Latency is not in the certificate.** 19.14 measured `d_klat4.0x` failing at 25 ms while
+   passing at 15 ms, so the gain-mismatch margin is bounded by *latency*, not by the root
+   locus computed here. The 106x upper gain figure is a statement about an undelayed loop and
+   must not be quoted without that qualification.
+3. **The certificate holds $K$ fixed while perturbing the plant.** That is the right question,
+   but `_anchor` re-trims $f_h$ at runtime to the frequency the ramp actually reached, which
+   *shrinks* the effective mass error -- so the mass result is conservative in the safe
+   direction.
+4. **A Gaussian is never fully certified.** Unbounded support means no box covers every draw.
+   What is certified is a box plus the probability mass it carries, which is why
+   `robust_cert.as_sigmas` reports a miss probability alongside every half-width and never
+   returns zero.
+
+### 20.7 Correspondence with the implementation
+
+| Quantity | Where |
+|---|---|
+| $M_i(b) = A_{a,i} - b\,\mathbf v\,\mathbf k_i^\top$ | `robust_cert.axis_loop`, built through the design code so it cannot drift |
+| certified gain interval | `robust_cert.gain_interval`, bisection on the root locus |
+| complex-gain region, phase margin | `robust_cert.complex_region`, `robust_cert.phase_margin` |
+| $m/m_{nom} = (b_{nom}/b)^2$ | `robust_cert.mass_interval` |
+| $|\chi| = m_R g d/((I_s+I_t)\omega^2)$ | `robust_cert.coning_from_com` |
+| box-to-sigma inversion | `robust_cert.as_sigmas` |
+| the rotation this bounds | `mixer_sign.py`, the rig measurement that anchors it |
+
+```bash
+uv run python controller/control/robust_cert.py     # self-check, then the report
+uv run python controller/control/simulate_hover.py  # scenario d must stay consistent with it
+```
+
+The certified lateral band $[0.080,\ 106]$ contains scenario d's $0.25\times$, $1\times$ and
+$4\times$ $k_{lat}$, and all three PASS in the nonlinear simulation -- a falsification test
+the certificate could have failed and did not.
+
+---
+
 ## Appendix A: Correspondence with the MATLAB implementation
 
 Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`
 plus `frequency_tracking_statespace_sim.m`) map onto §1–§11, and
 `MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` maps onto §12–§13 as
-`control/spatial_model.py`. Function and variable names are kept across the port, so the two
+`ai/design/spatial_model.py`. Function and variable names are kept across the port, so the two
 read side by side and `grep` finds the counterpart.
 
 Three departures from the multi-coil original, each argued at its own section: the field

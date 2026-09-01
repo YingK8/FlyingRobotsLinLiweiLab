@@ -25,19 +25,17 @@ import cv2
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera"),
-                str(HERE.parent / "viz")]
 
-import background as bgmod  # noqa: E402
-import rig as rigmod  # noqa: E402
-import segment as segmod  # noqa: E402
-import spin as spinmod  # noqa: E402
-import stereo as st  # noqa: E402
-from estimator import RADIUS_BENCH_MM  # noqa: E402
-from filter import PoseFilter  # noqa: E402
-from live_viz import normal_segment_px  # noqa: E402
-from record import latest_flight, open_recording  # noqa: E402
-from shape import CentreCalibration  # noqa: E402
+from controller.pose import background as bgmod
+from controller.calib import rig as rigmod
+from controller.pose import segment as segmod
+from controller.pose import spin as spinmod
+from controller.pose import stereo as st
+from controller.pose.estimator import RADIUS_BENCH_MM
+from controller.pose.filter import PoseFilter
+from controller.viz.live_viz import normal_segment_px
+from controller.camera.record import latest_flight, open_recording
+from controller.calib.shape import CentreCalibration
 
 FLIGHTS = HERE.parents[1] / "results" / "flights"
 SCALE = 0.5
@@ -110,8 +108,6 @@ def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0, witness=Non
         npx = normal_segment_px(pose, cam, zero, centre_px=seg.ellipse[0])
     mask = seg.mask if (show_mask and seg is not None) else None
     out = segmod.draw(frame, seg, normal_px=npx, mask=mask)
-    # One ellipse now. There used to be two -- the mask fit in red and a per-view
-    # refinement of it in green -- and the refinement was removed (`theory.md` 16.24).
     _rim_overlay(out, pose, cam, view)
     _blade_overlay(out, seg, witness)
     label = f"{tag}"
@@ -126,7 +122,11 @@ def _panel(frame, seg, pose, cam, zero, tag, show_mask=True, view=0, witness=Non
 
 
 def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=SCALE,
-           backgrounds="auto"):
+           backgrounds="auto", mode_scale=1.0):
+    # The output panel stays the same size whatever mode the pipeline ran at: `scale`
+    # is a display setting and `mode_scale` is a measurement one, and halving twice
+    # made the 640x400 demo unreadable for no reason.
+    scale = min(1.0, scale / mode_scale)
     flight = Path(flight)
     out_path = Path(out_path or flight / "demo.mp4")
     rig = rigmod.StereoRig.load(rigmod.DEFAULT_PATH)
@@ -175,6 +175,20 @@ def render(flight, out_path=None, gated=False, radius_mm=RADIUS_BENCH_MM, scale=
                 break
             frames = [f if f.ndim == 2 else cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
                       for _, f in got]
+            if mode_scale != 1.0:
+                # Stands in for the sensor's smaller mode, so the demo shows what the
+                # LIVE pipeline sees rather than a resolution nothing runs at.
+                # INTER_AREA because it is the decimation filter -- INTER_LINEAR aliases
+                # the rim, which is the one feature the whole pipeline measures.
+                #
+                # The intrinsics follow on their own: `StereoPoseEstimator._match_scale`
+                # compares each frame against the rig's own `image_size` and applies
+                # `rig.scaled()`, which is exact for a uniform rescale (fx, fy, cx, cy
+                # scale; the distortion coefficients are dimensionless). So nothing here
+                # touches the calibration, and the overlay geometry stays consistent
+                # because every drawn point comes from the same rescaled rig.
+                frames = [cv2.resize(f, None, fx=mode_scale, fy=mode_scale,
+                                     interpolation=cv2.INTER_AREA) for f in frames]
             pose = est.update(frames, t=n / 60.0, frame_index=n)
             got = filt.update(pose, t=n / 60.0)
             if pose is not None and got is not None:
@@ -244,7 +258,11 @@ if __name__ == "__main__":
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("flight", nargs="?", default=None)
     ap.add_argument("-o", "--out", default=None)
+    ap.add_argument("--mode-scale", type=float, default=1.0,
+                    help="downsample the bag before the pipeline, e.g. 0.5 for the "
+                         "640x400 flight mode. Intrinsics rescale themselves.")
     ap.add_argument("--gated", action="store_true",
                     help="run the real gates, so rejected frames show as 'no pose'")
     a = ap.parse_args()
-    render(a.flight or latest_flight(FLIGHTS), a.out, gated=a.gated)
+    render(a.flight or latest_flight(FLIGHTS), a.out, gated=a.gated,
+           mode_scale=a.mode_scale)

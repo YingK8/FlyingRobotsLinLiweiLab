@@ -1,50 +1,9 @@
-"""
-Two views, one pose.
-
-`conic.backproject_ellipse` gives **two** circle poses from one ellipse and cannot
-choose; a second camera makes the choice a measurement rather than a bet, and fixes
-two other things as a side effect.
-
-    ambiguity  both cameras see the same circle, so of the four cross-view pairings
-               one agrees and three do not. `match` reports `margin`, how many sigmas
-               better the winner was -- i.e. how much the data actually decided.
-    depth      a single view localises the ellipse *centre* far better than its
-               *size*, so error is anisotropic ~11:1 (0.078 mm across the optical
-               axis, 0.857 along). Each camera's bad axis is the other's good one,
-               and `fuse` combines them in information form.
-    bias       fusion weights by *direction*, not over time, which is what makes it
-               work here: the single-view residual autocorrelates at 0.966 after one
-               frame, so temporal averaging cannot touch it. Along camera A's depth
-               axis camera B measures laterally and carries ~120x the weight, so a
-               3 mm systematic depth error in A enters the fused answer as 0.025 mm.
-
-Three layers, increasing cost, each usable alone:
-
-    match    microseconds. Resolves the ambiguity.
-    fuse     microseconds. Adds depth and bias. Enough on its own for a
-             sub-millimetre target, and the fallback if refinement is too slow.
-    refine   ~0.3 ms. Joint reprojection minimisation on R^3 x S^2 against both
-             silhouettes. The only layer that can improve *orientation*: it treats
-             the protruding mast as the localised outlier arc it is, where
-             `shape.TiltCalibration` must average a scalar correction over it.
-
-**Five unknowns, never six.** Position (3) plus the normal on S^2 (2). Roll is
-unobservable -- the ring is rotationally symmetric and the robot spins at 310-350 Hz
-against a much slower camera -- so carrying it would leave that direction of ``J'J``
-rank-deficient and the normal equations singular.
-
-**Normals are lines here, not vectors.** `conic.backproject` orients each normal
-toward its own camera, so a rig with one camera above the rotor plane and one below
-legitimately reports opposite normals for one pose. Everything internal compares
-with ``abs(dot)``; the sign is applied once at the end against a caller-supplied
-reference.
-"""
-
 from __future__ import annotations
 
 import math
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,120 +15,90 @@ from scipy.optimize import least_squares
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import conic  # noqa: E402
-import segment as segmod  # noqa: E402
-from shape import CentreCalibration, TiltCalibration  # noqa: E402
-from uncertainty import ErrorModel  # noqa: E402
-from uncertainty import features as uncertainty_features  # noqa: E402
-from uncertainty import GATE_MARGIN as uncertainty_GATE_MARGIN  # noqa: E402
-from estimator import RADIUS_MM, _angles_from_normal  # noqa: E402
-from zeroing import Zero  # noqa: E402
-from filter import ACCEL_MM_S2  # noqa: E402
+from controller.pose import conic
+from controller.pose import segment as segmod
+from controller.calib.shape import CentreCalibration, TiltCalibration
+from controller.pose.uncertainty import ErrorModel
+from controller.pose.uncertainty import features as uncertainty_features
+from controller.pose.uncertainty import GATE_MARGIN as uncertainty_GATE_MARGIN
+from controller.pose.estimator import RADIUS_MM, _angles_from_normal
+from controller.calib.zeroing import Zero
+from controller.pose.filter import ACCEL_MM_S2
 
-# Per-view error scales used to weight the fusion, in mm at the calibration
-# resolution (1024x768).  Straight from the Cramer-Rao floor in
-# controller/pose/theory.md S13: lateral 0.078, depth 0.857.  They are weights, not
-# predictions -- only their *ratio* matters to the fused answer, which is why a
-# rough figure is good enough and why the ratio is the thing to keep current if
-# these are ever refitted.
-#
-# A floor is not a measurement.  `noise.py` measures both scales on a stationary
-# robot and writes `noise_model.json`; `StereoPoseEstimator` prefers that when it
-# exists and falls back to these.  The depth scale there is a fraction of range, so
-# the value below is the fallback quoted at `noise.FALLBACK_REF_Z_MM`.
 SIGMA_LAT_MM = 0.078
 SIGMA_DEPTH_MM = 0.857
 
 # Refinement stops here.  The residual is Sampson distance in pixels and the
 # seed is already sub-pixel, so this is about polishing rather than converging;
 # more iterations buy nothing and cost frame budget.
+# Pose quantisation for the centre-cal displacement cache in `refine`. Coarse enough to
+# collapse a finite-difference step, fine enough that the solve recomputes as it travels.
+CAL_DISP_TOL_MM = 0.01
+CAL_DISP_TOL_N = 1e-5
+
+REFINE_TOL = 1e-4
+
+# The stopping tolerance that pairs with the ANALYTIC Jacobian, `mode="image"` only.
+# Separate from `REFINE_TOL` because a tolerance is only meaningful against the Jacobian
+# that produced the gradient: 19.3 tuned 1e-4 against forward differences whose step is
+# noise-dominated (measured: columnwise cosine ~0.1 against the true gradient), and a
+# Jacobian that actually points downhill reaches the same optimum in far fewer steps.
+# Measured on the 250-frame replay, against the batched-FD baseline at 1e-4:
+#
+#   tol    est ms   nfev   refine_rms_px   discrepancy_mm   union_coverage
+#   FD 1e-4   6.9      7        5.1642           0.4641           0.8611
+#   1e-4      7.8     10        4.7890           0.4641           0.8278
+#   1e-3      4.1      4        4.9089           0.4641           0.8778
+#   3e-3      3.2      3        5.1027           0.4641           0.8833
+#   1e-2      2.4      2        5.4185           0.4641           0.9000
+#
+# 1e-3 is strictly better than the baseline on every quality axis while being 40%
+# faster, so it needs no trade argued for it. 3e-3 buys another 0.9 ms and is still
+# better than the baseline; 1e-2 is where `refine_rms_px` crosses it and the pose shift
+# jumps 0.25 -> 0.34 mm, which is 19.3's signature of stopping early rather than
+# converging. Available, not taken.
+REFINE_TOL_ANALYTIC = 1e-3
+
+# Relative finite-difference step for the batched Jacobian, matching what
+# `least_squares(jac="2-point")` picks by default -- sqrt of machine epsilon. Measured
+# larger steps converge to a BETTER residual but take more iterations, so this is a
+# quality knob pointing away from speed; see `control/theory.md` 19.3.
+_JAC_REL_STEP = math.sqrt(np.finfo(float).eps)
+
+# Analytic Jacobian (`theory.md` 19.4's "remaining structural item"). Set False to fall
+# back to the batched forward differences it replaced -- both are kept because the
+# accuracy protocol in 19.2/19.3 is an A/B against each other.
+USE_ANALYTIC_JAC = True
+
+# Pixel step for the ONE thing in the analytic Jacobian still differenced in image
+# space: d(raw pixel)/d(ideal pixel). Distortion is a smooth polynomial with no image
+# data in it, so this is a plain numerical derivative of an analytic function and 1e-3 px
+# sits far above float64 cancellation and far below the lens's curvature scale.
+_JAC_DISTORT_STEP_PX = 1e-3
+
+# Central-difference step for the evidence map's image gradient, in pixels. The map is
+# read bilinearly, so its gradient is piecewise constant within a pixel cell and
+# discontinuous across one; a step of half a cell straddles that, and stays far inside
+# the RING_BLUR_SIGMA = 3 features it has to resolve.
+_JAC_GRAD_STEP_PX = 0.5
+
+# The residual is sqrt(max(ref - E, 0)), whose derivative -dE/(2r) is singular as r -> 0.
+# Below this fraction of sqrt(ref) the sample is treated as carrying no gradient. See
+# `jac_analytic`.
+_JAC_MIN_RESID_FRAC = 1e-3
+
+_RIM_SHAPE_CACHE = {}
+
 MAX_REFINE_ITER = 12
 
 # The robot's rim diameter, from the mesh. Used as the natural length scale for
 # deciding when two views cannot be looking at the same thing.
 BODY_DIAMETER_MM = 20.409
 
-# Reject a frame when the two views' independent answers disagree by more than
-# this. Not a tuned constant: two cameras that disagree about the robot's
-# position by more than its own body have not both seen the robot.
-#
-# It is also the single most valuable thing the second camera provides, and that
-# was not obvious in advance. Measured over 900 rendered pairs, 9.1% of frames
-# were catastrophic (position error above 5 mm) -- and on every one of them the
-# *monocular* estimate was already wrong by ~23 mm, because segmentation had
-# grabbed the wrong thing in one view. Stereo cannot repair that. What it can do
-# is notice: those frames show a cross-view discrepancy of 349 mm median against
-# 5.4 mm for good frames, a 60x separation with no overlap worth speaking of.
-#
-#   gate     frames kept    catastrophic among kept    p95 |pos|
-#   none        100%              9.1%                  5.59 mm
-#   25 mm        85%              0.00%                 1.81 mm
-#   40 mm        89%              0.87%                 2.11 mm
-#
-# A controller is far better served by a declared gap than by a confident 50 mm
-# error, which is why the default rejects rather than falling back to one view:
-# on these frames the surviving view was wrong too.
-#
-# **Retuned for the direct fit, because the blunder it has to catch has changed.**
-# The reasoning above sized it against segmentation failures, which separate by 60x
-# (349 mm against 5.4) and need no precision to catch. The direct fit removed those and
-# left a subtler one: the *branch flip*, where both views take the mirrored solution
-# together, agree with each other, and are jointly wrong. The two conic solutions are
-# furthest apart near 45 degrees of tilt -- 84.5 degrees -- so a flip costs almost a
-# right angle of orientation while moving position by only ~8.5 mm. A 25.5 mm gate
-# never sees it, and the branch *margin* does not either: on flipped frames it reads
-# 28.3 sigma against 25.8 on good ones, so the matcher is confidently wrong.
-#
-# What does separate them is that the good frames got much better: 2.0 mm median
-# against the 5.4 the old note records. Swept on `2026-08-28_131552`, a take flown
-# deliberately upright so the true normal is constant and its scatter *is* the error:
-#
-#   gate     kept    normal scatter, median / p90    frames >20 deg out
-#   25.5 mm   77%          9.45 / 68.85 deg                 24%
-#   12 mm     72%          7.86 / 69.59                     19%
-#    8 mm     66%          3.37 / 63.95                     11%
-#    6 mm     62%          1.97 /  7.28                      8%
-#    5 mm     58%          1.38 /  4.06                      6%
-#    4 mm     56%          0.59 /  3.00                      4%
-#    3 mm     54%          0.99 /  2.05                      3%
-#
-# The cliff is between 8 and 6 mm, where p90 falls 64 -> 7 degrees: that is the flips
-# being cut. Passes over **4-6 mm**, and 5 is the midpoint; below 4 it buys tenths of a
-# degree for whole points of coverage. On `2026-08-28_092117`, which has real attitude
-# change and so no constant to measure against, the same move takes frames more than 20
-# degrees from the mean from 15% to 3%.
-#
-# It is now a *precision* gate rather than a plausibility one, so it has to be
-# re-measured whenever the fit's precision moves -- unlike the body-diameter reasoning
-# above, which needed no numbers.
+# Two-view agreement gate: above this the pair is a blunder, not a noisy fix.
 MAX_DISCREPANCY_MM = 5.0
 
-# Reject a pose whose rotor axis jumps faster than the robot can turn, in degrees per
-# second, and only while the previous one is still fresh.
-#
-# The branch flip of `MAX_DISCREPANCY_MM` is a *discrete* error -- the two conic
-# solutions are ~84 degrees apart near 45 degrees of tilt -- so it appears as a jump
-# nothing physical can produce and returns the same way. Cross-view discrepancy catches
-# it only indirectly, by noticing that a flipped pair agrees slightly less well, which
-# is why gating on that alone costs 20 points of coverage to remove the last few.
-#
-# 600 deg/s is far above the robot and far below a flip. Sampled every third frame at
-# 60 fps the window is 50 ms, so this admits 30 degrees between poses where a flip asks
-# for 84; the fastest real attitude change measured on any flight here is under 60 deg/s.
-#
-# **Rate, not a fixed angle**, so it does not tighten when frames are dropped, and
-# **only while `dropout_s` has not elapsed**: after a real gap there is no prior worth
-# trusting and re-acquisition must be allowed, which is the same rule `_choose` uses
-# monocularly. Without that a single bad pose would end the track permanently.
-# **Off by default.** It works -- it takes the upright take's normal scatter from
-# 1.38 to 0.57 deg p50 -- but it decides the present frame from the previous one, so a
-# single wrong pose that slips through can reject the correct poses that follow, and the
-# recovery is a dropout rather than a correction. That is unstable in the way a gate must
-# not be, and the discrepancy gate above catches the same flips on its own evidence
-# (1.38 deg p50, 6% of frames more than 20 deg out, against 1% with this on). Set it to a
-# number to turn it back on.
 MAX_JUMP_DEG_PER_S = None
 
 # How long a previous normal stays worth comparing against. Matches the monocular
@@ -177,35 +106,6 @@ MAX_JUMP_DEG_PER_S = None
 # jump gate must stand aside so the track can re-acquire.
 DROPOUT_S = 0.25
 
-# Reject a frame whose outline is not elliptical enough for the circle model to
-# mean anything, as a **fraction of the major axis** rather than in pixels.
-#
-# It was 1.5 px, and that was wrong in a way only a resolution sweep exposes:
-# detection came out *lower* at 1280x800 (53%) than at 640x480 (68%). Backwards.
-# More pixels should mean more information, not fewer accepted frames. The cause
-# is that a pixel threshold is dimensional -- at twice the resolution the same
-# *relative* outline quality yields twice the pixel residual, so a fixed limit
-# silently tightens as the sensor improves, and at 160x120 it silently vanishes,
-# passing frames whose outline is nothing like an ellipse.
-#
-# 0.012 is the old 1.5 px expressed against the ~130 px major axis it was tuned
-# at, so at that resolution behaviour is unchanged and only the scaling differs.
-#
-# It exists because the cross-view gate above cannot catch everything. That gate
-# finds views that *disagree*; it is blind to both views failing the same way,
-# which is exactly what happens near face-on, where the rim's outer wall goes
-# unlit and the outline collapses onto the blade cross in both cameras at once.
-# Measured over 112 frames, the surviving 9.8% of catastrophic orientations all
-# had this signature -- segmentation IoU 0.32 against 0.58, and both cameras
-# agreeing to within 5.6 mm on a wrong answer.
-#
-#   gate     frames kept   normal >10 deg among kept   normal p50 / p95
-#   none        100%             9.8%                   1.87 / 25.66
-#   1.5 px       71%             1.3%                   0.96 /  3.15
-#   1.25 px      63%             0.0%                   0.85 /  3.01
-#
-# 1.5 px is roughly five times the sub-pixel precision the boundary is measured
-# to, so it fires only when the outline is materially non-elliptical.
 MAX_FIT_RMS_REL = 0.012
 
 # Where the direct fit's reference level sits in the seed's own ring evidence.
@@ -216,31 +116,7 @@ MAX_FIT_RMS_REL = 0.012
 # for the whole ring. p90 of the seed's samples.
 REF_PERCENTILE = 90
 
-# How far a direct fit must stand above its own surroundings to be believed.
-#
-# The blunder gate for the `fit_ellipse_image` path, replacing `MAX_FIT_RMS_REL` for the
-# views it refines -- that one measures the hull, and the hull is what the shadow
-# contaminated. `segment.RingFit.ridge` is the fitted curve's evidence over that of
-# curves just inside and outside it, so it tests whether the ellipse is on a ridge.
-#
-# **Coverage was tried here first and is the wrong statistic.** It measures how much of
-# the rim is present, which is not the same question: a well-fitted ring two thirds
-# hidden behind the rig and an ellipse plainly too big for a fully visible one both
-# score 0.52, and they need opposite answers. Rejecting the first throws away exactly
-# the frames a two-view fit exists to rescue. `ridge` reads 27.3 and 0.60 on that pair.
-#
-# Swept over 534 stereo fits on three flights, against cross-view agreement:
-#
-#   ridge   kept   median   under 25.5 mm        coverage   kept   median   under gate
-#    1.5     79%   1.10 mm      92%                 0.60      79%   1.10 mm     84%
-#    2.0     70%   0.97 mm      94%                 0.70      65%   0.92 mm     91%
-#    2.5     63%   0.91 mm      96%                 0.75      59%   0.89 mm     94%
-#    3.0     58%   0.89 mm      98%                 0.80      50%   0.88 mm     94%
-#    4.0     50%   0.85 mm      99%
-#
-# It dominates coverage at every operating point -- at 2.0 it keeps 70% of frames for
-# the 94% that coverage reaches only by dropping to 59%. Passes over 2.0-4.0; 2.5 is
-# near the midpoint and is where the marginal frame stops being worth its error.
+# Below this the evidence map has no ridge on the rim and the ellipse is unpinned.
 MIN_RING_RIDGE = 2.5
 
 
@@ -280,9 +156,19 @@ def _tangent_basis(n):
     """
 
     n = _unit(n)
-    seed = np.array([1.0, 0.0, 0.0]) if abs(n[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
-    t1 = _unit(np.cross(n, seed))
-    return t1, np.cross(n, t1)
+    # Explicit components, not `np.cross`. Identical arithmetic, but np.cross spends most
+    # of its time in axis bookkeeping (`normalize_axis_tuple`, `moveaxis`) which for a
+    # 3-vector dwarfs the six multiplies. `refine`'s residual calls this on every
+    # evaluation, ~47 a frame, so it showed up as 124k bookkeeping calls in the profile.
+    nx, ny, nz = n
+    # seed = +x, or +y when n is too close to +x for the cross to be well conditioned.
+    if abs(nx) < 0.9:
+        t1 = np.array([0.0, nz, -ny])          # n x (1,0,0)
+    else:
+        t1 = np.array([-nz, 0.0, nx])          # n x (0,1,0)
+    t1 = _unit(t1)
+    ax, ay, az = t1
+    return t1, np.array([ny * az - nz * ay, nz * ax - nx * az, nx * ay - ny * ax])
 
 
 def viewing_bisector(rig, towards_cameras=False):
@@ -662,13 +548,40 @@ def _rim_points(center_world, normal_world, radius_mm, phis):
         one basis per normal and no second place for it to be derived differently.
     """
 
-    u, v = _tangent_basis(normal_world)
     c = np.asarray(center_world, dtype=np.float64).reshape(3)
-    return c + radius_mm * (np.outer(np.cos(phis), u) + np.outer(np.sin(phis), v))
+    return c + _rim_shape(np.asarray(normal_world, dtype=np.float64).reshape(3),
+                          radius_mm, phis)
 
 
-def _project_ideal(pts_world, cam):
-    """``(ideal pinhole pixels, in front of the lens)``. Distortion is applied after."""
+def _rim_shape(normal, radius_mm, phis):
+    """The rim offsets from the centre: depends on the NORMAL only, so it is cached.
+
+        `least_squares` differentiates 5 parameters, and 3 of them are the centre --
+        which shifts the rim rigidly and leaves this untouched. Caching it means the
+        tangent basis and the two outer products are computed twice per Jacobian
+        instead of six times. Exact: keyed on the normal's own bytes, so a changed
+        normal cannot hit a stale entry.
+    """
+
+    key = (normal.tobytes(), radius_mm, phis.shape[0])
+    hit = _RIM_SHAPE_CACHE.get(key)
+    if hit is None:
+        u, v = _tangent_basis(normal)
+        hit = radius_mm * (np.outer(np.cos(phis), u) + np.outer(np.sin(phis), v))
+        if len(_RIM_SHAPE_CACHE) > 64:
+            _RIM_SHAPE_CACHE.clear()
+        _RIM_SHAPE_CACHE[key] = hit
+    return hit
+
+
+def _project_ideal(pts_world, cam, with_cam_frame=False):
+    """``(ideal pinhole pixels, in front of the lens)``. Distortion is applied after.
+
+        `with_cam_frame` also returns the camera-frame points and the guarded depth.
+        `refine`'s analytic Jacobian needs both to build d(pixel)/d(world point), and
+        recomputing them there would be a second copy of the projection convention --
+        the one thing that must not exist twice.
+    """
 
     R = cam.R
     p = (np.asarray(pts_world, dtype=np.float64) - cam.T_world_cam[:3, 3]) @ R
@@ -683,7 +596,7 @@ def _project_ideal(pts_world, cam):
         cam.K[0, 0] * p[:, 0] / z + cam.K[0, 2],
         cam.K[1, 1] * p[:, 1] / z + cam.K[1, 2],
     ])
-    return out, ~behind
+    return (out, ~behind, p, z) if with_cam_frame else (out, ~behind)
 
 
 def _predict_ellipse(
@@ -908,6 +821,76 @@ def refine(
         # where a side-on frame has least to spare.
         phis = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
 
+        # The centre-cal displacement, cached on a coarsely quantised pose. It cost two
+        # conic decompositions per view per evaluation -- 222 `cone_from_circle` calls a
+        # frame, more than the projection it corrects -- and `least_squares` spends 6 of
+        # every 7 evaluations on finite differences, so quantising the pose at
+        # CAL_DISP_TOL_MM collapses those 6 to one lookup.
+        #
+        # MEASURED COST, not free: the Jacobian loses the displacement's own derivative,
+        # which moves the answer 0.14 mm median (p95 0.34) and raises `refine_rms_px`
+        # from 5.112 to 5.126 -- 0.3% on a residual of 5 px, with `discrepancy_mm` and
+        # `margin` unchanged, i.e. the optimum is flat over that 0.14 mm. Tightening the
+        # quantum to 1e-6 mm does NOT recover it; collapsing the finite differences is
+        # the whole effect. Bought 17.0 -> 12.5 ms a pair. Freezing the displacement at
+        # the seed instead is 10.1 ms for the same 0.13 mm, but it goes stale when the
+        # solve travels, where this recomputes. See `theory.md` 16.9.
+        _disp = {}
+
+        def displacement(centre, normal, cam):
+            key = (id(cam), *np.round(centre / CAL_DISP_TOL_MM).astype(np.int64),
+                   *np.round(normal / CAL_DISP_TOL_N).astype(np.int64))
+            if key not in _disp:
+                try:
+                    ideal = conic.normalise_ellipse(conic.ellipse_from_conic(
+                        _predict_image_conic(centre, normal, cam, radius_mm)))
+                    corr = _predict_ellipse(centre, normal, cam, radius_mm,
+                                            tilt_cal, centre_cal)
+                    _disp[key] = np.subtract(corr[0], ideal[0])
+                except (ValueError, np.linalg.LinAlgError):
+                    # A trust region does reach poses whose image conic is not a real
+                    # ellipse -- edge-on, or behind the lens. Those samples are already
+                    # parked as unseen, so skipping the correction only decides whether
+                    # the solve survives to walk back out.
+                    _disp[key] = None
+            return _disp[key]
+
+        def evidence_many(ps):
+            """Evidence for several poses at once: ``(len(ps), total)``.
+
+                One projection and one `sample_map` per VIEW for the whole batch instead
+                of one per view per pose. That matters because the per-call cost is
+                mostly fixed: measured on this rig, project+distort is 22.9 us for 45
+                points, 40.9 for 180 and 132.6 for 900 -- about 15 us of overhead plus
+                ~120 ns a point. Five separate 180-point calls cost 205 us where one
+                900-point call costs 133.
+            """
+
+            rims, disps = [], []
+            for p in ps:
+                centre, normal = unpack(p)
+                rims.append(_rim_points(centre, normal, radius_mm, phis))
+                disps.append(None if centre_cal is None or centre_cal.is_identity
+                             else [displacement(centre, normal, c) for c in cams])
+            rim = np.concatenate(rims)
+            m = len(ps)
+            out = np.empty((m, total))
+            k = 0
+            for vi, (w, cam) in enumerate(zip(weights, cams)):
+                pts, seen = _project_ideal(rim, cam)
+                pts = np.ascontiguousarray(pts)
+                if disps[0] is not None:
+                    # Per pose, so each block gets its own sub-pixel centre correction.
+                    for j, d in enumerate(disps):
+                        if d[vi] is not None:
+                            pts[j * n:(j + 1) * n] += d[vi]
+                np.clip(pts, -_FAR_PX, _FAR_PX, out=pts)
+                pts = np.array(_distort_points(pts, cam), dtype=np.float64, copy=True)
+                pts[~seen] = -_FAR_PX
+                out[:, k:k + n] = segmod.sample_map(w, pts).reshape(m, n)
+                k += n
+            return out
+
         def evidence(p):
             centre, normal = unpack(p)
             rim = _rim_points(centre, normal, radius_mm, phis)
@@ -922,20 +905,9 @@ def refine(
                     # silhouette is that same displacement. Not the general affine map
                     # between the two ellipses: `mode="image"` needs `direct=True`,
                     # which forces `tilt_cal` to identity, so nothing rescales.
-                    #
-                    # Guarded because a trust region does reach poses whose image conic
-                    # is not a real ellipse -- the circle edge-on, or behind the lens.
-                    # The samples there are already parked as unseen, so skipping a
-                    # sub-pixel centre correction on them changes nothing except
-                    # whether the solve survives to walk back out.
-                    try:
-                        ideal = conic.normalise_ellipse(conic.ellipse_from_conic(
-                            _predict_image_conic(centre, normal, cam, radius_mm)))
-                        corr = _predict_ellipse(centre, normal, cam, radius_mm,
-                                                tilt_cal, centre_cal)
-                        pts += np.subtract(corr[0], ideal[0])
-                    except (ValueError, np.linalg.LinAlgError):
-                        pass
+                    d = displacement(centre, normal, cam)
+                    if d is not None:
+                        pts += d
                 # Clipped *before* distortion, which raises the radius to the sixth
                 # power: an unclipped coordinate overflows the float32 cast in
                 # `sample_map`. A trust region does walk out this far, and so does
@@ -976,6 +948,133 @@ def refine(
             # where a plain (ref - w) residual would penalise a *bright* sample too.
             return np.sqrt(np.maximum(ref - evidence(p), 0.0))
 
+        def jac_fd(p):
+            """Forward differences, all five columns in ONE batched evaluation.
+
+                Arithmetically the same thing `least_squares(jac='2-point')` does -- same
+                relative step, same forward difference -- but it costs one pass over
+                5*n_points instead of five passes over n_points, and the solve is
+                overhead-bound rather than arithmetic-bound (see `evidence_many`).
+                Roughly 80% of the solve was this Jacobian.
+            """
+
+            f0 = np.sqrt(np.maximum(ref - evidence(p), 0.0))
+            # scipy's own rule for 2-point, sign included: `rel * sign(x) * max(1, |x|)`.
+            # The sign is not cosmetic -- dropping it steps the negative parameters the
+            # other way and the answer moves, which is exactly how this was caught.
+            h = (_JAC_REL_STEP * np.where(p >= 0, 1.0, -1.0)
+                 * np.maximum(np.abs(p), 1.0))
+            ev = evidence_many(p + np.diag(h))
+            return ((np.sqrt(np.maximum(ref - ev, 0.0)) - f0) / h[:, None]).T
+
+        n_centre = 3 if params == "both" else 0
+
+        def jac_analytic(p):
+            """Image gradient of the evidence map times the pixel-vs-pose derivative.
+
+                `theory.md` 19.4's "remaining structural item". `jac_fd` batches the five
+                extra evaluations into one pass; this removes them. Per view per
+                iteration it costs ONE projection over n points, ONE distortion call
+                over 3n, and three n-point remaps, against `jac_fd`'s projection and
+                distortion over 6n.
+
+                The chain, for residual = sqrt(max(ref - E, 0)):
+
+                    d(res)/dp = -(1 / 2 res) * grad_w(pix) . d(pix)/d(rim) . d(rim)/dp
+
+                Only two of those four factors are differenced, and neither touches the
+                image: **d(rim)/d(normal)** in 3-space (two cached `_rim_shape` lookups)
+                and **d(raw pixel)/d(ideal pixel)**, which is a smooth polynomial. The
+                three centre columns of d(rim)/dp are exactly the identity -- the same
+                fact `_rim_shape` is cached on -- and the pinhole term is closed form.
+
+                Two derivatives are deliberately dropped, both already accepted upstream:
+                the centre-cal `displacement` is held constant (19.5 measured that at
+                0.14 mm and took it), and `ref` is fixed before the solve starts.
+            """
+
+            centre, normal = unpack(p)
+            rim = _rim_points(centre, normal, radius_mm, phis)
+
+            # World-space d(rim point)/d(param), (n, npar, 3).
+            D = np.zeros((n, len(p), 3))
+            for i in range(n_centre):
+                D[:, i, i] = 1.0        # the centre shifts the rim rigidly
+            base = _rim_shape(normal, radius_mm, phis)
+            for j in range(n_centre, len(p)):
+                # scipy's own step rule, sign included, as in `jac_fd`: a normal
+                # parameter is an increment on the tangent basis, so this differences
+                # pure geometry and samples no pixels.
+                h = (_JAC_REL_STEP * (1.0 if p[j] >= 0 else -1.0)
+                     * max(abs(p[j]), 1.0))
+                q = np.array(p, dtype=np.float64)
+                q[j] += h
+                D[:, j, :] = (_rim_shape(unpack(q)[1], radius_mm, phis) - base) / h
+
+            out = np.zeros((total, len(p)))
+            k = 0
+            for w, cam in zip(weights, cams):
+                pts, seen, pc, z = _project_ideal(rim, cam, with_cam_frame=True)
+                pts = np.ascontiguousarray(pts)
+                if centre_cal is not None and not centre_cal.is_identity:
+                    d = displacement(centre, normal, cam)
+                    if d is not None:
+                        pts += d
+                np.clip(pts, -_FAR_PX, _FAR_PX, out=pts)
+
+                # d(ideal pixel)/d(param), through the camera frame. `p_cam` is
+                # `(rim - T) @ R`, so a world-space delta maps to `delta @ R`, and the
+                # pinhole derivative is [[fx/z, 0, -fx x/z^2], [0, fy/z, -fy y/z^2]].
+                dc = D @ cam.R
+                zi = (1.0 / z)[:, None]
+                du = cam.K[0, 0] * (dc[..., 0] - pc[:, 0:1] * dc[..., 2] * zi) * zi
+                dv = cam.K[1, 1] * (dc[..., 1] - pc[:, 1:2] * dc[..., 2] * zi) * zi
+
+                # d(raw pixel)/d(ideal pixel), differenced in ONE call over 3n points
+                # rather than three over n -- the projection is overhead-bound, so the
+                # stacking is what makes this cheaper than the thing it replaces (19.4).
+                hp = _JAC_DISTORT_STEP_PX
+                stack = np.concatenate([pts, pts + [hp, 0.0], pts + [0.0, hp]])
+                sd = np.asarray(_distort_points(stack, cam), dtype=np.float64)
+                d_du, d_dv = (sd[n:2 * n] - sd[:n]) / hp, (sd[2 * n:] - sd[:n]) / hp
+                # A copy, not a view: with no distortion `_distort_points` hands back
+                # its own input, and the park below would write into `stack`.
+                pd = np.array(sd[:n], dtype=np.float64, copy=True)
+                pd[~seen] = -_FAR_PX    # parked, as in `evidence`: reads zero everywhere
+
+                ddu = d_du[:, 0:1] * du + d_dv[:, 0:1] * dv
+                ddv = d_du[:, 1:2] * du + d_dv[:, 1:2] * dv
+
+                # The image gradient, as a central difference OF THE SAMPLED FIELD --
+                # not a Sobel of the map. `sample_map` reads bilinearly, so the function
+                # the solver is actually descending is piecewise-linear between pixel
+                # centres; a Sobel gradient is the derivative of a *different*,
+                # 3x3-smoothed function. Measured, that inconsistency cost the trust
+                # region its step: columnwise cosine against a true numerical Jacobian
+                # was 0.84-0.99 and nfev rose from 7 to 10. All five reads go in ONE
+                # remap over 5n points, which is why this is still cheaper than
+                # differencing the pose (a remap is ~2 us; a projection is ~15 us fixed).
+                hg = _JAC_GRAD_STEP_PX
+                g = segmod.sample_map(w, np.concatenate([
+                    pd, pd + [hg, 0.0], pd - [hg, 0.0],
+                    pd + [0.0, hg], pd - [0.0, hg]])).reshape(5, n)
+                dE = (((g[1] - g[2]) / (2.0 * hg))[:, None] * ddu
+                      + ((g[3] - g[4]) / (2.0 * hg))[:, None] * ddv)
+
+                r = np.sqrt(np.maximum(ref - g[0], 0.0))
+                # d/dp sqrt(max(ref - E, 0)) = -dE / 2r, singular as r -> 0. That is the
+                # max()'s own kink: a sample sitting exactly at the reference. Forward
+                # differences step across it and get a finite secant; this cannot, so
+                # such a sample is given no gradient rather than an enormous one. It
+                # keeps no information either way -- its residual is already zero.
+                live = r > _JAC_MIN_RESID_FRAC * math.sqrt(ref)
+                out[k:k + n] = np.where(
+                    live[:, None], -dE / (2.0 * np.where(live, r, 1.0))[:, None], 0.0)
+                k += n
+            return out
+
+        jac = jac_analytic if USE_ANALYTIC_JAC else jac_fd
+
     else:
         counts = [len(h) for h in hulls]
         total = sum(counts)
@@ -996,18 +1095,18 @@ def refine(
     # In `params='both'` the vector mixes millimetres (position, order 10-250)
     # with radians (the tangent increment, order 0.01), so an unscaled trust
     # region is badly conditioned. `x_scale='jac'` takes the scaling off the
-    # Jacobian rather than guessing.  Tolerances are 1e-5 because the residual
-    # is in pixels and the seed is already sub-pixel: tightening further changed
-    # no reported digit and cost iterations.
+    # Jacobian rather than guessing.
     opts = dict(
         method="trf",
         loss=loss,
         f_scale=1.0 if f_scale is None else float(f_scale),
         x_scale="jac",
+        jac=jac if mode == "image" else "2-point",
         max_nfev=max_iter * 6,
-        xtol=1e-5,
-        ftol=1e-5,
-        gtol=1e-5,
+        **dict.fromkeys(
+            ("xtol", "ftol", "gtol"),
+            REFINE_TOL_ANALYTIC
+            if (mode == "image" and USE_ANALYTIC_JAC) else REFINE_TOL),
     )
     opts.update(ls_kwargs)
     try:
@@ -1064,15 +1163,6 @@ class StereoPose:
     jump_deg: float
     t_seg_ms: float
     t_est_ms: float
-    # The fields below exist so `recorder.py` and `viz.py` accept a StereoPose
-    # wherever they accept an `estimator.Pose`, without either of them growing a
-    # type switch. They describe **view A** -- the reference camera -- because a
-    # per-view quantity has no single stereo value, and view A is the one the
-    # overlay shows. The genuinely stereo numbers are `discrepancy_mm` and
-    # `margin` above, which have no monocular analogue.
-    # Predicted error bounds for this frame, from `uncertainty.ErrorModel`.
-    # Logged whether or not they are used to reject, so the gate's calibration
-    # can be audited against outcomes rather than taken on trust.
     pred_pos_mm: float = float("nan")
     pred_ang_deg: float = float("nan")
     psi_deg: float = float("nan")
@@ -1193,6 +1283,15 @@ class StereoPoseEstimator:
         # 600-frame flight, 5 poses recovered against 194 with the level left alone.
         self.thresh = thresh
         self.min_area = min_area
+        # Pixel scale, set on the first frame from the rig's calibration `image_size`.
+        # Every pixel constant here -- the ring kernel, the blob floor, the intrinsics --
+        # is quoted at that resolution, so running the sensor at a smaller mode has to
+        # rescale all three together or segmentation silently stops finding the rim.
+        self._px_scale = 1.0
+        self._ksize = None
+        # Two workers, one per view, alive for the estimator's life: at ~100 Hz the pool
+        # would otherwise spend more time spawning threads than segmenting.
+        self._pool = ThreadPoolExecutor(max_workers=len(self.rig.cameras))
         # One empty-rig plate per camera, keyed by `Camera.name`. Without them
         # `segment.valid_region` falls back to `backdrop_mask`, which is 40x slower and
         # cannot tell the robot's rim from a dark gap in the scene behind it.
@@ -1230,7 +1329,7 @@ class StereoPoseEstimator:
         # Measured scales when a static calibration exists, the S13 floor otherwise.
         # An explicit argument beats both: a caller that passes one means it.
         if noise is None:
-            from noise import NoiseModel
+            from controller.pose.noise import NoiseModel
             noise = NoiseModel.load()
         self.noise = noise
         self.sigma_lat_mm = (
@@ -1242,15 +1341,6 @@ class StereoPoseEstimator:
         self.sigma_depth_mm = (
             noise.sigma_depth_mm(noise.ref_z_mm) if sigma_depth_mm is None
             else sigma_depth_mm)
-        # Which way is up, and it is not a preference. A silhouette is identical for a
-        # normal and its negative, and the second camera does not help: both see the same
-        # outline. Only a prior about the rig settles it, and the prior is that the
-        # cameras are looking at the *top* of the disc, so the thrust axis points back
-        # towards them -- the opposite of their mean viewing direction.
-        #
-        # The old default was camera A's own +z, which points from the camera *into* the
-        # scene, so every pose came out inverted: measured on four flights, the normal's
-        # z ran +0.61 to +0.78 where the geometry requires it negative.
         self.reference = (np.asarray(reference, dtype=np.float64) if reference is not None
                           else viewing_bisector(self.rig, towards_cameras=True))
         self.max_discrepancy_mm = max_discrepancy_mm
@@ -1347,6 +1437,36 @@ class StereoPoseEstimator:
         norm = float(np.linalg.norm(med))
         return None if norm < 1e-9 else med / norm
 
+    def _match_scale(self, frame):
+        """Rescale the rig and the pixel constants to the frame actually arriving.
+
+            The sensor's 640x400 mode is a true 0.5x of the 1280x800 the rig was
+            calibrated at, so `fx, fy, cx, cy` halve and the distortion coefficients do
+            not (`rig.Camera.scaled`). Done here rather than at the caller because both
+            the live loop and `from_recording` would otherwise each have to remember.
+        """
+
+        wh = self.rig.meta.get("image_size")
+        h, w = frame.shape[:2]
+        if not wh or (w, h) == tuple(wh):
+            return
+        s = w / float(wh[0])
+        if abs(s - h / float(wh[1])) > 1e-3:
+            raise ValueError(
+                f"frame {w}x{h} is not a uniform rescale of the calibrated {tuple(wh)}; "
+                f"a non-square rescale would need separate fx and fy factors")
+        if s == self._px_scale:
+            return
+        self.rig = self.rig.scaled(s / self._px_scale)
+        self.min_area *= (s / self._px_scale) ** 2
+        # Odd, and never below 3: an even kernel has no centre pixel to sit the
+        # top-hat on, and 1 makes the opening the identity.
+        self._ksize = max(3, int(round(segmod.RING_KSIZE * s)) | 1)
+        self._px_scale = s
+        print(f"pose: frames are {w}x{h}, rig calibrated at {wh[0]}x{wh[1]} -- "
+              f"intrinsics x{s:.3f}, ring kernel {self._ksize}px, "
+              f"min blob {self.min_area:.0f}px", file=sys.stderr)
+
     def _view_candidates(self, frame, cam):
         """
         Segment one view and back-project it.
@@ -1359,6 +1479,10 @@ class StereoPoseEstimator:
 
         plate = self.backgrounds.get(cam.name)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        # A running plate returns a new array each frame, so `ring_weight` cannot key its
+        # response cache on the buffer. Version it by the plate's own frame count instead.
+        bg_version = (cam.name, getattr(plate, "n", 0) // segmod.PLATE_REFRESH_FRAMES) \
+            if hasattr(plate, "update") else None
         if hasattr(plate, "update"):
             # A `background.RunningPlate`: estimated from the stream itself, so the live
             # loop needs no captured plate and cannot be running on a stale one. Duck
@@ -1366,11 +1490,9 @@ class StereoPoseEstimator:
             plate = plate.update(gray)
 
         if self.direct:
-            # The evidence map, for the *joint* two-view solve only. Refining each view
-            # separately against it was removed: watching the overlay, the per-view fit
-            # comes apart exactly where the seed does, and the seed is the steadier of
-            # the two by six times. See `theory.md` 16.23 and 16.24.
-            w = segmod.ring_weight(gray, background=plate)
+            roi = segmod.ellipse_roi(self._prev_ellipse.get(cam.name), gray.shape)
+            w = segmod.ring_weight(gray, background=plate, bg_version=bg_version,
+                                   roi=roi, ksize=self._ksize)
             seg = (segmod.segment(frame, thresh=self.thresh, min_area=self.min_area,
                                   background=plate)
                    if plate is not None else segmod.segment_ring(gray, weight=w)[0])
@@ -1442,9 +1564,9 @@ class StereoPoseEstimator:
                 leaves one camera's field of view, an occluder covers it, the threshold
                 finds nothing.
 
-                The frames are **not** simultaneous, and this used to assume they were.
-                Two free-running cameras land up to one sensor frame period apart --
-                7.71 ms median at 119 fps on this bench.  Pass ``stamps``
+                The frames are **not** simultaneous. Two free-running cameras land up
+                to one sensor frame period apart -- 7.71 ms median at 119 fps on this
+                bench. Pass ``stamps``
                 (`sources.StereoCamera.last_stamps`) and ``motion``, a `filter.PoseFilter`
                 or any object with ``rate`` and ``rate_cov``, and `fuse` moves each view
                 to the mean instant and inflates its covariance to pay for the move.
@@ -1460,14 +1582,14 @@ class StereoPoseEstimator:
             self.frame_index + 1 if frame_index is None else int(frame_index)
         )
 
+        self._match_scale(frames[0])
         t_seg0 = time.perf_counter()
-        segs, cands, ellipses, maps = [], [], [], []
-        for frame, cam in zip(frames, self.rig.cameras):
-            s, c, e, w = self._view_candidates(frame, cam)
-            segs.append(s)
-            cands.append(c)
-            ellipses.append(e)
-            maps.append(w)
+        # The two views share nothing -- separate plates, separate `_prev_ellipse` keys,
+        # separate response-cache keys -- and every stage inside is cv2 or numpy, which
+        # release the GIL. So this is a real 2x on the segmentation share, not a fake one.
+        out = list(self._pool.map(
+            lambda a: self._view_candidates(*a), zip(frames, self.rig.cameras)))
+        segs, cands, ellipses, maps = ([x[k] for x in out] for k in range(4))
         t_seg_ms = (time.perf_counter() - t_seg0) * 1e3
 
         t0 = time.perf_counter()
@@ -1476,10 +1598,6 @@ class StereoPoseEstimator:
             self.n_lost += 1
             return None
 
-        # A view that dropped out used to be tolerated here, on the reasoning
-        # that one camera still yields a monocular answer. Measurement retired
-        # that reasoning: see `require_stereo` above. Those frames are not
-        # degraded, they are unusable, and they carry no cross-view check.
         if self.require_stereo and len(usable) < 2:
             self.n_rejected_mono += 1
             self.n_lost += 1
@@ -1497,22 +1615,6 @@ class StereoPoseEstimator:
             self.n_lost += 1
             return None
 
-        # **The sliding window arbitrates, but only on frames already known bad.**
-        # Measured on `2026-08-28_131552` -- flown upright, so the normal is ground
-        # truth -- the frames a quarter turn out are cleanly separable before anything
-        # is done about them: cross-view discrepancy reads p50 0.58 mm and p90 2.86 on
-        # the frames that are right, against p10 6.20 and p50 23.21 on the frames that
-        # are wrong. So the window is asked only about those, and the three quarters
-        # that are already self-consistent are left exactly as they were.
-        #
-        # Asking it about *every* frame was tried and is strictly worse. The prior then
-        # drags the good frames too and the window, fed its own output, reinforces
-        # whatever it picked: ungated at 15 degrees the quarter-turn frames went 26.8%
-        # to 27.4%, at 10 degrees to 37.3%, and at 8 degrees to 45.0%, with the median
-        # frame's scatter blowing out from 0.84 to 7.50 degrees. Gated, the same prior
-        # at 3 degrees takes 26.8% to 8.1% and leaves the median at 0.83. A temporal
-        # prior on a decision that feeds the prior is a positive feedback loop unless
-        # something outside it says when to listen. See `theory.md` 16.19.
         prior = self._window_normal(now)
         if (
             prior is not None
@@ -1803,7 +1905,7 @@ def _subset(rig, indices):
 
     if len(indices) == len(rig.cameras):
         return rig
-    from rig import StereoRig
+    from controller.calib.rig import StereoRig
 
     return StereoRig(
         cameras=tuple(rig.cameras[i] for i in indices),
@@ -1990,3 +2092,105 @@ def blend_normals(
     if np.linalg.norm(out) < 1e-12:
         return a, sigma_ratio_deg
     return orient(out, reference), float(1.0 / math.sqrt(wr + wm))
+
+
+def _self_check():
+    """The claims in `refine`'s fast paths that are supposed to be EXACT."""
+
+    rng = np.random.default_rng(0)
+    phis = np.linspace(0.0, 2.0 * np.pi, segmod.RING_SAMPLES, endpoint=False)
+
+    # 1. `_tangent_basis` really is an orthonormal basis of the plane perpendicular to n,
+    #    including near the seed-switch at |n_x| = 0.9 where the cross degenerates.
+    for n in [rng.normal(size=3) for _ in range(2000)] + [
+            np.array([1.0, 0.0, 0.0]), np.array([0.9, 1e-9, 1e-9]),
+            np.array([0.89, 0.1, 0.1]), np.array([0.0, 0.0, 1.0])]:
+        if np.linalg.norm(n) < 1e-9:
+            continue
+        u, v = _tangent_basis(n)
+        w = _unit(n)
+        assert abs(u @ w) < 1e-12 and abs(v @ w) < 1e-12, n
+        assert abs(u @ v) < 1e-12, n
+        assert abs(np.linalg.norm(u) - 1) < 1e-12, n
+        assert abs(np.linalg.norm(v) - 1) < 1e-12, n
+
+    # 2. The `_rim_shape` cache is EXACT, not approximate. It exists because three of
+    #    least_squares' five perturbations move only the centre; if it ever returns a
+    #    shape for the wrong normal the solve silently fits the wrong circle.
+    for _ in range(500):
+        c, n = rng.normal(size=3) * 50.0, rng.normal(size=3)
+        if np.linalg.norm(n) < 1e-9:
+            continue
+        u, v = _tangent_basis(n)
+        want = (np.asarray(c, dtype=np.float64).reshape(3)
+                + 6.0 * (np.outer(np.cos(phis), u) + np.outer(np.sin(phis), v)))
+        assert np.array_equal(_rim_points(c, n, 6.0, phis), want), "rim cache is not exact"
+
+    # 3. A cached shape is never handed out for a different normal, and never mutated by
+    #    a later call. The cache is keyed on bytes, so this is really a test that nothing
+    #    downstream writes into what it was given.
+    n0 = np.array([0.0, 0.0, 1.0])
+    first = _rim_shape(n0, 6.0, phis).copy()
+    for _ in range(100):
+        _rim_points(rng.normal(size=3) * 50.0, rng.normal(size=3), 6.0, phis)
+    assert np.array_equal(_rim_shape(n0, 6.0, phis), first), "cached shape was mutated"
+
+    # 4. The analytic Jacobian actually points downhill. Plant a pose, render its rim
+    #    into two synthetic evidence maps, and seed `refine` well away from it: a wrong
+    #    chain rule cannot recover the planted centre, and a right one lands on it.
+    #    Synthetic on purpose -- there is no noise, no plate and no occlusion here, so a
+    #    failure is the derivative and nothing else.
+    #
+    #    This is also the measurement that retired `theory.md` 19.4's open item: on this
+    #    same scene the batched forward differences it replaced land 2.33 mm out, fifty
+    #    times worse, because scipy's default step is far below the evidence map's
+    #    float32 pixel resolution and differences rounding rather than signal.
+    def _cam_at(az_deg, el_deg, dist, name, size=(640, 400)):
+        a, e = math.radians(az_deg), math.radians(el_deg)
+        eye = dist * np.array([math.cos(e) * math.cos(a),
+                               math.cos(e) * math.sin(a), math.sin(e)])
+        z = -eye / np.linalg.norm(eye)
+        x = np.cross([0.0, 0.0, 1.0], z)
+        x /= np.linalg.norm(x)
+        T = np.eye(4)
+        T[:3, :3] = np.column_stack([x, np.cross(z, x), z])
+        T[:3, 3] = eye
+        return Camera(K=np.array([[900.0, 0, size[0] / 2],
+                                  [0, 900.0, size[1] / 2], [0, 0, 1.0]]),
+                      dist=np.zeros(5), T_world_cam=T, name=name)
+
+    def _render(cam, centre, normal, radius, size=(640, 400)):
+        rim = _rim_points(centre, normal, radius,
+                          np.linspace(0.0, 2.0 * np.pi, 720, endpoint=False))
+        pts, seen = _project_ideal(rim, cam)
+        m = np.zeros((size[1], size[0]), np.float32)
+        for (u, v), ok in zip(pts, seen):
+            iu, iv = int(round(u)), int(round(v))
+            if ok and 0 <= iv < size[1] and 0 <= iu < size[0]:
+                m[iv, iu] = 1.0
+        return cv2.GaussianBlur(m, (0, 0), segmod.RING_BLUR_SIGMA)
+
+    from controller.calib.rig import Camera, StereoRig
+
+    rig = StereoRig(cameras=(_cam_at(0, 45, 300, "A"), _cam_at(83, 45, 300, "B")))
+    radius, c_true = 10.2, np.array([2.0, -3.0, 1.5])
+    n_true = _unit([0.08, -0.05, 1.0])
+    maps = [_render(c, c_true, n_true, radius) for c in rig.cameras]
+    errs = []
+    for _ in range(12):
+        r = refine(None, rig, c_true + rng.normal(size=3) * 1.5,
+                   _unit(n_true + rng.normal(size=3) * 0.05), radius,
+                   loss="cauchy", mode="image", weights=maps)
+        errs.append(np.inf if r is None else float(np.linalg.norm(r.center - c_true)))
+    errs = np.array(errs)
+    assert np.median(errs) < 0.25, f"analytic Jacobian lost the planted pose: {errs}"
+    assert errs.max() < 1.0, f"analytic Jacobian has a bad seed: {errs}"
+
+    print(f"stereo: tangent basis orthonormal incl. the |n_x|=0.9 switch, "
+          f"rim cache exact over 500 poses, {len(_RIM_SHAPE_CACHE)} entries live, "
+          f"analytic jac recovers a planted pose to "
+          f"{np.median(errs):.3f} mm median over 12 seeds")
+
+
+if __name__ == "__main__":
+    _self_check()

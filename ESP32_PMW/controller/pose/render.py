@@ -41,9 +41,9 @@ import numpy as np
 if os.environ.get("PYOPENGL_PLATFORM") not in (None, "egl", "osmesa"):
     del os.environ["PYOPENGL_PLATFORM"]
 
-import pyrender  # noqa: E402
-import trimesh  # noqa: E402
-from scipy.spatial.transform import Rotation  # noqa: E402
+import pyrender
+import trimesh
+from scipy.spatial.transform import Rotation
 
 MESH_PATH = Path(__file__).resolve().parent / "assets" / "flyingrobot_rod2.STL"
 INTRINSICS_PATH = (
@@ -244,7 +244,7 @@ class Sample:
                 estimator error.
         """
 
-        import conic
+        from controller.pose import conic
 
         K = load_K() if self.K is None else self.K
         return conic.project_circle(self.center_mm, self.normal, RIM_RADIUS_MM, K)
@@ -336,10 +336,6 @@ def pose_matrix(tilt_deg, azimuth_deg, center_mm, spin_deg=0.0):
     """
 
     t, a = math.radians(tilt_deg), math.radians(azimuth_deg)
-    # Rotate +z by `tilt` about a unit axis in the x-y plane set by `azimuth`.
-    # `k` is already normalised, so `t * k` is the rotation vector directly and
-    # scipy does the Rodrigues expansion -- previously written out here by hand
-    # along with its skew-symmetric matrix.
     axis = np.array([-math.sin(a), math.cos(a), 0.0])
     r = Rotation.from_rotvec(t * axis)
     if spin_deg:

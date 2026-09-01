@@ -64,9 +64,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import sources  # noqa: E402
+from controller.camera import sources
 
 DEFAULT_PATH = HERE / "noise_model.json"
 
@@ -578,7 +577,7 @@ def _preview(frames, pose, footer, scale=0.5):
     """
 
     import cv2
-    import segment
+    from controller.pose import segment
 
     if not frames:
         return None
@@ -718,15 +717,12 @@ def station_from_recording(rec_dir, n_frames=100000, rig_path=None, meta=None):
         viewer and a web server to fit three numbers.
     """
 
-    sys.path.insert(0, str(HERE.parent / "viz"))
-    from live_viz import _stereo_estimator
-    from record import latest_flight, open_recording
+    from controller.viz.live_viz import _stereo_estimator
+    from controller.camera.record import latest_flight, open_recording
 
     rec_dir = latest_flight(Path(rec_dir))
     rig, est = _stereo_estimator(rig_path, backgrounds="running")
     caps, stamps = open_recording(rec_dir)
-    if stamps is None:
-        print(f"{rec_dir}: no frames.csv, so the two views are assumed simultaneous")
 
     i = 0
 
@@ -766,8 +762,7 @@ def station_from_source(spec="camera:0,camera:1", n_frames=600, rig_path=None,
     # one image that keeps updating instead of a new one stacked per station.
     own = not isinstance(preview, sources.Sink)
     sink = (sources.Sink("noise capture").open() if preview else None) if own else preview
-    sys.path.insert(0, str(HERE.parent / "viz"))
-    from live_viz import _stereo_estimator
+    from controller.viz.live_viz import _stereo_estimator
 
     rig, est = _stereo_estimator(rig_path, backgrounds="running")
     cams = [c.strip() for c in spec.split(",")]
@@ -800,7 +795,7 @@ def report(model, rig=None, radius_mm=None):
         rim -- rather than a worse estimator.
     """
 
-    import bounds
+    from controller.pose import bounds
 
     lines = [model.summary()]
     if rig is not None:
@@ -849,7 +844,7 @@ def calibrate(sources_, out=DEFAULT_PATH, condition="coils_off", rig_path=None,
 
     if rig is None:
         try:
-            import rig as rigmod
+            from controller.calib import rig as rigmod
             rig = rigmod.StereoRig.load()
         except Exception:
             rig = None
@@ -918,8 +913,7 @@ class Session:
                              f"&nbsp; {msg}")
 
     def _run(self):
-        sys.path.insert(0, str(HERE.parent / "viz"))
-        from live_viz import _stereo_estimator
+        from controller.viz.live_viz import _stereo_estimator
 
         self.rig, est = _stereo_estimator(self.rig_path, backgrounds="running")
         src = sources.open_stereo([c.strip() for c in self.cameras.split(",")],
@@ -1012,7 +1006,7 @@ def record_live(stations=3, frames=600, cameras=None, rig_path=None,
     """
 
     if cameras is None:
-        import rig as rigmod
+        from controller.calib import rig as rigmod
 
         cameras = rigmod.StereoRig.load(rig_path or rigmod.DEFAULT_PATH).sources()
         print(f"cameras: {cameras}")
@@ -1066,11 +1060,11 @@ def main(argv=None):
     if a.show:
         model = NoiseModel.load(a.out)
         try:
-            import rig as rigmod
+            from controller.calib import rig as rigmod
             r = rigmod.StereoRig.load()
         except Exception:
             r = None
-        from estimator import RADIUS_BENCH_MM
+        from controller.pose.estimator import RADIUS_BENCH_MM
         print(report(model, r, RADIUS_BENCH_MM))
         return 0
 

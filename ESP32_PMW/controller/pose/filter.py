@@ -235,7 +235,7 @@ class PoseFilter:
         # and absent that, the rendered fallbacks above. An explicit sigma always
         # wins over all three -- callers that pass one mean it.
         if noise is None:
-            from noise import NoiseModel
+            from controller.pose.noise import NoiseModel
             noise = NoiseModel.load()
         self.noise = noise
         # With a rig, R is the fused covariance of two cameras that are not aligned

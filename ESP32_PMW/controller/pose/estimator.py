@@ -33,63 +33,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import conic  # noqa: E402
-import segment as segmod  # noqa: E402
-from shape import TiltCalibration  # noqa: E402
-from zeroing import Zero  # noqa: E402
+from controller.pose import conic
+from controller.pose import segment as segmod
+from controller.calib.shape import TiltCalibration
+from controller.calib.zeroing import Zero
 
-# Effective rim radius, in mm.
-#
-# Starts from the mesh: the *outer* radius of
-# ESP32_PMW/controller/flyingrobot_rod2.STL (99.9th percentile of
-# vertex radius, 10.2065 mm), not the mean rim radius (9.965 mm), because the
-# segmenter returns a convex hull and a hull traces the outermost surface. Using
-# the mean instead biases every distance by 2.4% -- a systematic 5 mm at 200 mm
-# that no filtering removes.
-#
-# Then tuned: depth scales exactly linearly with the assumed radius, so a scalar
-# error shows up as a constant *relative* depth bias and is directly measurable.
-# Fitted on 700 training poses rendered with realistic sensor noise and motion
-# blur, where the residual bias was -0.374%.
-#
-# The same value serves the weighted and unweighted fits, to 0.03%.
-#
-# The fit uses the *median* bias, not the mean, and the difference is not
-# cosmetic: about 1% of noisy frames fail catastrophically (the face-on, dimly
-# lit case where the hull collapses onto the blade cross, depth error to 409%).
-# On that data the mean reads +1.09% and the median -0.37% -- opposite signs.
-# Fitting to the mean moved this constant the wrong way and tripled the median
-# position error, from 1.49 to 3.30 mm.
-#: One entry per rig appearance: the effective radius depends on where the
-#: threshold cuts the boundary, and the two appearances cut different edges.
-#:
-#: `dark` was carried over from a dataset rendered at a different threshold and was
-#: marked provisional, with refitting blocked on the renderer being unable to reproduce
-#: this rig. The renderer is not needed: two cameras 83 deg apart disagree about where
-#: the robot is by an amount that depends on the radius assumed, and that disagreement
-#: has a sharp minimum. Three flights over two days, swept independently
-#: (`fit_radius.py`), all land on 10.4 mm -- median cross-view discrepancy 2.2 / 2.4 /
-#: 3.2 mm against 5.96 at the old value, and 10.38 by 11.0 mm.
-#:
-#: **Re-fitted to 10.2 for the direct fit** (`theory.md` S16). It was tied to
-#: `segment.DARK_THRESH` because the effective radius is where a *threshold* cuts a
-#: shaded edge, and 10.4 belonged to a threshold of 220. `segment.fit_ellipse_image`
-#: does not cut anything: it settles on the rim's darkness ridge, which is a different
-#: and better-defined edge, so the constant had to move with it. The same three flights
-#: swept independently now all land on 10.2, with sharper minima than before -- median
-#: cross-view discrepancy **0.83 / 1.17 / 1.04 mm** against 2.4 / 1.5 / 1.9 at 10.4 on
-#: the mask fit. That is the number to re-run (`fit_radius.py`) if either the direct
-#: fit's constants or the lighting move.
-#:
-#: Its absolute scale still inherits the rig's, which rests on the board pitch (S14.4).
-#: `bright` now names two different things and that is a trap. 10.2446 was fitted on
-#: *renders* of a white body against a dark ground, and the render tests still use it.
-#: The bench rig as of 2026-08-28 is also `bright` -- a white ring on a black cloth --
-#: and the direct fit measures **10.05** on it, a sharp V (1.22 mm at the minimum,
-#: 9.19 at 9.5 and 9.96 at 10.5). Pass `radius_mm=` explicitly for the bench rig until
-#: the two are given separate appearance keys.
 RADIUS_BY_APPEARANCE = {
     "bright": 10.2446,  # white body on dark ground, fitted on renders
     "dark": 10.2,       # direct fit on flight data, see above

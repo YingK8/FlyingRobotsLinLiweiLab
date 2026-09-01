@@ -34,10 +34,9 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-from estimator import RADIUS_MM, PoseEstimator, load_intrinsics  # noqa: E402
-from zeroing import DEFAULT_PATH, Zero, average_poses  # noqa: E402
+from controller.pose.estimator import RADIUS_MM, PoseEstimator, load_intrinsics
+from controller.calib.zeroing import DEFAULT_PATH, Zero, average_poses
 
 
 def collect(estimator, source, n_frames, max_attempts=None):
@@ -139,7 +138,7 @@ def from_source(
         few dozen is cheap insurance against calibrating to one bad frame.
     """
 
-    import sources
+    from controller.camera import sources
 
     est = _estimator(intrinsics, radius_mm, thresh)
     with sources.open_source(spec) as s:

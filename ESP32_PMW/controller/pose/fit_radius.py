@@ -24,14 +24,13 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import background as bgmod  # noqa: E402
-import cv2  # noqa: E402
-import rig as rigmod  # noqa: E402
-from record import open_recording  # noqa: E402
-from shape import CentreCalibration, TiltCalibration  # noqa: E402
-from stereo import StereoPoseEstimator  # noqa: E402
+from controller.pose import background as bgmod
+import cv2
+from controller.calib import rig as rigmod
+from controller.camera.record import open_recording
+from controller.calib.shape import CentreCalibration, TiltCalibration
+from controller.pose.stereo import StereoPoseEstimator
 
 FLIGHTS = HERE.parents[1] / "results" / "flights"
 STEP = 12          # every twelfth stereo frame: the sweep needs spread, not every frame
@@ -101,7 +100,7 @@ def fit(flights, radii=np.arange(9.8, 11.01, 0.1)):
 
 
 if __name__ == "__main__":
-    import segment
+    from controller.pose import segment
     print(f"appearance {segment.APPEARANCE}, dark threshold {segment.DARK_THRESH}\n")
     args = [Path(a) for a in sys.argv[1:]]
     fit(args or sorted(d for d in FLIGHTS.iterdir()

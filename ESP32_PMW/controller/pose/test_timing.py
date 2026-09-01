@@ -27,10 +27,9 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 # Same layering `stereo.py` sets up: pose is stage 3, calib is stage 2.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import rig as rigmod  # noqa: E402
-import stereo  # noqa: E402
+from controller.calib import rig as rigmod
+from controller.pose import stereo
 
 SKEW_S = 0.008          # one frame period at 119 fps, the worst case rather than the median
 SPEED_MM_S = 40.0       # a brisk translation; hover is 15-22

@@ -1289,7 +1289,7 @@ hull point onto "the intensity edge" can move it onto the inner one. It stays of
 | Spread gate $\kappa$ (§15.5) | `segment.DARK_MAX_SPREAD`, `silhouette_hull(max_spread=)` |
 | Admissibility $\rho_{\max}$ then size (§15.5) | `segment._best_group`, `segment.SHAPE_TOL` |
 | Margins (§15.6) | `ai/tests/test_elp_captures.py`, swept per constant |
-| Rejected area, shown to the operator | `segment.shade_rejected`, `segment.clutter_mask`, `online_camera.ipynb` [§3](../control/theory.md) (ch.4)–4 |
+| Rejected area, shown to the operator | `segment.shade_rejected`, `online_camera.ipynb` [§3](../control/theory.md) (ch.4)–4 |
 | Empty-rig plate per camera (§15.8) | `background.from_video`, `for_flight`, `segment(background=)` |
 | Rim radius from cross-view disagreement (§15.9) | `pose/fit_radius.py`, `estimator.RADIUS_BY_APPEARANCE` |
 | Ellipse fitted to the image, not the mask (§16) | `segment.ring_weight`, `segment.fit_ellipse_image`, `stereo.refine(mode="image")` |
@@ -2494,3 +2494,118 @@ sample count, date -- so a number read here can always be traced to the run that
 produced it. **Until then the pipeline runs on the rendered fallbacks and says so
 on every start**, which is the state this section exists to make visible rather
 than comfortable.
+
+## 19. Making the pipeline fast enough to close a loop around
+
+2026-08-30. Section 16 ends by noting the joint image-mode solve is "fine for replay, not
+yet for the live loop" at 47-51 ms a pair. This is how that gap was closed to 15.4 ms
+(20.8 -> 64.8 Hz on `results/flights/2026-08-29_231418`, 246 of 250 frames solved at every
+step, so none of it was bought by dropping frames). The per-step table and the rejected
+options are in `control/theory.md` 19.2 and 19.5, with the control-side consequences; what
+belongs here is why two of the wins were sitting in this directory unclaimed.
+
+### 19.1 A cache keyed on the one thing that changes every frame
+
+`ring_weight` caches the plate's 41x41 opening -- 2.6 ms a view -- under the comment "the
+plate does not change ... the estimator passes the same array every frame". Neither half
+held. `RunningPlate.update` returns `self.bg.astype(np.uint8)`, a **fresh array every
+call**, and a `RunningPlate` is the live default. Keyed on `id(img)`, the cache therefore
+missed 100% of the time and paid in full the cost it existed to remove, while holding a
+reference to every dead plate so the ids could not be recycled.
+
+The tempting repair -- return a stable buffer from `update` -- is worse than the bug. A
+running plate *does* change: it walks a count a frame. A stable id would have pinned a
+response to a plate that had moved, silently. The fix has to version the content, not the
+buffer, so the key is now the plate's own frame counter over `PLATE_REFRESH_FRAMES`.
+
+**The general lesson is the one this file keeps relearning: a cache whose invalidation
+premise is written in a comment rather than checked in code is a measurement waiting to
+be wrong.** Nothing failed. It was 5 ms a pair, every pair, for as long as the running
+plate has been the default.
+
+### 19.2 The ROI was written, documented, measured, and never called
+
+`ring_weight` has taken an `roi` argument since it was written, with `_clamp_roi` behind
+it and a measured "0.37 ms on 450x450 against 2.64 ms full-frame" in its own docstring.
+A repo-wide search found no caller passing one. Meanwhile `StereoPoseEstimator._prev_ellipse`
+was already carrying the previous frame's ellipse per camera -- used only as a fallback
+seed when segmentation returned nothing, never to say where to look.
+
+So the live loop segmented the full frame twice a frame to find a rim whose position it
+already knew to a few pixels. The window is the previous ellipse's major axis times
+`ROI_MARGIN = 1.6`, squared rather than fitted: the rim rotates between frames and a box
+that hugs the minor axis clips it when it does. No previous ellipse, or a failed solve,
+falls back to the whole frame -- **a tracker that cannot re-acquire is worse than a slow
+one**, and this is the only branch that guarantees re-acquisition.
+
+### 19.3 Resolution: the prediction was right
+
+13's fused-worst-axis table puts 1280x800 at 0.060 mm and 640x480 at 0.119, and 351 says
+outright that resolution is nearly free to give up because the error is bias-dominated.
+Measured against the same 246 frames, 640x400 moves the pose by a per-axis spread of
+0.110 / 0.119 / 0.065 mm. **The 0.119 mm prediction landed on the nose.** That sits under
+the 0.185-0.274 mm centre-displacement bias which was already the dominant term, and it
+bought 23.2 -> 15.4 ms.
+
+640x400 specifically, not 640x480: it is a true 0.5x decimation of the native mode, so
+`fx, fy, cx, cy` halve exactly and the distortion coefficients are untouched.
+`StereoPoseEstimator._match_scale` does that rescale off the frame it is handed, comparing
+against the rig's own `image_size`, so the live loop and `from_recording` cannot disagree
+about it and no caller has to remember. The pixel constants scale with it -- `RING_KSIZE`
+and `MIN_BLOB_AREA_PX` are quoted at the calibration resolution and are silently wrong at
+any other.
+
+320x240 was measured and rejected: 6 Hz more, for 0.205/0.169 mm of bias, which is over
+the floor rather than under it.
+
+### 19.4 Two views, two threads -- and what that broke
+
+`update` looped over the views serially. Every stage inside is cv2 or numpy, which release
+the GIL, so a two-worker pool took segmentation 16.0 -> 8.9 ms. The pool is built once per
+estimator, not per frame: at these rates thread creation would cost more than the work.
+
+They share less than it first appears -- separate plates, separate `_prev_ellipse` keys,
+separate response-cache keys -- but "separate keys" was not the same as "separate state".
+`ring_weight`'s plate-response cache was one global dict with a `clear()` at four entries,
+so one view could evict the other's live entry, and the response would then be recomputed
+against a *later plate generation*. **The pose stopped being reproducible run to run, by up
+to 0.34 mm**, with no crash and nothing obviously wrong. The eviction rule was what coupled
+two callers that had been carefully given distinct keys. Each caller owns a slot now, with
+no eviction at all. Full account in `control/theory.md` 19.7; the lesson that belongs here
+is that **a cache is shared state even when its keys are not.**
+
+### 19.5 Where the remaining time is
+
+At 640x400 the pair costs 9.4 ms: 3.2 segmentation, 6.2 the joint solve. `refine` is the
+pipeline now, and its cost is the *numerical* Jacobian -- five parameters differenced
+two-point turn each reported evaluation into six.
+
+**The arithmetic is not what is slow.** Project-and-distort on this rig is 22.9 us for 45
+points, 40.9 for 180, 132.6 for 900: about 15 us of fixed per-call overhead plus ~120 ns a
+point. So the solve is bound by the number of numpy and cv2 calls on small arrays, and the
+lever is to make fewer, larger calls rather than faster ones. Three were taken:
+
+- the five perturbations are evaluated in **one** pass over `5n` points instead of five
+  passes over `n` (`evidence_many` plus a supplied `jac`), 7.6 -> 6.2 ms;
+- three of the five move only the centre, which shifts the rim rigidly, so the
+  normal-dependent part of `_rim_points` is cached -- exact, verified bit-identical over
+  3000 random poses;
+- `_tangent_basis` drops `np.cross`, whose axis bookkeeping dominates its own arithmetic
+  for a 3-vector.
+
+The same measurement is why **a GPU does not belong here**: 3 kB of points per call against
+a 5-10 us launch, evidence maps that would have to be uploaded every frame, and a
+sequential trust region with nothing to run wide. The one data-parallel part of the pipeline
+is segmentation, and segmentation is now 3.2 ms of 9.4. Full argument in
+`control/theory.md` 19.4.
+
+An analytic Jacobian -- image gradient of the evidence map times the pixel-vs-pose
+derivative -- removes the extra evaluations instead of batching them. **Done 2026-09-01;
+the full result is `control/theory.md` 19.12.** It is not the speed win this paragraph
+expected: at the shipped tolerance it is *slower* and *more accurate*, because scipy's
+default finite-difference step is below the float32 resolution of the pixel coordinate it
+perturbs and had been differencing rounding. On a synthetic scene the analytic Jacobian
+recovers a planted pose to 0.030 mm where those forward differences land 2.33 mm out. The
+speed arrives by re-tuning the stopping tolerance against the better gradient
+(`REFINE_TOL_ANALYTIC = 1e-3`): 6.9 -> 4.1 ms with `refine_rms_px` and `union_coverage`
+both improved and `discrepancy_mm` unmoved.

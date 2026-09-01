@@ -38,17 +38,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import elp as cammod  # noqa: E402
-import segment as segmod  # noqa: E402
+from controller.camera import elp as cammod
+from controller.pose import segment as segmod
 
 DEFAULT_OUT = HERE.parents[0] / "pose" / "background_dark.png"
 
-# Above this fraction of the frame differing, the stored background no longer
-# describes the scene. Deliberately generous: the robot and its rod are a few
-# percent of the frame, so anything near 10% is the *scene* having changed, not
-# the robot being in it.
 STALE_FRACTION = 0.10
 
 
@@ -256,7 +251,7 @@ def capture_stereo(specs=("camera:0", "camera:1"), tags="AB", n_frames=40,
     case.
     """
 
-    import sources
+    from controller.camera import sources
 
     out = {}
     src = sources.open_stereo(list(specs), max_skew_s=None, width=width, height=height,

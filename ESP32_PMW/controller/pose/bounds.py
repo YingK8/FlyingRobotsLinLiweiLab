@@ -73,32 +73,6 @@ def _Phi(u):
     return 0.5 * (1.0 + np.vectorize(erf)(u / math.sqrt(2.0)))
 
 
-def edge_crlb_continuum(contrast, sigma_noise, psf_px):
-    """
-    CRLB on edge position for point-sampled pixels, continuum limit.
-
-        With samples dense compared to the blur, the sum becomes an integral:
-
-            J = (C^2/sigma_n^2) * (1/s^2) * INT phi((x-x0)/s)^2 dx
-              = (C^2/sigma_n^2) * (1/s) * INT phi(u)^2 du
-              = C^2 / (2 sqrt(pi) s sigma_n^2)                 [INT phi^2 = 1/(2 sqrt pi)]
-
-        hence
-
-            sigma_x0 >= (sigma_n/C) * sqrt(2 sqrt(pi) s)  ~  1.8826 (sigma_n/C) sqrt(s)
-
-        **Blur costs precision here, as sqrt(s)** -- the opposite of the folklore that
-        a blurrier edge interpolates better. The folklore describes a different
-        failure, which `edge_crlb_discrete` captures and this form cannot: a sharp
-        edge under point sampling loses information because no pixel straddles it.
-    """
-
-    contrast = float(contrast)
-    if contrast <= 0.0 or sigma_noise <= 0.0 or psf_px <= 0.0:
-        raise ValueError("contrast, sigma_noise and psf_px must be positive")
-    return (sigma_noise / contrast) * math.sqrt(2.0 * math.sqrt(math.pi) * psf_px)
-
-
 def edge_crlb_discrete(
     contrast, sigma_noise, psf_px, box_pixel=True, half_width=12, reduce="rms"
 ):
@@ -150,19 +124,6 @@ def edge_crlb_discrete(
 #: *centre* of the last inside pixel, so the true edge is uniform over one pixel
 #: about it: Var = 1/12.
 QUANTISATION_SIGMA_PX = 1.0 / math.sqrt(12.0)  # 0.2887 px
-
-
-def subpixel_breakeven_snr(psf_px=1.0, box_pixel=True):
-    """
-    Contrast-to-noise ratio at which sub-pixel refinement starts to pay.
-
-        Below this, the CRLB on a fitted edge is worse than simply rounding to the
-        pixel grid (``QUANTISATION_SIGMA_PX``), and the refinement adds variance for
-        nothing. Solving ``edge_crlb(C, sigma_n, s) = 1/sqrt(12)`` for ``C/sigma_n``.
-    """
-
-    unit = edge_crlb_discrete(1.0, 1.0, psf_px, box_pixel=box_pixel)
-    return unit / QUANTISATION_SIGMA_PX
 
 
 # ---------------------------------------------------------------------------
@@ -305,33 +266,6 @@ def ellipse_crlb(centre, semi_axes, angle_rad, n_points, sigma_r_px, **kw):
     return np.linalg.inv(j)
 
 
-def circle_crlb_closed_form(radius_px, n_points, sigma_r_px):
-    """
-    Analytic CRLB for a circle -- the case where the algebra closes.
-
-        With ``x(phi) = c + r (cos phi, sin phi)`` the normal is ``(cos phi, sin phi)``
-        and the three gradients are ``(-cos phi, -sin phi, -1)`` for ``(cx, cy, r)``.
-        Averaging ``cos^2 = sin^2 = 1/2`` and ``cos sin = 0`` over a full turn,
-
-            J = (N/sigma_r^2) diag(1/2, 1/2, 1)
-
-        so
-
-            sigma_cx = sigma_cy = sigma_r sqrt(2/N),      sigma_radius = sigma_r / sqrt(N).
-
-        **The centre is measured sqrt(2) times WORSE than the radius, per axis.**
-        That is the opposite of the intuition that a centre, being an average of
-        opposed points, should be the better-determined quantity: each point
-        constrains the centre only along its own normal, so the information about cx
-        is diluted by cos^2 phi, while every point constrains the radius fully.
-        Returned as ``(sigma_centre_px, sigma_radius_px)``; exercised against
-        `ellipse_fisher` in `test_bounds.py`.
-    """
-
-    n = float(n_points)
-    return (float(sigma_r_px) * math.sqrt(2.0 / n), float(sigma_r_px) / math.sqrt(n))
-
-
 # ---------------------------------------------------------------------------
 # (D) Ellipse -> pose, and the depth/lateral law
 # ---------------------------------------------------------------------------
@@ -376,7 +310,7 @@ def pose_jacobian(centre, semi_axes, angle_rad, camera_matrix, radius_mm, step=1
         solutions and report a spurious infinity.
     """
 
-    import conic as _conic
+    from controller.pose import conic as _conic
 
     def solve(p):
         e = ((p[0], p[1]), (2.0 * p[2], 2.0 * p[3]), math.degrees(p[4]))
@@ -480,69 +414,6 @@ def depth_lateral_ratio(z_mm, radius_mm, tilt_deg=0.0, per_axis=False):
     return g * float(z_mm) / denom
 
 
-def depth_lateral_ratio_numeric(
-    z_mm, radius_mm, camera_matrix, tilt_deg, n_points=4000, sigma_r_px=0.01
-):
-    """
-    The same ratio, evaluated from the full Fisher matrix rather than the fit.
-
-        Slower and exact (no interpolation, no weak-perspective assumption). Used by
-        `test_bounds.py` to certify `depth_lateral_ratio` and to regenerate
-        ``_TILT_FACTOR`` if the parametrisation ever changes.
-    """
-
-    f = 0.5 * (camera_matrix[0, 0] + camera_matrix[1, 1])
-    a_px = f * radius_mm / z_mm
-    b_px = a_px * math.cos(math.radians(tilt_deg))
-    centre = (float(camera_matrix[0, 2]), float(camera_matrix[1, 2]))
-    cov, _ = pose_crlb(
-        centre, (a_px, b_px), 0.0, camera_matrix, radius_mm, n_points, sigma_r_px
-    )
-    if cov is None:
-        return None
-    sd = np.sqrt(np.clip(np.diag(cov), 0.0, None))
-    return float(sd[2] / math.hypot(sd[0], sd[1]))
-
-
-def tilt_from_ratio_sigma(theta_rad, sigma_ratio):
-    """
-    Propagated tilt uncertainty from noise on the axis ratio ``b/a``.
-
-        ``theta = arccos(b/a)`` gives ``dtheta/d(b/a) = -1/sin theta``, so away from
-        face-on
-
-            sigma_theta = sigma_ratio / sin theta.
-
-        That expression diverges at ``theta = 0``, and the divergence is real but the
-        formula is not: at exactly face-on the linearisation fails because ``theta``
-        is at the boundary of its domain (``b <= a`` always). Expanding instead,
-        ``cos theta ~ 1 - theta^2/2`` gives ``theta ~ sqrt(2 delta)`` for a ratio
-        deficit ``delta``, so the error goes as the SQUARE ROOT of the ratio noise
-        and the estimator is biased *away* from zero:
-
-            E[theta_hat] ~ 0.8225 sqrt(2 sigma_ratio)      at theta = 0
-
-        (the constant is ``E|u|^{1/2}`` for a standard normal). Both regimes are
-        checked against Monte Carlo in `test_bounds.py`; the crossover is near
-        ``theta ~ sqrt(sigma_ratio)``.
-    """
-
-    s = math.sin(theta_rad)
-    if s < 1e-12:
-        return math.inf
-    return float(sigma_ratio) / s
-
-
-def tilt_bias_at_face_on(sigma_ratio):
-    """
-    Expected apparent tilt of a genuinely face-on circle. See above.
-    """
-
-    # E|u|^{1/2} for u ~ N(0,1) = 2^{1/4} Gamma(3/4)/sqrt(pi)
-    k = (2.0**0.25) * math.gamma(0.75) / math.sqrt(math.pi)
-    return k * math.sqrt(2.0 * float(sigma_ratio))
-
-
 # ---------------------------------------------------------------------------
 # Structural results: rank and ambiguity
 # ---------------------------------------------------------------------------
@@ -559,7 +430,7 @@ def roll_null_space(centre_mm, normal, radius_mm, camera_matrix, n_probe=64):
         have. This is the formal version of "the estimator is 5-DOF, not 6".
     """
 
-    import conic as _conic
+    from controller.pose import conic as _conic
 
     n = np.asarray(normal, dtype=np.float64)
     n = n / np.linalg.norm(n)
@@ -609,7 +480,7 @@ def ambiguity_is_exact(centre_mm, normal, radius_mm, camera_matrix):
         Returns ``(image_gap_px, margin_deg, n_branches)``.
     """
 
-    import conic as _conic
+    from controller.pose import conic as _conic
 
     e = _conic.project_circle(centre_mm, normal, radius_mm, camera_matrix)
     poses = _conic.backproject_ellipse(e, camera_matrix, radius_mm)

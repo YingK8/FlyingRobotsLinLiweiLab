@@ -53,10 +53,9 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import conic  # noqa: E402
-import shape  # noqa: E402  (calib/: owns APPEARANCE)
+from controller.pose import conic
+from controller.calib import shape
 
 # Carried over from visual_servo/servo.py so both paths behave the same.
 #
@@ -99,6 +98,7 @@ import shape  # noqa: E402  (calib/: owns APPEARANCE)
 # use 128 by way of `estimator.RADIUS_BY_APPEARANCE["bright"]`, which was fitted with
 # it; this constant and that one move together.
 THRESH = 72
+# Moves with estimator.RADIUS_BY_APPEARANCE['bright']=128; the two were fitted together.
 MIN_BLOB_AREA_PX = 30
 
 # Opening is deliberately smaller than closing.  The projected rim wall is only
@@ -118,10 +118,6 @@ _CLOSE_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
 # Fractional rather than absolute so it holds across resolutions and distances.
 _BLOB_KEEP_FRACTION = 0.02
 
-# A contrast-relative level (scaled to the frame's peak) was tried and dropped:
-# 58 mm instead of 64 on the face-on hard-side-light failure it targeted, because
-# there the rim is not dim but unlit, and it made every well-lit case worse by
-# pulling fringe pixels into the hull. That failure is fixed by lighting.
 
 # fitEllipse needs 5 points for 5 ellipse parameters.
 _MIN_CONTOUR_PTS = 5
@@ -172,64 +168,12 @@ AXIAL_WEIGHT_POWER = 1.0
 AXIAL_DEFAULT = os.environ.get("POSE_AXIAL", "1") not in ("0", "", "false", "False")
 AXIAL_WEIGHT_ITERS = 2
 
-# Optional floor on the axial weights. **0.0 -- the re-weighting is not what
-# the orientation comes from; see `fit_ellipse`.**
-#
-# Kept because the investigation behind it is worth not repeating. The weights
-# fall to exactly zero over the arc nearest the major axis's centre, and a zero
-# weight does not distrust a point, it deletes it. What remains is clustered at
-# the two ends of the major axis, and five conic parameters fitted to two
-# opposing clusters are ill-conditioned in exactly one direction: rotation. On a
-# noise-free ellipse of ratio 0.834 that put the fitted major axis **33.5 deg**
-# out, with a Sampson rms of 3.7374 px against 0.0000 px for the plain fit --
-# a re-weighted fit that was *worse* against the very points it was fitted to.
-#
-# A floor looked like the fix and is not. It changes *which* cases fail rather
-# than whether they do: at 0.05 the 33.5 deg case became exact, and a different
-# pose that had been exact went 14 deg out. The rotation is ill-conditioned under
-# these weights, so the error is arbitrary in them. Locking the orientation is
-# the fix; this stays at 0 so the axes keep the full benefit of the suppression.
+# Stays 0: a floor changes WHICH poses fail, not whether. The rotation is ill-conditioned
+# under these weights, so the error is arbitrary in them.
 AXIAL_WEIGHT_FLOOR = 0.0
 
-# Weight given to boundary points that fall **outside** the current fit.
-#
-# Contamination is one-sided by construction: the hull is a superset of the
-# projected rim, so the rod, mount and threshold spill push the outline outward
-# only. A symmetric loss splits the difference with it and settles outside the rim
-# by about half the excursion; weighting outward points down pulls the fit onto the
-# inner envelope, where the rim is. The asymmetry matters more than the value.
-#
-# This buys **spread**, not bias -- `TiltCalibration` already removes the mean.
-# Over 120 poses with tilt and contamination amplitude varied:
-#
-#             ratio-error mean     ratio-error std
-#   off            +0.01825            0.00479
-#   0.15           +0.00935            0.00253      <- 47% less spread
-#   0.30           +0.01181            0.00316
-#
-# Near 45 degrees, where dtheta = d(ratio)/sin(theta), that is 0.388 deg of
-# irreducible tilt error falling to 0.205 deg -- and no calibration can recover
-# it, because it is scatter rather than offset.
-#
-# Overridable from the environment so the A/B can be run without editing code:
-#   POSE_ONE_SIDED=0 ... disables it, reproducing the previous behaviour.
 ONE_SIDED_WEIGHT = float(os.environ.get("POSE_ONE_SIDED", "0.15"))
 
-# Fraction of the outline discarded outright once the rim is well covered, and
-# the coverage required before discarding anything.
-#
-# A down-weighted point still pulls the fit; a discarded one does not. The mast is
-# a *localised lobe* rather than spread-out error, so selection suits it better
-# than weighting: on silhouettes with a randomly placed lobe the ratio-error
-# scatter falls 0.03586 -> 0.02266, a **37%** reduction.
-#
-# The guard is not optional. Discarding a quarter of the boundary is safe only
-# when there is redundancy left, and with a rim broken into arcs there is not:
-# at 70% arc coverage an unguarded trim made the scatter *worse* (0.03623 ->
-# 0.04253) and the worst case worse still. Angular coverage of the points about
-# the fitted ellipse measures exactly that redundancy, so the trim is applied
-# only above `TRIM_MIN_COVERAGE` and skipped entirely below it -- which, on the
-# broken-rim cases, leaves the previous behaviour untouched.
 TRIM_FRACTION = 0.25
 TRIM_MIN_COVERAGE = 0.85
 TRIM_ITERS = 3
@@ -284,10 +228,6 @@ class Segmentation:
     t_ms: float
     valid: np.ndarray | None = None
     valid_from: str | None = None
-    # Mean rim evidence, set only when `fit_ellipse_image` has refined `ellipse` onto
-    # the image. Finite means the ellipse is a direct fit rather than a fit to the
-    # mask, so `fit_rms_px` -- which measures the *hull* -- no longer describes it and
-    # callers must gate on this instead. NaN means the mask fit stands.
     evidence: float = float("nan")
     coverage: float = float("nan")
     ridge: float = float("nan")
@@ -570,17 +510,13 @@ def fit_ellipse(pts, axial=None, power=None, iters=None):
     if not all(np.isfinite([major, minor])) or major <= 0 or minor <= 0:
         return None
 
-    # rms is over *all* hull points, including the ones the fit down-weights.
-    # A weighted rms was tried and is worse for the gate (acceptance 3.5% ->
-    # 0.5%): the unweighted value is the signal, not a defect, because it
-    # measures how far the silhouette departs from *any* ellipse -- i.e. how much
-    # contamination is present, and so how much error survives the weighting.
     return ellipse, float(np.sqrt(np.mean(_sampson_distance(ellipse, pts) ** 2)))
 
 
 # Half-width, in pixels, of the intensity profile sampled across the boundary
 # when locating it to sub-pixel precision.
 SUBPIX_SEARCH_PX = 3.0
+# Half-width in px of the intensity profile sampled across the boundary.
 SUBPIX_SAMPLES = 13
 
 
@@ -675,46 +611,6 @@ _MAX_ANCHORS = 4
 # there is most of a decade of margin.
 SHAPE_TOL = 0.05
 
-# **This gate is close to inert, and tightening it makes things worse.** The score is
-# fit error against the convex HULL, and any compact solid blob's hull is an ellipse:
-# a rim and a solid disc both measure 0.0004. It cannot tell them apart, so on a normal
-# frame nothing is rejected and selection below falls through to size alone.
-#
-# Left loose deliberately. Swept on both 18:48 flights at threshold 180, gating on
-# radial error over the group's mask PIXELS (which does separate ring from blob,
-# 0.027 against 0.33) and breaking ties on inlier count, the result improves
-# monotonically as the gate is widened -- 184940 solves 23% at tol 0.09, 30% at 0.20,
-# 39% at 0.40 and 45% with no gate at all, against 44% for plain size. Every millimetre
-# the error criterion is allowed to reject something, the answer gets worse.
-#
-# The reason is what the candidates actually are. They are not rim-versus-clutter,
-# where fit error would win; they are partial-rim-versus-larger-partial-rim, all
-# genuinely elliptical and differing only in how much of the ring they hold. Fit error
-# cannot rank those and size can, because more of the ring is bigger. Selecting on
-# error alone is worse still (8% solved): error has no support term, so its minimum is
-# always the smallest candidate -- the roundest blob against hulls, the thinnest arc
-# against pixels, since an ellipse follows a short arc almost exactly.
-#
-# Contamination inflating the major axis was the real objection to size, and `_regrow`
-# is what answers it: reassembling the ring makes the correct group the biggest one.
-#
-# **Anchor-and-grow still cannot reject.** `_regrow` only ever adds blobs, so scenery
-# once absorbed is never shed -- on 184830 view A frame 420 this returns 607x502 where
-# the rim is 463x278, having eaten the shadow blobs beside it. Backward elimination
-# (start from every blob, drop the smallest, refit, keep the set that best explains the
-# mask) does not have that failure and is the more accurate extractor measured against a
-# leave-one-out consensus ground truth: worst-case centre error 2.7 px across both
-# 18:48 flights against 3.6 px here, and 2.0 px against 3.6 on 184940. It is not in this
-# file because it scores WORSE on the stereo solve for that same flight (23% against
-# 44%), and see the warning below for why that number cannot be trusted right now.
-#
-# **Cross-view discrepancy is not a valid objective while the extrinsic is stale.**
-# Extraction accuracy and stereo agreement came out anti-correlated across the two
-# flights: the more accurate extractor loses the stereo solve, because a biased ellipse
-# partially cancels a wrong rig and a clean one exposes it. Every millimetre figure used
-# to tune this module was measured that way, `RING_BAND` included -- re-derive it after
-# `calib/calibrate.py` succeeds. Full study: results/rim_extractor_trials.html.
-
 
 def _group_hull(labels, members, n, stats=None):
     """
@@ -754,34 +650,6 @@ def _group_hull(labels, members, n, stats=None):
     return hull + (x0, y0)
 
 
-# How far off its own fitted ellipse a blob may sit and still be counted part of the
-# ring, as a fraction of the local radius: |r - 1| < this, with r the blob centroid's
-# radius in the ellipse's own frame.
-#
-# This exists because `max_spread` measures the wrong thing once the rim breaks up.
-# That radius comes from the *anchor blob's* bounding box, which is a whole rim when
-# the threshold keeps the rim solid and a single thin arc when it does not -- and
-# 1.35 arc-radii cannot reach across the ring to the arcs on the far side. On flight
-# 184940 at threshold 180 no candidate group spanned the real 382 px rim; the best
-# covered 314 px and the rest were quadrant-sized.
-#
-# Re-gathering on the fitted ellipse instead asks the question the shape actually
-# poses -- is this blob on the ring -- and is scale-free, so it works the same whether
-# the rim arrived in one piece or twelve.
-#
-# Swept on both 18:48 flights, every sixth stereo frame through the two-view solve,
-# at threshold 180. Solved-frame % on 184940: 37 at 0.20, 43 at 0.35, **45 at 0.50**,
-# 43 at 0.65, 42 at 0.80, 38 at 1.00, and 32 both for the old distance grouping and
-# for the no-grouping control. An interior peak, not a range edge, and it beats
-# keeping every blob -- which the old rule did not.
-#
-# 184830 reads 45% at every setting including no grouping at all, so this buys nothing
-# there. That flight is limited by its extrinsic, not by segmentation.
-#
-# **It cannot bootstrap from a single blob.** One arc does not determine the ring, so a
-# rim shattered into isolated fragments still fails -- the seed has to span enough of
-# the ring to fit an ellipse near the true one first. That is why the seed is still the
-# distance rule and this only extends it.
 RING_BAND = 0.5
 RING_REGROW_ITERS = 2
 
@@ -937,8 +805,6 @@ def silhouette_hull(mask, keep_fraction=_BLOB_KEEP_FRACTION, max_spread=None):
             return None, 0.0
 
     if len(keep) == n - 1:
-        # Nothing was rejected, which is the usual case on a clean frame; reuse
-        # the mask rather than rebuild an identical one.
         kept_mask = mask
     else:
         # A lookup table indexed by label, not `np.isin`: one fancy-index pass
@@ -1005,66 +871,12 @@ BACKGROUND_PATH = Path(__file__).resolve().parent / "background_dark.png"
 # boundary points, so `cv2.findNonZero` is used rather than `np.nonzero`.
 BACKDROP_LUM = 150
 BACKDROP_SD = 12
+# Quarter resolution: 2.43 ms per frame against 48.4 ms (20 Hz) at full, which is disqualifying.
 BACKDROP_SCALE = 0.25
 BACKDROP_ERODE = 15
 
-# Threshold on 255 - luminance, so the dividing level is 255 - this: at 175 the
-# body must read below **80** counts. Note the inversion when changing it -- a
-# *larger* number here is a *stricter*, darker cut.
-#
-# **Raised from 110 on the rod**: the cut moved from "below 145" to "below 80".
-# The rod's p5 is 83, so 145 admits it; the drone's median is 42-78, so 80 keeps
-# the drone and drops the rod. On the edge-on capture the major axis goes from
-# +130% to +1%.
-#
-# The old value came from a render sweep with no rod in frame, so it cannot speak
-# to this choice. Its shape is still worth knowing: the threshold fails by eating
-# rim arcs, not by losing the robot, so detection stayed 80/80 at every level while
-# p90 ran to 30% (`ai/notes/pose_appearance.md`).
-#
-# **The margin is the result, not the working point.** Swept against both real
-# captures, this passes over **170-215** and fails either side, so 190 is the
-# midpoint rather than a value that merely works. 170 lets the rod in; above 215
-# the cut eats into the drone's own shading. A value at the edge of a passing
-# range is indistinguishable from a correct one until the lighting moves, which
-# is why the range is recorded and not just the choice.
-#
-# **This is the fragile appearance of the three.** Body and ground are both
-# neutral, so only brightness separates them, and the drone/rod gap is only ~35
-# counts. Keep the backdrop evenly lit, and re-measure the range -- not the
-# working point -- after any lighting change.
-# Re-measured on three flights against the empty-rig plate (`background.from_video`),
-# every eighth stereo frame through the full estimator: 190 recovers 24-30% of frames,
-# 210-220 recovers 43-59%, 230 falls away again. The gap is where the rim's near-black
-# stops being separable from the shadowed scene behind it, and 190 was cutting the rim
-# itself. 220 wins on two of the three takes and is a point behind on the third.
-# Re-measured 2026-08-26 on the two 18:48 flights, every sixth stereo frame through
-# the full two-view solve, scored on median cross-view discrepancy. Both flights vote
-# 180 independently, over a flat 170-190: 31.8 and 32.7 mm, against 43.6 / 37.2 at 150
-# and 38.9 / 120.4 at 220. The lighting moved between sessions -- at 220 camera B's rim
-# stops being separable at all and the fit lands on specks (167x61 px where the ring is
-# circular), which is what the mask overlay shows at a glance.
-#
-# **The 32 mm floor was never this constant's fault, and it was not the extrinsic
-# either.** That was the reading here, and it was wrong: it blamed the rig because no
-# threshold reached the gate. What reaches it is not thresholding at all. With
-# `fit_ellipse_image` refitting the ellipse onto the rim evidence, the frames whose fit
-# actually covers the rim agree across views to a **median 4.1 mm** -- against a 25.5 mm
-# gate -- so the extrinsic was sound the whole time and the floor was the mask.
-#
-# **This level is now a seed, not a measurement**, and that changes what it is for: it
-# has to land the direct fit's starting ellipse within its capture radius, not cut the
-# rim in the right place. Re-swept on that basis, end to end through the estimator over
-# all three flights, as frames solved:
-#
-#   100   33.3 / 12.3 / 14.7 %      190   76.0 / 54.0 / 43.7 %
-#   150   49.1 / 34.0 / 23.6 %      220   49.7 / 23.4 / 44.2 %
-#
-# 190 wins on every flight, which is the value the sweeps above and `theory.md` already
-# shipped -- the 100 it replaced came from tuning the mask as a measurement, back when
-# it was one. Median cross-view discrepancy sat at 3.3-4.0 mm at every level in that
-# table (swept before `RADIUS_BY_APPEARANCE` was re-fitted): the level decides how often
-# the fit starts close enough to converge, and no longer decides how good the answer is.
+# Swept end to end over three flights, as frames solved: 190 -> 76/54/44 %, 150 -> 49/34/24 %,
+# 100 -> 33/12/15 %. It sets how often the direct fit starts inside its capture radius.
 DARK_THRESH = 190
 
 # How far a blob may sit from the largest one and still count as part of the
@@ -1139,54 +951,10 @@ def background_mask(gray, bg=None, thresh=None):
     return cv2.threshold(cv2.absdiff(gray, bg), t, 255, cv2.THRESH_BINARY)[1]
 
 
-# Rim evidence: how far a pixel stands out from the envelope around it.
-#
-# A morphological closing with a structuring element of width k fills every dark
-# feature narrower than k, so `closing - image` responds **only to dark structures
-# thinner than k**. That is the whole shadow/rim discriminator, and it is the one
-# separation a level cannot make: the rim is ~8 px thick and scores full, a cast
-# shadow is broader than the kernel, survives the closing, and scores ~0.
-#
-# The `bright` appearance is the mirror image -- `image - opening`, a top-hat -- and it
-# is the *rig-side* fix for the same problem: a shadow on a black backdrop has nothing
-# to darken, so it never enters the map at all. The kernel argument is unchanged.
-#
-# Measured over 20 frames per camera on both 18:48 flights, as mask area in pixels:
-#   level on 255-luminance   24k -> 154k as shadows come and go
-#   this, thresholded at 40  22k -> 36k, and 2.6k on the frames with no robot in view
-# The rim itself is ~28k px, so the level was spending most of its mask on shadow.
-#
-# **MORPH_RECT, not MORPH_ELLIPSE.** Rect is separable and ellipse is not: 2.64 ms
-# against **40.2 ms** at 1280x800. Same trap as the full-resolution backdrop finder,
-# and the same disqualification -- 40 ms does not fit a 16.7 ms frame.
-#
-# **What looks like occlusion at this width is mostly this constant, and widening it
-# does not help.** The rim is ~8 px of *stroke*, but what the kernel has to exceed is
-# the whole bright structure the stroke sits in, and the projected ring is not 8 px wide
-# everywhere. At the ends of the projected minor axis the near and far arcs of the duct
-# converge into a locally wide bright blob, the opening keeps it, and the top-hat
-# returns nothing. Measured on `2026-08-28_131552`, dead-sample rate around the fitted
-# ellipse: 9-11% over most of the curve, 27% at the major-axis ends, and **49.7% within
-# 20 degrees of the minor-axis ends** -- on rim whose raw luminance reads 139.6 against
-# 157.9 where it *is* found. The rim is bright and present and the map does not see it.
-#
-# A wider kernel fixes that and costs more than it is worth, because it stops
-# discriminating. Arc coverage goes to 1.000 and every end metric gets worse:
-#
-#   k                      41     49     61     81
-#   arc alive p50          0.861  --     1.000  1.000
-#   at the minor tips      0.567  --     1.000  1.000
-#   discrepancy p50, mm    0.77   1.92   2.39   ~3
-#   under the 5 mm gate    72.9%  59.8   55.4   ~53
-#   more than 30 deg out   8.8%   18.3   13.2   ~14
-#   ridge p50              35.8   29.0   23.7   --
-#
-# `ridge` is the row that explains the rest, and it falls monotonically: a kernel wide
-# enough to keep the converged arcs also keeps the body, so the map stops being a ridge
-# on the rim and the ellipse is no longer pinned to anything. This is `coverage` failing
-# as a blunder test exactly as documented on `RingFit` -- everything is "alive" when the
-# whole neighbourhood is bright. 41 stands. Recovering the converged arcs needs a
-# growth rule at constant kernel, not a wider kernel.
+PLATE_REFRESH_FRAMES = 30
+
+# A wider kernel keeps the body as well as the rim, so the map stops being a ridge and the
+# ellipse is pinned to nothing. Widen with a growth rule at constant kernel instead.
 RING_KSIZE = 41
 
 # How much of the plate's own response to subtract.
@@ -1263,26 +1031,6 @@ RING_COVERAGE_FLOOR = 0.5
 # shoulders miss the rim.
 RING_SHOULDER = 0.14
 
-# **Bounding how far the fit may move from its seed was tried and is a net loss.** The
-# motivation was good: over 2026 views of `2026-08-28_135533` a healthy refinement
-# shrinks the major 2.8% (the mask hulls the rim's outer edge, the evidence ridge is its
-# centre-line) and moves the centre 4.0 px, p90 6.8 -- while on `2026-08-28_131552` the
-# same medians hold and the tails do not, major p10 -11.2%, centre p90 55 px and max
-# **466 px**, from frames where the mask seed collapsed to a 14 px major on a ~400 px
-# ring. Rejecting those and reporting the seed instead:
-#
-#   drift / scale bound    off     0.50/0.40  0.30/0.25  0.10/0.15
-#   131552  discrepancy p90  26.58   26.58      26.58      11.22
-#           more than 30 deg 4.4%    4.2        4.7        8.6
-#   135533  discrepancy p90  1.54    5.01       5.01       4.69
-#           more than 30 deg 0.6%    3.1        3.1        2.8
-#
-# Only the tightest bound helps anything, only on one flight, and it costs orientation
-# on both. The reason is that a large move is not the same as a wrong move: a seed at
-# 252 px on a 415 px ring needs a +65% correction, and that is the fit doing exactly its
-# job. Drift does not separate recovery from runaway, and the seed is the worse report
-# either way -- its axis ratio is biased by hulling the outer edge, which lands straight
-# on the tilt.
 
 # The seed level, as a fraction of the evidence map's own `RING_SEED_PERCENTILE`.
 #
@@ -1299,17 +1047,9 @@ RING_SEED_PERCENTILE = 99.9
 # arriving as arcs, which is a property of the robot and not of the appearance.
 RING_MAX_SPREAD = 1.35
 
-# Normalising the response by the local bright envelope -- `(closing - g) / closing`,
-# the multiplicative shadow model -- was tried and **rejected**. The intent was to
-# even out the evidence where a shadow falls across the rim and lowers its contrast.
-# It does not: along-ring p10 as a fraction of the median went 43% -> 51% on one
-# frame and was unchanged or worse on the other thirteen. The evidence around a rim
-# is intrinsically uneven, and normalising the map does not change that -- what
-# handles it is the robust loss in the direct fit, not a better map.
-
 
 def ring_weight(gray, background=None, ksize=None, sigma=None, roi=None,
-                appearance=None, plate_weight=None):
+                appearance=None, plate_weight=None, bg_version=None):
     """
     Rim evidence as a float32 map: bright on the thin rim, ~0 elsewhere.
 
@@ -1351,18 +1091,14 @@ def ring_weight(gray, background=None, ksize=None, sigma=None, roi=None,
         return cv2.subtract(m, f) if appearance == "dark" else cv2.subtract(f, m)
 
     def plate_response(img, box):
-        # The plate does not change, and its closing is 2.6 ms of every frame. Keyed
-        # on the array's own buffer, holding a reference so the id cannot be recycled
-        # onto a different plate -- the estimator passes the same array every frame.
-        key = (id(img), box, k, appearance)
-        hit = _PLATE_RESPONSE_CACHE.get(key)
-        if hit is None:
-            if len(_PLATE_RESPONSE_CACHE) > 4:
-                _PLATE_RESPONSE_CACHE.clear()
+        slot = bg_version[0] if isinstance(bg_version, tuple) else bg_version
+        key = ((id(img) if bg_version is None else bg_version), box, k, appearance)
+        hit = _PLATE_RESPONSE_CACHE.get(slot)
+        if hit is None or hit[0] != key:
             x, y, ww, hh = box if box else (0, 0, img.shape[1], img.shape[0])
-            hit = (img, response(img[y:y + hh, x:x + ww]))
-            _PLATE_RESPONSE_CACHE[key] = hit
-        return hit[1]
+            hit = (key, img, response(img[y:y + hh, x:x + ww]))
+            _PLATE_RESPONSE_CACHE[slot] = hit
+        return hit[2]
 
     usable = background is not None and background.shape == gray.shape
 
@@ -1508,7 +1244,6 @@ def fit_ellipse_image(weight, seed, n=None, ref=None, f_scale=None, max_iter=60,
     )
 
 
-
 def ring_seed(weight, frac=None, pct=None, max_spread=None, min_area=MIN_BLOB_AREA_PX):
     """
     A seed ellipse straight from the evidence map. No plate, no level on luminance.
@@ -1521,9 +1256,8 @@ def ring_seed(weight, frac=None, pct=None, max_spread=None, min_area=MIN_BLOB_AR
         that question itself and nothing upstream of it is needed.
 
         The level is a fraction of the map's **own** high percentile, not of its
-        maximum: one specular pixel should not set the scale. Otsu was tried here and is
-        too permissive -- the map is 95% near-zero, so Otsu puts the level in the noise
-        and the hull spans the frame (72k px on, major 1377 where the ring is ~450).
+        maximum: one specular pixel should not set the scale. Not Otsu -- the map is 95%
+        near-zero, so Otsu lands the level in the noise and the hull spans the frame.
 
         `max_spread` is not optional here for the same reason it is not in the dark
         path: the rim is hollow and arrives as arcs, and without a spread limit
@@ -1631,6 +1365,25 @@ def _box_blur(img, sigma):
 _PLATE_RESPONSE_CACHE = {}
 
 
+ROI_MARGIN = 1.6      # of the previous major axis: how far the rim may move in a frame
+
+
+def ellipse_roi(ellipse, shape, margin=ROI_MARGIN):
+    """Square search window around a previous ellipse, or None if it has no size.
+
+        Squared on the MAJOR axis rather than fitted to the ellipse: the rim can rotate
+        between frames, and a box that hugs the minor axis clips it when it does.
+    """
+
+    if ellipse is None:
+        return None
+    (cx, cy), (major, minor), _ = ellipse
+    r = 0.5 * max(major, minor) * margin
+    if not (r > 0) or not (np.isfinite(cx) and np.isfinite(cy) and np.isfinite(r)):
+        return None
+    return _clamp_roi((cx - r, cy - r, 2 * r, 2 * r), shape)
+
+
 def _clamp_roi(roi, shape, pad=0):
     """``(x, y, w, h)`` grown by ``pad`` and clipped to the frame."""
 
@@ -1734,18 +1487,6 @@ def score_channel(frame, appearance=None, thresh=None, region=None, background=N
 
     if appearance == "bright":
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-        # Gate on the plate when there is one. This branch used to return the frame
-        # ungated, which threw away a region that had already been computed -- and on
-        # the black-backdrop rig that is the whole failure: the bench at the frame edge
-        # reads 252 against the robot's 240, so *no* level separates them, while the
-        # plate difference alone segments the robot almost exactly (identical seed to
-        # within 3 px of the evidence map's own). The level was never too high; it was
-        # being asked to do a job the region does.
-        #
-        # Only from a plate, never `backdrop_mask`: that finder looks for the bright
-        # smooth region, which on a dark backdrop is the robot itself or nothing. And
-        # unlike `dark`, no region is not a refusal here -- the renders every `bright`
-        # constant was fitted on have no plate and no clutter, and must keep working.
         if region is None and background is not None:
             region = background_mask(gray, bg=background)
         if region is not None:
@@ -1753,9 +1494,6 @@ def score_channel(frame, appearance=None, thresh=None, region=None, background=N
         return gray, int(THRESH if thresh is None else thresh)
 
     if appearance == "dark":
-        # Mono is the normal case here, not a degraded one: the ELP OV9281 has no
-        # colour to give and the chroma gate this used to apply was measured
-        # inoperative on it. A three-channel frame is collapsed rather than split.
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
         region = valid_region(gray, bg=background) if region is None else region
         if region is None:
@@ -1764,28 +1502,6 @@ def score_channel(frame, appearance=None, thresh=None, region=None, background=N
         return dark, int(DARK_THRESH if thresh is None else thresh)
 
     raise ValueError(f"unknown appearance {appearance!r}; use 'bright' or 'dark'")
-
-
-def clutter_mask(frame, background=None):
-    """
-    Everything the segmenter will ignore -- the complement of `valid_region`.
-
-        Exposed on its own because the rejected area is worth having as an object
-        rather than only as something to remove. It is what the live overlay shades,
-        so a wrong pose and a wrong *rejection* can be told apart at a glance -- in a
-        plain ellipse overlay they look identical. It is also a direct check on
-        whether the camera has moved, since every source of clutter here is fixed to
-        the rig.
-
-        Returns an all-255 mask when no valid region can be found, because in that
-        case everything is being ignored, which is exactly what should be displayed.
-    """
-
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-    region = valid_region(gray, bg=background)
-    if region is None:
-        return np.full(gray.shape, 255, np.uint8)
-    return cv2.bitwise_not(region)
 
 
 def threshold_mask(frame, thresh=None, appearance=None, background=None,
@@ -1830,13 +1546,10 @@ def segment(
         than assume a detection, since a lost frame is normal in flight.
 
         ``subpixel`` re-locates the hull onto the intensity edge before fitting; see
-        `subpixel_boundary`. Pass ``False`` to recover the previous behaviour, which
-        is how the A/B in the journal was run.
+        `subpixel_boundary`.
 
-        ``axial=False`` disables the weighted refit in `fit_ellipse`. It is a real
-        parameter rather than a module flag on purpose: `AXIAL_WEIGHT_ITERS` used to
-        be a default argument, so reassigning it in a test changed nothing and the
-        A/B silently measured the weighted path twice.
+        ``axial=False`` disables the weighted refit in `fit_ellipse`. A real parameter
+        rather than a module flag, so a test can turn it off and have that take effect.
 
         ``appearance`` selects how the robot is told apart from its background; see
         `score_channel`. ``thresh=None`` takes that appearance's own default level,
@@ -2057,8 +1770,6 @@ def _self_check():
     seg = segment(img, appearance="bright", thresh=128)
     assert np.array_equal(seg.mask, mask), "helper and segment must threshold alike"
 
-    # The tint has to reach the image in both cases -- the no-detection one is the
-    # whole point, and it is the one that used to return before drawing anything.
     assert not np.array_equal(draw(img, seg, mask=True), draw(img, seg))
     assert not np.array_equal(draw(img, None, mask=mask), draw(img, None))
 
@@ -2078,5 +1789,32 @@ def _self_check():
     print("segment self-check ok")
 
 
+def _check_plate_cache():
+    """Two callers must not be able to hand each other the wrong plate response.
+
+        This is the shape of the bug in `control/theory.md` 19.7: the cache was global
+        with an eviction rule, the two view threads shared it, and which plate generation
+        a response belonged to depended on interleaving. Distinct slots, no eviction.
+    """
+
+    rng = np.random.default_rng(0)
+    gray = rng.integers(0, 255, (120, 160), dtype=np.uint8)
+    a = rng.integers(0, 255, (120, 160), dtype=np.uint8)
+    b = rng.integers(0, 255, (120, 160), dtype=np.uint8)
+    va, vb = ("A", 0), ("B", 0)
+    wa = ring_weight(gray, background=a, bg_version=va)
+    wb = ring_weight(gray, background=b, bg_version=vb)
+    # Interleave the two slots the way two threads would, many times over.
+    for _ in range(20):
+        assert np.array_equal(ring_weight(gray, background=a, bg_version=va), wa)
+        assert np.array_equal(ring_weight(gray, background=b, bg_version=vb), wb)
+    assert not np.array_equal(wa, wb), "different plates gave the same map -- key collision"
+    # A new generation must invalidate, or the cache pins a stale plate forever.
+    c = rng.integers(0, 255, (120, 160), dtype=np.uint8)
+    assert not np.array_equal(ring_weight(gray, background=c, bg_version=("A", 1)), wa)
+    print("segment: plate-response cache is per-slot, collision-free, and versions expire")
+
+
 if __name__ == "__main__":
+    _check_plate_cache()
     _self_check()

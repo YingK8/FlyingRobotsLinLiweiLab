@@ -43,6 +43,7 @@ Without it, "stopped" is never claimed at all.
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -80,11 +81,12 @@ def blade_phase(gray, ellipse, r_frac=R_FRAC, n=N_SAMPLES):
 
     prof = gray[ys, xs].astype(np.float64)
     prof -= prof.mean()
-    power = np.abs(np.fft.rfft(prof)) ** 2
+    spec = np.fft.rfft(prof)            # once: the phase and the power are one transform
+    power = np.abs(spec) ** 2
     band = power[BAND].sum()
     if band <= 0.0:
         return 0.0, 0.0
-    return float(np.angle(np.fft.rfft(prof)[BLADES])), float(power[BLADES] / band)
+    return float(np.angle(spec[BLADES])), float(power[BLADES] / band)
 
 
 class SpinWitness:
@@ -191,8 +193,7 @@ def from_recording(rec_dir, tag="A", limit=None, stride=1):
 
     import cv2
 
-    sys.path[:0] = [str(Path(__file__).resolve().parent)]
-    import segment as segmod
+    from controller.pose import segment as segmod
 
     rec = Path(rec_dir)
     cap = cv2.VideoCapture(str(rec / tag / f"{tag}.mp4"))
@@ -223,6 +224,114 @@ def from_recording(rec_dir, tag="A", limit=None, stride=1):
     finally:
         cap.release()
     return w
+
+
+def probe(index=None, mode="640x400@210", seconds=6.0, roi=None, grayscale=True):
+    """
+    High-rate blade-phase capture: is the rotor rotating, or just oscillating?
+
+        The pose pipeline runs at ~25 fps because segmenting a stereo pair costs
+        ~50 ms, which puts Nyquist at 12.5 Hz -- below the drive frequency, below the
+        19 Hz phase mode, below everything worth seeing. A spectrum taken there is
+        empty no matter what the rotor does.
+
+        This drops the pose estimate entirely. One camera, one segmentation to fix the
+        ring, then nothing per frame but sampling intensity around it. That runs at
+        camera rate: 210 fps at 640x400 (Nyquist 105 Hz), 420 at 320x240.
+
+        Returns ``(t, phase)`` arrays. Feed them to `classify`.
+    """
+
+    import sys
+
+    from controller.camera import elp
+    from controller.pose import segment as segmod
+
+    if index is None:
+        from controller.camera import identify
+
+        index = identify.elp_indices()[0]
+    cam = elp.open_elp(index=index, mode=mode, grayscale=grayscale)
+    try:
+        # One segmentation to place the ring. The robot is on the pad and does not
+        # translate meaningfully during a spin-up, so re-fitting per frame would only
+        # buy jitter at the cost of the frame rate this exists for.
+        if roi is None:
+            for _ in range(40):
+                item = cam.read()
+                if item is None:
+                    continue
+                seg = segmod.segment(item[1])
+                if seg is not None:
+                    roi = seg.ellipse
+                    break
+            if roi is None:
+                raise RuntimeError("no segmentation; cannot place the sampling ring")
+
+        t, ph = [], []
+        t_end = time.monotonic() + seconds
+        while time.monotonic() < t_end:
+            item = cam.read()
+            if item is None:
+                continue
+            angle, strength = blade_phase(item[1], roi)
+            if strength >= MIN_STRENGTH:
+                t.append(item[0])
+                ph.append(angle)
+    finally:
+        cam.close()
+    return np.asarray(t), np.unwrap(np.asarray(ph))
+
+
+def classify(t, phase, field_hz=None):
+    """
+    Rotating, oscillating, or neither, from a high-rate phase record.
+
+        Two independent statistics, because they fail differently:
+
+        * **coherence** = ``|sum d| / sum|d|`` over per-frame phase steps. A rotor
+          turning steadily accumulates phase, so this approaches 1. One rocking back
+          and forth returns to where it started, so this approaches 0. Aliasing
+          weakens it but does not invert it.
+        * **spectrum** (Lomb-Scargle, because frame times are not evenly spaced). An
+          oscillating rotor is a periodic signal and shows a peak -- at the drive
+          frequency if it is being shaken by the field, or near the phase mode if it
+          is ringing. A steadily rotating one has no peak once the trend is removed.
+
+        Rotation with a strong peak is neither: it is a rotor slipping poles.
+    """
+
+    from scipy.signal import lombscargle
+
+    if len(t) < 32:
+        return {"verdict": "too few samples", "n": len(t)}
+    d = np.diff(phase)
+    tot = np.abs(d).sum()
+    coherence = float(abs(d.sum()) / tot) if tot else 0.0
+
+    fs = 1.0 / float(np.median(np.diff(t)))
+    trend = np.polyval(np.polyfit(t, phase, 1), t)
+    grid = np.linspace(0.3, 0.45 * fs, 3000)
+    power = lombscargle(t, phase - trend, 2.0 * np.pi * grid, normalize=True)
+    peak_hz, peak = float(grid[np.argmax(power)]), float(power.max())
+
+    if coherence > 0.5:
+        verdict = "ROTATING"
+    elif peak > 0.25:
+        verdict = "OSCILLATING"
+    else:
+        verdict = "no coherent motion"
+    # How far the rotor actually moves, in physical degrees. A few degrees of rocking
+    # is invisible in coherence and in a normalised periodogram, but it is the
+    # difference between "held still" and "being shaken but not carried round".
+    amp_deg = float(np.std(phase - trend)) * 180.0 / (np.pi * BLADES)
+    out = {"verdict": verdict, "n": len(t), "fs_hz": fs, "nyquist_hz": fs / 2,
+           "amp_deg": amp_deg,
+           "coherence": coherence, "peak_hz": peak_hz, "peak_power": peak,
+           "spin_hz": float(d.sum() / (2 * np.pi * BLADES * (t[-1] - t[0])))}
+    if field_hz:
+        out["field_hz"] = field_hz
+    return out
 
 
 def _synthetic(angle_deg=0.0, size=241, blades=BLADES, r_out=100.0):
@@ -288,7 +397,24 @@ def _self_check():
     assert spun.turning is True, spun.summary()
     assert abs(abs(spun.drift_rev) - 9 * 5.0 / 360.0) < 0.01, spun.drift_rev
 
+    # `classify` is the general form of the rotating-vs-rocking question, and it must
+    # separate the two cases the runner's capture trigger exists for. Phase is in blade
+    # angle, so one revolution is 2*pi*BLADES.
+    t = np.arange(256) / 60.0
+    turn = classify(t, 2 * np.pi * BLADES * 3.0 * t)                    # 3 rev/s, steady
+    rock = classify(t, 0.35 * np.sin(2 * np.pi * 9.0 * t))              # 9 Hz, nets to 0
+    assert turn["verdict"] == "ROTATING", turn
+    assert turn["coherence"] > 0.99, turn["coherence"]
+    assert abs(turn["spin_hz"] - 3.0) < 0.05, turn["spin_hz"]
+    assert rock["verdict"] == "OSCILLATING", rock
+    assert rock["coherence"] < 0.5, rock["coherence"]
+    assert abs(rock["peak_hz"] - 9.0) < 0.5, rock["peak_hz"]
+    # Too short to judge is its own answer, never a default to one of the two above.
+    assert classify(t[:8], np.zeros(8))["verdict"] == "too few samples"
+
     print("spin: 4th harmonic found, rotation recovered to <1 deg, blank rejected")
+    print(f"  classify -> turning {turn['coherence']:.3f} coherence, "
+          f"rocking {rock['peak_hz']:.1f} Hz peak")
     print(f"  still -> {still.summary()}")
     print(f"  spun  -> {spun.summary()}")
     print("\nall checks passed")

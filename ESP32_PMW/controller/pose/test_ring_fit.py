@@ -21,9 +21,8 @@ import cv2
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import segment as sg  # noqa: E402
+from controller.pose import segment as sg
 
 SIZE = 640
 RING = ((320.0, 320.0), (380.0, 260.0), 25.0)   # centre, (major, minor), degrees

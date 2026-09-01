@@ -44,10 +44,9 @@ import trimesh
 HERE = Path(__file__).resolve().parent
 # Pipeline layering: a stage sees only the stages before it, so a forward import
 # fails at once instead of quietly creating a cycle. pose is stage 3 of 4.
-sys.path[:0] = [str(HERE), str(HERE.parent / "calib"), str(HERE.parent / "camera")]
 
-import render as rendermod  # noqa: E402
-from rig import StereoRig  # noqa: E402
+from controller.pose import render as rendermod
+from controller.calib.rig import StereoRig
 
 # The takeoff stand: a black rod below the robot.  8 mm diameter is what the
 # bench uses; the length is arbitrary as long as it leaves frame.

@@ -52,22 +52,6 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "error_model.json"
 TARGET_POS_MM = 0.5
 TARGET_ANGLE_DEG = 1.0
 
-# Quantile of the actual/predicted ratio used to turn a scale into a bound.
-#
-# Not 1.0: the maximum of a training sample is an outlier, not a bound, and
-# calibrating to it rejects most of a fresh dataset for no gain. Not 0.99
-# either -- the target is 100% of reported frames, and on a controlled synthetic
-# check the quantile buys coverage at a steep and very visible price:
-#
-#   quantile   accepted   coverage
-#   0.99         70.7%      99.53%
-#   0.995        64.3%      99.48%
-#   0.999        46.7%     100.00%
-#
-# That trade is structural, not a tuning artefact: a bound that is right every
-# time has to sit above the worst case, and most frames are nowhere near it.
-# Whether 0.999 suffices on real data is verified on a held-out split, never
-# assumed.
 RATIO_QUANTILE = 0.999
 
 # Fraction of the specification the gate enforces.

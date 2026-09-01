@@ -22,7 +22,7 @@ static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
 // first in setup(), before ctl.begin(), so the coils can't glitch on and the
 // ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
 inline void driveBoot() {
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
   delay(1000);
   forceAllGatesLow();
   initResetButton();

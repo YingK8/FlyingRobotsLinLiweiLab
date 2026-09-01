@@ -7,6 +7,19 @@
 
 const int PWM_FREQ = 20000;       // carrier (Hz)
 
+// Host link speed. 115200 put 29 bytes -- one `mag=` or `az=` line -- 2.5 ms on the
+// wire, which is longer than a 500 Hz control period and swamped the whole reason for
+// raising the control clock: at 200 Hz the mean command age was 2.5 ms and the wire
+// added another 2.5, so the clock could only ever fix half the delay. At 921600 those
+// same 29 bytes take 0.31 ms. Bandwidth was never the constraint -- the host's deadbands
+// hold the line at 92 B/s, 0.8% of 115200 (`controller/control/theory.md` 19.10) --
+// latency was.
+//
+// MUST match `controller/control/link.SerialComm.BAUD` and `platformio.ini`'s
+// `monitor_speed`. There is no handshake and no ack, so a mismatch is silent: the
+// firmware simply never parses a command and the coils sit at their last value.
+const int SERIAL_BAUD = 921600;
+
 const int LED_PIN = 2;
 const int NUM_CHANNELS = 4;
 

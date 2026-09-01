@@ -5,3 +5,22 @@
 .vscode/launch.json
 .vscode/ipch
 build/
+# Run artefacts that land in the CWD. `RunConfig.log` defaults to hover_run.log there,
+# and simulate_hover writes its figures beside itself, so these reappear every session.
+hover_run.log
+hover_link_check.log
+hover_sim_*.png
+# The coil-thermal stamp: per-machine state, never shared.
+ai/thermal/.last_energised
+.DS_Store
+__pycache__/
+*.egg-info/
+
+# The scratchpad: bench harnesses and offline design tooling. Experiments live here and
+# are not shared. `coil_thermal` lives here too, and the flight path REFUSES TO ARM
+# without it -- see CLAUDE.md "Safety".
+ai/
+
+# Flight recordings: 628 MB of mp4 and counting, one dir per take. Kept on disk, out of
+# git. `results/README.md` says what a run dir holds.
+results/flights/

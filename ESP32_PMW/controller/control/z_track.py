@@ -22,37 +22,35 @@ from pathlib import Path
 
 import numpy as np
 
-from hover_model import GRAVITY, I_ROBOT, fit_k_drag
+from controller.control import constants as C
+from controller.control.hover_model import GRAVITY, I_ROBOT, fit_k_drag
 
 HERE = Path(__file__).resolve().parent
 
 # Series-RLC coil channel. tau_max moves with drive frequency, which is what makes the
 # torque ceiling a function of f rather than a constant.
-INDUCTANCE_H = 1.4e-3
-CAPACITANCE_F = 500e-6
-RESISTANCE_OHM = 1.7
+INDUCTANCE_H = C.COIL_SERIES_L_H
+CAPACITANCE_F = C.COIL_SERIES_C_F
+RESISTANCE_OHM = C.COIL_SERIES_R_OHM
 
-F_HOVER_HZ = 150.0     # SEED GUESS, the firmware's ramp target. ZTracker identifies it.
-F_STEPOUT_HZ = 190.0   # SEED GUESS: 190 Hz is the coil's electrical match, not a step-out.
-S_LIM = 0.8            # sin(delta) ceiling, below 1 for the Q~22 phase swing at ramp ends
+F_HOVER_HZ = C.F_HOVER_TRACK_HZ
+F_STEPOUT_HZ = C.F_STEPOUT_HZ
+# sin(delta) ceiling, under 1 to leave phase margin at the ramp ends.
+S_LIM = 0.8
 
 OMEGA_N = 2.0          # rad/s. 56:1 below the phase-lock mode, so f_robot ~ f_field holds.
 ZETA = 0.9
 
 GAMMA_F = 4.0          # Hz/(m*s). Trim pole gamma*(2g/f_hover)/kp ~ 1/(7.6 s), 3x under OMEGA_N.
-F_HAT_LO_HZ = 125.0    # f_hat band, matching the firmware freq= guard: the estimator, not the
-F_HAT_HI_HZ = 175.0    # seed, must not be what stops identification short of the true f_hover
+# f_hat band. Was 125/175 "matching the firmware freq= guard" -- that guard is gone, the
+# firmware now accepts any positive frequency, so there is nothing left to match. Widened
+# so the band can never be what stops identification short of the true f_hover; the real
+# ceiling is `f_ceiling()` (201.2 Hz at S_LIM with F_STEPOUT_HZ=225), which the tracker
+# recomputes as f_hat moves. Was quoted at ~167 Hz, against the retired F_STEPOUT=190.
+F_HAT_LO_HZ = 100.0
+F_HAT_HI_HZ = 200.0
 F_HAT_REFRESH = 0.01   # refresh the ceiling per 1% of f_hat move; f_ceiling() bisects 50x
 
-# Step-out: all available torque commanded while z falls anyway. The threshold has to
-# sit far enough above the rate noise that noise alone never trips it, and 3 frames of
-# agreement rides a dropout.
-#
-# The "~9 mm/s, so this is 16 sigma" this comment used to claim came from an assumed
-# 0.5 mm per frame that nobody ever measured. `pose/noise.py` measures it; `demo()`
-# below recomputes the multiple from whatever model is on disk and fails if it has
-# fallen under `STEPOUT_MIN_SIGMA`. Until a static calibration is recorded the number
-# stays a guess, and the check says so rather than passing quietly.
 STEPOUT_F_FRAC = 0.98
 STEPOUT_ZDOT_MPS = -0.15
 STEPOUT_FRAMES = 3
@@ -83,6 +81,54 @@ def coil_gain(f_hz: float) -> float:
     w = 2.0 * math.pi * f_hz
     reactance = w * INDUCTANCE_H - 1.0 / (w * CAPACITANCE_F)
     return RESISTANCE_OHM / math.hypot(RESISTANCE_OHM, reactance)
+
+
+def pull_in_hz(tau_nm: float, inertia: float = I_ROBOT) -> float:
+    """
+    The highest drive frequency a rotor **at rest** can still be captured by, Hz.
+
+        Capture is a race, not an equilibrium. With the field already turning at `f`
+        and the rotor at zero, the swing equation gives ``ddelta/dt = 2*pi*f``, so the
+        torque acts in one direction for only half a slip cycle, ``1/(2f)``. Whatever
+        speed the rotor has by the end of that window is all it gets before the torque
+        reverses. Setting that speed equal to the field's:
+
+            tau/(2 f I) = 2 pi f   =>   f = sqrt(tau / (4 pi I))
+
+        This is why the takeoff is intermittent rather than simply broken. It is an
+        impulse argument and ignores friction, so it is an upper bound.
+    """
+
+    return math.sqrt(max(tau_nm, 0.0) / (4.0 * math.pi * inertia))
+
+
+def takeoff_start_hz(tau_ref_nm, f_ref_hz=150.0, lo=0.5, hi=40.0, inertia=I_ROBOT):
+    """
+    Where to start the ramp: the most torque available that can still capture.
+
+        Two curves cross exactly once. Available torque rises with frequency, because
+        the series capacitor's impedance falls, so ``tau ~ f`` and `pull_in_hz` rises
+        as ``sqrt(f)``. The requirement rises as ``f``. Below the crossing capture is
+        possible and weak; above it, impossible at any strength.
+
+        So the best start is *just* under the crossing -- start lower and the rotor is
+        pushed by almost nothing, start higher and it is never caught at all. Starting
+        at 0.2 Hz drew a measured 0.00 A and moved nothing; the crossing is where the
+        useful torque lives.
+
+        ``tau_ref_nm`` anchors the torque scale at ``f_ref_hz``; torque is taken linear
+        in coil current, which is itself linear in f in the capacitive band.
+    """
+
+    def capturable(f):
+        return pull_in_hz(tau_ref_nm * f / f_ref_hz, inertia) >= f
+
+    if not capturable(lo):
+        return lo
+    for _ in range(60):                      # bisect the single crossing
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if capturable(mid) else (lo, mid)
+    return lo
 
 
 @dataclass
@@ -256,8 +302,6 @@ class ZTracker:
         a_hi = min(a_hi, self._a_prev + a_rate * dt)
         a_cmd = min(max(a_fb, a_lo), a_hi)
 
-        # Conditional adaptation: against a clamped actuator a steady error measures the
-        # clamp, not f_hover, and winds f_hat up exactly as the old integral wound up.
         if a_lo < a_fb < a_hi and not self.stepout:
             self.f_hat = min(max(self.f_hat + self.gamma * error * dt, self.f_lo), self.f_hi)
             if abs(self.f_hat - self._f_ceiling_at) > F_HAT_REFRESH * self._f_ceiling_at:
@@ -289,15 +333,39 @@ def check_stepout_margin(tau_s: float = TAU_ZDOT_S, dt: float = 1.0 / 60.0):
     """
 
     import sys as _sys
-    _sys.path[:0] = [str(HERE.parent / "pose"), str(HERE.parent / "calib"),
-                     str(HERE.parent / "camera")]
-    from noise import NoiseModel
+    from controller.pose.noise import NoiseModel
 
     m = NoiseModel.load()
     sigma = m.velocity_sigma_mm_s("z", tau_s=tau_s, dt=dt)
     if not np.isfinite(sigma) or sigma <= 0:
         return float("nan"), float("inf"), m.measured
     return sigma, abs(STEPOUT_ZDOT_MPS) * 1e3 / sigma, m.measured
+
+
+def _check_pull_in():
+    """Capture is a race the model has to reproduce, in both directions."""
+
+    I = I_ROBOT
+    # Doubling the torque raises the reachable frequency by sqrt(2), not 2.
+    a, b = pull_in_hz(1e-6, I), pull_in_hz(2e-6, I)
+    assert abs(b / a - math.sqrt(2.0)) < 1e-6, (a, b)
+    assert pull_in_hz(0.0, I) == 0.0
+
+    # The crossing exists and is unique: below it capturable, above it not.
+    tau_ref, f_ref = 5.0e-5, 150.0
+    f_star = takeoff_start_hz(tau_ref, f_ref, inertia=I)
+    assert 1.0 < f_star < 40.0, f_star
+    below = pull_in_hz(tau_ref * (f_star * 0.9) / f_ref, I) >= f_star * 0.9
+    above = pull_in_hz(tau_ref * (f_star * 1.2) / f_ref, I) >= f_star * 1.2
+    assert below and not above, (f_star, below, above)
+
+    # More torque pushes the crossing up: a stronger drive can start faster.
+    assert takeoff_start_hz(2 * tau_ref, f_ref, inertia=I) > f_star
+
+    # The measured capacitor is what starves the low end. 0.2 Hz drew 0.00 A on the
+    # rig, and the model must agree that almost no torque is available there.
+    assert coil_gain(0.2) < 0.02, coil_gain(0.2)
+    print(f"pull-in: crossing at {f_star:.1f} Hz, sqrt(tau) scaling, low band starved\n  ok")
 
 
 def demo() -> None:
@@ -344,11 +412,16 @@ def demo() -> None:
     for a in np.linspace(-lim.g, a_max, 25):
         f = lim.f_hover * math.sqrt(1.0 + a / lim.g)
         assert abs(lim.g * ((f / lim.f_hover) ** 2 - 1.0) - a) < 1e-9, a
-    # ...and the linearization it replaces does not, by 8% at 25 Hz out.
-    df = 25.0
+    # ...and the linearisation it replaces does not. The shortfall is exactly r/(2+r)
+    # with r = df/f_hover, so it is f_hover-INDEPENDENT when stated that way. The old
+    # form used a fixed 25 Hz and a 7% floor, which silently went slack the moment
+    # f_hover moved 150 -> 190 (7.7% -> 6.2%) and failed for no physical reason.
+    r = 0.15
+    df = r * lim.f_hover
     exact = lim.g * (((lim.f_hover + df) / lim.f_hover) ** 2 - 1.0)
     linear = 2.0 * lim.g / lim.f_hover * df
-    assert abs(linear - exact) / exact > 0.07, (linear, exact)
+    assert abs((exact - linear) / exact - r / (2.0 + r)) < 1e-9, (linear, exact)
+    assert (exact - linear) / exact > 0.05, (linear, exact)
 
     # A step demand must respect both clamps and never command DC.
     times, heights = np.array([0.0, 5.0, 20.0]), np.array([0.0, 0.15, 0.15])
@@ -386,10 +459,8 @@ def demo() -> None:
     assert f_max <= f_ceil + 1e-9, (f_max, f_ceil)
     assert f_max > 0.98 * f_ceil, f"clamp far too conservative: {f_max} << {f_ceil}"
 
-    # The re-parameterization's whole claim: seed f_hat 10 Hz low against the exact lift law
-    # and the error ends up in f_hat, not as a permanent bias in a_fb. No pad constraint --
-    # the sink on the way IS the 1.45 m/s^2 of trim the old form would have carried forever.
-    trk = ZTracker(np.array([0.0, 1e9]), np.array([0.06, 0.06]), lim, f_seed=140.0)
+    trk = ZTracker(np.array([0.0, 1e9]), np.array([0.06, 0.06]), lim,
+                   f_seed=lim.f_hover - 10.0)
     z, zdot, a_fb_tail = 0.06, 0.0, []
     for i in range(int(120.0 / dt)):
         f = trk.step(i * dt, z, dt, z_dot=zdot)
@@ -399,7 +470,8 @@ def demo() -> None:
             a_fb_tail.append(trk.a_fb)
     a_fb_rms = float(np.sqrt(np.mean(np.square(a_fb_tail))))
     print(
-        f"identify:   f_hat = {trk.f_hat:.2f} Hz from a 140.0 seed (true {f_true:.1f}), "
+        f"identify:   f_hat = {trk.f_hat:.2f} Hz from a {lim.f_hover - 10.0:.1f} seed "
+        f"(true {f_true:.1f}), "
         f"z = {z * 1000:.1f} mm, a_fb rms = {a_fb_rms:.4f} m/s^2"
     )
     assert abs(trk.f_hat - f_true) < 0.5, trk.f_hat
@@ -417,6 +489,10 @@ def demo() -> None:
     assert trk.stepout, "step-out guard missed a free fall at the torque ceiling"
     assert abs(trk.f_cmd - trk.f_hat) < 1e-9, trk.f_cmd
     print(f"step-out:   tripped, f_cmd dropped to f_hat = {trk.f_cmd:.2f} Hz")
+    # Written long before it was called from anywhere. The capture model is the one on
+    # this rig with a real margin question, so it runs with the rest.
+    _check_pull_in()
+    check_stepout_margin()
     print("self-check PASS")
 
 

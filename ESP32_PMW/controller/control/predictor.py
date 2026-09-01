@@ -24,7 +24,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from hover_model import GRAVITY
+from controller.control.hover_model import GRAVITY
 
 # 3 frames at 30 fps. At a 5% f_hat error that costs 5.5 mm against 10.3 mm coasting.
 MAX_COAST_S = 0.10
@@ -145,7 +145,7 @@ class PlantPredictor(StatePredictor):
 
         super().__init__(**kw)
         if plant is None:
-            from spatial_model import Plant, quick_coils, robot_params
+            from ai.design.spatial_model import Plant, quick_coils, robot_params
 
             plant = Plant(quick_coils(), robot_params())
         self.plant = plant

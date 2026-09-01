@@ -13,7 +13,8 @@ parameter not derivable from the model: seed guess, re-identify on the rig.
 
 The reduced 4-state design model (x, xd, z, zd) treats rotation as a phase-locked inner
 actuator, f_robot ~ f_field. Its 16.8 Hz mode is above a 30 Hz camera's Nyquist, so the outer
-loop must not try to shape it. See spatial_model.py for the 3-D plant that supersedes this one.
+loop must not try to shape it. See ai/design/spatial_model.py for the 3-D plant that
+supersedes this one.
 
 Self-check: uv run python controller/control/hover_model.py
 """
@@ -26,9 +27,12 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.signal import cont2discrete
 
+from controller.control import constants as C
+
 GRAVITY = 9.80665  # m/s^2 (MATLAB line 613)
 
-# Polar moment about the spin axis, kg m^2. From the CAD tensor; spatial_model.robot_params()
+# Polar moment about the spin axis, kg m^2. From the CAD tensor; ai/design/spatial_model.py's
+# robot_params()
 # recomputes it. theory.md section 3. Supersedes the older constant the *_gui.m files carry.
 I_ROBOT = 3.3578361348541667e-9
 
@@ -62,7 +66,7 @@ DRAG_TORQUE_NM = np.array(
     ]
 )
 
-F_HOVER_HZ_DEFAULT = 140.0    # Hz; firmware main_flight.cpp flies 150, so pass it explicitly
+F_HOVER_HZ_DEFAULT = C.F_HOVER_MATLAB_REF_HZ  # the MATLAB port reference, not a target
 K_LAT_DEFAULT = 0.05          # SEED GUESS: rad tilt per unit mag. Identify on the rig.
 TORQUE_MARGIN_DEFAULT = 5.0   # tau_max / |drag at f_hover|
 
@@ -219,7 +223,7 @@ def summary():
     assert abs(k_drag - 3.908983509946592e-10) < 1e-16, k_drag
     assert abs(p.I_robot - 3.3578361348541667e-9) < 1e-15, p.I_robot
     assert abs(math.degrees(p.delta_trim) - 11.5370) < 1e-3
-    assert abs(vgain - 2 * GRAVITY / 140.0) < 1e-12
+    assert abs(vgain - 2 * GRAVITY / C.F_HOVER_MATLAB_REF_HZ) < 1e-12
     assert abs(rot[0].real - (-2.594)) < 0.01 and abs(abs(rot[0].imag) - 105.69) < 0.2
     print("self-check PASS")
 

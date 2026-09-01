@@ -23,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+import collections
 import math
 import sys
 import threading
@@ -36,11 +37,6 @@ import cv2
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [
-    str(HERE.parent / "pose"),
-    str(HERE.parent / "calib"),
-    str(HERE.parent / "camera"),
-]
 
 # Palette lifted from ai/validation/scene3d.py so the live view and the offline
 # validation renders name the same thing with the same colour.
@@ -103,13 +99,16 @@ class NullViz:
     # The coils have no firmware watchdog, so that is the only safe direction to fail.
     armed = False
     land = False
-    restart = False
     estop = False
+    takeoff = False
     mag_max = 0.0
     gain_scale = (1.0, 1.0)
     setpoint = (0.0, 0.0, 60.0)
 
     def push(self, *a, **kw):
+        pass
+
+    def log_line(self, *a, **kw):
         pass
 
     def set_zero(self, *a, **kw):
@@ -188,7 +187,7 @@ def load_rig(path=None):
         anything is not.
     """
 
-    import rig as rigmod
+    from controller.calib import rig as rigmod
 
     p = Path(path) if path else rigmod.DEFAULT_PATH
     if p.exists():
@@ -210,7 +209,7 @@ def nominal_rig(elev_deg=(45.0, 45.0), azim_deg=(0.0, 90.0), range_mm=None):
         it splits the occlusion risk between the takeoff rod below and the coils above.
     """
 
-    import rig as rigmod
+    from controller.calib import rig as rigmod
 
     kw = {} if range_mm is None else {"range_mm": float(range_mm)}
     return rigmod.StereoRig.from_spherical(
@@ -369,7 +368,7 @@ def smoothed(pose, state, last=None):
 
     import dataclasses
 
-    from estimator import _angles_from_normal
+    from controller.pose.estimator import _angles_from_normal
 
     if state is None:
         return pose
@@ -456,7 +455,7 @@ class LiveViz:
         estimator=None,
     ):
         import viser
-        from zeroing import Zero
+        from controller.calib.zeroing import Zero
 
         # The datum the estimator reports in. `Zero.load` returns identity when there
         # is no file, which is the un-zeroed camera-frame case, so this is safe to
@@ -472,6 +471,10 @@ class LiveViz:
         self._ref_idx, self._ref_sign = axis_map(self.axes)
         self._ref_warned = False
         self._spin = None      # last SpinWitness pushed, for the readout
+        # Bounded: a 2 Hz telemetry stream over a long flight would otherwise grow
+        # without limit behind a panel that only ever shows the tail.
+        self._link_lines = collections.deque(maxlen=LINK_LOG_LINES)
+        self._link_trip = False
         self._plots_spec = plots_spec(self.axes)
         self.trace_len = int(trace_len)
         self.plot_len = int(plot_len)
@@ -504,9 +507,32 @@ class LiveViz:
 
         self._thread = threading.Thread(target=self._run, name="live_viz", daemon=True)
         self._thread.start()
-        print(f"live_viz: http://localhost:{self.server.get_port()}")
+        got = self.server.get_port()
+        if got != port:
+            # viser silently takes the next free port. Silently is the problem: the
+            # operator goes to the port they asked for, finds a stale session from a
+            # previous run still answering there, and concludes the new one is broken.
+            print(f"live_viz: port {port} was busy (something else is still holding "
+                  f"it -- check `lsof -nP -iTCP:{port} -sTCP:LISTEN`)")
+        print(f"live_viz: http://localhost:{got}")
 
     # ---- the only method the control loop touches -------------------------
+
+    def log_line(self, text, sent=False):
+        """
+        One line of serial traffic, for the Link panel. Safe from any thread.
+
+                `deque.append` is atomic under the GIL and the render thread only ever
+                reads, so this needs no lock -- which matters because it is called from
+                the control loop on every command and every telemetry line.
+        """
+
+        line = text.strip()
+        if not line:
+            return
+        if "trip=1" in line:
+            self._link_trip = True
+        self._link_lines.append(("-> " if sent else "   ") + line[:120])
 
     def push(self, pose=None, ref=None, u=None, frames=None, t=None, spin=None,
              **stats):
@@ -549,7 +575,7 @@ class LiveViz:
     # ---- static scene -----------------------------------------------------
 
     def _build_scene(self, radius_mm):
-        import render
+        from controller.pose import render
 
         scene = self.server.scene
         mesh = render.load_mesh()
@@ -692,7 +718,10 @@ class LiveViz:
             # iteration, and nothing here ever writes into the loop's state from
             # another thread. `land` is the single exception -- see below.
             self._estop = False
-            estop = gui.add_button("E-STOP")
+            # "stop", not "E-STOP": it de-energises immediately, but the run
+            # recovers -- `takeoff` reboots the board out of OFF and ramps again.
+            # Calling it an emergency stop implied a one-way door it is not.
+            estop = gui.add_button("stop")
 
             @estop.on_click
             def _(_):
@@ -717,20 +746,20 @@ class LiveViz:
             self._gain_vert = gui.add_slider(
                 "gain vertical", min=0.0, max=3.0, step=0.05, initial_value=1.0)
             self._mag_max = gui.add_slider(
-                "mag max", min=0.0, max=0.8, step=0.01, initial_value=0.0)
+                "mag max", min=0.0, max=1.0, step=0.01, initial_value=0.0)
             # Set before the button exists: the click callback runs on the render
             # thread and may fire the instant the widget is created.
             self._land = False
-            self._restart = False
+            self._takeoff = False
             land = gui.add_button("land")
-            restart = gui.add_button("restart takeoff")
+            takeoff = gui.add_button("takeoff")
 
-            @restart.on_click
+            @takeoff.on_click
             def _(_):
-                # After a firmware e-stop the board reboots into IDLE, and
-                # `takeoff` is only ever sent once. Without this the run has to be
-                # killed and the cameras, datum and viewer all rebuilt to retry.
-                self._restart = True
+                # Run with takeoff=False and press this once the cameras, the datum
+                # and the viewer have settled. Sending `takeoff` at process start
+                # means every attempt to test anything else costs a full restart.
+                self._takeoff = True
 
             @land.on_click
             def _(_):
@@ -741,6 +770,20 @@ class LiveViz:
 
         with gui.add_folder("Now"):
             self.readout = gui.add_markdown("waiting for the first pose")
+
+        # Everything crossing the serial link, in order. The log on disk has this too,
+        # but a spin-up that stalls does so in a couple of seconds and the question is
+        # always *where* -- at which frequency and with what current. Reading that back
+        # afterwards means knowing to look; seeing it live means noticing.
+        #
+        # NOT the overcurrent trip: `main_flight.cpp` passes `tripA = 0.0f` and
+        # `PwmController` gates the latch on `_overcurrentTripA > 0.0f`, so the firmware
+        # cannot raise `trip=1` any more. The banner below is kept because the trip is a
+        # build-time argument someone may restore -- but on THIS build nothing here
+        # protects you, and a supply in constant-current mode holds 10 A rather than
+        # cutting out. The only backstops are the three kills in CLAUDE.md.
+        with gui.add_folder("Link"):
+            self.link_log = gui.add_markdown("_no serial traffic yet_")
 
         # In the sidebar rather than on the frustums. Hung in the scene they face
         # wherever the camera faces, so reading them means orbiting to each one in turn
@@ -861,7 +904,7 @@ class LiveViz:
             self._trace = deque(self._trace, maxlen=int(self.trace_slider.value))
 
     def _update_scene(self, last):
-        import render
+        from controller.pose import render
 
         p = last.pose if getattr(last.pose, "xyz_mm", None) is not None else None
         if p is not None:
@@ -901,6 +944,10 @@ class LiveViz:
                 np.asarray(self._hist[k], dtype=float) for k, _ in series
             )
         self.readout.content = self._readout()
+        if self._link_lines:
+            head = ("**TRIPPED** -- the 10 A latch fired; only a reboot clears it\n\n"
+                    if self._link_trip else "")
+            self.link_log.content = head + "```\n" + "\n".join(self._link_lines) + "\n```"
         if self._spin is not None:
             self.readout.content += "\n\n**rotor:** " + self._spin.summary()
 
@@ -933,7 +980,7 @@ class LiveViz:
     def _default_thresh():
         """The level the segmenter would use on its own, so the slider starts neutral."""
 
-        import segment
+        from controller.pose import segment
 
         return int(segment.DARK_THRESH if segment.APPEARANCE == "dark"
                    else segment.THRESH)
@@ -981,24 +1028,40 @@ class LiveViz:
 
         return float(self._mag_max.value)
 
+    def _latch(self, name):
+        """Read one one-shot latch: True once per press, then False until the next.
+
+            ONE implementation, deliberately. This is the software kill (`theory.md`
+            4.0) and it was three hand-copied two-liners, which is three chances to
+            typo the one that matters. `test_panel.PanelViz` reuses this too, so the
+            regression test exercises the real protocol rather than a look-alike.
+
+            The render thread SETS a latch and never clears it; the reader clears it.
+            Read each one exactly once per tick, into a local -- a second read is a
+            press silently thrown away, which is the bug the runner's docstring
+            describes costing a whole session.
+        """
+
+        pressed = getattr(self, name)
+        setattr(self, name, False)
+        return pressed
+
     @property
     def land(self):
-        """True once per button press, then False again -- a one-shot latch."""
+        """True once per 'land' press -- a one-shot latch. See `_latch`."""
 
-        pressed, self._land = self._land, False
-        return pressed
+        return self._latch("_land")
 
     @property
-    def restart(self):
-        """True once per 'restart takeoff' press -- the same one-shot latch as `land`."""
+    def takeoff(self):
+        """True once per 'takeoff' press -- a one-shot latch. See `_latch`."""
 
-        pressed, self._restart = self._restart, False
-        return pressed
+        return self._latch("_takeoff")
 
     @property
     def estop(self):
         """
-        True once per E-STOP press -- the same one-shot latch as `land`.
+        True once per stop press -- a one-shot latch. See `_latch`.
 
                 The press has already cleared `armed` and `mag max` on the render
                 thread, so the loop is disarmed whether or not it reads this. What this
@@ -1006,13 +1069,12 @@ class LiveViz:
                 than merely stop sending.
         """
 
-        pressed, self._estop = self._estop, False
-        return pressed
+        return self._latch("_estop")
 
     def _update_images(self, last):
         """Put each camera's annotated view in the sidebar."""
 
-        import segment
+        from controller.pose import segment
 
         if not last.frames:
             return
@@ -1050,6 +1112,8 @@ class LiveViz:
             if view is not None:
                 view.image = _fit_width(rgb, SIDEBAR_W)
 
+
+LINK_LOG_LINES = 18   # what fits in the panel without scrolling it off
 
 _XYZ = ("x", "y", "z")
 _C_XYZ = ("#e0533d", "#2e9bd6", "#e8b33c")
@@ -1122,7 +1186,7 @@ def _fake_pose(t, hover_mm=60.0):
         raw optical frame) is what lays the robot on its side.
     """
 
-    from estimator import Pose, _angles_from_normal
+    from controller.pose.estimator import Pose, _angles_from_normal
 
     xyz = np.array(
         [40.0 * math.cos(t), 40.0 * math.sin(t), hover_mm + 20.0 * math.sin(0.5 * t)]
@@ -1158,7 +1222,7 @@ def demo(port=8080, seconds=None, hz=30.0, rig=None):
         hovering over the origin.  Its world is the lab frame, +z up.
     """
 
-    import zeroing
+    from controller.calib import zeroing
 
     viz = make_viz(
         port=port,
@@ -1190,7 +1254,7 @@ def replay(path, port=8080, speed=1.0):
     """Play a `recorder.py` CSV back through the viewer at `speed` x real time."""
 
     import pandas as pd
-    from estimator import Pose
+    from controller.pose.estimator import Pose
 
     df = pd.read_csv(path, comment="#")
     viz = make_viz(port=port, label=f"replay {Path(path).name}")
@@ -1232,8 +1296,8 @@ def replay(path, port=8080, speed=1.0):
 def from_camera(source="camera:0", width=1280, height=800, port=8080):
     """Live vision with no controller in the loop -- the pose pipeline on its own."""
 
-    import sources
-    from estimator import PoseEstimator, load_intrinsics
+    from controller.camera import sources
+    from controller.pose.estimator import PoseEstimator, load_intrinsics
 
     K, dist = load_intrinsics()
     cam = sources.open_source(source, width=width, height=height)
@@ -1272,7 +1336,7 @@ DIAGNOSE_AFTER = 60
 def _diagnose_silence(frames, backgrounds, tags):
     """Say why nothing is being detected, once, after `DIAGNOSE_AFTER` empty frames."""
 
-    import segment
+    from controller.pose import segment
 
     print("\nno detections yet. What the segmenter can see:", file=sys.stderr)
     for tag, f in zip(tags, frames):
@@ -1294,9 +1358,9 @@ def _diagnose_silence(frames, backgrounds, tags):
               file=sys.stderr)
 
 
-def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=800,
-                  port=8080, rotate180=True, backgrounds=None, zero="auto", flip=False,
-                  rotate=None, axes=("x", "y", "z"), label=None, record=None):
+def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=400,
+                  fps=210, port=8080, rotate180=True, backgrounds=None, zero="auto",
+                  flip=False, rotate=None, axes=("x", "y", "z"), label=None, record=None):
     """Generator over the live stereo pipeline. Yields one `Tick` per frame.
 
     ``record`` writes the frames this loop is already reading to a flight folder,
@@ -1305,18 +1369,18 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
     running `record` alongside it. Pass a directory, or True for the default.
     """
 
-    import sources
-    from filter import PoseFilter
+    from controller.camera import sources
+    from controller.pose.filter import PoseFilter
 
     rig, est = _stereo_estimator(rig_path)
     cams = [x.strip() for x in specs.split(",")]
     try:
         src = sources.open_stereo(cams, max_skew_s=None, width=width, height=height,
-                                  grayscale=True, rotate180=rotate180)
+                                  fps=fps, grayscale=True, rotate180=rotate180)
     except OSError as e:
         # "could not open camera index 1" does not say whether the camera is unplugged,
         # held by another process, or simply enumerated somewhere else today.
-        import identify
+        from controller.camera import identify
         here = ", ".join(f"{d.name}" for d in identify.connected()) or "none"
         elps = identify.elp_indices(n=None)
         raise SystemExit(
@@ -1329,7 +1393,7 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
         # Default to the saved plates when they exist. Having to name them was a trap:
         # `capture_stereo` writes them, the bare call ignored them, and the only symptom
         # was a viewer that detected nothing.
-        from background import load_stereo
+        from controller.pose.background import load_stereo
         required = backgrounds == "saved"
         backgrounds = load_stereo(tags)
         if backgrounds:
@@ -1337,19 +1401,19 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
         elif required:
             raise SystemExit(
                 "no saved plates. Take the robot out of frame and run\n"
-                "    python -c \"import sys; sys.path.insert(0, 'pose'); "
-                "import background; background.capture_stereo()\"")
+                "    uv run python -c \"from controller.pose import background; "
+                "background.capture_stereo()\"")
     elif backgrounds == "running":
         # No plate to shoot and nothing to hold still for: `RunningPlate` is a running
         # median that converges on whatever does not move, so it builds the plate out of
         # the live stream while the robot flies through it. Costs the first
         # `background.WARMUP_FRAMES` frames, which it reports as "no plate" so the
         # top-hat runs unaided until then.
-        import background as bgmod
+        from controller.pose import background as bgmod
         backgrounds = {t: bgmod.RunningPlate() for t in tags}
         print("building background plates from the stream as it runs")
     elif backgrounds == "auto":
-        import background as bgmod
+        from controller.pose import background as bgmod
         print("building background plates -- move the robot around for a few seconds")
         backgrounds = bgmod.from_stereo_stream(src, tags=tags)
         item = src.read()
@@ -1360,12 +1424,10 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
                 "the plates build, or\ntake it out of frame once and use "
                 "backgrounds='saved' (background.capture_stereo).")
     elif backgrounds is not None and not isinstance(backgrounds, dict):
-        from background import load_for_flight
+        from controller.pose.background import load_for_flight
         backgrounds = load_for_flight(backgrounds)
     if not backgrounds:
-        # Not `backdrop_mask`. A running median needs nothing shot in advance and beats
-        # the backdrop fallback outright, so an absent plate is no longer a degraded mode.
-        import background as bgmod
+        from controller.pose import background as bgmod
         backgrounds = {t: bgmod.RunningPlate() for t in tags}
         print("no saved plates: building them from the stream as it runs "
               "(background.capture_stereo() if you would rather shoot one)",
@@ -1390,15 +1452,20 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
     if pending is not None:
         print("live_viz: datum not set yet -- the scene re-orients once the robot "
               "holds still enough to fix one")
-    import spin as spinmod
+    from controller.pose import spin as spinmod
 
-    # Per view: the blades are read in each camera independently, so the two
-    # disagreeing is itself a signal. Must see the raw frame -- `silhouette_hull`
-    # convex-hulls the 4-fold structure away.
-    witnesses = [spinmod.SpinWitness() for _ in rig.cameras]
+    witness = spinmod.SpinWitness()
+    # `fps` is not knowable at construction, and it is not a cosmetic setting: the
+    # witness's alias limit is fps/8, the band in which it will commit to STOPPED at
+    # all. The rate that matters is the one THIS loop achieves, not the sensor's --
+    # segmenting a stereo pair costs ~50 ms, so the pose pipeline runs far below the
+    # camera's measured 119 fps at 1280x800, and handing over the capture rate would
+    # inflate the limit ~5x and turn unresolvable frames into confident STOPPED.
+    # Measured from the stream instead, EWMA over the frame interval.
+    dt_ewma = None
     rec = None
     if record is not None and record is not False:
-        import record as recmod
+        from controller.camera import record as recmod
 
         rec = recmod.FlightWriter(
             recmod.DEFAULT_DIR if record is True else record,
@@ -1406,16 +1473,11 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
             meta={"source": "live_viz.stereo_frames", "specs": specs,
                   "rotate180": bool(rotate180)})
         print(f"recording -> {rec.dir}")
-    lost, last_seen, misses = 0, None, 0
+    lost, last_seen, misses, t_prev = 0, None, 0, None
     try:
         while True:
             item = src.read()
             if item is None:
-                # `MonoCamera.read` returns None after a 2 s timeout, and a live session
-                # must not end on one. A USB stall, another process touching the device,
-                # a dropped frame -- all transient, all indistinguishable here from an
-                # unplugged camera, and treating the first as the second used to close
-                # the viewer with nothing said but "(viser) Server stopped".
                 misses += 1
                 if misses < MAX_READ_MISSES:
                     print(f"camera read timed out ({misses}/{MAX_READ_MISSES}), retrying",
@@ -1441,10 +1503,16 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
             lost += pose is None
             # After update: `per_view` is where the segmentations live, and the
             # witness needs the raw frame plus that view's own ellipse.
-            for w, fr, sg in zip(witnesses, frames,
-                                 getattr(pose, "per_view", ()) if pose else ()):
-                if sg is not None:
-                    w.update(t_cap, fr, sg.ellipse)
+            if t_prev is not None and t_cap > t_prev:
+                dt = t_cap - t_prev
+                dt_ewma = dt if dt_ewma is None else dt_ewma + 0.1 * (dt - dt_ewma)
+                witness.fps = 1.0 / dt_ewma
+            t_prev = t_cap
+            per_view = getattr(pose, "per_view", ()) if pose else ()
+            if per_view and per_view[0] is not None and frames:
+                # field_hz is fed by the controller through Tick.spin -- see
+                # hover_controller_runner. Nothing here knows what was commanded.
+                witness.update(t_cap, frames[0], per_view[0].ellipse)
             if pose is not None:
                 last_seen = pose
                 if pending is not None:
@@ -1472,7 +1540,7 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=1280, height=8
                 frames=list(frames),
                 lost=lost,
                 viz=viz,
-                spin=witnesses[0],
+                spin=witness,
             )
     except KeyboardInterrupt:
         pass
@@ -1510,9 +1578,8 @@ def from_stereo(*a, **kw):
     a `background.RunningPlate` per camera, built from the stream as it runs and needing
     nothing shot in advance; ``"auto"`` for a temporal median up front (move the robot
     while it builds); ``{camera name: plate}``; or a flight directory to take them from.
-    A shot plate is only good while the cameras *and the scene* hold still -- one taken
-    from a flight two days earlier differed from the live view on 44% of the frame,
-    because the foam had been moved -- which is the argument for ``"running"``.
+    A shot plate is only good while the cameras *and the scene* hold still: a plate two
+    days stale differed from the live view on 44% of the frame. Prefer ``"running"``.
 
     Open loop: everything above is `stereo_frames`, and this is the whole difference
     between watching a flight and flying one -- a push with no reference and no command.
@@ -1541,10 +1608,10 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
     gate, against 100% at 9.95.
     """
 
-    import rig as rigmod
-    from estimator import RADIUS_BENCH_MM
-    from shape import CentreCalibration, TiltCalibration
-    from stereo import StereoPoseEstimator
+    from controller.calib import rig as rigmod
+    from controller.pose.estimator import RADIUS_BENCH_MM
+    from controller.calib.shape import CentreCalibration, TiltCalibration
+    from controller.pose.stereo import StereoPoseEstimator
 
     p = Path(rig_path) if rig_path else rigmod.DEFAULT_PATH
     if not p.exists():
@@ -1559,7 +1626,7 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
     # Say which noise model is in force. A rendered fallback silently standing in
     # for a bench measurement is exactly the confusion `noise.py` exists to end, and
     # the only place it would ever be visible is here.
-    from noise import NoiseModel
+    from controller.pose.noise import NoiseModel
     nm = NoiseModel.load()
     if nm.measured:
         print(f"noise model: measured, {nm.meta.get('condition', 'condition unrecorded')},"
@@ -1570,7 +1637,7 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
               "    noise.record_live(stations=4)                     (from run.ipynb)")
 
     if backgrounds == "running":
-        import background as bgmod
+        from controller.pose import background as bgmod
         backgrounds = {c.name: bgmod.RunningPlate() for c in rig.cameras}
     return rig, StereoPoseEstimator(rig, tilt_cal=TiltCalibration.load(),
                                     centre_cal=CentreCalibration.load(),
@@ -1625,13 +1692,8 @@ def _rotate_zero(zero, spec):
     S = _rotation(spec)
     if S is None:
         return zero
-    from zeroing import Zero
+    from controller.calib.zeroing import Zero
 
-    # Record where the rotation *puts* up, not just that one was applied. The datum
-    # alone always puts the rotor axis on +z, so `up_direction` used to answer "+z" for
-    # any datum -- and then a `rotate` moved the poses out from under it, leaving viser
-    # drawing an xy grid and calling z up while the robot's axis sat on x. A z motion
-    # then reads as an x motion, which is exactly how it looked.
     up = S @ np.array([0.0, 0.0, 1.0])
     i = int(np.argmax(np.abs(up)))
     return Zero(R=zero.R @ S.T, t=zero.t, psi_ref_deg=zero.psi_ref_deg,
@@ -1657,7 +1719,7 @@ class _DatumPrimer:
         self.done = False
 
     def offer(self, center, normal):
-        from zeroing import Zero
+        from controller.calib.zeroing import Zero
 
         if self.done:
             return None
@@ -1724,7 +1786,7 @@ def prime_zero(est, frames, n=AUTO_ZERO_FRAMES, tol_deg=AUTO_ZERO_TOL_DEG,
         Returns ``(zero, report)``, with ``zero`` ``None`` if none was found.
     """
 
-    from zeroing import Zero
+    from controller.calib.zeroing import Zero
 
     kept = []
     for i, fs in enumerate(frames):
@@ -1771,7 +1833,7 @@ def _unit_np(v):
 
 def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
                    rig=None, est=None, viz=None, loop=False, zero="auto", flip=False,
-                   rotate=None):
+                   rotate=None, max_frames=None, scale=1.0):
     """Replay a `camera/record.py` recording through the pose pipeline.
 
     The offline twin of `from_stereo`, and the reason the recorder writes `frames.csv`:
@@ -1785,9 +1847,8 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
     """
 
     import sys as _sys
-    from filter import PoseFilter
-    _sys.path.insert(0, str(HERE.parent / "camera"))
-    from record import open_recording
+    from controller.pose.filter import PoseFilter
+    from controller.camera.record import open_recording
 
     if est is None:
         # A `RunningPlate`, not this recording's own median plate. Both are built from
@@ -1798,8 +1859,6 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
         # to the live one, which is worth more than the 1 mm.
         rig, est = _stereo_estimator(rig_path, backgrounds="running")
     caps, stamps = open_recording(rec_dir)
-    if stamps is None:
-        print(f"{rec_dir}: no frames.csv, so the two views are assumed simultaneous")
 
     if zero == "auto":
         # A priming pass, before the scene exists: the viz reads the datum once at
@@ -1825,7 +1884,7 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
     filt = PoseFilter(rig=rig)
     log = None
     if csv_out:
-        from recorder import PoseRecorder
+        from controller.pose.recorder import PoseRecorder
         log = PoseRecorder(csv_out, meta={"source": str(rec_dir)})
     own_viz = viz is None
     if own_viz:
@@ -1836,8 +1895,11 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
                        label=f"replay {Path(rec_dir).name}",
                        backgrounds=est.backgrounds, estimator=est, zero=est.zero)
     poses, lost, i, last_seen = [], 0, 0, None
+    t_bench = time.monotonic()
     try:
         while True:
+            if max_frames is not None and i >= max_frames:
+                break            # benchmarking: a bounded slice of a long recording
             got = [c.read() for c in caps]
             if not all(ok for ok, _ in got):
                 if not loop:
@@ -1861,6 +1923,13 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
                 est.thresh = viz.thresh
             frames = [f if f.ndim == 2 else cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
                       for _, f in got]
+            if scale != 1.0:
+                # Stands in for running the sensor at a smaller mode. INTER_AREA is the
+                # decimation filter: INTER_LINEAR aliases the rim, which is the one
+                # feature the whole pipeline measures. The estimator rescales the rig off
+                # the frame size, so nothing else needs telling.
+                frames = [cv2.resize(f, None, fx=scale, fy=scale,
+                                     interpolation=cv2.INTER_AREA) for f in frames]
             row = stamps[i] if stamps is not None and i < len(stamps) else None
             t = float(np.mean(row)) if row is not None else i / 60.0
             pose = est.update(frames, t=t, frame_index=i,
@@ -1888,13 +1957,23 @@ def from_recording(rec_dir, rig_path=None, port=8080, csv_out=None, speed=1.0,
             viz.close()
     got = [p for p in poses if p is not None]
     print(f"{i} frames, {len(got)} solved, {lost} lost")
+    if got:
+        # The pipeline benchmark. `t_seg_ms`/`t_est_ms` are already on every StereoPose;
+        # `other` is decode + filter + push, by subtraction. With viz=NullViz() there is
+        # no server and no sleep, so `wall` is the rate the control loop would see.
+        ms = np.array([[p.t_seg_ms, p.t_est_ms] for p in got])
+        wall = (time.monotonic() - t_bench) * 1e3 / max(i, 1)
+        print(f"  median ms/pair: segment {np.median(ms[:, 0]):5.1f}  "
+              f"estimate {np.median(ms[:, 1]):5.1f}  "
+              f"other {wall - np.median(ms.sum(1)):5.1f}  "
+              f"wall {wall:5.1f}  ->  {1e3 / wall:5.1f} Hz")
     return poses
 
 
 def _self_check():
     """Assert the things that fail silently rather than loudly."""
 
-    import render
+    from controller.pose import render
 
     # The off-by-one that kills the gradient without raising.
     for n in (0, 1, 2, 37):
@@ -1919,11 +1998,11 @@ def _self_check():
         assert np.allclose(back, m[:3, :3], atol=1e-9), (tilt, azim)
 
     # Frame convention: the un-zeroed rig world is camera A's optical frame, +y down.
-    import rig as rigmod
+    from controller.calib import rig as rigmod
 
     # All four frames, because getting this wrong renders the robot on its side and
     # nothing else in the scene complains.
-    import zeroing
+    from controller.calib import zeroing
 
     mono = rigmod.StereoRig.monocular()
     assert up_direction(mono) == "-y", "camera A optical: +y is image-down"
@@ -1999,7 +2078,7 @@ def _self_check():
     # the column-name drift and read-only-view traps that only bite at run time.
     import tempfile
 
-    import recorder
+    from controller.pose import recorder
 
     with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as fh:
         fh.write("# source, self-check\n" + ",".join(recorder.COLUMNS) + "\n")

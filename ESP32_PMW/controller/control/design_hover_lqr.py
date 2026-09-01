@@ -31,7 +31,8 @@ import os
 import numpy as np
 from scipy.linalg import solve_discrete_are
 
-from hover_model import make_params, linearize_reduced, discretize
+from controller.control import constants as C
+from controller.control.hover_model import make_params, linearize_reduced, discretize
 
 C_MEAS = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]])
 
@@ -70,10 +71,8 @@ def _noise_provenance(rate_hz):
     from pathlib import Path as _Path
 
     here = _Path(__file__).resolve().parent
-    _sys.path[:0] = [str(here.parent / "pose"), str(here.parent / "calib"),
-                     str(here.parent / "camera")]
     try:
-        from noise import NoiseModel
+        from controller.pose.noise import NoiseModel
     except Exception as e:
         return {"measured": False, "why": f"noise model unavailable: {e}"}
 
@@ -102,13 +101,37 @@ def _noise_provenance(rate_hz):
 
 
 def design(
-    rate_hz=30.0,
-    f_hover=140.0,
+    # The rate the SHIPPED gain file is designed at, so re-running this module as its own
+    # docstring documents regenerates what is already there. It was 30.0 -- a stale
+    # default left behind when the loop moved to 200 Hz -- and `__main__` calls `design()`
+    # bare, so following the documented command silently overwrote the shipped file with
+    # gains for a rate the loop has not run at since 2026-08-30. The closed loop is
+    # invariant in `rate_hz` (`theory.md` 19.8), so this never announced itself as wrong.
+    rate_hz=500.0,
+    # The LINEARISATION POINT for the gains, not a claim about where the rig hovers --
+    # `_anchor` overwrites the trim at runtime with the frequency the ramp actually
+    # reached, so this only has to be close enough for the linearisation to hold. 160 Hz
+    # from the 2026-08-29 takeoffs. Was 140.0, a MATLAB GUI text-box default that was
+    # never a measurement of this rig. See `theory.md` 18.12 for why this, z_track's
+    # F_HOVER_HZ and constants.RAMP_TARGET_HZ are all different and all correct.
+    f_hover=C.F_HOVER_DESIGN_HZ,
     k_lat=0.05,
     margin=5.0,
-    mag_max=0.8,
-    freq_delta_max=15.0,
+    # No power ceiling in software: the bench supply's current limit is the only one.
+    # mag_max is the firmware's own range for `mag=<0..1>`.
+    mag_max=1.0,
+    # +/- about f_hover. Wide on purpose: a narrow window is a *control* envelope, and
+    # centred on the design f_hover it clamps hard the moment the rig is run anywhere
+    # else -- at a 60 Hz ramp target the old +/-15 would have commanded 125 Hz on arming.
+    freq_delta_max=139.0,
     freq_slew=200.0,
+    # Bryson's rule sets `r = 1 / u_max^2`, where `u_max` is the control excursion worth
+    # one unit of cost. This scales that excursion: >1 says a larger command is
+    # acceptable, which buys closed-loop bandwidth. It is the ONE knob for the
+    # speed-vs-latency-robustness trade, kept as a knob rather than folded into the
+    # literals so the sweep behind the shipped value is reproducible. See `theory.md`
+    # 19.13 for what was measured across it.
+    authority=1.0,
     out=None,
 ):
     """Synthesise the hover LQR and write the gain file. Returns the gain dict."""
@@ -128,7 +151,7 @@ def design(
         1 / 0.010**2,
         1 / 0.030**2,
     ]
-    r_diag = [1 / 0.5**2, 1 / 3.0**2]
+    r_diag = [1 / (0.5 * authority) ** 2, 1 / (3.0 * authority) ** 2]
     K, _, eig = dlqr(Aa, Ba, np.diag(q_diag), np.diag(r_diag))
 
     # discrete eigenvalue -> equivalent continuous rate in Hz

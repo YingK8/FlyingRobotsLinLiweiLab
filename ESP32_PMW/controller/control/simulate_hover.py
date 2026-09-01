@@ -9,7 +9,7 @@ exercised here rather than only in flight.
 
 Scenarios (a|b|c|d|e|all):
   a  10 mm lateral + 10 mm vertical initial offset, clean measurements
-  b  (a) + 0.5 mm sensor noise + 1 frame latency
+  b  (a) + 0.5 mm sensor noise + 15 ms latency
   c  trim mismatch: plant hovers at 143 Hz, controller believes 140 (integrator proof)
   d  k_lat robustness: true k_lat in {0.25x, 1x, 4x} the design value
   e  profile tracking: quadratic-ease 10 mm climb + linear 15 mm lateral translate
@@ -30,8 +30,13 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from hover_model import make_params, nonlinear_dynamics
-from reference_profiles import Profile, demo_profile
+from controller.control.hover_model import make_params, nonlinear_dynamics
+from controller.control.reference_profiles import Profile, demo_profile
+
+
+#: Sentinel: `step(dt=None)` means "no new fix, hold the rate", which is a different
+#: thing from "caller did not say", where the old once-per-measurement default applies.
+_UNSET = object()
 
 
 class VelocityEstimator:
@@ -46,18 +51,41 @@ class VelocityEstimator:
 
     def __init__(self, ts: float, cutoff_hz: float = 5.0):
         self.ts = ts
-        tau = 1.0 / (2.0 * math.pi * cutoff_hz)
-        self.alpha = ts / (ts + tau)
+        self.tau = 1.0 / (2.0 * math.pi * cutoff_hz)
+        self.alpha = ts / (ts + self.tau)
         self.prev_pos = None
         self.vel = np.zeros(2)
 
-    def update(self, pos: np.ndarray) -> np.ndarray:
+    def update(self, pos: np.ndarray, dt: float | None = None) -> np.ndarray:
+        """New rate estimate. ``dt`` is the interval the position actually moved over.
+
+            **Not the control period.** The control loop steps far faster than the pose
+            pipeline delivers -- 500 Hz against ~100 Hz -- and between fixes the position
+            handed in comes from `predictor.StatePredictor`, which advances it by exactly
+            `v * dt`. Differencing that returns the velocity that produced it: no
+            information, only filter lag. So a stale tick passes ``dt=None`` and the
+            estimate is held.
+
+            On the tick a fix DOES land, the jump is the correction accumulated over the
+            whole pose interval. Dividing it by `self.ts` -- which is what this did until
+            2026-09-01 -- reports a rate too large by `pose_interval / ts`: 2x at 200 Hz
+            and 5x at 500 Hz, i.e. the defect gets worse exactly as the clock rises.
+            `theory.md` 19.8 names this and puts it second in its ladder; the clock going
+            to 500 Hz is what made it due.
+
+            `alpha` follows `dt` for the same reason: a 1-pole low-pass at a fixed
+            cutoff is `dt / (dt + tau)`, and pinning it to `ts` would re-introduce the
+            rate dependence from the other side.
+        """
+
         if self.prev_pos is None:
             self.prev_pos = pos.copy()
             return self.vel.copy()
-        raw = (pos - self.prev_pos) / self.ts
+        if dt is None:
+            return self.vel.copy()      # no new information: hold, do not re-difference
+        raw = (pos - self.prev_pos) / dt
         self.prev_pos = pos.copy()
-        self.vel += self.alpha * (raw - self.vel)
+        self.vel += (dt / (dt + self.tau)) * (raw - self.vel)
         return self.vel.copy()
 
 
@@ -79,9 +107,18 @@ class DiscreteHoverController:
         self.q = np.zeros(2)  # error integrators [int_ex, int_ez]
         self.prev_f_field = self.f_hover  # slew-limit reference
 
-    def step(self, t: float, x_meas: float, z_meas: float) -> tuple[float, float]:
+    def step(self, t: float, x_meas: float, z_meas: float,
+             dt=_UNSET) -> tuple[float, float]:
+        """One control step. ``dt`` is how long the measurement took to change.
+
+            Defaults to `self.ts`, which is right only when a caller steps once per
+            measurement -- `simulate_hover`'s scenarios do. The live loop does not, and
+            passes the real fix interval, or None on a tick with no new fix. See
+            `VelocityEstimator.update`.
+        """
+
         pos = np.array([x_meas, z_meas])
-        vel = self.est.update(pos)
+        vel = self.est.update(pos, self.ts if dt is _UNSET else dt)
         ref_p, ref_v, ref_a = self.profile.eval(t)
 
         err = np.array(
@@ -128,7 +165,12 @@ class Scenario:
     x0_mm: float = 0.0  # initial lateral offset
     z0_mm: float = 0.0  # initial vertical offset
     sensor_sigma_m: float = 0.0
-    latency_frames: int = 0
+    # Sensor-to-command latency in SECONDS, not in control steps. It used to be
+    # `latency_frames`, which meant 5 ms at 200 Hz and 2 ms at 500 -- so raising the
+    # clock made every latency scenario quietly easier while claiming to test the same
+    # thing. That is the same class of error as 19.9's phase-lock check measuring its own
+    # sample grid. Physical delay does not care what rate the loop runs at.
+    latency_s: float = 0.0
     dist_accel: float = 0.0  # constant lateral disturbance accel m/s^2
     k_lat_true_mult: float = 1.0  # plant k_lat vs design k_lat
     plant_f_hover: float | None = None  # true lift-balance frequency (mismatch test)
@@ -161,7 +203,7 @@ def simulate(sc: Scenario, gains: dict, seed: int = 0) -> dict:
             p_true.omega_trim,
         ]
     )
-    meas_queue = deque(maxlen=sc.latency_frames + 1)
+    meas_queue = deque(maxlen=max(1, int(round(sc.latency_s / ts)) + 1))
     n = int(round(sc.duration / ts))
     out = {
         k: np.zeros(n)
@@ -184,12 +226,20 @@ def simulate(sc: Scenario, gains: dict, seed: int = 0) -> dict:
         ref_p, _, _ = sc.profile.eval(t)
         out["t"][k], out["x"][k], out["z"][k] = t, s[0], s[2]
         out["mag"][k], out["f_field"][k] = u
-        out["delta"][k] = s[4]
         out["x_ref"][k], out["z_ref"][k] = ref_p
 
         sol = solve_ivp(
             dyn, (t, t + ts), s, args=(u,), max_step=ts / 8, rtol=1e-8, atol=1e-9
         )
+        # The PEAK phase error over the step, not the value at its start. The plant was
+        # always integrated finely (max_step=ts/8); only the recording was on the control
+        # grid, so the phase-lock check measured whatever `ts` happened to sample. That
+        # made the metric rate-dependent for no physical reason: the same 143 Hz mismatch
+        # read 46.6 deg at 30 Hz and 73.5 at 50-200 Hz, and the 60 deg gate was set
+        # against the coarser view. See `theory.md` 18.12.
+        span = sol.y[4, :]
+        out["delta"][k] = span[np.argmax(np.abs(
+            np.arctan2(np.sin(span), np.cos(span))))]
         s = sol.y[:, -1]
     return out
 
@@ -209,11 +259,12 @@ def evaluate(sc: Scenario, out: dict, gains: dict) -> tuple[bool, list[str]]:
         f"(< {sc.tol_mm} mm) {'PASS' if cond else 'FAIL'}"
     )
 
-    cond = np.abs(dw).max() < 60.0
+    peak = np.abs(dw).max()
+    cond = peak < 90.0
     ok &= cond
+    grade = "PASS" if peak < 60.0 else ("THIN" if cond else "FAIL")
     msgs.append(
-        f"  phase lock: max |delta| = {np.abs(dw).max():.1f} deg (< 60) "
-        f"{'PASS' if cond else 'FAIL'}"
+        f"  phase lock: max |delta| = {peak:.1f} deg (margin 60, lock lost 90) {grade}"
     )
 
     mag_max = gains["limits"]["mag_max"]
@@ -283,7 +334,9 @@ def build_scenarios() -> dict[str, list[Scenario]]:
     return {
         "a": [Scenario("a", x0_mm=10, z0_mm=10)],
         "b": [
-            Scenario("b", x0_mm=10, z0_mm=10, sensor_sigma_m=0.5e-3, latency_frames=1)
+            # 15 ms: `control/theory.md` 19.1's pose-pipeline figure, which is the age
+            # of a fix by the time a command based on it reaches the coils.
+            Scenario("b", x0_mm=10, z0_mm=10, sensor_sigma_m=0.5e-3, latency_s=0.015)
         ],
         "c": [Scenario("c", plant_f_hover=143.0, duration=15.0, settle_s=8.0)],
         "d": [
@@ -331,8 +384,48 @@ def run(scenario="all", gains=None, plots=True):
     return all_ok, results
 
 
+def _check_velocity_estimator():
+    """The rate estimate must not depend on how fast the CONTROL loop steps.
+
+        This is `theory.md` 19.8's defect, made falsifiable: the control clock runs far
+        faster than the pose pipeline, so a fix lands only every k-th tick. Dividing that
+        fix's jump by the control period reports a rate k times too large, and k rises
+        with the clock -- 500 Hz against ~100 Hz pose is k = 5.
+    """
+
+    truth = np.array([12.0, -7.0])       # mm/s, constant
+    for ts, k in ((0.005, 2), (0.002, 5), (0.002, 20)):
+        est = VelocityEstimator(ts)
+        pos, t_fix = np.zeros(2), 0.0
+        for i in range(4000):
+            t = i * ts
+            if i % k == 0:               # a fix lands: position jumps by a whole interval
+                dt = t - t_fix if i else None
+                pos, t_fix = truth * t, t
+                v = est.update(pos.copy(), dt)
+            else:                        # predictor tick: no new information
+                v = est.update(pos.copy(), None)
+        err = np.max(np.abs(v - truth) / np.abs(truth))
+        assert err < 0.01, (
+            f"ts={ts} k={k}: rate {v} against {truth}, {err:.1%} off -- the estimator "
+            f"is reading the control period instead of the fix interval")
+
+    # And the held ticks really are held, not silently re-differenced to zero: with the
+    # position frozen between fixes, dividing by ts would drag the estimate toward 0.
+    est = VelocityEstimator(0.002)
+    est.update(np.zeros(2), None)
+    est.update(truth * 0.01, 0.01)
+    v0 = est.vel.copy()
+    for _ in range(500):
+        est.update(truth * 0.01, None)
+    assert np.array_equal(est.vel, v0), "a stale tick moved the rate estimate"
+    print("simulate_hover: rate estimate is independent of the control clock "
+          "(ts 5/2 ms, 2-20 ticks per fix) and stale ticks hold\n  ok")
+
+
 if __name__ == "__main__":
     import sys
 
+    _check_velocity_estimator()
     ok, _ = run(sys.argv[1] if len(sys.argv) > 1 else "all")
     sys.exit(0 if ok else 1)

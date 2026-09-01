@@ -80,8 +80,10 @@ def load(path) -> dict:
     # line and must still load -- "" is the right answer for them, not a failure.
     stamp = next((l.split(":", 1)[1].strip() for l in lines
                   if l.startswith("# ramp:")), "")
+    trim = next((l.split(":", 1)[1].strip() for l in lines
+                 if l.startswith("# trim:")), "")
     rows = list(csv.DictReader(l for l in lines if not l.startswith("#")))
-    out = {"ramp": stamp}
+    out = {"ramp": stamp, "trim": trim}
     for k in rows[0]:
         v = [r[k].strip() if r[k] else "" for r in rows]
         try:
@@ -460,8 +462,12 @@ def plot_tilt(paths=None, out=None, labels=None):
     sc = None
     for i, p in enumerate(paths):
         d = load(p)
+        # Plain language on the figure: `az`/`mag` are firmware shorthand and mean nothing
+        # to a reader. `az` is the RESULTANT WEAK DIRECTION -- the bearing in which the
+        # ring's field is weakened, since applyMixer drops the coils facing it -- and
+        # `mag` is how deeply. The disk tilts toward the weak side.
         lab = (labels[i] if labels and i < len(labels)
-               else f"{p.stem}  {d.get('ramp', '') or 'unrecorded'}")
+               else (d.get("trim") or "trim unrecorded"))
         pol = fig.add_subplot(1, n + 1, i + 1, projection="polar")
         pol.set_title(f"{lab}\nrotor normal on $S^2$", fontsize=9, pad=16)
         pol.set_rmax(TILT_RMAX_DEG)
@@ -489,14 +495,16 @@ def plot_tilt(paths=None, out=None, labels=None):
         idx = np.digitize(f[m], edges) - 1
         med = np.array([np.median(th[m][idx == k]) if (idx == k).sum() > 10 else np.nan
                         for k in range(len(edges))])
-        lin.plot(edges, med, marker="o", ms=3, lw=1.5, label=lab)
+        # Short label in the legend: the polar panel above already carries the full
+        # description, and repeating it here grew the box until it covered the data.
+        lin.plot(edges, med, marker="o", ms=3, lw=1.5, label=lab.split("  ")[0])
 
     if sc is not None:
         fig.colorbar(sc, ax=lin, label="drive frequency [Hz]", pad=0.02)
     lin.set(xlabel="drive frequency [Hz]", ylabel="tilt from datum axis [deg]",
             title="tilt vs frequency")
     lin.grid(alpha=0.3)
-    lin.legend(fontsize=7)
+    lin.legend(fontsize=8, loc="lower right")
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     fig.subplots_adjust(top=0.80, wspace=0.35)
     out = Path(out or Path(CSV_DIR) / "tilt_so2.png")

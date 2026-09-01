@@ -961,6 +961,13 @@ def fly(cfg=None, **kw):
     fh = open(csv_path, "w", newline="")
     rows = csv.writer(fh)
     fh.write(f"# ramp: {ramp.label(cfg.segments)}\n")
+    # The trim is the other thing that changes between attempts, so it is stamped for the
+    # same reason the ramp is: without it a comparison rests on remembering what was typed.
+    _coil = {0: "A", 90: "B", 180: "C", 270: "D"}.get(int(cfg.trim_az) % 360)
+    fh.write(f"# trim: resultant weak direction {cfg.trim_az:g} deg"
+             + (f" (coil {_coil})" if _coil else "")
+             + f", strength {cfg.trim_mag:.2f}"
+             + (f", from {cfg.trim_at_hz:g} Hz" if cfg.trim_mag else " (off)") + "\n")
     rows.writerow(CSV_HEADER)
     try:
         controller_loop(ticks, link, ctrl, cfg, ztrk, rows,

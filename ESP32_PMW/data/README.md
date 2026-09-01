@@ -22,8 +22,12 @@ Outcome: coupling is magnetic (not ground); strong pairs A–C and B–D, k≈0.
 
 ## 2026-07-04b_comp-calibration-cw/
 Feedforward trim calibration, CW rotation (env:comp_test A/B captures).
-- `comp_ab_162530` — v1 run that proved the CS→ADC taps are disconnected
-  (on-board closed loop impossible).
+- `comp_ab_162530` — v1 run that proved the CS→ADC taps were disconnected at the
+  time (on-board closed loop impossible). **Superseded:** the ADC pins were later
+  rewired and each channel now reads its own coil — `SENS` in `src/drive_common.h`
+  is per-channel calibrated and telemetry reports four independent currents. The CS
+  pin still gives an unsigned magnitude sampled asynchronously at ~1 kHz, so it
+  supports amplitude regulation but not commutation; see control/theory.md 17.2.
 - `comp_ff_iter1/iter2` — scope-in-the-loop iterations: equal-duty baseline
   spread max/min 1.88 → **1.07** with CW trims {1.337, 0.866, 0.794, 1.003}.
 - `tilt_trimmed_verify` — trims in main_tilt at 210 Hz hold: spread 1.043.

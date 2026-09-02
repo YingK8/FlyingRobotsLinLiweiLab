@@ -1,0 +1,24 @@
+{
+  "camera_indices": [
+    0,
+    1
+  ],
+  "rotate180": true,
+  "mode": [
+    640,
+    400
+  ],
+  "fps": 120.0,
+  "fps_measured": 118.83,
+  "n_frames": 8035,
+  "dropped": 2896,
+  "encoder_errors": 0,
+  "skew": {
+    "n": 8035,
+    "median_ms": 0.9601250058040023,
+    "p95_ms": 9.820008918177308,
+    "max_ms": 187.86220799665898,
+    "dropped": 0
+  },
+  "created": "2026-09-01T20:26:49"
+}

@@ -1,0 +1,26 @@
+{
+  "source": "control.tilt_sweep",
+  "schedule": "tilt.json",
+  "camera_indices": [
+    0,
+    1
+  ],
+  "rotate180": true,
+  "mode": [
+    640,
+    400
+  ],
+  "fps": 210.0,
+  "fps_measured": 207.65,
+  "n_frames": 21773,
+  "dropped": 0,
+  "encoder_errors": 0,
+  "skew": {
+    "n": 21773,
+    "median_ms": 1.0478749172762036,
+    "p95_ms": 8.369075343944129,
+    "max_ms": 63.90270893462002,
+    "dropped": 0
+  },
+  "created": "2026-09-01T20:59:46"
+}

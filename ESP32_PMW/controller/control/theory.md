@@ -2004,6 +2004,14 @@ blades alias above $\text{fps}/8$. `controller/pose/spin.py` reads blade phase w
 valid and refuses to answer where it is not. Angle-referenced control therefore waits on
 either a rotor-angle sensor or per-phase current sensing; neither exists on this board.
 
+**Section 22 does not overturn this, and the distinction is the whole reason it is a
+separate section.** The lock-in in `coil_probe.cpp` does extract a current angle from the
+same unsigned `CS` pin -- but off the flight path, at one held frequency, averaged over
+hundreds of cycles, to produce two calibration constants per channel. Commutation needs the
+angle *signed, every cycle, in real time*, and none of the three things this section rules
+out are made available by averaging. What 22 buys is a better open-loop command, not a
+closed loop on rotor angle.
+
 ## 18. The spin-up ramp, and what it can and cannot explain
 
 The ramp from rest to hover is the only fully open-loop part of a flight: nothing measures
@@ -2257,6 +2265,15 @@ band that separates the two. `takeoff_report.py` refits both from $|I|(f)$ over 
 and reports the implied $f_0$ and $Q$ beside the current constants. Until that lands, the
 resonance is unknown and any statement that 160 Hz is "at resonance" is unsupported.
 
+**Superseded twice over as of 2026-09-01, and still unresolved.** The capacitor bank was
+doubled to 800 µF, so every fitted $C$ above is void -- $f_0 \propto C^{-1/2}$, and the
+nominal moves to 150 Hz. And the question is now known to be *per channel*: 22.2 shows the
+four channels each have their own $(f_0, Q)$, that only those two numbers are identifiable
+from $|I|(f)$ at all, and that their spread is what puts the coil currents out of phase with
+each other. `takeoff_report.metrics` fits all four separately under `phase_fits`, and
+`coil_phase.fit_channel` **refuses** a band whose peak sits at an edge -- which is the
+specific failure that produced the 400 µF above, now guarded rather than merely regretted.
+
 ### 18.7 Correspondence with the implementation
 
 | Quantity | Where |
@@ -2391,6 +2408,14 @@ $C = 334\,\mu$F, $f_0 = 174$ Hz, $Q = 0.40$. Separately, at $f > 140$ Hz the fou
 drew 3.39, 4.70, 4.73 and 3.77 A at equal commanded duty -- a 39% spread, so the rotating
 field is measurably elliptical, and this is the first real evidence for re-enabling
 `CurrentBalanceController`.
+
+**The $L$/$C$ pair here is void as of 2026-09-01**, when the bank went to 800 µF: $f_0$
+scales as $C^{-1/2}$, so this 174 Hz peak maps to 112 Hz against the 334 µF fitted here, or
+138 Hz against the write-up's selected 500 µF. That those two disagree is the same
+under-constrained fit 18.6 describes, and neither may be written into `constants.py` as a
+measurement. $Q = 0.40$ is the closest thing to a measured $Q$ this project has, and 22.3
+sets it against the three other values in the tree, which span 0.09 to 22. The 39 % current
+spread survives the bank change untouched -- it is an amplitude fact, not a resonance one.
 
 ### 18.9 The reappearance test: a rate-free way to bound rotor speed
 
@@ -2768,6 +2793,60 @@ band 18.16 records as hard to hold.
 **Operator observation the same day, which agrees:** with coil A dropped the robot "flew off
 in a much more stable manner", and "by keeping the drone vertical, the drone is able to take
 off more stably and at a lower frequency". Both follow directly from the numbers above.
+
+### 18.18 MEASURED 2026-09-01: the field is 29 % stronger toward 151 deg, and that is the tilt
+
+`probe=` (a lock-in on the coil current, IDLE-only, ~1.6 s per point) measured per-coil
+amplitude and phase against the commanded reference at five frequencies. 8 s of drive
+total:
+
+| f | amplitude dipole | direction | amp spread | phase spread | strongest |
+|---|---|---|---|---|---|
+| 60 Hz | 2.0 % | 104 deg | 5 % | 3.4 deg | C |
+| 90 Hz | 7.1 % | 139 deg | 15 % | 4.2 deg | C |
+| 120 Hz | 15.7 % | **153 deg** | 21 % | 11.7 deg | C |
+| 150 Hz | 22.3 % | **151 deg** | 27 % | 13.4 deg | C |
+| 174 Hz | 28.9 % | **151 deg** | 33 % | 11.5 deg | C |
+
+**The direction converges on ~151 deg above 120 Hz, and 18.15 measures the rotor leaning at
+146 deg.** Five degrees apart, from two instruments sharing nothing: a lock-in on coil
+current, and the optical rotor normal. 20.3 argued that the only surviving candidate cause
+was a lab-frame field asymmetry, and that a field asymmetry is host-addressable; this is
+that asymmetry, measured.
+
+**Both grow with drive, which is the second half of the agreement.** The imbalance goes
+2 % -> 29 % from 60 to 174 Hz, and the tilt goes 1.46 -> 3.08 deg from rest to 105 Hz. The
+frequency dependence is diagnostic on its own: R dominates the channel impedance at low
+frequency, where the coils look matched, and the per-coil L/C spread takes over approaching
+the ~174 Hz series resonance (18.8 fits f_0 = 174 Hz, Q = 0.40). So this is a REACTIVE
+mismatch, not a resistive one, which is why it is invisible on a DC or low-frequency check.
+
+**The trim, at the frequency actually flown:**
+
+| f | resultant weak direction | strength |
+|---|---|---|
+| 150 Hz | 151 deg | 0.19 |
+| 174 Hz | 151 deg | 0.24 |
+
+`applyMixer` weakens the coils facing `az`, and B/C are the strong side, so the correction
+points AT 151 deg rather than at `tilt + 180`. Both 0 deg and 315 deg have been flown and
+151 deg has not.
+
+**RETRACTION: the 18 deg dipole measured the same day from `CS` telemetry is withdrawn.**
+Averaging `I[A]` from the periodic telemetry at 90 Hz gave 0.49 A at 18 deg with coil A
+strongest; the lock-in at the same frequency gives 139 deg with coil C strongest. The
+lock-in is the instrument to believe, and 17.2 says why: `CS` is an unsigned magnitude
+sampled asynchronously at about 1 kHz, roughly 7 samples per electrical cycle at 150 Hz,
+"enough to regulate amplitude and not enough to resolve an angle". It is not enough to
+resolve an amplitude ratio between channels either, once the sampling aliases. Coherence on
+the lock-in was 0.90.
+
+**What an amplitude trim cannot reach.** The phase spread is 13.4 deg at 150 Hz and grows
+with frequency alongside the amplitude spread. A rotating field needs the four channels at
+0/90/180/270 deg *relative*, so a phase error distorts the field into an ellipse whatever
+the amplitudes do, and `applyMixer` has no phase authority at all. Correcting it needs a
+per-coil phase offset in firmware -- which `PwmController::setPhaseOffset` already
+supports, so the mechanism exists and only the calibration is missing.
 
 ### 18.12 Three "hover frequencies", and why they disagree
 
@@ -3581,6 +3660,308 @@ $4\times$ $k_{lat}$, and all three PASS in the nonlinear simulation -- a falsifi
 the certificate could have failed and did not.
 
 ---
+
+## 22. The commanded phase is not the current phase
+
+### 22.1 The objection
+
+Raised in review, 2026-09-01, against the write-up's claim of $\pm 0.5^\circ$ phase
+precision:
+
+> That is the *commanded* phase. What the robot sees is the *current* phase, and it is set
+> by the RLC network. Near resonance the current phase detunes as
+> $\Delta\theta \approx -2Q\,(\Delta\omega/\omega_0)$, and a $\pm 20\%$ electrolytic
+> tolerance moves $f_r$ by 10 %, so the channel-to-channel phase error is many times the
+> claimed precision -- and it is analog, not digital.
+
+**The structure of this is correct and the conclusion stands.** The commanded phase is not
+the quantity the rotor responds to, the difference is per channel, and nothing in this
+project has ever measured it. It enters the tilt budget the same way an amplitude imbalance
+does, so a tilt attributed to coil asymmetry currently has an uncontrolled contribution
+mixed in.
+
+Three things about it need correcting, and one of them is worse than the objection.
+
+### 22.2 The current phase needs exactly two numbers per channel
+
+For a series RLC the current phase relative to the driving voltage is
+$\theta = \arctan\big((\omega L - 1/\omega C)/R\big)$. Substituting
+$\omega_0 = 1/\sqrt{LC}$ and $Q = \tfrac{1}{R}\sqrt{L/C}$:
+
+$$\boxed{\ \theta_k(f) = \arctan\!\left(Q_k\left(\frac{f}{f_{0,k}}
+   - \frac{f_{0,k}}{f}\right)\right)\ }$$
+
+$R$, $L$, $C$ and the drive amplitude have all left. Expanding about $f_{0}$ recovers the
+reviewer's $2Q\,\Delta f/f_0$ as the small-detuning limit, so this is the same statement
+without the linearisation.
+
+**Two numbers per channel is what makes the measurement possible on this hardware**, and the
+reason is the term that vanished. The absolute gain of the CS path is the least trustworthy
+quantity on the board:
+
+| | |
+|---|---|
+| VNH5019 sense ratio | $K = 4670$ to $10110$, $\pm 30\%$ part to part (`hw_references/VNH5019_CS.png`) |
+| CS drift | $\pm 19\%$ over temperature, same table |
+| `R4`, CS to ADC | **no value in the BOM** (`docs/PCB_Design_Documentation.md` 157) |
+| `SENS` $\approx 15.3$ A/V | empirical, and $\sim 3.2\times$ what a 1 k$\Omega$ load implies -- unexplained |
+
+An *amplitude* calibration inherits every one of those. A *phase* calibration inherits none
+of them, because a real scalar gain drops out of an argument. The same cancellation is why
+`coil_phase.fit_channel` solves for $(A, f_0, Q)$ from the shape of $|I|(f)$ and throws $A$
+away, and why its self-check asserts that scaling the input current by $3.17$ moves the
+fitted $f_0$ by less than $10^{-3}$ Hz.
+
+A second consequence, less obvious: **report the phase relative to the four-channel mean,
+never absolutely.** The CS path has its own delay -- $t_{DSENSE}$ is 20-50 µs, which is
+1.4-3.6 deg at 200 Hz -- and it is common to four identical channels, so it cancels in a
+difference and does not cancel in an absolute number. Nothing is lost, because what tilts
+$\hat n$ is the channel-to-channel difference in the first place.
+
+### 22.3 The magnitude is wrong, because $Q$ is not known to within a factor of five
+
+The review computed $Q = 1.29$ from $R = 1.3\ \Omega$. That number is not invented -- it is
+the write-up's own measured coil DC resistance (§3.2). But `constants.py` carries
+$R = 6.9\ \Omega$ for the series channel, and the two give:
+
+| $R$ | source | $Q$ at 800 µF | provenance |
+|---|---|---|---|
+| $1.3\ \Omega$ | write-up 3.2 | 1.02 | measured, coil DC only |
+| $6.9\ \Omega$ | `constants.py` | 0.19 | measured, series channel incl. driver |
+| $15\ \Omega$ | `constants.py` | 0.09 | measured per channel, the driver's view |
+
+and 18.6 already records a fourth, $Q \sim 22$, quoted in the justification for
+`S_LIM = 0.8` and supported by nothing. **Four values spanning two and a half orders of
+magnitude, all of them in this repository.** 18.6 closed with "the resonance is unknown and
+any statement that 160 Hz is 'at resonance' is unsupported"; that is still true, and it is
+now the binding obstacle to answering the review at all.
+
+The capacitor bank was doubled to **800 µF per coil array on 2026-09-01**, which moots every
+fitted constant taken before that date -- $f_0 \propto C^{-1/2}$, so the measured 174 Hz
+peak scales to 112 Hz against the fitted 334 µF or 138 Hz against the write-up's selected
+500 µF. Those two do not agree either, which is the same disease. With the confirmed
+$L = 1.4$ mH the nominal is $f_0 = 150$ Hz.
+
+Predicted spread at 190 Hz, over the range the unknowns actually span:
+
+| bank | effective tol. | $Q = 0.19$ | $Q = 1.02$ |
+|---|---|---|---|
+| one cap | 20 % | 4.5 deg | 19.9 deg |
+| five in parallel | 8.9 % | 2.0 deg | 8.8 deg |
+| eight in parallel | 7.1 % | 1.6 deg | 6.9 deg |
+
+peak-to-peak, in degrees. **A parallel bank averages its own tolerance down by $\sqrt N$**,
+which the objection did not account for and which works in the rig's favour: the write-up
+describes the 500 µF bank as five 100 µF parts in parallel, so the effective tolerance is
+nearer 9 % than 20 %.
+
+The honest summary is that **the answer is somewhere between 1.6 and 20 degrees**, that the
+range is set by an $R$ this project has measured three incompatible ways, and that no
+argument settles it. One measurement does.
+
+### 22.4 The digital claim is worse than the objection assumed
+
+The $\pm 0.5^\circ$ figure comes from `writeup` 3.5, where it describes the multi-node
+controller/client hardware synchronisation: a controller node emits a zero-shift calibration
+signal and clients pick it up on an interrupt. **That path is compiled out.**
+`platformio.ini` sets `-D USE_SYNC=0`; `SYNC_LATENCY_US` and `SYNC_AS_SERVER` are dead
+config, and `PwmController::setPhase` early-returns entirely under
+`USE_SYNC && SYNC_AS_SERVER`.
+
+What ships instead is plain GPIO toggling out of a periodic `esp_timer` at **25 µs**
+(`PwmController.cpp:146`). LEDC drives only the 20 kHz carrier and never the phase; there is
+no MCPWM anywhere in the tree. One tick is therefore the real quantum:
+
+| $f$ | 100 Hz | 150 | 174 | 210 | 300 |
+|---|---|---|---|---|---|
+| one tick, deg | 0.90 | 1.35 | 1.57 | 1.89 | 2.70 |
+
+A finer truncation exists downstream -- `startUs` is computed to 1 µs, 0.06 deg at 174 Hz
+(`PwmController.cpp:281`) -- but the 25 µs ISR is what binds. **So the claim is off by 3-4x
+on its own terms, before any analog effect, and it describes a build that has never flown.**
+
+This matters for the fix as well as the write-up. A trim finer than the quantum buys
+nothing, so the quantum is the floor on any residual this rig can report, and `coil_phase.report`
+prints the two side by side rather than quoting a residual that the hardware cannot express.
+
+### 22.5 Measuring it: a lock-in at $2f$ on an unsigned pin
+
+Three properties of the existing current-sense path each destroy phase on their own: the ADC
+is paced at ~1 kHz (`PwmController::_serviceCurrentLoop`), a 50 ms EMA smooths it
+(`current_sense.cpp`), and `driveTelemetry` prints at 2 Hz. `coil_probe.cpp` bypasses all
+three -- raw reads, no filter, accumulated in quadrature and reported once.
+
+**The CS pin is unsigned**, mirroring whichever high-side FET is sourcing, so a sinusoidal
+coil current arrives full-wave rectified. $|\sin x|$ has no component at its own rate:
+
+$$|\sin x| = \frac{2}{\pi} - \frac{4}{\pi}\sum_{k\ge 1}\frac{\cos 2kx}{4k^2-1}
+  = \frac{2}{\pi} - \frac{4}{3\pi}\cos 2x - \dots$$
+
+so the lock-in runs at $2f$ and halves the resulting angle, recovering $\theta_k$ modulo
+$180^\circ$. That ambiguity is harmless against a spread of a few degrees -- a channel
+genuinely half a turn out is an amplitude fault, and `coil_balance.py` is the tool for that.
+The leading minus sign matters and is not cosmetic: the reference sits half a turn from the
+current, so $\arg$ returns $2\psi + \pi$, and dropping the $\pi$ would bias every channel by
+90 deg.
+
+**The mux skew is removed by construction, not by correction.** The ESP32 ADC needs a
+throwaway read after switching pins, so the four channels are visited in sequence; at 200 Hz
+each 50 µs of skew is 3.6 deg, which is the entire effect being measured. Rather than
+subtract a nominal offset, every sample carries a timestamp taken next to its own
+conversion, so the skew never enters the accumulators at all.
+
+**This does not reopen field-oriented control.** 17.2 rules FOC out because commutation
+needs *signed* per-phase current sampled synchronously *every cycle in real time*, and
+concludes that "angle-referenced control waits on either a rotor-angle sensor or per-phase
+current sensing; neither exists on this board." That remains true. What is done here is a
+*calibration*: one frequency, held for a second, coherently averaged over hundreds of cycles,
+off the flight path, producing two constants. It answers a question 17.2 was not asking, and
+it hands the loop no angle it could fly on.
+
+**Two independent routes, deliberately not averaged.** The shape of $|I|(f)$ over a ramp
+gives $(f_0, Q)$ per channel from magnitudes alone; the `probe=` lock-in gives $\theta$ per
+channel directly, from angles alone. They share no arithmetic, so agreement is the check that
+the lock-in is measuring the coil and not its own reference. `coil_phase.compare` prints both
+and never blends them, for the reason 18.6 gives about averaging numbers that disagree.
+
+### 22.6 The trim, and why it must depend on frequency
+
+$\theta_k$ changes sign through resonance and swings tens of degrees across a 2-210 Hz ramp,
+so a single constant offset is wrong nearly everywhere it is applied.
+`PwmController::setPhaseTrim` therefore stores $(f_{0,k}, Q_k)$ and re-evaluates the closed
+form on every frequency change, caching the result outside the ISR spinlock -- four `atanf`
+calls with interrupts disabled would be a large fraction of the 25 µs tick.
+
+The base phase is kept separately from the corrected one (`_basePhaseDeg` against
+`_phaseOffsetsPct`) so that repeated frequency changes cannot accumulate a correction into
+the command. `setPhase` keeps meaning "the phase I want the *current* at", which is why
+`PwmSequencer` needs no knowledge that a trim exists.
+
+**A half-filled table is refused.** `setPhaseTrim` disarms unless all four channels carry a
+positive $f_0$ and $Q$, because three trimmed channels and one raw is a larger asymmetry
+than trimming none -- and an uncalibrated build must drive the commanded phase raw rather
+than a guessed correction.
+
+### 22.7 What this does not settle
+
+**No measurement has been taken yet.** Everything above 22.4 is a prediction bracketed by an
+unresolved $R$; `COIL_F0_HZ` and `COIL_Q` in `src/drive_common.h` are all zero, the trim is
+disarmed, and the residual this section exists to report does not have a number. Until a
+probe sweep runs on the 800 µF bank, the correct statement about channel-to-channel phase is
+"between 1.6 and 20 deg, unmeasured" -- which is still a better claim than $\pm 0.5^\circ$,
+because it is true.
+
+Four further limits:
+
+1. **The ramp must pass through resonance.** $f_0$ and $Q$ are separable only from a band
+   that brackets the peak. A ramp stopping short still fits, and fits confidently -- that is
+   exactly how 400 µF entered `constants.py` (18.6: "fitted in the one band where it is the
+   only thing visible"). `coil_phase.fit_channel` refuses when the peak sits at an edge, and
+   its self-check asserts the refusal on a band truncated below $f_0$. The most recent run,
+   `20260901_092547`, reaches only 109 Hz and cannot support this fit.
+2. **The rotor is present during a probe.** The measurement is of the electrical network;
+   back-EMF from a turning rotor is not modelled. The balance-loop comment
+   (`tilt_ccw_nodisk`) reports CS as blind to the disk, which suggests the coupling is small,
+   but "suggests" is the strength of that claim.
+3. **A phase trim does not touch the amplitude imbalance.** The 39 % current spread of 18.8
+   and the 1.63 A dipole at 145 deg of `coil_balance.py` are a separate defect with a
+   separate trim. Whether phase or amplitude dominates the measured 1.6 deg lean is precisely
+   what is not yet known, and correcting one does not test the other.
+4. **The residual floor is the 25 µs tick**, not the lock-in. Below ~1.7 deg at 190 Hz there
+   is nothing the commanded phase can express.
+
+### 22.8 Where this lands in the tilt budget
+
+20.5 certifies $|\psi| < 69.4^\circ$ of input rotation, and observes that the margin is
+already the short one: 12.8's measured 72 deg sits outside it. A per-channel current-phase
+error is not the same rotation as $\psi$ -- it is a distortion of the field rather than a
+rigid rotation of the command -- but it spends from the same budget, and it does so
+*uncalibrated*, which is the condition 20.5 says the 69.4 deg is not ample for. That is the
+argument for measuring it rather than bounding it: 20.5's tolerance is on the residual after
+calibration, and there has been no calibration.
+
+### 22.9 Correspondence with the implementation
+
+| quantity | where |
+|---|---|
+| $\theta_k(f) = \arctan(Q_k(f/f_{0,k} - f_{0,k}/f))$ | `coil_phase.theta`, and `PwmController::_recomputeTrim` |
+| $(f_0, Q)$ from the shape of $\lvert I\rvert(f)$ | `coil_phase.fit_channel`; refuses an edge peak |
+| $(f_0, Q)$ from measured angles | `coil_phase.fit_probe` |
+| the two routes, side by side | `coil_phase.compare` -- never averaged |
+| per-run per-channel fit | `takeoff_report.metrics`, key `phase_fits` |
+| the $2f$ lock-in, mux skew, coherence | `lib/PwmController/src/coil_probe.cpp` |
+| `probe=<hz>[:<ms>[:<duty>]]`, IDLE only | `cmdProbe` in `src/main_flight.cpp` |
+| the answer line the host parses | `link.parse_probe`, `link.ProbePoint` |
+| `probe=` counted as drive (heat) | `link.SerialComm._note_drive` |
+| the measured constants | `COIL_F0_HZ` / `COIL_Q`, `src/drive_common.h` -- zero until measured |
+| arming, and the refusal of a partial table | `PwmController::setPhaseTrim` |
+| the commanded-phase quantum | `esp_timer_start_periodic(_periodicTimer, 25)`, `PwmController.cpp:146` |
+
+```bash
+uv run python controller/control/coil_phase.py             # self-check, no hardware
+uv run python controller/control/coil_phase.py --measure   # probe sweep, ENERGISES
+uv run python controller/control/coil_phase.py --fit results/takeoff/<run>.csv
+```
+
+## 23. The channel-0 amplitude sweep, and why its photographs can be trusted
+
+`spiffs_data/tilt.json` holds coils B, C and D at 100% carrier and steps coil A through
+20, 40, 60, 80 and 100%, 2.5 s at each, after a 30 s EASE ramp to 150 Hz. It is run by
+`main_tilt.cpp` (`pio run -e tilt -t upload`, then `-t uploadfs`) and filmed by
+`controller/control/tilt_sweep.py`. Three things about it are decisions, not details.
+
+### 23.1 The sweep is in current, not in duty, and that is why the balancer stays on
+
+`main_tilt` calls `enableCurrentBalance()`, and the instinct from the calibration rigs
+(§`platformio.ini`, the PASSTHROUGH note) is that a loop which equalises the four
+currents must erase a deliberate asymmetry. It does not, because the balancer is not an
+equaliser. `CurrentBalanceController` normalises each channel's *commanded carrier* into
+a ratio $r_i = c_i / \max_j c_j$ and drives channel $i$ toward $m\,r_i$, where $m$ is the
+magnitude set by the reference channels -- the ones within `refBandPct` of the top
+carrier. Stepping A to 20% therefore makes it a follower with $r_A = 0.2$ and asks the PI
+for one fifth of the current the held channels carry.
+
+The distinction matters for what the photographs mean. Open loop, a carrier of 20% is a
+statement about a *duty cycle*, and the current it produces depends on that coil's
+resistance, its capacitor, and how far the drive frequency sits from that channel's own
+$f_0$ -- all four differ, and §22 is the argument that the last of these is unknown to a
+factor of five on this rig. Closed loop, 20% is a statement about *current*, which is
+the quantity the field is proportional to. So the sweep's independent variable is
+$I_A/I_{B,C,D} \in \{0.2, \ldots, 1.0\}$, and the lean angle read off each still can be
+plotted against a number that means the same thing on any day.
+
+The calibration rigs run PASSTHROUGH for the opposite reason: they measure the coupling
+*from* duty *to* current, so closing that loop would measure the loop.
+
+### 23.2 The label line is the only event, and no offset is fitted
+
+`main_tilt` parses no serial. Nothing is commanded, there is no run CSV, and so none of
+the markers §19 and `sync.py` rely on exist -- there is no `<> csv t=0`, because there is
+no host clock origin to record. What there is instead is `label=<name>`, printed by
+`main_tilt`'s `loop()` whenever `JsonPwmSequencer::stepLabel()` changes. On the label
+change, not the step change: `resolution_ms` is 25, so a 2.5 s hold compiles to ~100
+queue entries that all carry one label.
+
+`tilt_sweep.run` reads the cameras and the serial port in one process, so that line is
+stamped with the same `time.monotonic()` as the frames beside it, and the alignment is
+again free rather than estimated (`sync.py`'s opening argument applies unchanged). The
+still for each step is cut `SETTLE_BACK_S` before the *next* label rather than after the
+current one: the rotor spends most of a 2.5 s hold swinging into the new lean, and it is
+the settled attitude that is the measurement.
+
+### 23.3 A take that dropped a frame cannot be cut, and is refused
+
+`FlightWriter` writes a row to `frames.csv` for every stereo read, but hands the frame to
+a bounded queue and *counts a drop* rather than blocking when the encoder falls behind --
+correctly, since a flight outranks its film. The consequence for cutting stills is that
+row $n$ of `frames.csv` and frame $n$ of the mp4 are the same frame only until the first
+drop, and thereafter differ by the running drop count, which is not recorded per frame.
+
+Every still after that point would be a genuine photograph of the wrong duty cycle, with
+nothing downstream able to notice: the images are all of the same robot in the same rig,
+and only the filename claims which step it is. `tilt_sweep.stills` therefore reads
+`meta.json` and refuses outright when `dropped > 0`. Refusing costs a re-shoot; the
+alternative costs a plot whose x-axis is wrong by one step and which looks fine.
 
 ## Appendix A: Correspondence with the MATLAB implementation
 

@@ -36,8 +36,17 @@ F_HOVER_TRACK_HZ = 190.0
 # match and not a step-out at all.
 F_STEPOUT_HZ = 225.0
 
-# MEASURED. Coil current peaks here and falls above it, so torque margin is worse past
-# resonance -- but lift goes as f^2 and wins anyway until step-out. Optimise for lift.
+# MEASURED 2026-08-29, and STALE as of 2026-09-01. Coil current peaked here and fell above
+# it, so torque margin is worse past resonance -- but lift goes as f^2 and wins anyway until
+# step-out. Optimise for lift.
+#
+# STALE because the series capacitor bank was doubled to 800 uF on 2026-09-01 and f0 goes as
+# C^-1/2. Scaling the old measurement gives 112 Hz (against the fitted 334 uF) or 138 Hz
+# (against the write-up's selected 500 uF) -- the two disagree because the old C never
+# agreed with itself, so the new resonance is genuinely unknown, not merely un-rescaled.
+# Nothing may rescale this number arithmetically; it is re-measured by the ramp in
+# `coil_phase.fit_run`. Kept at the last MEASURED value rather than replaced by a
+# prediction, so no consumer silently flies a computed number.
 F_RESONANCE_HZ = 174.0
 
 # ---------------------------------------------------------------- the takeoff ramp
@@ -70,17 +79,40 @@ RAMP_POLYNOMIAL, RAMP_EASE, RAMP_EXPONENTIAL = 0, 1, 2
 #                                  L confirmed by the operator 2026-08-29; C fitted the
 #                                  same day from |I|(f) over a 0.2-60 Hz ramp.
 #
-# The series pair predicts resonance at 1/(2*pi*sqrt(LC)) = 213 Hz, but the rig measures
-# 174 Hz, so C is the suspect: it was fitted in the one band where it is the only thing
-# visible. `takeoff_report._fit_rlc` refits L and C from each flight's logged currents;
-# nothing writes the refit back yet.
+# There is a THIRD value for R that neither line above carries: `writeup` 3.2 reports the
+# coil cluster's DC resistance as 1.3 ohm. That is the number a reader of the write-up will
+# use, and at 800 uF it gives Q = 1.02 where 6.9 ohm gives Q = 0.19 -- a factor of five in
+# every phase prediction downstream. Which one is the real series R is still open; the
+# lock-in in `coil_phase` measures Q directly and does not need it resolved first.
+#
+# C was 400e-6 until 2026-09-01, fitted from |I|(f) over a 0.2-60 Hz ramp -- the one band
+# where it is the only thing visible, so the fit could not constrain L. The bank is now
+# 800 uF (operator, 2026-09-01). The old pair predicted 213 Hz against a measured 174; the
+# new pair predicts 150 Hz against a measurement that does not exist yet.
 
 COIL_CHANNEL_R_OHM = 15.0
 COIL_CHANNEL_L_H = 6.7e-3
 
 COIL_SERIES_R_OHM = 6.9
 COIL_SERIES_L_H = 1.4e-3
-COIL_SERIES_C_F = 400e-6
+COIL_SERIES_C_F = 800e-6   # per coil array. Was 400e-6 before 2026-09-01.
+
+# ------------------------------------------------------------ per-channel drive phase
+#
+# What the robot responds to is the phase of the coil CURRENT, which the series RLC sets --
+# not the phase the ESP32 commands. theory.md 22 derives why the two differ and why only
+# these two numbers per channel are needed:
+#
+#     theta_k(f) = atan(Q_k * (f/f0_k - f0_k/f))
+#
+# It depends on f0 and Q alone -- no V, no absolute R, L or C -- so the CS path's unknown
+# gain (VNH5019 K spreads 4670-10110, and R4 has no value in the BOM) cancels exactly.
+#
+# None until `coil_phase.measure()` has run on this bank. A guessed trim is worse than no
+# trim: it would rotate the field by a number nobody measured, so the consumers treat None
+# as "no compensation" rather than substituting a default.
+COIL_PHASE_F0_HZ: tuple[float, ...] | None = None   # per channel A,B,C,D
+COIL_PHASE_Q: tuple[float, ...] | None = None       # per channel A,B,C,D
 
 V_RAIL = 12.0        # V, net VM1
 V_RAIL_MAX = 20.0    # V, driver ceiling before overvoltage risk
@@ -97,8 +129,16 @@ I_TRIP = 10.0        # A, the firmware overcurrent latch
 # the pipeline had measured them every frame since the start and thrown them away, so
 # "did the rotation axis move during the ramp?" could not be answered from any run.
 # theory.md 18.14 had to infer a 4.6 deg thrust tilt from accelerations instead.
-CSV_COLUMNS = ("t,state,f_hz,x_mm,y_mm,z_mm,tilt_deg,tilt_az_deg,mag,az,armed,spin,lost,"
-               "i_a,i_b,i_c,i_d").split(",")
+# `acc_tilt_x/y` are the THRUST direction from the position track (attitude.ThrustVector),
+# in degrees, and they are the signal the attitude loop closes on -- not `tilt_deg`, which
+# comes from the pose normal and carries 9.5 deg of scatter against a 1.5 deg signal
+# (theory.md 21). Blank while the robot is on the pad, where the reaction cancels lateral
+# acceleration and the sensor means nothing. `cmd_tilt_x/y` is what the attitude loop asked
+# for, logged even when it is flying open loop, because the identification in 21.2 regresses
+# exactly that against the response.
+CSV_COLUMNS = ("t,state,f_hz,x_mm,y_mm,z_mm,tilt_deg,tilt_az_deg,"
+               "acc_tilt_x,acc_tilt_y,cmd_tilt_x,cmd_tilt_y,"
+               "mag,az,armed,spin,lost,i_a,i_b,i_c,i_d").split(",")
 
 
 def demo():
@@ -107,17 +147,28 @@ def demo():
     assert RAMP_S <= MAX_RAMP_S, "the default ramp must not trip its own thermal cap"
 
     # The series pair is what predicts resonance; check the disagreement is still the one
-    # documented above and has not quietly become something else.
+    # documented above and has not quietly become something else. The sense of this
+    # disagreement FLIPPED on 2026-09-01: at 400 uF the pair predicted 213 Hz, high against
+    # the 174 Hz measured; at 800 uF it predicts 150 Hz, low against that same stale 174.
     import math
     predicted = 1.0 / (2 * math.pi * math.sqrt(COIL_SERIES_L_H * COIL_SERIES_C_F))
-    assert 205.0 < predicted < 220.0, predicted
-    assert predicted > F_RESONANCE_HZ, "series LC still predicts high against the measured peak"
+    assert 145.0 < predicted < 156.0, predicted
+    assert predicted < F_RESONANCE_HZ, "the 800 uF pair must predict BELOW the stale 174 Hz peak"
 
-    assert len(CSV_COLUMNS) == 17 and CSV_COLUMNS[0] == "t", CSV_COLUMNS
-    assert CSV_COLUMNS[6:8] == ["tilt_deg", "tilt_az_deg"], CSV_COLUMNS
+    # Both phase tables are per-channel or absent; never half-populated, and never a
+    # different length from the coil count.
+    for name, tbl in (("COIL_PHASE_F0_HZ", COIL_PHASE_F0_HZ), ("COIL_PHASE_Q", COIL_PHASE_Q)):
+        assert tbl is None or len(tbl) == 4, f"{name} must be None or one entry per coil"
+    assert (COIL_PHASE_F0_HZ is None) == (COIL_PHASE_Q is None), \
+        "f0 and Q are measured together; one without the other cannot produce a trim"
+
+    assert len(CSV_COLUMNS) == 21 and CSV_COLUMNS[0] == "t", CSV_COLUMNS
+    assert CSV_COLUMNS[6:12] == ["tilt_deg", "tilt_az_deg", "acc_tilt_x", "acc_tilt_y",
+                                 "cmd_tilt_x", "cmd_tilt_y"], CSV_COLUMNS
+    cal = "uncalibrated" if COIL_PHASE_F0_HZ is None else "calibrated"
     print(f"constants: ramp {RAMP_START_HZ}->{RAMP_TARGET_HZ} Hz in {RAMP_S}s, "
           f"step-out {F_STEPOUT_HZ} Hz, series LC predicts {predicted:.0f} Hz "
-          f"vs {F_RESONANCE_HZ:.0f} measured\n  ok")
+          f"vs {F_RESONANCE_HZ:.0f} measured (STALE, old bank); phase {cal}\n  ok")
 
 
 if __name__ == "__main__":

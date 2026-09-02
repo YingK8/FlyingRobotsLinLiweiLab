@@ -1,41 +1,119 @@
 {
+  // Drive-frequency sweep at a FIXED channel-0 tilt.
+  // Frequencies: 20, 40, 60, 80, 100, 120, 140, 160 Hz. Coil A (channel 0) is held at
+  // 30% carrier at every point; B, C and D stay at 100%.
+  //
+  // Per point: ramp 1 -> f over 15 s with all four at 100%, THEN step channel 0 to
+  // 30%, hold 5 s, ramp back down to 0 Hz over 4 s, cut the carrier, sit off
+  // for 10 s, repeat. Every point starts from the same stationary rotor and ends
+  // stopped, so no point inherits the state of the one before it.
+  //
+  // The up-ramp is 15 s (was 10 s through 2026-09-01 21:07). Slower is the safe
+  // direction: capture happens in the first seconds at low Hz, and a ramp that is too
+  // quick there starves it -- the rotor never gets caught and the point photographs as a
+  // stationary robot rather than as a failure. The down-ramp stays 4 s; it is a spin-down,
+  // not a capture, and nothing has to be caught on the way back to zero.
+  //
+  // THE 30% LINE MUST BE REPEATED IN EVERY BLOCK. `activateChannels` writes the carrier
+  // duty of every channel in its mask, and mask 15 includes channel 0 -- so a single
+  // `addCarrierDutyCycleTask` in the first block alone is silently reset to 100% by the
+  // next block's `activateChannels`, and only the first point actually runs tilted.
+  // Setting it after the ramp rather than before is deliberate: ramping up already
+  // asymmetric is how a capture is lost.
+  //
+  // The down-ramp runs BEFORE the carrier is cut, so the rotor is spun down rather than
+  // dropped. The carrier is cut AFTER reaching 0 Hz -- a 0 Hz drive with the carrier
+  // still on is not "off", it is DC into a stationary field, the hottest thing this rig
+  // can do, and it reads as an idle in the telemetry.
+  //
+  // `main_tilt` runs PASSTHROUGH (no current balancer). Required, not incidental:
+  // closing the balance loop makes channel 0 a "tilt follower" and drags the other three
+  // down toward its mis-read negative current, so a commanded 30:100:100:100 became
+  // 20:47:58:48 on 2026-09-01. See `control/theory.md` 23.1.
+  //
+  // THERMAL: 8 x (15 + 5 + 4) = 192 s of drive (+96 C at 0.5 C/s) against a 70 C
+  // ceiling; 272 s wall including the coils-off gaps. Runs under an operator override.
+  //
+  // Labels are stamped by main_tilt.cpp on change; FREQ_<hz>HZ is what tilt_sweep.py
+  // names each still after, so keep the numeric field zero-padded.
   "resolution_ms": 25,
   "initial_freq": 0.0,
   "initial_duty": [50, 50, 50, 50],
   "direction": "CW",
   "schedule": [
-    { "method": "label", "value": "TILT_SPINUP_1_220HZ_100PCT" },
+    { "method": "label", "value": "FREQ_020HZ" },
     { "method": "activateChannels", "mask": 15, "value": 100.0 },
-    { "method": "addEaseRampTask", "from": 1.0, "to": 150.0, "duration_ms": 30000 },
-    { "method": "label", "value": "TILT_HOLD_LEVEL" },
-    { "method": "addWaitTask", "duration_ms": 3000 },
-    { "method": "label", "value": "TILT_0_3_AT_90" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 90.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_80" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 80.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_70" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 70.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_60" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 60.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_50" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 50.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_40" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 40.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_30" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 30.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_20" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 20.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
-    { "method": "label", "value": "TILT_0_3_AT_10" },
-    { "method": "addCarrierDutyCycleTask", "channels": [0, 3], "value": 10.0 },
-    { "method": "addWaitTask", "duration_ms": 2500 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 20.0, "duration_ms": 30000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_020HZ" },
+    { "method": "addEaseRampTask", "from": 20.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_040HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 40.0, "duration_ms": 28000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_040HZ" },
+    { "method": "addEaseRampTask", "from": 40.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_060HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 60.0, "duration_ms": 30000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_060HZ" },
+    { "method": "addEaseRampTask", "from": 60.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_080HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 80.0, "duration_ms": 32000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_080HZ" },
+    { "method": "addEaseRampTask", "from": 80.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_100HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 100.0, "duration_ms": 34000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_100HZ" },
+    { "method": "addEaseRampTask", "from": 100.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_120HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 120.0, "duration_ms": 36000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_120HZ" },
+    { "method": "addEaseRampTask", "from": 120.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_140HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 140.0, "duration_ms": 38000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_140HZ" },
+    { "method": "addEaseRampTask", "from": 140.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+    { "method": "label", "value": "FREQ_160HZ" },
+    { "method": "activateChannels", "mask": 15, "value": 100.0 },
+    { "method": "addEaseRampTask", "from": 2.0, "to": 160.0, "duration_ms": 40000 },
+    { "method": "addCarrierDutyCycleTask", "channels": [0], "value": 30.0 },
+    { "method": "addWaitTask", "duration_ms": 5000 },
+    { "method": "label", "value": "DOWN_160HZ" },
+    { "method": "addEaseRampTask", "from": 160.0, "to": 0.0, "duration_ms": 4000 },
+    { "method": "activateChannels", "mask": 15, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 10000 },
+
     { "method": "label", "value": "TILT_OFF" },
     { "method": "activateChannels", "mask": 15, "value": 0.0 },
     { "method": "addWaitTask", "duration_ms": 500 }

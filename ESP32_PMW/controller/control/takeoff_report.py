@@ -42,6 +42,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 CSV_DIR = ROOT / "results" / "takeoff"
 
+from controller.control import coil_phase
 from controller.control import constants as C
 from controller.control.z_track import CAPACITANCE_F, INDUCTANCE_H, RESISTANCE_OHM
 
@@ -176,6 +177,14 @@ def metrics(d: dict) -> dict:
             m["f_res_hz"] = 1.0 / (2 * math.pi * math.sqrt(m["L_H"] * m["C_F"]))
             m["Q"] = math.sqrt(m["L_H"] / m["C_F"]) / RESISTANCE_OHM
 
+    # Per-channel, which the pooled fit above cannot see. The four channels do not share
+    # an f0: their capacitors differ, and the resulting current-PHASE spread tilts the
+    # rotation axis the same way an amplitude imbalance does (theory.md 22). Fitted on
+    # (f0, Q) rather than (L, C, R) because only those two are identifiable from the shape
+    # of |I|(f), and only those two are needed for the phase.
+    m["phase_fits"] = {t: coil_phase.fit_channel(d["f_hz"], d["i_" + t.lower()])
+                       for t in coil_phase.TAGS}
+
     ramp = (d["state"] <= 1) & np.isfinite(d["f_hz"]) & np.isfinite(d["z_mm"])
     m["n_ramp"] = int(ramp.sum())
     if m["n_ramp"] < 10 * PAD_MIN_BINS:
@@ -309,6 +318,23 @@ def report(path, plot: bool = True) -> dict:
     else:
         p("coil refit", f"skipped, {m.get('n_fit', 0)} usable current points above "
                         f"{FIT_F_MIN:.0f} Hz")
+
+    fits = m.get("phase_fits") or {}
+    if all(fits.get(t) for t in coil_phase.TAGS):
+        at = C.F_HOVER_TRACK_HZ
+        sp = coil_phase.spread_deg(at, fits)
+        print(f"  per-channel resonance, and the current phase it implies at {at:.0f} Hz")
+        for t, dev in zip(coil_phase.TAGS, sp):
+            f0 = fits[t]["f0_hz"]
+            print(f"    {t}  f0 = {f0:6.1f} Hz  Q = {fits[t]['q']:4.2f}   "
+                  f"phase {dev:+6.2f} deg from the four-channel mean")
+        pk = float(np.nanmax(sp) - np.nanmin(sp))
+        tick = 360.0 * 25e-6 * at
+        p("  phase spread", f"{pk:.2f} deg pk-pk, against a {tick:.2f} deg command quantum")
+    elif any(fits.values()):
+        p("phase fit", "incomplete -- at least one channel's band does not bracket f0")
+    else:
+        p("phase fit", "none -- the ramp must pass THROUGH resonance to separate f0 from Q")
     verdict = ("ROTOR NEVER TURNED, so nothing above is about a flying robot"
                if m["captured"] == "never turned"
                else f"lifted at {m['f_liftoff']:.0f} Hz, peak {m['z_max']:.0f} mm" if lifted

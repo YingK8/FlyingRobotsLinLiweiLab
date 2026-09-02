@@ -35,6 +35,29 @@ public:
   void setDutyCycle(int channel, float dutyPercent); ///< 0-100%.
   void setPhase(int channel, float degrees);         ///< 0-360 deg.
 
+  /**
+   * @brief Compensate each channel for the phase its series RLC adds to the CURRENT.
+   *
+   * The ESP32 commands a phase; the robot responds to the phase of the coil current,
+   * and the two differ by theta_k(f) = atan(Q_k (f/f0_k - f0_k/f)) -- a per-channel
+   * amount that changes sign through resonance. With a trim set, setPhase() keeps
+   * meaning "the phase I want the CURRENT at" and the correction is applied beneath it,
+   * re-evaluated on every frequency change. See `controller/control/theory.md` 22.
+   *
+   * Frequency-dependent on purpose: across a 2->210 Hz ramp theta swings tens of
+   * degrees, so a single constant trim is wrong nearly everywhere.
+   *
+   * @param f0Hz  per-channel resonance; nullptr, or any entry <= 0, disables the trim.
+   * @param q     per-channel Q; nullptr, or any entry <= 0, disables the trim.
+   */
+  void setPhaseTrim(const float *f0Hz, const float *q);
+
+  /// True when a phase trim is armed. False means the commanded phase goes out raw.
+  bool phaseTrimActive() const { return _trimOn; }
+
+  /// The correction currently applied to `channel`, in degrees (0 when disarmed).
+  float phaseTrimDeg(int channel) const;
+
   // Getters
   float getFrequency() const;            ///< Global frequency (Hz); 0 in DC mode.
 
@@ -110,6 +133,8 @@ private:
   static void IRAM_ATTR _timerCallback(void *arg);
   static void IRAM_ATTR _onSyncInterrupt();
   void updatePhaseParams(int channel);
+  void _applyPhase(int channel);   ///< base phase minus the cached trim -> _phaseOffsetsPct
+  void _recomputeTrim();           ///< refresh the trim cache; call OUTSIDE the spinlock
   void _writeCarrier(int channel, float dutyPercent);
   // Sense/balance work done inside run() when opted in.
   void _serviceCurrentLoop();
@@ -143,6 +168,17 @@ private:
 
   // State Arrays
   float *_phaseOffsetsPct;
+  // The phase as COMMANDED, before any RLC trim. Kept apart from _phaseOffsetsPct so a
+  // trim can be re-derived on every frequency change without the previous correction
+  // accumulating into the base.
+  float *_basePhaseDeg;
+  float _trimF0Hz[PWMC_MAX_CHANNELS] = {0};
+  float _trimQ[PWMC_MAX_CHANNELS] = {0};
+  // Cached theta_k(f), refreshed on frequency change. Cached rather than computed where
+  // it is used because that point is inside the ISR spinlock, and four atan2f calls with
+  // interrupts off is a large fraction of the 25 us tick.
+  float _trimCacheDeg[PWMC_MAX_CHANNELS] = {0};
+  bool _trimOn = false;
   static float _wrapPct(float degrees);
   float *_dutyCycles;
   PhaseParams *_params;

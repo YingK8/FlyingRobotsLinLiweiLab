@@ -2,6 +2,7 @@
 //
 // `seq=` is the ONLY way to ramp the coils. The profile belongs to the host, where it
 // can be retuned without a reflash; this firmware compiles in no ramp of its own.
+#include "coil_probe.h"
 #include "drive_common.h"
 #include "SerialComm.h"
 #include "constants.h"
@@ -106,6 +107,50 @@ static bool cmdSeq(const String &arg) {
   return false;
 }
 
+// probe=<hz>[:<ms>[:<carrier %>]] -- one lock-in burst measuring the coil CURRENT phase
+// per channel. IDLE only: it energises, and it must not be able to fire mid-flight.
+//
+// The burst BLOCKS, so for its duration neither the GPIO14 button nor a host `stop` is
+// serviced. That is why PROBE_MAX_MS is short and the coils are cut the instant it
+// returns: the window is bounded by construction rather than by anything watching it.
+// Nothing here holds the coils on after the call.
+static const uint32_t PROBE_MAX_MS = 2000;
+static const float PROBE_DUTY = 60.0f;   // % carrier. Near resonance full drive pulled
+                                         // 4.08 A (theory.md 18.8) against a 2 A
+                                         // continuous rating, and the lock-in does not
+                                         // need the amplitude -- only the angle.
+static const uint32_t PROBE_SETTLE_MS = 250;   // >> the RLC ringdown, Q/f0 is ~ms here
+
+static bool cmdProbe(const String &arg) {
+  if (state != IDLE) { Serial.printf("!probe state=%d\n", (int)state); return false; }
+
+  float v[3] = {0.0f, 1200.0f, PROBE_DUTY};   // hz, ms, carrier %
+  splitFloats(arg, v, 3);
+  if (!(v[0] > 0.0f)) { Serial.println("!probe needs hz>0"); return false; }
+  const uint32_t ms = (uint32_t)clampf(v[1], 100.0f, (float)PROBE_MAX_MS);
+  const float duty = clampf(v[2], 0.0f, 100.0f);
+
+  ctl.setGlobalFrequency(v[0]);
+  for (int i = 0; i < NUM_CHANNELS; i++) ctl.setCarrierDutyCycle(i, duty);
+  delay(PROBE_SETTLE_MS);
+
+  ProbeResult r;
+  // SPIN_PHASES is the commanded reference the measured angle is taken against. Note it
+  // is the BASE phase: any trim already applied is what we are trying to see the effect
+  // of, so a post-trim probe correctly reports the RESIDUAL.
+  const bool ok = coilProbe(ADC_PINS, NUM_CHANNELS, v[0], ms, SPIN_PHASES, r);
+  allCoilsOff();
+  ctl.setGlobalFrequency(0.0f);   // back to DC idle, so the echo does not read as driving
+
+  if (!ok) { Serial.println("!probe no samples"); return false; }
+  Serial.printf("PROBE f=%.2f A=%.0f,%.2f B=%.0f,%.2f C=%.0f,%.2f D=%.0f,%.2f "
+                "n=%lu coh=%.2f\n",
+                v[0], r.amp[0], r.phaseDeg[0], r.amp[1], r.phaseDeg[1],
+                r.amp[2], r.phaseDeg[2], r.amp[3], r.phaseDeg[3],
+                (unsigned long)r.n, r.coherence);
+  return true;
+}
+
 static bool cmdFreq(const String &arg) {
   float hz = arg.toFloat();
   if (state != FLIGHT) { Serial.printf("!freq state=%d\n", (int)state); return false; }
@@ -134,8 +179,9 @@ static void dispatch(String cmd) {
   else if (key == "stop")  { allCoilsOff(); state = OFF;                       ok = true; }
   else if (key == "freq")   ok = cmdFreq(arg);
   else if (key == "seq")    ok = cmdSeq(arg);
+  else if (key == "probe")  ok = cmdProbe(arg);
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|hover|land|stop|freq=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|hover|land|stop|freq=|probe=)\n",
                   cmd.c_str());
     return;
   }
@@ -150,6 +196,12 @@ void setup() {
   ctl.begin(); // DC; the ramp sets the running frequency
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   ctl.enableCurrentSense(ADC_PINS, SENS, /*tripA*/ 0.0f);
+  // No-op until COIL_F0_HZ / COIL_Q are filled in from a probe sweep: setPhaseTrim
+  // refuses a table with any non-positive entry, so an uncalibrated build drives the
+  // commanded phase raw rather than a guessed correction.
+  ctl.setPhaseTrim(COIL_F0_HZ, COIL_Q);
+  Serial.printf("[flight] phase trim %s\n",
+                ctl.phaseTrimActive() ? "ARMED from drive_common.h" : "off (uncalibrated)");
 }
 
 void loop() {

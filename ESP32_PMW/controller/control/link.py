@@ -41,6 +41,48 @@ _DUTY_RE = re.compile(r"duty\[%\]:\s*(.*?)(?:\||$)")
 _VAL_RE = re.compile(r"[A-D]=(-?[\d.]+)")
 
 
+# `probe=` answers with one line, once, when the burst finishes:
+#   "PROBE f=150.00 A=1832,-5.21 B=1790,-3.04 C=1855,-6.11 D=1801,-4.42 n=2048 coh=0.97"
+# Amplitude is raw lock-in magnitude in ADC counts -- deliberately NOT amps, because the
+# CS gain is the least trustworthy number on the board and the phase does not need it
+# (theory.md 22.2). The angle is the coil CURRENT phase relative to what that channel was
+# commanded, in degrees.
+_PROBE_RE = re.compile(r"(?:^|[ |])PROBE\b")
+_PROBE_F_RE = re.compile(r"(?:^|[ |])f=(-?\d+(?:\.\d+)?)")
+_PROBE_CH_RE = re.compile(r"([A-D])=(-?[\d.]+),(-?[\d.]+)")
+_PROBE_COH_RE = re.compile(r"coh=(-?[\d.]+)")
+
+
+class ProbePoint(NamedTuple):
+    """One `probe=` burst: per-channel lock-in magnitude and current phase."""
+
+    f_hz: float
+    amps: tuple[float, ...] = ()      # raw lock-in magnitude, ADC counts
+    phase_deg: tuple[float, ...] = ()  # current phase re. commanded, degrees
+    coherence: float | None = None     # 0..1; below ~0.9 the burst is noise
+
+
+def parse_probe(line: str) -> ProbePoint | None:
+    """A PROBE line -> ProbePoint, or None if this is not one (or is truncated)."""
+
+    if not _PROBE_RE.search(line):
+        return None
+    f = _PROBE_F_RE.search(line)
+    hits = _PROBE_CH_RE.findall(line)
+    if not f or len(hits) != 4:
+        return None    # truncated or interleaved; the caller retries on the next line
+    by_ch = {ch: (float(a), float(d)) for ch, a, d in hits}
+    if set(by_ch) != set("ABCD"):
+        return None
+    coh = _PROBE_COH_RE.search(line)
+    return ProbePoint(
+        f_hz=float(f.group(1)),
+        amps=tuple(by_ch[c][0] for c in "ABCD"),
+        phase_deg=tuple(by_ch[c][1] for c in "ABCD"),
+        coherence=float(coh.group(1)) if coh else None,
+    )
+
+
 class Telemetry(NamedTuple):
     """One parsed telemetry line. A field is None or empty when the line did not carry it."""
 
@@ -138,17 +180,34 @@ class SerialComm:
         `seq=clear` and `seq=ramp:` only queue tasks, so they stay out. `seq=go` is what
         starts the ramp turning current into heat.
 
+        `probe=` holds a fixed frequency for its burst and draws hardest of all near
+        resonance, so it counts from the moment it is sent. It has no matching `stop`:
+        the burst self-terminates, and `coil_phase.measure` sends an explicit `stop`
+        after each point to close the interval.
+
         Any new command that energises belongs in this list, or its heat goes unaccounted
         and the model reads cold while the coils are not.
         """
 
         c = cmd.strip().lower()
-        if c.startswith(("seq=go", "freq=", "mag=", "throttle=")):
+        if c.startswith(("seq=go", "freq=", "mag=", "throttle=", "probe=")):
             if self._drive_since is None:
                 self._drive_since = time.monotonic()
         elif c in ("stop", "land") and self._drive_since is not None:
             self._drive_s += time.monotonic() - self._drive_since
             self._drive_since = None
+
+    def note_external_drive(self, on: bool):
+        """Open/close a drive interval for coils this host never commanded.
+
+        `main_tilt.cpp` runs a SPIFFS schedule and parses no serial, so it energises
+        on reset with nothing passing through `handle_serial_comm` -- the one path
+        `_note_drive` watches. Without this its heat is simply not counted, and
+        `coil_thermal` reads cold while the coils are not. Callers: `tilt_sweep.py`,
+        around the reset that starts the schedule and the label that ends it.
+        """
+
+        self._note_drive("seq=go" if on else "stop")
 
     def energised_s(self):
         """Seconds of drive so far, including an interval still open."""
@@ -187,6 +246,31 @@ def demo():
     assert parse_telemetry("garbage") == Telemetry(), "never read values out of noise"
     assert parse_telemetry("!freq=163.00 rejected").freq is None, "a rejection is not a rate"
     assert parse_telemetry("state=2 freq=210.0").state == 2
+
+    # The PROBE line. `f=` here is not `freq=`, so a probe answer must not read as a
+    # frequency the coils are running at, and a telemetry line must not read as a probe.
+    pl = ("PROBE f=150.00 A=1832,-5.21 B=1790,-3.04 C=1855,-6.11 D=1801,-4.42 "
+          "n=2048 coh=0.97")
+    pp = parse_probe(pl)
+    assert pp.f_hz == 150.0 and pp.coherence == 0.97, pp
+    assert pp.phase_deg == (-5.21, -3.04, -6.11, -4.42), pp
+    assert pp.amps[0] == 1832.0, pp
+    assert parse_telemetry(pl).freq is None, "a probe answer is not a drive frequency"
+    assert parse_probe(line) is None, "telemetry is not a probe answer"
+    # Truncated and interleaved lines are common at 921600; half a probe is not a probe.
+    assert parse_probe("PROBE f=150.00 A=1832,-5.21 B=1790,-3.0") is None
+    assert parse_probe("PROBE A=1,0 B=1,0 C=1,0 D=1,0") is None, "no f= is not a probe"
+
+    # `probe=` energises and must start the thermal clock, or its heat goes unaccounted.
+    # This is the rule CLAUDE.md states for any new drive path.
+    c = SerialComm.__new__(SerialComm)
+    c._drive_since, c._drive_s = None, 0.0
+    c._note_drive("probe=150:1500")
+    assert c._drive_since is not None, "probe= must count as drive"
+    c._note_drive("stop")
+    assert c._drive_since is None and c.energised_s() > 0.0, "stop must close the interval"
+    c._note_drive("seq=ramp:2:210:30000:1:2")
+    assert c._drive_since is None, "queueing a ramp does not energise"
 
     # The RX framer, against a fake port. It reads everything waiting in one syscall
     # now instead of one per byte, so the buffer it scans can hold several lines, half a
@@ -242,6 +326,7 @@ def demo():
     assert got == [] and rest == "", (got, rest)
 
     print("link: parses zero, live and rejected telemetry; rejects noise; "
+          "reads PROBE and counts probe= as drive; "
           "framer handles split, batched and overflowing reads\n  ok")
 
 

@@ -105,10 +105,29 @@ no longer be spun up from a serial monitor without the Python host. **Do not add
 path back**; if you ever do, `link._note_drive` must count it as drive or its heat goes
 unaccounted. The reasoning is in `controller/control/theory.md` 18.7.
 
-Empirically best so far: **30 s EASE (k=2) to 210 Hz** (`ramp.DEFAULT`). Note that coil
-current peaks at the ~174 Hz resonance and falls above it, so torque margin is worse up
-there -- but lift goes as f^2 and wins anyway until step-out. Optimise for lift, not for
-torque margin.
+That rule is about `main_flight`. The one other firmware that spins the coils up is
+`-e tilt` (`src/main_tilt.cpp`), restored 2026-09-01 for the channel-0 amplitude sweep.
+It runs a SPIFFS schedule, **parses no serial**, and starts on reset -- so it energises
+with nothing passing through `handle_serial_comm`, and its heat is counted only because
+`controller/control/tilt_sweep.py` brackets the run with `SerialComm.note_external_drive`.
+Any other schedule-driven env must do the same. Its only software kill is GPIO14; there
+is no `stop` it can hear. See `control/theory.md` 23.
+
+Empirically best so far: **30 s EASE (k=2) to 210 Hz** (`ramp.DEFAULT`). Coil current peaks
+at resonance and falls above it, so torque margin is worse up there -- but lift goes as f^2
+and wins anyway until step-out. Optimise for lift, not for torque margin.
+
+**Where resonance IS, is unknown.** The 174 Hz in `F_RESONANCE_HZ` was measured on the old
+capacitor bank; the bank went to 800 uF per coil array on 2026-09-01 and $f_0 \propto
+C^{-1/2}$, so that number is stale and must not be rescaled arithmetically -- the old $C$
+never agreed with itself (334 uF fitted vs 500 uF selected scale it to 112 or 138 Hz). The
+nominal is 150 Hz. Re-measure with `coil_phase.py --measure`; `theory.md` 22.3 has the
+argument, 18.6 the history.
+
+**`probe=` is a drive path.** It energises, so `link._note_drive` counts it and
+`coil_phase.measure` gates it on `coil_thermal.wait_until_safe()`. It is IDLE-only and
+blocks for its burst, during which neither the GPIO14 button nor a host `stop` is serviced
+-- which is why it is capped at 2 s and cuts the coils the instant it returns.
 
 ## Commands
 
@@ -118,6 +137,7 @@ pio run -e flight -t upload        # flash it
 pio run -e <env> -t uploadfs       # schedule-driven envs only; flight takes its commands
                                    #   over serial and reads no SPIFFS schedule
 uv run python controller/control/z_track.py     # self-checks: run the module
+uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives
 uv run python ai/spinup/detector.py --all       # did the rotor turn on each take?
 ```
 

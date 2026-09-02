@@ -45,6 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
+from controller.control import attitude
 from controller.control import predictor
 from controller.control import ramp
 from controller.control import z_track
@@ -354,7 +355,7 @@ class CommandLink:
         # A non-match leaves the last good value standing: lines arrive truncated
         # and interleaved, and a dropped field is not a reading of zero.
         while (line := self.comm.handle_serial_comm()) is not None:
-            self.log.write(line + "\n")
+            self.log.write(f"[{time.monotonic():.3f}] <- {line}\n")
             if self.on_line:
                 self.on_line(line)
             t = parse_telemetry(line)
@@ -441,6 +442,11 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
               "loop running; the firmware ramps to FLIGHT, nothing is commanded before that")
         feed = _PoseFeed(ticks, threaded=threaded)
         t_start = time.monotonic()
+        # The run CSV's `t` is relative to this instant and nothing else records it, so
+        # the log is where the three artefacts are tied together: video frames, serial
+        # traffic and CSV rows all reduce to one monotonic clock through this line.
+        # `sync.py` reads it.
+        link.log.write(f"[{t_start:.3f}] <> csv t=0\n")
         pred = predictor.StatePredictor()
         # What the coils were last told, and the current hover estimate. Passing one for
         # both would make every prediction a constant-velocity coast.
@@ -463,6 +469,15 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
         t_pred = t_start          # where the predictor has been advanced to
         t_fix = t_start           # wall time of the last pose fix, for the tracking land
         trim_sent = False         # the tilt trim is commanded once, above trim_at_hz
+        # Attitude. The estimator runs ALWAYS -- it is the measurement, and it costs a
+        # savgol over a 0.25 s ring buffer -- but the controller only acts when
+        # `attitude_closed` is set AND a rotation has been measured. Flying it open is how
+        # the rotation gets identified in the first place (theory.md 21.2).
+        tv = attitude.ThrustVector()
+        tilt_ctl = attitude.TiltController(gain=args.attitude_gain,
+                                           rot_deg=args.attitude_rot_deg)
+        cmd_tilt = (0.0, 0.0)
+        id_phase = -1             # which dither azimuth is commanded
         lost_land_s = getattr(args, "lost_land_s", LOST_LAND_S)
         n_seen = 0
         while True:
@@ -536,6 +551,25 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                       f"engaged at {link.freq:.1f} Hz")
                 link.send(f"az={args.trim_az:.0f}")
                 link.send(f"mag={args.trim_mag:.3f}")
+
+            # IDENTIFICATION DITHER. Steps the commanded weak direction through a set of
+            # azimuths so `attitude.fit_rotation` has a known input to regress the tilt
+            # response against. It runs on the same clock as the trim and REPLACES its
+            # azimuth, so the two never fight over `az=`.
+            #
+            # This is the only excitation available: the thrust sensor reads nothing while
+            # the robot is seated (the pad cancels lateral acceleration), so the dither has
+            # to happen inside an airborne window that is currently 1-2 s long. If it is too
+            # short, `fit_rotation` refuses rather than fitting noise -- which is the
+            # designed outcome, not a failure of the run.
+            # Gated on FREQUENCY, not on the trim having fired: identification has to be
+            # runnable with no trim at all, and an earlier version that keyed off
+            # `trim_sent` silently did nothing whenever `trim_mag` was 0.
+            if args.id_azimuths and link.freq and link.freq >= args.trim_at_hz:
+                k = int((now - t_start) / args.id_dwell_s) % len(args.id_azimuths)
+                if k != id_phase:
+                    id_phase = k
+                    link.send(f"az={args.id_azimuths[k]:.0f}")
 
             # Arm on the RAMP, not just on FLIGHT. Measured 2026-09-01: across five runs the
             # lateral loop never armed once, because arming waited for the firmware to
@@ -680,9 +714,15 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                     (f"{tick.pose.theta_deg:.2f}", f"{tick.pose.phi_deg:.1f}")
                     if tick.pose is not None else ("", ""))
                 i = link.currents or ("", "", "", "")
+                # Blank, not zero, when the thrust sensor declines: a 0.00 here would read
+                # as "measured, and level", which is the opposite of "not airborne yet".
+                at = (("", "") if tv.tilt_xy is None
+                      else (f"{tv.tilt_xy[0]:.3f}", f"{tv.tilt_xy[1]:.3f}"))
                 rows.writerow([f"{now - t_start:.4f}", link.state if link.state is not None
                                else "", link.freq if link.freq is not None else "",
-                               x, y, z, tilt, tilt_az, mag_cmd, az_cmd, int(armed),
+                               x, y, z, tilt, tilt_az, at[0], at[1],
+                               f"{cmd_tilt[0]:.4f}", f"{cmd_tilt[1]:.4f}",
+                               mag_cmd, az_cmd, int(armed),
                                _spin_state(tick.spin), tick.lost, *i])
 
             if link.state != FLIGHT:
@@ -710,6 +750,7 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                     dt_meas = tick.t - t_meas
                 t_meas = tick.t
                 xyz_mm = pred.update(tick.xyz_mm, t=tick.t)
+                tv.update(tick.xyz_mm, tick.t)
                 # From the SHUTTER, not from now: `tick.t` is the capture stamp, so the
                 # next step propagates this pose forward by its full pipeline age. That
                 # is the latency compensation `filter.predict_ahead` was written for and
@@ -734,6 +775,13 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
             ux, f_lqr = ctrl_x.step(t, x_m - sp_x, z_m - sp_z, dt_meas)
             uy, _ = ctrl_y.step(t, y_m - sp_y, z_m - sp_z, dt_meas)
             ux, uy = gain[0] * ux, gain[0] * uy
+
+            # THE 5-DOF SEAM. Position gives (ux, uy); attitude gives another Cartesian
+            # term in the same frame and units; they sum here, and one polar conversion
+            # below serves both. Remaining degrees of freedom join at this same point.
+            cmd_tilt = tilt_ctl.step(tv.tilt_xy, t)
+            if args.attitude_closed:
+                ux, uy = ux + cmd_tilt[0], uy + cmd_tilt[1]
 
             # Polar, because the actuator is: one azimuth and one magnitude, never a signed
             # magnitude with a 180 degree flip hiding in it.
@@ -832,7 +880,9 @@ class RunConfig:
     axes: tuple = ("x", "y", "z")  # datum-frame axis names, for the viz labels
     profile: str = None  # reference profile JSON; None holds at the viz setpoint
     port: str = None
-    log: str = "hover_run.log"
+    # None pairs the serial log with the run's CSV as `<csv_dir>/<stamp>.log`. A fixed
+    # path is honoured, but is overwritten every run -- see `fly`.
+    log: str | None = None
     csv_dir: str = "results/takeoff"  # one CSV per attempt, read by takeoff_report.py
     takeoff: bool = True
     # THE ramp. `((from_hz, to_hz, seconds, mode, k), ...)`, straight onto
@@ -862,6 +912,19 @@ class RunConfig:
     # trim applied through it distorts the rotating field enough to stop the rotor being
     # caught at all -- measured 2026-09-01 with az=315, which never span.
     trim_at_hz: float = 20.0
+    # Attitude loop (theory.md 21). The estimator always runs and is always logged; these
+    # only decide whether it ACTS. `attitude_rot_deg` is the mixer rotation and has no
+    # default -- 20.5 allows only 69.4 deg of error before the loop is uncertifiable, and
+    # 12.8 measured 72 deg on a related model, so it is measured by `attitude.fit_rotation`
+    # from an open-loop run before anything closes. `attitude_closed` stays False until then.
+    attitude_rot_deg: float | None = None
+    attitude_closed: bool = False
+    attitude_gain: float = 0.02
+    # Identification: cycle the commanded weak direction through these while flying, so
+    # `attitude.fit_rotation` has a known input. Empty disables it. Dwell must exceed the
+    # estimator's 0.25 s window or every sample straddles two commands.
+    id_azimuths: tuple = ()
+    id_dwell_s: float = 0.4
     # Lateral authority when auto-armed. STAYS 0 until the az sweep is run: `applyMixer`
     # steers by COIL_AZ, which main_flight.cpp labels a seed guess, and a wrong azimuth
     # map pushes lateral the wrong way -- the same class of bug as the inverted
@@ -942,7 +1005,17 @@ def fly(cfg=None, **kw):
             f"f_ceiling={ztrk.f_ceil:.1f} Hz, a_max={ztrk.a_ceiling:.2f} m/s^2"
         )
 
-    link = CommandLink(cfg.port, cfg.dry_run, cfg.log,
+    # One stamp for both artefacts, so an attempt's CSV and its serial log are named
+    # alike and neither can be attributed to the wrong run.
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join(cfg.csv_dir, stamp + ".csv")
+    # `cfg.log` defaults to None, which means "beside the CSV". The old fixed
+    # `hover_run.log` was opened "w" every run, so each attempt silently destroyed the
+    # previous attempt's serial trace -- fine when the log was a live tail, useless once
+    # `sync.py` aligns it to a flight that is kept. An explicit path still wins, and
+    # still clobbers, which is the caller's choice.
+    log_path = cfg.log or os.path.join(cfg.csv_dir, stamp + ".log")
+    link = CommandLink(cfg.port, cfg.dry_run, log_path,
                        takeoff_cmd=ramp.seq_lines(cfg.segments))
     # The viewer the camera path built is reachable through the first tick; for the
     # stub path it is own_viz. On the camera path `stereo_frames` builds its viewer
@@ -952,7 +1025,6 @@ def fly(cfg=None, **kw):
     if own_viz is not None:
         link.on_line = own_viz.log_line
 
-    csv_path = os.path.join(cfg.csv_dir, time.strftime("%Y%m%d_%H%M%S") + ".csv")
     # Block-buffered, not line-buffered. A row a tick at 500 Hz is 500 flushes a second
     # inside a 2 ms budget; the default 8 kB buffer is ~40 rows, i.e. ~80 ms of flight,
     # and `fh.close()` in the `finally` below flushes the tail on every exit that runs
@@ -977,7 +1049,7 @@ def fly(cfg=None, **kw):
         link.close()
         if own_viz is not None:
             own_viz.close()
-        print(f"done -> {cfg.log}, {csv_path}")
+        print(f"done -> {log_path}, {csv_path}")
         # A missing or broken report must never mask the flight's own exception.
         try:
             from controller.control import takeoff_report
@@ -985,4 +1057,4 @@ def fly(cfg=None, **kw):
             takeoff_report.report(csv_path)
         except Exception as exc:  # noqa: BLE001
             print(f"no takeoff report ({type(exc).__name__}: {exc})")
-    return cfg.log
+    return log_path

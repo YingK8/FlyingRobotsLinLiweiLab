@@ -152,6 +152,18 @@ class TorqueLimits:
     def sin_delta(self, f_hz: float) -> float:
         """Torque ratio at steady spin. >= 1 means step-out."""
 
+        # f = 0 is 0/0, not infinity: the drag load k_drag*f^2 vanishes at exactly the
+        # rate the available torque does, because coil_gain ~ f at DC and tau_max goes as
+        # its square. The limit is 0 (measurably: 5.6e-4 at 1 Hz, 5.6e-7 at 1 mHz), so
+        # falling through to the `tau <= 0` branch reported a step-out at the one frequency
+        # where there is neither spin to lose nor drag to lose it to.
+        #
+        # Reached whenever the tracker commands DC -- a maximal descent inverts to f = 0 --
+        # which only became reachable in the saturating case when the 800 uF bank moved
+        # f_ceiling. The trajectory that exposed it was already divergent; the bug was the
+        # discontinuity, not the trajectory.
+        if f_hz <= 0.0:
+            return 0.0
         tau = self.tau_max(f_hz)
         return math.inf if tau <= 0.0 else self.k_drag * f_hz**2 / tau
 
@@ -403,6 +415,13 @@ def demo() -> None:
         print("              Record a static calibration:\n"
               "                uv run python controller/pose/noise.py --record\n"
               "                or noise.record_live(stations=4) in run.ipynb")
+
+    # sin_delta at DC is a limit, not a step-out. The ratio is 0/0 there -- drag and
+    # available torque both vanish as f^2 -- and reporting inf tripped every caller the
+    # moment a maximal descent inverted to f = 0.
+    assert lim.sin_delta(0.0) == 0.0, lim.sin_delta(0.0)
+    assert lim.sin_delta(1e-3) < 1e-5, lim.sin_delta(1e-3)
+    assert lim.sin_delta(1.0) < lim.sin_delta(10.0) < lim.s_lim, "monotone up from DC"
 
     # The calibration trap: a limiter that cannot reach hover cannot fly.
     assert f_ceil > lim.f_hover, f"{f_ceil} <= {lim.f_hover}"

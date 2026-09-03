@@ -11,7 +11,7 @@ void setup() {
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   ctl.enableCurrentSense(ADC_PINS, SENS);
 
-  ctl.enableCurrentBalance(); // enable PI current balancing
+  // ctl.enableCurrentBalance(); // enable PI current balancing
 
   seq.loadFromJsonFile("/tilt.json");
   seq.start();

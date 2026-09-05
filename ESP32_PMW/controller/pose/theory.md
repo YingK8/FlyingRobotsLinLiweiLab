@@ -2864,6 +2864,66 @@ normal into that plane -- a hard constraint on one component, the disc keeping t
 
 The same `fused_axis` serves the live loop in `control/tilt_servo.py` (`control/theory.md` 24), and `DiscStereoEstimator.update` now takes the centre from the two views' undistorted ellipse centres by ray triangulation rather than from the rim radius: on 300 frames of `2026-09-01_210758` the position is identical to the digit at an assumed radius of 10.24 and 25 mm, with a ray gap of 1 mm median.
 
+### 20.5 The opening deletes blade tips, and giving them back moves every number
+
+20.1 stops at "the disc is one blob at `DISC_LOW`, so open it with 11 px and the mast,
+wires and bead go". They do. So does a **blade tip**, which is thinner than 11 px as often
+as a guy wire is, and the largest-component pick then discards whatever the opening
+severed. Measured on drone 1, 16 views spread across the take: only **65-88 % of the
+above-threshold pixels reached the mask**, and painting the erased set back onto the frame
+shows the mast, the wires, the bead -- and a white blade tip standing outside the fitted
+ellipse. It was reported from the overlay video (2026-09-04) as the propellers not being
+fully detected, and read at first as a threshold being too high. The threshold was never
+the problem: 5000-6400 px per view sit above it, blades included.
+
+The blob left of the disc in those frames is rotor too, not rig. Over 500 consecutive
+frames of one hold, **exactly one pixel** is bright in more than 95 % of them: everything
+in that region sweeps.
+
+**The failed fix, recorded because it is the obvious one.** Keep the components the
+opening severed -- they are rotor, the mast did not survive the opening, so what else
+could they be? Measured on the same frames: it grabs something off-rotor and takes the
+minor axis 86 -> 114 px with the hull fit rms 0.8 -> 4.5. Rejected.
+
+**What works is a window, not a component test.** The opening picks the disc BODY; the
+pre-opening mask is then given back inside that body's own ellipse scaled by
+`disc_pose.RECOVER_SCALE` = 1.25, keeping only what still connects to the body. The
+geometry is the whole argument: the mast and the wires leave the disc along its **normal**,
+which is the thin direction of that ellipse, so they exit the window within a few px
+however far they run, while a blade tip leaves along the disc plane and stays inside it.
+The recovery can therefore only extend the hull where a blade sticks out, which is the
+defect and nothing else. It recovers 167-1240 px per view with the fit rms staying inside
+its 1-3.4 px band.
+
+**Held to the mast, which shares no failure mode with it** (`control/theory.md` 23), the
+whole drone-1 sweep re-solved:
+
+| Hz | agree before | after | disc scatter before | after |
+|---|---|---|---|---|
+| 20 | 7.49 | **5.43** | 17.28 | **4.50** |
+| 40 | 5.37 | **4.26** | 9.48 | **2.77** |
+| 60 | 5.59 | **4.54** | 4.39 | 4.96 |
+| 80 | 5.25 | **4.34** | 2.82 | 3.07 |
+| 100 | 5.33 | **4.48** | 1.86 | **1.84** |
+| 120 | 5.53 | **4.71** | 1.70 | **1.61** |
+| 140 | 5.57 | **4.67** | 3.02 | **2.78** |
+| 160 | 12.07 | **8.43** | 26.44 | **24.50** |
+| mean | 6.52 | **5.11** | 8.37 | **5.75** |
+
+Agreement improves at **every** point, and the datum's own spread goes 8.73 -> 5.72 deg.
+The mast's scatter improves too (6.62 -> 4.23), which is not a coincidence and not
+double-counting: `find_mast` takes the disc segmentation as its input, so a mask that
+stops cutting blades sharpens the mast pick as well -- the two sensors are less
+independent than 23 assumes, and the agreement number should be read with that in hand.
+The 20 Hz point moves most (scatter 17.28 -> 4.50), which is where the argument predicts
+it: frozen blades are exactly the case whose tips were being erased.
+
+**Every per-point number published from these takes before 2026-09-04 was fitted to a
+mask missing a third of its bright pixels** and is superseded; the absolute tilts moved
+several degrees (20 Hz pre-drop 22.2 -> 15.4). `RECOVER_SCALE`'s ceiling is a blade past
+1.25 radii -- a rotor at rest, seen edge-on -- which is still cut. Pushing the scale out
+reaches the wires, so that case wants the mast pick masking them first, not a wider window.
+
 ## 21. The pipeline in C++, and what holding it to the Python taught
 
 Written 2026-09-03. Everything `StereoPoseEstimator.update` does per frame -- the evidence

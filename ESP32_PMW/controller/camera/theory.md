@@ -17,6 +17,7 @@ device will tell you something that is not true.
 | 4 | `modes.py` | measures what each mode actually delivers, and diagnoses why |
 | 5 | `record.py` | the flight recorder: one video per camera plus the `frames.csv` that makes them a timed pair |
 | 6 | `test_record.py` | checks that pairing and the take boundaries hold |
+| 7 | `../native/src/capture_avf.mm` | the live path: the same camera, in C++, paired differently (§1.6) |
 
 Start at `sources.MonoCamera`; everything else exists because of what §1.2 and
 §1.3 say about it.
@@ -143,7 +144,34 @@ shutter**. Both properties matter downstream and neither is incidental:
   what disqualifies colour-based clutter rejection, and the whole of
   [§15](../pose/theory.md#152-why-chroma-cannot-rescue-it) follows from it.
 
-## 1.6 Correspondence with the implementation
+## 1.6 The pair's phase is an asset, not only a cost
+
+1.4 models the two cameras as independent uniform phases and treats the resulting skew as
+something to correct for. Read the other way, it says the two cameras' frames are
+**interleaved in time**, and `StereoCamera.read` throws half of those instants away:
+`MonoCamera.read` consumes its slot and blocks for a fresh frame from *each* camera, so a
+pair costs the slower camera's period and the observation rate can never beat one
+camera's rate.
+
+A slot that is never consumed -- always the newest frame, with a sequence number rather
+than emptiness saying "new" -- lets a pose fire on every frame from *either* camera. That
+is roughly twice the observations at the same resolution, FOV and calibration, which is
+the only route past ~208 fps on this sensor: the faster modes are crops, and downsampling
+happens after the USB transfer so it cannot move the capture rate at all.
+
+The cost is one failure mode this chapter's design does not have. `read`'s 2 s timeout is
+what stops the loop when a camera dies; a never-consumed slot would pair its frozen last
+frame forever. `pose/tracker.py`'s `max_skew_s` replaces it -- a stopped camera's skew
+grows without bound and every pair is refused.
+
+Built in C++ (`controller/native/src/capture_avf.mm`) against AVFoundation rather than
+OpenCV's `videoio`, which also removes this chapter's two worst ergonomics: the device is
+addressed by `uniqueID` so A and B come from the rig instead of from probe order (see
+`identify.py`'s argument, which is about OpenCV specifically), and the format is *chosen*
+from `AVCaptureDeviceFormat` rather than requested and checked, so 1.2's silent size
+substitution cannot happen. Full argument in `pose/theory.md` 22.
+
+## 1.7 Correspondence with the implementation
 
 | Model element | Code |
 |---|---|
@@ -158,3 +186,5 @@ shutter**. Both properties matter downstream and neither is incidental:
 | Skew measurement (§1.4) | `sources.py` `StereoCamera.read`, `skew_stats` |
 | Mean pair timestamp (§1.4) | `StereoCamera.read` |
 | One camera or two, branch-free (§1.1) | `elp.open_group`, `elp.as_frames` |
+| Never-consumed slot, interleaved pairing (§1.6) | `native/src/tracker.h`, `pose/tracker.py` |
+| Capture on AVFoundation directly (§1.6) | `native/src/capture.h`, `capture_avf.mm` |

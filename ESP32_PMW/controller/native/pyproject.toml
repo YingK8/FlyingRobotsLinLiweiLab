@@ -1,0 +1,18 @@
+# The compiled pose core, `pmw_pose`. A separate distribution so that `uv sync` without
+# `--extra native` never needs cmake, and so the pure-Python `controller` package (an
+# editable hatchling install) is untouched. See controller/pose/theory.md 21.
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.9"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "esp32-pmw-native"
+version = "0.1.0"
+description = "C++ core of the ESP32_PMW stereo pose pipeline"
+requires-python = ">=3.12"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+# Stable ABI: a uv interpreter bump does not force a rebuild.
+wheel.py-api = "cp312"

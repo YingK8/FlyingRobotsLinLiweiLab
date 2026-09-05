@@ -1,0 +1,3 @@
+# generated, 2026-09-04T02:30:35+00:00
+# source, results/flights/New Folder With Items/2026-08-29_231418
+frame,t_capture,t_host,x_mm,y_mm,z_mm,theta_deg,phi_deg,psi_deg,nx,ny,nz,vx_mm_s,vy_mm_s,vz_mm_s,ellipse_cx,ellipse_cy,major_px,minor_px,ellipse_deg,area_px,fit_rms_px,ambiguity_margin_deg,n_solutions,jump_deg,discrepancy_mm,margin,refine_rms_px,union_coverage,pred_pos_mm,pred_ang_deg,t_seg_ms,t_est_ms,t_total_ms

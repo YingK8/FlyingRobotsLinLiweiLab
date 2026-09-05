@@ -28,15 +28,41 @@ static float seqF0 = 0.0f;      // start frequency of the first segment
 static float azSet = 0.0f;      // deg
 static float magSet = 0.0f;     // 0..1
 
+// `duty=A:B:C:D`: per-channel carrier % that REPLACES the az/mag mixer while set. The
+// host's tilt-servo loop (controller/control/tilt_servo.py) needs four independent
+// amplitudes -- a balance trim plus one coil dropped to a fraction of its trimmed value --
+// and the mixer's single cos lobe cannot express that. `collective` still scales it, so
+// `throttle=` and the LANDING ramp behave the same either way. `duty=off` clears it.
+static bool dutySet = false;
+static float dutyPct[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
+
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 // Thrust-vector mixer: drop the az-facing coils' ceilings so the disk tilts toward
 // az. Strong side stays at collective, the balance reference. Verify sign on rig.
 static void applyMixer() {
   for (int i = 0; i < NUM_CHANNELS; i++) {
-    float drop = MIX_GAIN * magSet * max(0.0f, cosf((azSet - COIL_AZ[i]) * (float)DEG_TO_RAD));
-    ctl.setCarrierDutyCycle(i, clampf(collective * (1.0f - drop), 0.0f, 100.0f));
+    float frac;
+    if (dutySet) {
+      frac = dutyPct[i] / 100.0f;
+    } else {
+      float drop = MIX_GAIN * magSet * max(0.0f, cosf((azSet - COIL_AZ[i]) * (float)DEG_TO_RAD));
+      frac = 1.0f - drop;
+    }
+    ctl.setCarrierDutyCycle(i, clampf(collective * frac, 0.0f, 100.0f));
   }
+}
+
+static void splitFloats(const String &s, float *out, int n);
+
+static bool cmdDuty(const String &arg) {
+  if (arg == "off") { dutySet = false; return true; }
+  float v[NUM_CHANNELS];
+  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = dutyPct[i];   // short command keeps the rest
+  splitFloats(arg, v, NUM_CHANNELS);
+  for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(v[i], 0.0f, 100.0f);
+  dutySet = true;
+  return true;
 }
 
 static void allCoilsOff() {
@@ -180,15 +206,17 @@ static void dispatch(String cmd) {
   else if (key == "freq")   ok = cmdFreq(arg);
   else if (key == "seq")    ok = cmdSeq(arg);
   else if (key == "probe")  ok = cmdProbe(arg);
+  else if (key == "duty")   ok = cmdDuty(arg);
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|hover|land|stop|freq=|probe=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|hover|land|stop|freq=|probe=)\n",
                   cmd.c_str());
     return;
   }
   if (!ok) return;
 
-  Serial.printf("state=%d col=%.0f az=%.0f mag=%.2f freq=%.2f\n",
-                (int)state, collective, azSet, magSet, ctl.getFrequency());
+  Serial.printf("state=%d col=%.0f az=%.0f mag=%.2f freq=%.2f duty=%s\n",
+                (int)state, collective, azSet, magSet, ctl.getFrequency(),
+                dutySet ? "set" : "off");
 }
 
 void setup() {

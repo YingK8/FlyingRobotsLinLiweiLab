@@ -24,6 +24,17 @@ dependencies = [
     "viser>=1.1.0",
 ]
 
+# The compiled pose core (controller/native). Optional: `uv sync --extra native` builds it
+# with cmake against Homebrew OpenCV/Eigen; without the extra the Python estimator runs.
+[project.optional-dependencies]
+native = ["esp32-pmw-native"]
+
+[tool.uv.workspace]
+members = ["controller/native"]
+
+[tool.uv.sources]
+esp32-pmw-native = { workspace = true }
+
 # `controller` is a real package, so every module says where its imports come from
 # (`from controller.pose import stereo`) instead of prepending sys.path by hand. uv installs
 # it editable, which is what keeps `python controller/control/z_track.py` working too.

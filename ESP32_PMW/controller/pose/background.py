@@ -54,6 +54,12 @@ STALE_FRACTION = 0.10
 WARMUP_FRAMES = 5
 
 
+try:  # the compiled step, when `uv sync --extra native` has built it
+    from pmw_pose import running_plate_update as _native_step
+except ImportError:
+    _native_step = None
+
+
 class RunningPlate:
     """
     The empty-rig plate estimated online, so nothing has to be captured first.
@@ -132,10 +138,17 @@ class RunningPlate:
             without one.
         """
 
-        f = gray.astype(np.float32)
-        if self.bg is None or self.bg.shape != f.shape:
-            self.bg = f.copy()
+        if self.bg is None or self.bg.shape != gray.shape:
+            self.bg = gray.astype(np.float32)
+        elif _native_step is not None and gray.dtype == np.uint8:
+            # The same arithmetic in C++ (controller/native): 0.57 -> 0.05 ms a view at
+            # 640x400, which was a fifth of the native core's whole frame. Same float32
+            # sign step, same uint8 cast, in place on `self.bg`.
+            out = _native_step(self.bg, np.ascontiguousarray(gray), self.step)
+            self.n += 1
+            return out if self.ready else None
         else:
+            f = gray.astype(np.float32)
             # np.sign then a scaled add, rather than np.clip on the difference: the
             # step must not depend on how far off the pixel is, or it becomes a mean.
             self.bg += self.step * np.sign(f - self.bg)

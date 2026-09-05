@@ -10,7 +10,9 @@ a two-camera stereo rig.
 | `src/main_flight.cpp` | the flight firmware. One `main_*.cpp` per experiment, one PlatformIO env each |
 | `lib/` | firmware libraries (`PwmController`, `SerialComm`, ...) |
 | `controller/` | the live host pipeline: `camera/` -> `calib/` -> `pose/` -> `control/`, plus `viz/`. A real Python package -- import by full path, `from controller.pose import stereo` |
+| `controller/native/` | `pmw_pose`: the C++ port of everything `StereoPoseEstimator.update` does per frame (`pose/theory.md` 21), plus the live capture and the interleaved tracker (22). Built by `uv sync --extra native`; `pose/stereo_native.py` wraps the estimator, `pose/tracker.py` the tracker, and `live_viz._stereo_estimator` picks the native core when it is importable. The Python estimator stays as the reference and `pose/native_parity.py` holds the two together |
 | `ai/` | gitignored scratchpad: bench harnesses and offline design tooling. `ai/thermal/coil_thermal.py` is load-bearing (see Safety) |
+| `controller/report.py` | one command for the whole offline pass on a take: solve, mast, angles, the command record, the plots and the overlay video, all into `<take>/report/`. The stages are the modules above; this only orders them |
 | `controller/run.ipynb` | the operator notebook, one cell per stage; cell 12 flies |
 | `results/`, `data/` | captures and outputs; each has a README mapping files to the script that made them |
 
@@ -129,6 +131,11 @@ argument, 18.6 the history.
 blocks for its burst, during which neither the GPIO14 button nor a host `stop` is serviced
 -- which is why it is capped at 2 s and cuts the coils the instant it returns.
 
+**`duty=A:B:C:D` is a drive path too.** Per-channel carrier ceilings that replace the az/mag
+mixer while set (`duty=off` clears). It exists for `controller/control/tilt_servo.py`, which
+needs four independent amplitudes; `link._note_drive` counts it. It scales `collective`, so
+`throttle=` and the landing ramp behave the same either way.
+
 ## Commands
 
 ```bash
@@ -136,8 +143,12 @@ pio run -e flight                  # build the flight firmware (default env)
 pio run -e flight -t upload        # flash it
 pio run -e <env> -t uploadfs       # schedule-driven envs only; flight takes its commands
                                    #   over serial and reads no SPIFFS schedule
+uv sync --extra native                          # build pmw_pose (needs cmake + Homebrew opencv, eigen)
+uv run python controller/pose/native_parity.py  # hold the C++ core to the Python reference
+uv run python controller/pose/tracker.py        # pairing, skew guard, view-cache exactness (no camera)
 uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives
+uv run python controller/report.py results/tilt_sweep/<take>   # the whole offline pipeline
 uv run python ai/spinup/detector.py --all       # did the rotor turn on each take?
 ```
 
@@ -147,9 +158,10 @@ Self-checks are a `demo()` or `_self_check()` under `if __name__ == "__main__"`,
 ## Loop rate
 
 The control loop runs at **500 Hz** on its own clock; the pose pipeline delivers
-**~90-100 Hz** (640x400). They are decoupled: `stereo_frames` runs on a producer thread
-behind a drop-oldest slot and the controller propagates with `predictor.StatePredictor`
-between fixes. `hover_controller.json` is designed at `rate_hz=500`, and the closed-loop
+**~90-100 Hz** (640x400) on the Python capture path, or roughly **4x that** through
+`stereo_frames(tracker=True)` -- see "Two cameras, two rates" below. They are decoupled:
+`stereo_frames` runs on a producer thread behind a drop-oldest slot and the controller
+propagates with `predictor.StatePredictor` between fixes. `hover_controller.json` is designed at `rate_hz=500`, and the closed-loop
 poles are invariant in that number (`control/theory.md` 19.8) -- raising the clock changes
 `K` by ~12% and nothing else.
 
@@ -171,13 +183,96 @@ Two rules that are not optional, both in `controller/control/theory.md` 19.6:
 - **The control loop stays on the main thread.** `signal` can only be delivered there, and
   a worker mid-`link.send` during SIGINT's `land()` half-writes a `stop`.
 
+**Smoothness is a separate axis from accuracy, and the static metrics cannot see it.**
+Score a fitting change by the **second difference** of the trajectory (real motion at
+100+ Hz has small acceleration, noise does not), carrying `discrepancy_mm` /
+`refine_rms_px` / `union_coverage` / solve count as guards -- jitter alone is minimised by
+an estimator that has stopped listening to the image. That is how
+`REFINE_TOL_ANALYTIC` went 1e-3 -> 5e-4 (angular jitter 0.45x, every guard flat or
+better). `pose/theory.md` 16.29. **The jitter floor and the `native_parity` floor are the
+same floor**: past 5e-4 the solve runs below its Jacobian's forward-difference noise and
+the two cores diverge.
+
 Benchmark any pipeline change before claiming it:
 
 ```bash
 uv run python -c "from controller.viz import live_viz; live_viz.from_recording(
-    'results/flights/2026-08-29_231418', viz=live_viz.NullViz(), speed=0,
-    zero=None, max_frames=250, csv_out='results/bench/after.csv')"
+    'results/flights/New Folder With Items/2026-08-29_231418', viz=live_viz.NullViz(),
+    speed=0, zero=None, max_frames=250, scale=0.5, csv_out='results/bench/after.csv')"
 ```
 
 It prints median segment / estimate / wall ms per pair. 250 frames of that recording solve
-246; if a change drops that, it bought its speed by losing the robot.
+246; if a change drops that, it bought its speed by losing the robot. `scale=0.5` is the
+640x400 the loop flies at -- without it the replay runs at the recording's native
+1280x800 and none of the 19.x numbers apply. **The pose core in force is printed**
+(`pose core: native (pmw_pose)` or `python`); pass `native=False` to
+`_stereo_estimator` to bench the reference. On this recording the two solve the same 246
+frames and agree to 1e-6 mm at p95 (`pose/theory.md` 21.3): the port is a port, and a
+speed-up that changes an answer is a bug in it.
+
+## Two cameras, two rates
+
+**One ELP delivers ~208 fps at 640x400 and nothing on the host changes that** (five
+flights' `meta.json`, `dropped` zero, so it is the camera and not the consumer).
+Downsampling happens after the USB transfer, so it buys compute -- which is not short --
+and `pose/theory.md` 19.3 measured a 2x2 bin at roughly double the position bias for 6 Hz.
+The faster sensor modes are **crops**, needing their own calibration. Do not go looking for
+rate in the resolution; the argument is `pose/theory.md` 22.1 and it has been made twice.
+
+The rate is in the **pairing**. `sources.StereoCamera.read` consumes each camera's slot
+and waits for a fresh frame from both, so a pair costs the slower camera's period.
+`controller/pose/tracker.py` never consumes its slot and fires a pose on every frame from
+*either* camera, paired with the other's newest -- about twice the observations, same
+resolution, same FOV, no recalibration. `live_viz.stereo_frames(tracker=True)` is the
+switch; the yields are identical, so `_PoseFeed`, the control loop's `fresh` gating and
+the notebook cannot tell.
+
+**`max_skew_s` is not optional and is not a tuning knob.** A slot that is never consumed
+has a failure mode the consuming one does not: a camera that stops delivering would pair
+its frozen last frame forever, at full rate, with full confidence. It is what replaces
+`MonoCamera.read`'s 2 s timeout.
+
+**A constant in frames is a duration in disguise.** Three separate numbers broke when the
+pose rate tripled, all of them correct at the rate they were written for and none of them
+failing loudly: `stereo.WINDOW_FRAMES` (a quarter second only at 60 fps),
+`background.RunningPlate.step` (counts per frame, meaning counts per second), and a `lost`
+counter that could not move. `pose/tracker.py` now derives the first two from the measured
+rate -- `PLATE_STEP_REF_HZ`, `cfg["window_frames"]`. Anything else counted in frames wants
+the same treatment before the rate moves again. `pose/theory.md` 22.8.
+
+**The frame rate you can use is set by the LIGHT, not just the sensor.** At 210 fps the
+exposure available is 4.76 ms, and if the scene does not fill it the ELP returns *empty
+buffers* at full rate rather than slowing down -- measured 53%/40% empty at 640x400@210
+against 10.8%/6.5% at 1280x800@120 on the same scene. Healthy here is frame mean 59/82 with
+max 235; at mean 20 it solves nothing. `scratchpad/light.py`-style mean/max readout first.
+
+**When the pipeline stops solving, check the frame means before anything else.** A healthy
+lit scene here reads mean 59/82 with max 235; at mean 20 and max 165 the segmenter loses the
+rim, the two views disagree, and `n_rejected` (the discrepancy gate) eats every frame. That
+is what a threefold drop in bench lighting looks like from the software side, and it is
+indistinguishable from a dozen code faults unless you look. `trk.stats()` carries
+`n_detected` / `n_rejected` / `n_rejected_fit` / `n_rejected_mono` and `age_ms` per camera
+for exactly this. `pose/theory.md` 22.8.
+
+**A live preview on a still robot stopped solving after ~4-5 minutes; earlier instances UNEXPLAINED.** It is a
+cliff, not a slope: `lost` sits at the 4 plate-warmup frames for 60,000+ ticks and then
+loses every frame at once, with both cameras still delivering (frames 1-4 ms old) and the
+skew guard responsible for a tenth of it. The obvious reading -- `RunningPlate` walking onto
+a subject that stopped moving -- is **not established**: correcting the plate's step for the
+pose rate changed nothing (63,322 ticks against 73,724). Do not repeat that guess without
+the evidence. `stats()` now carries `n_rejected` / `n_rejected_fit` / `n_rejected_mono` and
+`live_viz._why_no_pose` differences them across the silence, which is the measurement to
+read next. `pose/theory.md` 22.8. Saved plates are not a control -- the ones on disk are
+from 2026-08-29 and the scene is twice as bright now.
+
+Capture is on **AVFoundation directly**, not OpenCV `videoio`: Homebrew's `videoio` links
+ffmpeg 7 against an installed ffmpeg 8 and does not load, and `brew reinstall opencv`
+would pull OpenCV 5.0 -- the version bump `pose/theory.md` 21.2 records as moving
+`fitEllipseDirect` and `remap`. **Do not "fix" the OpenCV install to get `videoio` back.**
+
+**Every published segmentation timing before 2026-09-03 ran a path that bailed early.**
+`from_recording` uses running plates, on which `segment()` returns `None` on 100% of this
+recording's frames and the pose comes from the tracked-ellipse seed; with the saved rig
+plates the mask path runs and the fit-quality gate then rejects every frame (view B's hull
+rms is 1.6% of its major axis against the 1.2% gate). Both cores reproduce both
+behaviours; neither has yet been made to segment this take. `pose/theory.md` 21.1.

@@ -2319,6 +2319,163 @@ was cutting through a quarter of the rim. The second was `RADIUS_BENCH_MM` descr
 edge the pipeline had stopped measuring. Both were constants with reasons attached, and
 the reasons had expired.
 
+### 16.27 The silhouette shortcut, measured live
+
+Proposed 2026-09-04: skip the conic entirely. Threshold, keep the largest blob, take its
+second-moment axes, fit a box along them, and read the centre off the box's midlines, the
+diameter off its long side, and the tilt off `arccos(minor/major)`. It is a reasonable
+thing to want -- it is `body_angle.py`'s primitive (20) applied to the rim robot -- and it
+is worth recording exactly where it lands, because two thirds of it are right.
+
+Measured on 60 live pairs with the robot stationary, against the *pipeline's own 3-D pose
+projected back into the same camera*, so the comparison is like for like:
+
+| | blob box vs the rim the pose says |
+| --- | --- |
+| major axis | **+1.0%** |
+| minor axis | **+69.6%** |
+| centre | **30.3 px = 3.15 mm** (the live noise floor is 0.10-0.27 mm) |
+| tilt `arccos(minor/major)` | 32.3 deg against 59.8 -- **27 deg out** |
+| frame-to-frame steadiness | **12.9x steadier** (sd 0.071 deg against 0.908) |
+
+**The major axis is right and the minor is not, and the asymmetry is the whole story.**
+16.11 measured a hull fit of the *rim* inflating the minor by 6.9% against the direct fit,
+because the mast and magnet protrude along the rotor axis and under tilt push the
+silhouette outward in the short direction. A raw threshold blob does not fit the rim at all
+-- it fits the whole bright silhouette, mast included -- so the same effect arrives ten
+times larger. The overlay shows it plainly: the box is dragged up and rotated by the mast.
+
+So `arccos(minor/major)` is not measuring the rim's foreshortening, it is measuring the
+silhouette's aspect ratio, and those are the same number only for a bare disc. Even on a
+*perfect* projected circle the formula is the orthographic reading of a perspective image:
+synthetically it is 8-11 deg out at 30 mm off the optical axis, because it measures tilt
+about the line of sight rather than about anything fixed. `conic.backproject_ellipse`
+inverts the same ellipse **exactly** -- 1e-12 mm and 1e-6 deg round-trip at every position
+tested -- and costs 0.0033 ms in C++. There is nothing to buy by approximating it.
+
+**The steadiness is real and is the part worth keeping.** 16.23 ends by noting the mask
+seed and the direct fit are complementary rather than competing -- "the seed is steady and
+biased, the fit is sharp and noisy" -- and proposes taking the centre from one and the axis
+ratio from the other. This measurement says which way round: take the **major axis and its
+angle** from the blob, where it is accurate to 1% and thirteen times steadier, and take
+nothing else. The centre and the minor are exactly the two quantities the mast corrupts.
+
+**On speed, the instinct was right and the target was wrong.** Threshold plus largest
+component is 0.312 ms a view against the pipeline's 2.658 ms a pair, and segmentation is
+82% of the live budget (22.5) -- so that *is* where the remaining time is. But it buys the
+speed by segmenting the silhouette instead of the rim, which is the trade 16.1 already
+priced: the level is being asked "is this pixel rim?" when the only answerable question is
+"does this ellipse lie on the rim?". Measured live the background is not black enough for
+it either: camera B's p90 is 146 against camera A's 67, its largest blob at threshold 120
+is 37,734 px against A's 10,405, and only a narrow 140-180 window gives both cameras a
+plausible disc at all.
+
+The ambiguity half of the proposal -- default upright and flip whenever both cameras see
+the disc face-on -- inverts 16.13. `sign(n . v)` can only change through `n . v = 0`, which
+is **edge-on**; face-on is `|n . v| = 1`, the state furthest from a flip. And the mirror
+pair, which is the ambiguity that actually bites every frame, is not the same question:
+both branches share `|n . v|` exactly, so no amount of flip bookkeeping resolves it, while
+two views 84 deg apart settle it geometrically for free.
+
+### 16.29 Scoring a fit by smoothness, and what that found
+
+2026-09-04. Every accuracy number in this chapter is a *static* one -- cross-view
+discrepancy, residual rms, coverage, error against a rendered truth. None of them can see
+an estimator that is right on average and jumps between frames, and the operator watching
+an overlay sees exactly that and nothing else.
+
+The prior that makes jitter measurable is that **real motion is continuous**. A trajectory
+sampled at 100+ Hz has small acceleration; per-frame estimation noise does not. So the
+score is the **second difference** of the trajectory -- position in mm, normal angle in deg
+-- and the first difference is reported but never scored, because it contains the real
+motion.
+
+**Jitter alone is a trap and the guards are not optional.** It is minimised by an estimator
+that has stopped listening to the image: 16.23 measures the mask seed as six times steadier
+than the direct fit *and* biased. So every score carries `discrepancy_mm`, `refine_rms_px`,
+`union_coverage` and the solve count, and a configuration that smooths by losing frames,
+drifting off the rim or disagreeing across views is rejected however smooth it looks.
+
+Swept over the bench take: ring sample count, evidence blur, ROI margin, Jacobian gradient
+step, window length, iteration cap, and the stopping tolerance. **Everything was neutral or
+worse except the tolerance**, which was worth a factor of two to eight on its own. Blur
+looked good on jitter (0.56x) and was rejected on the guard it moved: discrepancy 1.46 ->
+2.94 mm.
+
+`REFINE_TOL_ANALYTIC`'s own comment carries the table. The shape of the finding is the part
+worth keeping here: **19.12 chose that constant for speed, checked it against rms, coverage
+and discrepancy, found all three unharmed, and shipped it -- and none of those three is a
+measure of smoothness.** The constant was not wrong on the evidence gathered; the evidence
+had a hole in it, and the hole was the thing the operator could see.
+
+It also put a number on 21.3's warning. Below 5e-4 the solve runs past the noise floor of
+its own Jacobian -- the two normal columns of `_rim_shape` are forward-differenced at
+sqrt(eps) -- and the trust region's accept/reject decisions begin turning on rounding, so
+the two cores diverge (p95 still 1e-4 mm, worst frame 0.18, `nfev` differing by 8) and
+`native_parity` fails. **The jitter floor and the parity floor are the same floor**, and
+exact derivatives for those two columns is the single change that would move both.
+
+### 16.28 Modelling the wall instead of calibrating it away
+
+Proposed 2026-09-04: make the fit *normal-focused*, so it handles side-on views better and
+counters the disc's thickness.
+
+Half of that is already here and half is not, and the split is worth being precise about.
+`refine(mode="image")` **is** normal-parameterised -- it solves centre(3) plus normal(2)
+directly against the evidence map -- and the axial one-sidedness of 12.4/12.5 is already
+carried by `axial_weights` and `_outward_weights`, which 16.11 describes as suppressing the
+contamination without eliminating it. What is *not* modelled is the thickness:
+`stereo._rim_shape` is `R (cos(phi) u + sin(phi) v)`, a **zero-thickness circle**. The wall
+is handled by calibrating the effective radius to whichever fit is in use (16.7, 16.11) -- a
+scalar standing in for a geometric fact.
+
+Measured from the mesh, the rim wall is **1.329 mm on a 10.205 mm radius, 13%**. At 60 deg
+that projects to `T sin(theta) = 1.15 mm ~ 11 px`, which is 16.11's otherwise unexplained
+10.4-12.7 px gap between the mask fit and the direct fit, to within the measurement. **The
+wall is that gap.**
+
+Fitting the real mesh's convex hull -- what the segmenter produces (12.4) -- with the
+thin-circle model, against the same model plus the wall, thickness taken from the mesh
+rather than fitted:
+
+| source | tilt | thin: dC / dnormal | **thick**: dC / dnormal |
+| --- | --- | --- | --- |
+| rim only | 20 deg | 0.958 mm / 3.39 deg | 1.043 / **2.30** |
+| rim only | 40 | 1.765 / 2.55 | **0.341 / 0.39** |
+| rim only | 58.9 | 1.294 / 3.47 | **0.581 / 0.59** |
+| rim only | 70 | 0.647 / 3.71 | **0.232 / 0.27** |
+| full mesh | 58.9 | 1.375 / 3.64 | **0.399 / 0.42** |
+| full mesh | 70 | 2.575 / 4.90 | **1.073 / 1.83** |
+
+**One parameter, not fitted, takes 2.5-3.7 deg of normal error to 0.3-0.6 across 40-70 deg.**
+It does least at 20 deg, as it must: the effect scales with `sin(theta)`.
+
+Three qualifications, the first of which stops this being a shipped result.
+
+**The `thin` column is not the shipped pipeline.** It is a hull fit at a nominal radius,
+where the live path fits the evidence *ridge* at an effective radius already calibrated to
+absorb this very bias, plus the axial and one-sided weights. So the table measures what
+thickness costs an *uncorrected* fit, not what modelling it would buy over the pipeline as
+it stands. That comparison has not been run, and it is the one to run next.
+
+**It fixes the wall, not the mast.** Rim-only at 70 deg lands at 0.232 mm; the full mesh at
+the same tilt lands at 1.073, and the difference is the mast and magnet -- the 12.3b
+contamination no rim model contains. Thickness is one of the two contaminants.
+
+**It does not help the reflection.** The wall's mass is very nearly symmetric about the rim
+plane (centroid -0.025 mm of a -0.467..+0.861 span), so a thick disc is still mirror
+symmetric and the two-fold ambiguity is untouched. Side-on it buys *accuracy*, measurably,
+and no disambiguation; 16.12's bulge remains the only monocular cue.
+
+What makes it structurally attractive rather than merely better is 12.5's last table. The
+centre displacement is almost entirely along the minor axis and **its sign flips near 57
+deg** -- the wall pushes one way below it, the mast pulls the other above -- so *no monotone
+function of tilt can correct both*, which is exactly what `CentreCalibration` is. A
+geometric model does not have that problem, because it computes the silhouette instead of
+fitting a curve to its displacement. The live rig currently sits at **58.9 deg**, within two
+degrees of that sign flip.
+
+
 ## 18. The static noise model: measuring the scatter instead of predicting it
 
 §13 derives what the error *cannot* go below and §16 measures what the pipeline
@@ -2609,3 +2766,703 @@ recovers a planted pose to 0.030 mm where those forward differences land 2.33 mm
 speed arrives by re-tuning the stopping tolerance against the better gradient
 (`REFINE_TOL_ANALYTIC = 1e-3`): 6.9 -> 4.1 ms with `refine_rms_px` and `union_coverage`
 both improved and `discrepancy_mm` unmoved.
+
+## 20. Segmenting a rotor that has no rim
+
+The tilt-sweep robots (`control/theory.md` 23) are a propeller on a mast. The rim
+extractor of 16 correctly finds nothing on them, so `pose/disc_pose.py` swaps only the
+segmentation and leaves undistortion, `conic.backproject_ellipse` and `fuse` alone. Three
+things went wrong in turn, each visible only once there was a video to look at.
+
+### 20.1 A threshold takes the lit half
+
+The disc is lit from one side. Above the seed level that separates it from the scene
+(110 grey) only its lit half survives; the shadowed half reads 65-100 and the fitted
+ellipse was a half-moon on every robot in both views. The fix is hysteresis: the largest
+component above the seed level, grown into every component above a lower level that
+touches it. The lower level is bounded below by the foam blocks (60-90), which touch the
+disc in some views: 50 leaked into them on all three robots, 65 did not. Drone 3's rim is
+a thin bright ring round a dark interior, which the 11 px opening deletes outright, so
+roundish enclosed holes are filled before the opening. Only roundish: at rest the frozen
+blades, mast and guy wires enclose a sliver (42x113, 51x133 px) that must not be filled,
+while disc interiors ran 78x42 to 89x62.
+
+### 20.2 The background plate is a low percentile, not an average
+
+Take 205012 opens with a hand and a sheet across camera B, and a bright patch on the
+foam wins the threshold whenever the robot is out of view. The obvious remedy, subtract
+an average frame, fails here for a reason particular to this rig: the robot never leaves.
+It sits on its mast for the whole take and spins for about 70% of it, so the mean and the
+median at a disc pixel *are* the spinning disc (152-202 grey), and subtracting either
+left the disc 0-2 grey above the background. Between frozen blades at rest the backdrop
+shows through, so a per-pixel 10th percentile over 300 frames spread across the take is
+the backdrop (19-38) everywhere but the hub. The brightest 20% of frames by mean grey are
+dropped first, which is what keeps a hand across the lens (108-150 mean against 37) out
+of the plate and does nothing on a clean take. On the difference image the thresholds
+become 90 / 35.
+
+### 20.3 What the plate cannot do
+
+A hand is transient; no plate removes it, and it segments as a 100 000 px component with
+a confident ellipse. Anything over 40 000 px is refused instead (the largest real disc,
+drone 3 at 60 Hz, is 21 912). The ellipse's sign is still ambiguous -- rotor-up and
+rotor-down project alike -- and `control/tilt_report.py` resolves it against the mast.
+
+### 20.4 The mast is the rotor axis, and the estimator should know it
+
+The disc normal and the mast direction are two readings of one physical axis, and until
+2026-09-02 the estimator used only the first and the report compared them afterwards.
+Two things follow from treating the mast as what it is.
+
+First, the branch. The ellipse's two-fold ambiguity (16.13) puts the mirrored pair about
+84 deg from the truth, and the two views agree with each other on the wrong branch as
+readily as on the right one, so `stereo.match` settles it with a prior. The base class
+uses a sliding median of recent normals (`_window_normal`), which needs five frames and,
+once it has settled on the wrong branch, follows it. `disc_pose.DiscStereoEstimator`
+overrides that prior with the mast triangulated from the same frame (`mast_world`),
+and arbitrates every frame rather than only when the two centres disagree -- the disc's
+centres are scaled by a rim radius it does not have (above), so their discrepancy says
+nothing. On drone 1 the disc's hold scatter at 160 Hz was 16 deg median and 72 at p90
+before this; those are branch flips, not motion.
+
+Second, the estimate. With both readings in hand the report blends them by inverse
+variance (`stereo.blend_normals`), at the scatter each showed about its hold mean on
+drone 1 with the plate segmenter: disc 2.3-3.4 deg, mast 1.9-4.0, so 3 and 2. A frame
+where they disagree by more than 15 deg is one of them being wrong -- frozen blades at
+20 Hz (29 deg at p90), a blade outscoring the mast -- and is left out rather than drawn.
+What the blend does not settle is a systematic 5 deg between the two, the same at every
+frequency from 40 to 140 Hz. That is a bias in one channel -- the hub-to-bead line not
+passing through the ellipse centre, or the ellipse's tilt calibration -- and it is
+reported per frame as `agree_deg` until it is measured.
+
+Two viewing geometries need separate treatment, and only one of them needs new code.
+A view looking straight down the axis sees a near-circle whose *orientation* is
+meaningless -- the major axis of a circle is whichever way the noise leans -- but whose
+normal is still the axis, which is that camera's own optical axis; `stereo.fuse` already
+weights each view's normal by $\sin^2$ of the tilt it sees, so that view contributes
+almost nothing to tilt and could not mislead if it did. A view seeing the disc edge-on
+is the opposite: the geometry is at its most sensitive and the segmentation at its
+worst, since the opening erodes a sliver and the hub and mast are much of what is left.
+Measured on drone 1 (13587 frames with a mast), disc-vs-mast runs 5.3-5.9 deg median
+while the thinner view's minor/major is 0.25-0.50 and 15.5 under 0.25. The report
+divides the disc's sigma by a quality $q$ that is 1 above 0.25, falls linearly to 0.12,
+and floors at 0.05 -- at which point the mast carries the frame -- and the 15 deg
+disagreement gate applies only to a disc worth believing ($q > 0.5$). Above 0.5 the
+disagreement also rises (19-29 deg), but on this rig, which never sees the disc
+face-on, those are frozen blades reading round, and the gate handles them.
+
+The rod was being found in only 51% of drone 1's hold frames with both views, 84% with
+at least one, and in every frame it was missed the rod and bead were plainly visible.
+The cause was the finder searching only the disc's own connected component: the hub
+between rod and disc is dim, so the rod is usually its own component at the threshold.
+`find_mast` now searches every bright component within 50 px of the disc -- drone 3's rod is dark and only its bead passes the threshold, 30-50 px above the rim, while a wire that far out is still refused by the distance and direction gates -- and the gates that
+keep blades and the guy wires out never depended on connectivity. And a single view is
+no longer wasted. The image line of the rod and the lens centre span a plane the axis
+must lie in (`disc_pose.mast_plane`), so with one view the report projects the disc
+normal into that plane -- a hard constraint on one component, the disc keeping the other
+-- under the same disagreement gate. Only with neither view is the frame disc-only.
+
+The same `fused_axis` serves the live loop in `control/tilt_servo.py` (`control/theory.md` 24), and `DiscStereoEstimator.update` now takes the centre from the two views' undistorted ellipse centres by ray triangulation rather than from the rim radius: on 300 frames of `2026-09-01_210758` the position is identical to the digit at an assumed radius of 10.24 and 25 mm, with a ray gap of 1 mm median.
+
+## 21. The pipeline in C++, and what holding it to the Python taught
+
+Written 2026-09-03. Everything `StereoPoseEstimator.update` does per frame -- the evidence
+map, the segmenter and its blob grouping, the three reweighted ellipse fits, undistortion,
+the cone back-projection, `match`, `fuse`, the sliding-window prior, the gates, and the
+image-mode `refine` with its analytic Jacobian and scipy's trust region -- now exists a
+second time, in C++ (`controller/native`, the `pmw_pose` module). `stereo_native.py`
+wraps it as a drop-in `StereoPoseEstimator`, `live_viz._stereo_estimator` picks it when
+it is built, and every consumer downstream reads the same `StereoPose` it always did.
+
+The decision to do this was taken knowing `control/theory.md` 19.14: pose latency is
+not what limits the controller. What the port buys is measured in 21.4. What it *found*
+is in 21.2 and 21.3, and that is most of the chapter, because a port that has to agree
+with its reference to rounding is the most searching test the reference has ever had.
+
+The rule that made it possible is the one `control/theory.md` 19.7 set: reproducibility
+is the instrument. The C++ is a statement-for-statement port that keeps numpy's
+evaluation order, and `native_parity.py` holds the two implementations to each other
+stage by stage on recorded frames. Nothing in `controller/native` holds a tuning
+constant: `stereo_native.native_config` reads every one from the Python module it lives
+in and the C++ constructor refuses a missing key, so a number still has exactly one home.
+
+### 21.1 Step zero: what the published segmentation numbers had measured
+
+`control/theory.md` 19.2 warned that every replay benchmark ran with running plates, on
+which `segment()` returned `None` on 100% of frames and the pose came from the tracked
+ellipse seeded during the plate's warm-up. Before porting, that was re-measured with
+every plate available for the 250-frame take:
+
+| plate | built by | `segment()` | frames solved | why |
+|---|---|---|---|---|
+| running (`RunningPlate`) | the stream itself | `None`, every frame | **246** | tracked-ellipse fallback, as 19.2 says |
+| median of the take | `background.for_flight` | `None` | 0 | `plate_holds_still_subject` fires: the robot is in the plate |
+| 10th percentile of the take | `disc_pose.plates_for_flight` | `None` | 0 | same; the robot never leaves its spot |
+| the saved rig plates | `background_{A,B}.png`, same day | **runs**, both views | **0** | view B's hull fit is 1.6% of its major against the 1.2% `MAX_FIT_RMS_REL` gate, every frame |
+
+So the mask path has never produced a pose on this recording, and the running-plate
+path -- the one that works -- acquires through `segment_ring` for the five warm-up frames
+and tracks from there. Both cores now reproduce both behaviours exactly (the segmenter is
+bit-identical on the saved plates, 21.3), which is the honest statement of where the
+segmenter stands; making it segment this take is a separate job and was not attempted.
+The reference numbers below are therefore the running-plate path at `scale=0.5`, twice,
+bit-identical run to run: **246/250, 3.2 ms segment + 4.1 ms solve, 8.8 ms wall,
+113 Hz** through the Python estimator. (The 19.12 table's 3.2 + 4.1 ms was this same
+number; its CLAUDE.md bench command lacked `scale=0.5` and would have run at 1280x800.)
+
+### 21.2 Three things the reference was doing that nobody had written down
+
+Each of these showed up as a parity failure and turned out to be the Python, not the port.
+
+**The cv2 wheel is OpenCV 5, and its `remap` no longer quantises.** 19.12 explains the
+analytic Jacobian's image gradient as a central difference *of the sampled field* because
+`cv2.remap` reads bilinearly with coordinates quantised to 1/32 px (`INTER_TAB_SIZE`).
+That was true of OpenCV 4. The wheel in `uv.lock` is `opencv-contrib-python 5.0.0.93`,
+and measured against a hand-written bilinear read its `remap` on float maps is exact
+(3e-6 rms against exact, 0.80 against the 1/32-quantised form), while Homebrew's 4.11
+quantises (5.6e-6 against quantised, 0.80 against exact). The pipeline changed its
+objective when the wheel moved, and nothing recorded it. The C++ does not call `remap`
+at all: `sample_map` is the wheel's kernel written out -- a lerp of lerps, each a fused
+multiply-add in float32, which is the only association that matches it bit for bit
+(`evidence.cpp`). It is also what makes the port independent of which OpenCV it links.
+
+**The Jacobian is a float32 computation and the residual is not.** `sample_map` returns
+float32, and under NEP 50 a Python float is weak, so inside `jac_analytic` the gradient
+`(g1 - g2) / (2 hg)`, the residual `sqrt(max(ref - g0, 0))` and the `live` mask are all
+evaluated in float32 -- while `residual()` writes the same samples into a float64 array
+first and is float64 throughout. A port that did the Jacobian in float64 agreed with the
+reference on the residual to the last bit and disagreed on the Jacobian by one part in
+10^3, because `-dE / (2r)` on a sample with `r ~ 0.04` amplifies a float32 rounding of
+`ref` (76.5426147 -> 76.54261) by 1/r. The C++ mirrors the float32 arithmetic exactly
+(`refine.cpp`). It is not a bug in the Python -- a Jacobian good to 1e-3 is plenty for a
+trust region -- but it is a precision the design never chose.
+
+**`cv2.fitEllipseDirect` differs between OpenCV builds by one float32 ulp, and the solve
+turns that into 0.4 mm.** With everything else exact, the two estimators still disagreed
+by 0.1-0.4 mm and 1-4 deg on ~5% of frames, with different iteration counts. Feeding the
+Python side the C++'s undistorted ellipse collapsed that to 2e-6 mm at p95 with identical
+iteration counts on all 246 frames; the whole difference was `undistort_ellipse`'s refit.
+The undistorted *points* are identical between the two OpenCVs (their five-iteration
+`undistortPoints` agrees to the last bit), but `fitEllipseDirect` returns a float32
+`RotatedRect` and its internals moved between 4.11 and 5.0, so on 180 sub-pixel points
+the two builds land on different sides of a float32 rounding on 59% of ellipses (177 of
+300 random ones). That is 1.5e-5 px. The trust region, stopping at
+`REFINE_TOL_ANALYTIC = 1e-3`, is sensitive to a seed perturbation of that size on the
+frames where a trial step sits near the acceptance threshold. **`undistort_ellipse` now
+refits with `conic.fit_conic_weighted` in double on both sides**, which either build
+reproduces to 1e-10 px; the segmenter's other `fitEllipseDirect` calls, on integer-valued
+hull points, agreed to 3e-12 across 500 views and were left alone. The reference moved by
+a float32 ulp of ellipse, i.e. by less than it already moved with the last wheel upgrade.
+
+A fourth, smaller one: `_rim_shape`'s two normal columns are forward-differenced at
+`sqrt(eps)`, and clang fuses multiply-adds by default where numpy rounds every product.
+That is a one-ulp difference in the rim points, which the 1.5e-8 step turns into 1e-5 of
+those columns. The native build compiles with `-ffp-contract=off`.
+
+### 21.3 Parity, stage by stage
+
+`uv run python controller/pose/native_parity.py --stage all`, 250 frames of the bench
+take at `scale=0.5`, running plates for the solve, the saved rig plates for the segmenter
+(so it runs):
+
+| stage | compared | agreement |
+|---|---|---|
+| evidence | `ring_weight` on the frames' own ROIs, 500 views; `sample_map` at 900 random points each | max 0.0 and 0.0 |
+| segment | hull point sets, `area_px`, ellipse, 500 views | 0.0, 0, 2.9e-12 px |
+| refine | the solve on the Python estimator's own captured inputs, 246 solves | `nfev` identical on all; centre p95 1.6e-6 mm, max 3.9e-4 |
+| solve | both estimators end to end on identical frames, stamps and motion | same 246 frames; `discrepancy_mm` 6.5e-13; xyz p95 4.4e-7 mm, max 9.3e-3; angle p95 4.6e-6 deg |
+
+The spread that remains -- a few times 1e-4 mm on the odd solve, with identical iteration
+counts -- is the trust region's own sensitivity to the `sqrt(eps)` forward-difference
+noise in the two normal columns, which no two IEEE implementations round identically.
+That is the floor, and it is also a statement about the reference: at tolerance 1e-3 the
+solve's answer is defined to about 1e-4 mm and no better, and the 0.4 mm swings of 21.2
+show how far a slightly different seed can carry it within that tolerance. Exact
+derivatives for those two columns would remove the noise on both sides; not done, because
+it changes the reference's descent direction and the diff was already large.
+
+Two state details the port had to reproduce to reach this: `ring_weight`'s plate-response
+cache is keyed on the running plate's frame counter // `PLATE_REFRESH_FRAMES`, so the
+plate's own top-hat is up to 30 frames stale by design (19.1); and with saved plates the
+cache lives in one slot shared by both cameras and they evict each other every frame, so
+those are never stale. The C++ carries the same cache, keyed the same way.
+
+### 21.4 What it cost, and what it bought
+
+The same bench as 21.1, both cores, two runs each, all four bit-identical run to run
+(`results/bench/py_running_*.csv`, `native_*.csv`):
+
+| core | segment | estimate | other | wall | rate |
+|---|---|---|---|---|---|
+| Python | 3.2 | 4.1 | 1.6 | 8.8 | 113 Hz |
+| native | 2.4 | 0.4 | 2.4 | 5.3 | 189 |
+
+The solve went 4.1 -> 0.4 ms: `control/theory.md` 19.4's diagnosis that it was bound by
+the *number* of numpy and cv2 calls on small arrays, not by arithmetic, was exactly
+right, and removing the calls removed the time. Segmentation barely moved, because it was
+never Python: morphology, blur, connected components and contours are OpenCV in both
+cores, Homebrew's build (TBB) is if anything a little slower per call than the wheel's
+(GCD), and the ROI is too small for threads to help. `other` is mp4 decoding, the filter
+and the viser push, which the live loop does not pay for the decode; the wrapper's own
+cost -- two mask copies and a dict -- is under 0.2 ms.
+
+Against 19.1's table, 8.8 -> 5.3 ms of pipeline is a fraction of a degree of
+phase at the 0.78 Hz closed loop. 19.14 still stands: the loop is bound by `k_lat`, not
+by this.
+
+### 21.5 Correspondence with the implementation
+
+- `controller/native/src/pmw.h` declares everything; one `.cpp` per Python module
+  (`evidence`, `conic`, `segment`, `refine`, `stereo`) plus `trf.cpp`, scipy's
+  `trf_no_bounds` for the exact solver with the Cauchy loss, ported call for call.
+- `bind.cpp` is the only file that touches Python. Frames and plates cross as numpy
+  buffers wrapped in `cv::Mat` headers, never as `cv::Mat` objects: the wheel and
+  Homebrew's OpenCV are different builds with different ABIs and both live in the process.
+- `stereo_native.NativeStereoPoseEstimator` subclasses the Python estimator so every
+  configuration decision (`noise`, `centre_cal`, `error_model`, the rescale on the first
+  frame) is made once, by the Python constructor, and refuses anything outside the live
+  configuration with `NotImplementedError`. `_gate_predicted` was split out of `update` so
+  the error-model gate is one function for both.
+- `background.RunningPlate.update` takes its sign step from `pmw_pose.running_plate_update`
+  when it is built, same float32 arithmetic, 0.57 -> 0.05 ms a view.
+- `uv sync --extra native` builds it (scikit-build-core, nanobind, Homebrew `opencv`
+  and `eigen`); without the extra nothing changes and the Python estimator runs.
+
+## 22. Capture in C++, and buying observations from phase instead of pixels
+
+Written 2026-09-04. The brief was a 300 Hz observation rate with the low-level camera
+capture and the pose processing in C++. The pose half was already done (21). The capture
+half turned out not to be the interesting part: the interesting part is that **300 Hz is
+above what one of these cameras can deliver, and the way past it is the pairing, not the
+language.**
+
+### 22.1 The ceiling is the sensor, and nothing on the host moves it
+
+Three measurements decide the whole shape of this chapter.
+
+| what | measured | source |
+| --- | --- | --- |
+| ELP at 640x400, both cameras, real flights | **205-209 fps**, 0 dropped | five takes' `meta.json`, 2026-09-01 |
+| the native pose core, one pair | **2.9-4.3 ms** | `results/bench/native_*.csv`, and 22.5 |
+| the only ELP mode above 300 fps, 320x240 | 422 fps, but a **crop** | `elp_camera.json` |
+
+The five flights are the load-bearing row. `fps_measured` of 204.96, 208.53, 208.50 and
+208.02 with **`dropped` zero** is not a consumer figure: a drop-oldest slot that loses
+nothing is a consumer that saw every frame the camera produced, so those numbers are the
+*camera*. One ELP at 640x400 delivers about 208 fps and no arrangement of software asks
+it for more.
+
+**Downsampling does not help, and the reason is worth stating because it is the natural
+first idea.** A 2x2 bin of a 640x400 frame is a real operation -- `_match_scale` already
+rescales the intrinsics for any uniform factor, and 640x400 is itself an exact 0.5x of
+the calibrated 1280x800 -- but it happens **after the USB transfer**. It buys compute,
+and compute is not what is short: the pair already solves in 2.9 ms against a 4.8 ms
+frame period. What it costs is in 19.3, which measured that exact downscale at 0.205 /
+0.169 mm of per-axis bias against 640x400's 0.110 / 0.119, for 6 Hz. Twice the error to
+relieve the one constraint that was not binding.
+
+The 320x240 sensor mode is the same trade with an extra penalty: it is a **crop**, not a
+rescale (NCC 0.836 against a resize, 0.9994 for 640x400), so it needs its own calibration
+and sees less of the scene.
+
+So the target as posed is unreachable at this resolution, and reachable at 320x240 only
+by paying for it in the currency 13 says is already dominant. The rate had to come from
+somewhere else.
+
+### 22.2 Two cameras, uncorrelated phase, and an observation nobody was collecting
+
+1.4 models the two free-running cameras as independent uniform phases on a period $T$,
+which is why their skew is triangular on $[-T, T]$ with $\mathbb{E}|\Delta| = T/3$. That
+model has always been treated as a *cost* -- the thing `fuse` has to correct for. Read the
+other way it says something useful: **the two cameras' frames are interleaved in time,
+and half of the instants at which the rig learns something new were being thrown away.**
+
+`sources.StereoCamera.read` throws them away by construction. `MonoCamera.read` *consumes*
+its slot and blocks until the next frame arrives, so a stereo read waits for a fresh frame
+from **each** camera. A pair therefore costs the slower camera's period and the
+observation rate can never exceed one camera's rate, however fast the pipeline behind it
+runs.
+
+Make the slot never-consumed -- always holding the newest frame, with `seq` rather than
+emptiness saying "new" -- and a pose can fire on **every frame from either camera**,
+paired with the other's most recent. At 208 fps a camera that is a period of 4.8 ms wide,
+the partner view is then somewhere in $[0, T]$, mean $T/2 = 2.4$ ms old.
+
+Three reasons that staleness is affordable, in decreasing order of how much they matter:
+
+- **It is not new.** The live path runs `max_skew_s=None` (only `calib/capture.py` sets a
+  limit). Today's pairs already carry a skew uniform on $[0, T]$; interleaving doubles how
+  many such observations arrive without widening the distribution one bit.
+- **`fuse` already prices it.** It takes per-view `stamps` and advances each view to the
+  pair's mean instant, with the velocity and its covariance (17). That machinery was
+  written for exactly this and has been running unused-for-its-purpose ever since.
+- **The number is small.** 2.4 ms at hover's 15-22 mm/s is about 0.05 mm, against a
+  centre-displacement bias of 0.185-0.274 mm that 19.3 says already dominates.
+
+What it is *not* affordable to ignore is the failure mode a never-consumed slot
+introduces and a consuming one cannot have. `MonoCamera.read` returns `None` after a 2 s
+timeout, so a camera that stops delivering stops the loop. A slot that is never consumed
+would instead pair its frozen last frame forever, producing a confident wrong pose stream
+at full rate -- the worst shape a failure can take here. **`max_skew_s` is what replaces
+the timeout**: a stopped camera makes the pair's skew grow without bound, every pair is
+refused, poses stop, and the caller's existing "the camera was unplugged" path fires.
+Defaulted to 1.5 frame periods, above the one period a healthy pair can reach and far
+under anything a stopped camera produces. `tracker._self_check` asserts it fires and that
+the refusal is *counted*, because a guard that drops frames silently is how a bench gets
+misdiagnosed for a week.
+
+**Consecutive interleaved observations share a view, so their errors are correlated** and
+a filter that treats them as independent will slightly over-trust them. Not measured yet;
+the honest statement is that the rate doubled and the information did not.
+
+### 22.3 Not `videoio`, and the accident that turned out to be a better design
+
+The plan was `cv::VideoCapture(CAP_AVFOUNDATION)` in C++: one dependency already linked,
+no new code. It does not work on this machine, for a reason worth recording because it
+will recur. Homebrew's `libopencv_videoio.4.11.0.dylib` links
+`/opt/homebrew/opt/ffmpeg/lib/libavcodec.61.dylib`; the installed ffmpeg is **8.1.1**,
+whose avcodec is **62**. The library does not load at all, so linking it would have broken
+the import of a pose core that works.
+
+**The repair is worse than the fault.** `brew reinstall opencv` installs **5.0.0** -- the
+exact version bump 21.2 records as moving `remap` and `fitEllipseDirect`, the latter by a
+float32 ulp that the trust region turns into 0.4 mm on 5% of frames. Pinning `ffmpeg@7`
+means `install_name_tool` on a brew-managed dylib that any upgrade silently reverts. So
+the capture went straight onto AVFoundation (`native/src/capture_avf.mm`), linking only OS
+frameworks.
+
+Measured first, in a throwaway probe, because the whole design rested on it: an
+`AVCaptureSession` **creates, configures, starts and delivers frames entirely from a
+worker thread with no `NSRunLoop`.** No main-thread requirement anywhere.
+
+Having to write it turned out to buy three things the wrapper could not:
+
+1. **A and B are resolved by identity rather than by probing.** `identify.py`'s whole
+   index dance exists because "neither macOS listing enumerates in OpenCV's order" and a
+   unique-id "cannot be tied to an OpenCV index", which is true of OpenCV and not of
+   AVFoundation: its `uniqueID` is the string `system_profiler` reports. The rig already
+   stores the calibrated pair in order (`elp_ids`), so **which camera is A becomes a fact
+   about the calibration** instead of about probe order, and `identify.py`'s "as long as
+   neither cable moves" caveat goes away.
+2. **The format is chosen, not requested.** `AVCaptureDeviceFormat` enumerates exact
+   size, fourcc and max rate up front, so `activeFormat` is *set* rather than asked for,
+   and `open_camera` refuses outright rather than taking the nearest size.
+   **This paragraph originally went on to say the silent size substitution of 1.2
+   therefore "cannot happen". That was wrong, and 22.6 is what it cost to find out**: a
+   session preset overrides `activeFormat` while leaving it reading correctly, so the
+   check has to be on the delivered buffer and choosing the format is not by itself
+   enough. Left here rather than quietly corrected, because the mistake is instructive --
+   the guarantee was assumed from the API's shape instead of measured, which is the same
+   error 19.1 records about a cache whose invalidation lived in a comment.
+3. **The Y plane is the grayscale.** The sensor is monochrome (1.5), so for a biplanar 420
+   buffer plane 0 *is* the image. Taking it is not a conversion but a projection onto the
+   only channel carrying anything, which removes the `cvtColor(BGR2GRAY)` that
+   `MonoCamera._grab_loop` pays per frame per camera.
+
+One thing it cost, and it is the thing to weigh if this is ever revisited: `VideoCapture`
+opens an mp4 as readily as a camera, which would have made the whole threading path
+testable offline for free. `Tracker.push_frame` / `pump` buy that back deliberately --
+the self-check drives slots, pairing, the staleness guard, the view cache and the solve
+from the bench recording with no camera and no AVFoundation involved.
+
+### 22.4 The view cache, and why "exact" is the only acceptable answer
+
+At the interleaved rate one of the two views is unchanged on every call, so re-segmenting
+it is pure waste. `Estimator::update` takes an optional frame `seq` per view and reuses
+the cached `ViewResult` when it has not moved.
+
+It is safe because `view_candidates` touches only `prev_ellipse[ci]` and
+`plate_cache_[ci]`, both per-view, and writes `prev_ellipse[ci]` from **its own
+segmentation** rather than from the refined pose. A view with no new frame has nothing to
+advance; its evidence map is its own pixels, so reusing it is reuse and not staleness.
+
+It is keyed on the grabber's sequence number and **never on the `Mat`'s data pointer**.
+19.1 is the whole reason: `ring_weight`'s plate cache keyed on `id(img)` against an array
+reallocated every frame, missed 100% of the time, and paid in full the cost it existed to
+remove -- for as long as the running plate had been the default. Version the content, not
+the buffer.
+
+**A cache that changes the answer is a bug in the cache, not a speed-up**, so that is an
+assertion rather than a claim. `tracker._self_check` runs two trackers on identical
+pixels, one allowed to reuse a view and one forced to recompute it by pushing the same
+frame again under a new seq, and requires the pose to agree **exactly** -- 0.0 mm, 0.0 in
+the normal, not a tolerance.
+
+The default is off (`seq = 0` recomputes), so `stereo_native`, `native_parity` and every
+existing caller are untouched and 21.3's parity numbers still mean what they meant.
+
+### 22.5 What it measured, on the bench
+
+Replay first, `pump()` on the bench take, 240 pairs after a 10-frame plate warm-up, one
+fresh view per step for interleave and two for `both`:
+
+| pairing | fresh views | ms a pose | rate |
+| --- | --- | --- | --- |
+| `both` | 2 | 4.20-4.34 | 231-238 Hz |
+| `interleave` | 1 | 2.49-2.68 | 373-401 Hz |
+
+Both solve the same **246 of 250** in every run, which is the number that says none of the
+rate was bought by losing the robot. (Those were taken on a machine at load average 17 and
+repeat runs swung as far as 11.13 / 5.69 ms; the ratio held across all seven runs. They are
+kept only for the ratio.)
+
+**Live, 2026-09-04, both ELPs on a stationary robot** -- which is the measurement that
+counts, because `pump()` times compute in isolation while the real worker competes with two
+capture queues and the interpreter:
+
+| | measured |
+| --- | --- |
+| frames grabbed, per camera | **197-200 fps** each, so ~395 arriving a second |
+| poses, `pair_mode="interleave"` | **221-240 Hz**, 0 lost over 34,700 |
+| segment / estimate a pose | **2.70 / 0.68 ms** = 3.31 ms, a **302 Hz** compute ceiling |
+| skew | median **0.46 ms**, p90 4.2 |
+| pairs refused on skew | ~14% under sustained load |
+| position scatter, robot still | **0.10 / 0.16 / 0.27 mm** |
+| through `stereo_frames(tracker=True)`, viser rendering | **239 Hz** sustained, 0 lost |
+
+Three things follow, and the third is the one that matters.
+
+**The rate roughly doubled**: the same core through `sources.py` ran the loop at 65-100 Hz.
+
+**It is not 400 Hz, and the reason is the feedback loop between the worker and the cache.**
+The view cache only pays when the worker is keeping up: at 395 frames/s against a 302 Hz
+ceiling the worker is behind, so by the time it wakes *both* cameras have usually advanced,
+both views recompute, and it pays the `both` cost -- which keeps it behind. The 14% skew
+refusals are the same fact seen from the other side: a worker that lags pairs a fresh frame
+with a partner more than one period old, and the guard correctly throws those away.
+
+**Compute is now the binding constraint, at 302 Hz against 395 arriving.** That is a
+reversal. For the whole of 19.x the pipeline was far below the camera and the question was
+always how to make the solve cheaper; 21 answered it and this chapter's pairing change spent
+the answer. Segmentation is **2.70 of the 3.31 ms, 82%** -- so the next real gain is there
+and nowhere else, and 22.8 is about what that costs.
+
+### 22.6 Three things macOS does to a capture that nothing warns you about
+
+All three were found by measurement, and all three fail *silently* -- which is the reason
+`Tracker::start` checks the delivered buffer rather than trusting any of the configuration.
+
+**A session preset overrides `activeFormat`, and the format keeps reading correctly.**
+Asking for 640x400 and configuring the device before adding the input delivered **1280x800
+at 94 fps** while `dev.activeFormat` still reported 640x400. This is exactly 1.2's
+undetectable size substitution -- every distance downstream wrong by a fixed factor -- and a
+check on the *format* cannot see it. Only the delivered buffer can.
+
+**`activeFormat` does not take until the session is running.** Measured across all four
+orderings, asking 640x400 of the ELP:
+
+| where `activeFormat` is set | delivered |
+| --- | --- |
+| inside `beginConfiguration` | 1280x800 @ 119 fps |
+| after `commitConfiguration` | 1280x800 @ 118 |
+| **after `startRunning`** | **640x400 @ 207** |
+| `videoSettings` width/height keys | 640x400 @ 200, but **scaled** from 1280x800 |
+
+The last row is the trap inside the trap: it produces the right *size* by resampling, not by
+putting the sensor in its own mode, so it is a soft image at a rate that is not the mode's.
+`AVCaptureSessionPresetInputPriority`, which states "the format is mine", is iOS-only.
+
+**Each size is offered twice, at rates that differ by 7x.** `camera_formats` on the ELP:
+
+| size | `yuvs` | `420v` |
+| --- | --- | --- |
+| 640x400 | 30 fps | **210** |
+| 640x480 | 30 | 210 |
+| 320x240 | 120 | 420 |
+| 1280x800 | 10 | 120 |
+
+Picking a format by size alone lands on the 30 fps variant seven times out of ten. This also
+settles two of 1.3's three anomalies: 160x120 really does offer 640 fps, so the 285.4 fps
+measured there was the consumer ceiling 1.3 suspected; and 640x400 caps at 210, so the
+271.3 fps that "exceeds the asked rate" was the bad warm-up, not the sensor.
+
+**`setSampleBufferDelegate:` keeps only a WEAK reference.** Passing a freshly allocated
+delegate as a temporary lets ARC release it before the first frame arrives, and the session
+then runs forever delivering nothing -- no error, no warning, just a camera that appears
+dead. A diagnostic probe written that way reported "both cameras deliver zero frames" while
+the cameras were in fact fine at 208 fps, which is a wrong conclusion drawn from a broken
+instrument. `AvfCamera` holds its `PmwGrabber` as a member, so the shipped path is safe;
+the trap is for anything written alongside it.
+
+**`activeFormat` after `startRunning` is a RACE, and losing it looks like a scene fault.**
+The ordering above is necessary but not sufficient: the call succeeds, `activeFormat` reads
+back correctly, and the camera streams at the session's size anyway because the stream was
+still coming up. Measured on this bench: one camera of the pair silently running 1280x800
+while the other ran 640x400. The C++ estimator has **no `_match_scale`** -- its intrinsics
+are fixed at construction -- so that view's ellipse is in the wrong pixel coordinates, the
+two views' poses disagree, and `n_rejected`, the cross-view discrepancy gate, refuses every
+frame. It presents as "the estimator suddenly stopped solving", which is what sent a whole
+afternoon chasing lighting and running plates. `AvfCamera::start` now retries until the
+*delivered* size matches (10/10 opens correct afterwards), and the grabber drops a
+wrong-size frame rather than handing it to a solver that cannot know it is wrong
+(`n_wrong_size`).
+
+**The sensor cannot always fill the frame period, and the shortfall is silent.** In a dim
+scene the ELP returns *empty buffers* at the requested rate rather than slowing down.
+Measured on one scene, changing only the frame period:
+
+| mode | period | empty frames, camera A / B |
+| --- | --- | --- |
+| 640x400 @ 210 | 4.76 ms | **53% / 40%** |
+| 1280x800 @ 120 | 8.33 ms | **10.8% / 6.5%** |
+
+Same light (frame mean ~19-21 either way), same code, same cameras. This is exposure time
+against frame period, not bandwidth: at 210 fps the exposure available is 4.76 ms and the
+scene did not fill it. For reference, this bench solving happily at 240 Hz earlier the same
+day read **mean 59 / 82 with max 235**; at **mean 20 with max 170** it solved nothing.
+**The rate the pipeline can run at is therefore a property of the lighting, not only of the
+sensor** -- 1.3's mode table is an upper bound that assumes enough light to reach it.
+
+**And an Objective-C exception is not a `std::exception`.** An `NSException` crossing into
+C++ reaches Python as `exception could not be translated!` with the cause discarded. Every
+AVFoundation call that can raise goes through `objc_guard`.
+
+### 22.7 Addressing a camera by identity, and what it was hiding
+
+`identify.py` finds the ELPs by opening each OpenCV index and checking the delivered size,
+because "neither macOS listing enumerates in OpenCV's order" and a unique-id "cannot be tied
+to an OpenCV index". Both are true of OpenCV and neither is true of AVFoundation, whose
+`uniqueID` is exactly the string `system_profiler` reports. Confirmed on this bench:
+`0x11000032e49281` and `0x12000032e49281`, matching the rig's `elp_ids` character for
+character.
+
+**AVFoundation lists them in the opposite order** -- `0x12...` first. So a tracker that took
+the first two devices it found would have run with A and B swapped, which `identify.py`'s
+own docstring describes as producing "poses that are smooth, plausible and wrong". The rig
+records which camera is A; asking the rig is the fix, and it also retires the "as long as
+neither cable moves" caveat that the probe order carried.
+
+### 22.8 What the rate change found, and the one mistake behind half of it
+
+Tripling the pose rate broke four things, and **three of them were the same mistake**: a
+constant expressed in *frames* whose meaning is a *duration*. Every one of them was correct
+at the rate it was written for and silently wrong at 220-400 Hz, and none of them failed
+loudly. The general form is worth more than any of the three:
+
+> **A per-frame constant is a duration in disguise, and this pipeline's frame rate moved.**
+
+Anything counted in frames -- a window length, an adaptation step, a warm-up, a refresh
+interval -- should be derived from the rate at construction rather than written down, and
+`pose/tracker.py` now does that for the two that mattered.
+
+
+**`WINDOW_FRAMES` is a duration written as a count.** `stereo.py:253` calls 15 frames "a
+quarter second at 60 fps, matching `DROPOUT_S`", and `window_normal` does gate on
+`DROPOUT_S` in *seconds* -- but the deque is trimmed by *count*. So the window is a
+quarter second only at 60 Hz. It has been ~150 ms at the 100 Hz the pipeline actually
+runs, and at 400 Hz it would be 36 ms, leaving the branch-flip prior with almost no
+memory. `tracker.py` derives it from the rate; `stereo.py`'s constant is deliberately left
+alone so nothing moves under `native_parity`. The reference's own drift is recorded here
+rather than silently fixed, because fixing it changes answers on every existing path.
+
+**The viser threshold slider was dead on the native core.** `live_viz` sets
+`est.thresh = viz.thresh` every iteration, but `thresh` reaches C++ as `Config.level`,
+read once at construction, and `_ensure_native` only rebuilds on a frame-scale change --
+so the slider had done nothing since the native core became the default, on the live path
+and on the replay path that exists to be tuned with it. Both now push it through per
+frame. This is the same shape of fault as 19.1: a value whose propagation was assumed
+rather than checked.
+
+**`RunningPlate.step` is counts per frame and means counts per second.** (This one is a
+real defect that was fixed; it is **not** the explanation for the failure that found it --
+see the end of this entry.) Its own docstring
+says so -- "``step`` is in counts per frame. At 1.0 and 60 fps the plate can follow a 60
+count/s drift" -- and it ends with "it cannot see a robot that never moves ... lower `step`
+buys time". At 220 Hz an unchanged `step = 1.0` walks the plate at **220 counts/s instead of
+60**, so it buys 3.7x less time, on the exact failure the docstring names. Measured: a live
+preview on a deliberately stationary robot ran about five minutes and then lost **2915
+consecutive frames** while both cameras stayed fresh (4 ms and 1 ms old) and only 213 pairs
+were refused on skew. `tracker.py` now sets `step = 60 / pose_rate`, which holds the plate
+at the counts per second it was tuned for.
+
+**And the fix did not fix the failure, which is the part worth recording.** The obvious
+reading -- the plate adapts 3.7x too fast, so it absorbs the still robot 3.7x sooner -- is
+wrong, or at least not sufficient. Corrected to 60 counts/s the preview ran **63,322 ticks
+(260 s)** before the same cliff, against **73,724 ticks (306 s)** uncorrected. No meaningful
+change.
+
+Two observations that the plate story does not explain:
+
+- **It is a cliff, not a slope.** `lost` sat at 4 -- the plate warm-up frames, and nothing
+  since -- for the entire run, and then 2651 consecutive losses. A plate slowly walking onto
+  a subject degrades the evidence gradually; this does not degrade at all and then stops.
+- **The two runs died at different tick counts and different elapsed times**, so it is not
+  a fixed counter either.
+
+**The cause was the light.** Chased with the gate counters, the losses turned out to be
+`n_rejected` -- the cross-view discrepancy gate -- firing on every frame: 180/s, then 622/s,
+then everything. And the frame statistics say why. During the healthy preview the two views
+had means of **59.4 and 82.0** with a max of 235; by the end of the session the same scene,
+same cameras, same code, read **19.7 and 22.0** with maxima of 165 and 144. The bench
+lighting fell about threefold while the investigation was running. A segmenter built on a
+brightly lit rim against a dark room does not survive that, and the first view to lose the
+rim disagrees with the second, which is exactly the gate that fired.
+
+That also fits the post-mortem image, in which camera A was nearly black while camera B
+still had signal -- one side of the rig losing its light first, not a camera fault. Both
+cameras were measured healthy throughout: 208-210 fps standalone, 1026-1050 frames per five
+seconds, frames 1-7 ms old at every failure.
+
+**What is not established** is that the earlier degradations had the same cause. They were
+not measured against frame statistics at the time, and by the time the instrumentation
+existed the lighting had already moved, so there is no clean before-and-after. The honest
+statement is that the failure reproduced at the end of the session is a lighting failure,
+and the earlier ones are unexplained and were investigated with tools that could not have
+told the difference. What it is not: the cameras (both delivering at full rate, frames 1-4 ms old at
+the failure) or the skew guard (311 refusals against 2651 losses). Saved plates are not an
+available control -- the ones on disk are dated six days before this test, mean 21.5/18.8
+against a live scene at 43.7/58.2, which is the "silently wrong the moment the lighting
+drifts" cost the class docstring opens with. The next measurement is the per-gate breakdown
+(`n_rejected`, `n_rejected_fit`, `n_rejected_mono`) across the silence, which now reaches
+`stats()`, plus the first and last frames side by side.
+
+**A counter that could only ever read zero, and the wrong diagnosis it bought.** On the
+tracker path `stereo_frames` kept `lost += pose is None` from the `sources.py` branch. It
+is dead there: a lost frame never reaches that line, because `read` returns `None` and the
+miss branch above it `continue`s. So `lost` sat at 0 while the estimator solved nothing,
+and a five-minute live preview reported `lost 0` for 73,724 consecutive ticks right up to
+the moment it stopped. The estimator's own counter is the true one.
+
+That mattered because it made the *stop message* lie. The message differenced nothing: it
+saw both cameras still delivering and asserted "the pairs are being refused on skew, so the
+two have drifted apart" -- while the two slots were 2 and 3 ms fresh, a skew of about 1 ms,
+nowhere near the 7.14 ms guard. The real cause was the estimator losing every frame, which
+the message had no way to say and the zeroed counter had hidden.
+
+Both are the same mistake in two places: **a number was reported without checking it could
+move.** The message now differences `n_lost`, `n_skew_dropped` and `n_grabbed` across the
+silence and names whichever one actually moved -- estimator, skew guard, stopped camera, or
+none of the three, which points at the worker itself. `_why_no_pose` in `live_viz.py`.
+
+The suspected cause of that particular silence is worth stating separately, because it is
+not a bug in any of this: the preview ran `backgrounds="running"` on a robot that was
+deliberately **stationary**, and `background.RunningPlate` walks itself onto anything that
+stops moving -- its own docstring says so, and 21.1 measured it returning `None` on 100% of
+frames for exactly that reason. A still robot is the one case the running plate cannot
+survive, and a preview is the one place a robot is likely to sit still.
+
+### 22.9 Correspondence with the implementation
+
+| Model element | Code |
+| --- | --- |
+| Capture, AVFoundation directly (22.3) | `native/src/capture.h`, `capture_avf.mm` |
+| Device by `uniqueID`, A/B from the rig (22.3) | `capture_avf.mm` `find_camera`, `pose/tracker.py` `camera_ids` |
+| Exact format or refuse (22.3) | `capture_avf.mm` `best_format`, `open_camera`'s closing assert |
+| Y plane as grayscale (22.3) | `capture_avf.mm` `gray_of` |
+| Never-consumed slot, `seq` says new (22.2) | `native/src/tracker.h` `deliver`, `ready` |
+| Interleaved vs both (22.2) | `tracker.h` `PairMode`, `pose/tracker.py` `pair_mode` |
+| The staleness guard (22.2) | `tracker.h` `step`, `pose/tracker.py` `SKEW_LIMIT_PERIODS` |
+| `RunningPlate` in the worker (22.2) | `tracker.h` `RunningPlate`, warmup and version semantics |
+| The view cache and its exactness (22.4) | `Estimator::set_frame_seq`, `stereo.cpp` `update`, `tracker._self_check` |
+| Velocity pushed in, not passed (22.2) | `tracker.h` `set_motion`, `pose/tracker.py` `set_motion` |
+| Window as a duration (22.6) | `pose/tracker.py` `cfg["window_frames"]` |
+| Threshold, live (22.6) | `Estimator::set_thresh`, `stereo_native.update`, `tracker.set_thresh` |
+| One switch for the live loop (22.2) | `live_viz.stereo_frames(tracker=True)` |
+| Format chosen by size AND rate (22.6) | `capture_avf.mm` `best_format`, `camera_formats` |
+| `activeFormat` applied at start (22.6) | `capture_avf.mm` `AvfCamera::apply_format` |
+| Delivered-buffer check (22.6) | `CameraSource::delivered_size`, `Tracker::start` |
+| NSException never escapes (22.6) | `capture_avf.mm` `objc_guard` |
+| A and B from the rig's ids (22.7) | `pose/tracker.py` `camera_ids`, `capture_avf.mm` `find_camera` |
+| Which camera stopped (22.6) | `TrackerStats::age_ms`, `stereo_frames`'s stop message |
+| Why the poses stopped (22.8) | `live_viz._why_no_pose`, differenced across the silence |
+| Plate step held per-second (22.8) | `pose/tracker.py` `PLATE_STEP_REF_HZ`, `plate_step` |

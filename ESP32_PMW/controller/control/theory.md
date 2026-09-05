@@ -3441,6 +3441,20 @@ at `authority = 1.0` too. The shipped controller's latency margin on the gain-mi
 scenario is therefore between 15 and 25 ms -- narrower than "detuned for latency
 robustness" suggests, and worth knowing before anything lengthens the pipeline again.
 
+### 19.15 The pipeline in C++
+
+Written 2026-09-03; the chapter is `pose/theory.md` 21. Everything `est.update` does per
+frame was ported to C++ and held to the Python to rounding: same 246 of 250 frames on
+the bench replay, identical trust-region iteration counts on every one, 4e-7 mm at p95.
+The solve went **4.1 -> 0.4 ms** -- 19.4's diagnosis, that it was bound by the count of
+numpy and cv2 calls and not by arithmetic, in full. Segmentation barely moved, being
+OpenCV in both cores. Wall 8.8 -> 5.3 ms a pair (113 -> 189 Hz), which
+against 19.1's table is a fraction of a degree of phase at 0.78 Hz; 19.14 stands. Holding
+the port to the reference also found three things the reference was doing unrecorded --
+the cv2 wheel's `remap` stopped quantising when it moved to OpenCV 5, the analytic
+Jacobian is a float32 computation, and one float32 ulp of `fitEllipseDirect` moves the
+solve by 0.4 mm on 5% of frames -- all in 21.2.
+
 ## 20. Robust stability: what mass and a centre-of-mass offset can and cannot do
 
 18.14 measured a thrust axis 4.6 deg off vertical, growing with thrust, and named three
@@ -3963,6 +3977,47 @@ and only the filename claims which step it is. `tilt_sweep.stills` therefore rea
 `meta.json` and refuses outright when `dropped > 0`. Refusing costs a re-shoot; the
 alternative costs a plot whose x-axis is wrong by one step and which looks fine.
 
+### 23.4 The normal as a tilt vector about the rest attitude
+
+`tilt_report.lean_table` reports the disc normal $\hat n$ (sign resolved against the mast,
+§23 preamble) not as an angle but as a tilt vector in the plane perpendicular to the rest
+datum $\hat u$. With $\theta = \arccos(\hat n \cdot \hat u)$ and the unit lean direction
+$\hat l = (\hat n - (\hat n\cdot\hat u)\hat u)/\lVert\cdot\rVert$, the two components are
+$\theta\,(\hat l\cdot\hat e_1)$ and $\theta\,(\hat l\cdot\hat e_2)$, so their hypotenuse is
+$\theta$ exactly and the azimuth is their `atan2`. That is the same $(\theta, \phi)$ split
+`estimator._angles_from_normal` makes about world $+z$, moved onto the physical zero --
+world $+z$ is camera A's optical axis and means nothing here (§23 preamble, `stereo_rig.json`).
+
+The basis is a naming choice, not a measurement: $\hat e_1$ is camera A's $x$ projected onto
+the rest plane and $\hat e_2 = \hat u \times \hat e_1$. Camera A's $x$ is the one direction
+on this rig that is fixed and can be pointed at; nothing else about the choice matters, and
+a different $\hat e_1$ only rotates the azimuth by a constant. The azimuth is nan under
+0.5 deg of tilt for the reason `_angles_from_normal` gives: `atan2(0, 0)` is noise, not a
+direction. Per-frequency plots draw every solved frame as a point with no line through
+them -- below ~60 Hz the blades strobe (`body_angle.py` header), and a line through a
+strobing rotor draws structure the data does not have.
+
+### 23.5 One folder per take, and the frames outside a point are kept
+
+`controller/report.py` runs the offline pass in one command. It adds no measurement: the
+solve, the mast pass, the datum and the two-sensor table are 23.1-23.4 unchanged, and the
+script is an order plus two things those stages did not produce.
+
+The first is the **command record**. `sweep.log` was read only for its `label=` lines
+(23.2); its 2 Hz telemetry -- the commanded frequency and the four duties -- was read for
+the drop instant and then thrown away. It is now `telemetry.csv` in full, and every change
+in it is `events.csv`: each label, and each duty step over 0.5 %. Frequency is deliberately
+NOT evented. It ramps continuously, so every sample is a change and an event file of 464
+rows says nothing; it is a column and a trace instead. Every rule on the timeline plot has
+a row in `events.csv`, which is the property that makes a marked plot checkable.
+
+The second is that `lean_table` now keeps the frames **outside** every frequency point,
+with `freq_hz` -1. Those are the ramps and the coils-off rest windows, and their tilt is
+the datum's own scatter measured against itself: on drone 1 it sits near zero between
+points and steps to 20 deg inside them, which is the cheapest available check that the
+datum is a datum and not an artefact of the window it was cut from. The per-point plots
+and `summary` select on `freq_hz`, so they never see those rows.
+
 ## Appendix A: Correspondence with the MATLAB implementation
 
 Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`
@@ -4000,3 +4055,49 @@ boundaries: a conservative rule of thumb is to keep the quasi-static demand belo
 $\tau_{max}\sin(\pi/2 - \Delta)$ with a swing allowance $\Delta$ of a few tens of
 degrees, or to shape $\dot f_f$ continuously (higher-order polynomial / exponential
 segments) so little swing energy is injected.
+
+## 24. Holding the seated rotor upright from the camera, and dropping a coil against that
+
+### 24.1 Why this is possible on the mast and not in the air
+
+The free rotor of 11.6 and 12.8 answers a field tilt with a precession 72 deg off the
+command after 50 ms, undamped at 1.2 Hz, inside the heave band. On the mast none of that
+applies: the rod reacts, the rotor cannot precess, and a duty step on one coil moves the
+axis by 3-5 deg in about 0.3 s and stays there (`results/tilt_sweep/*/normal_angle_f*.png`,
+2026-09-02). With the plate segmenter, the mast prior and the disc-mast fusion
+(`pose/theory.md` 20), the axis is read at 2-3 deg per frame and ~0.5 deg over 0.25 s, with
+the rod found in 87-95 % of frames -- the rejection of the pose normal as a feedback signal
+in `attitude.py` was measured on the rim estimator in free flight and does not carry over.
+So `control/tilt_servo.py` closes a loop, but a slow one: an integrator alone, pole at
+0.3 Hz, under the 0.8 Hz latency rule (19.11) and far below the 4 Hz wobble, which it
+averages rather than fights. It is an auto-trim, not a stabiliser.
+
+### 24.2 The Jacobian is measured, and that is the sign certification
+
+18.16 failed twice to measure the mixer's sign because the seated and airborne windows
+never overlapped. Seated is the operating point here, so each coil is probed in turn --
+duty 100 -> 80 for 0.6 s -- and the lean response is that coil's column of $J$ (deg per %
+of drop), sign included. A column under three times the pre-probe scatter refuses the run.
+Then $u \leftarrow u + K_i\,\Delta t\,J^{+}\,\bar\ell$ on four duties, clamped 40-100 with a
+40 % cap on the total drop; the pseudo-inverse spends the drops where they act, and a coil
+whose sign is "wrong" is simply a coil with a negative column. The self-check flips one and
+converges. `duty=A:B:C:D` in `main_flight.cpp` is what the loop drives: four independent
+carrier ceilings the single-lobe az/mag mixer cannot express, counted as drive by
+`link._note_drive`.
+
+### 24.3 Thirty percent of what
+
+23.1 is right that the sweep's independent variable ought to be a current ratio and that
+30 % of duty is not 30 % of current *across coils* (39 % spread at equal duty). Within one
+coil at one frequency, though, the drive is a linear RLC and $I \propto$ duty, so once the
+loop has converged and is FROZEN, setting coil A to $0.30\,d_{\mathrm{bal},A}$ is exactly
+30 % of its balanced current. The 2 Hz `I[A]:` telemetry ratio is logged as the check, by
+magnitude, because channel A's sense reads negative on this board (`main_tilt.cpp`). The
+freeze is not optional: an unfrozen trim cancels the experiment it is meant to prepare.
+
+### 24.4 What it cannot do, stated once
+
+Zero phase authority (18.18): the 13 deg per-coil phase spread makes an elliptical field
+no amplitude trim removes. The disc and the mast disagree by a systematic 5 deg, so a bias
+in either becomes a bias in "upright" until one is shown to carry it. And nothing here
+transfers to free flight -- the seated Jacobian is a property of the rod.

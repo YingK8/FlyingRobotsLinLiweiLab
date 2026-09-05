@@ -186,11 +186,13 @@ class SerialComm:
         after each point to close the interval.
 
         Any new command that energises belongs in this list, or its heat goes unaccounted
-        and the model reads cold while the coils are not.
+        and the model reads cold while the coils are not. `duty=` (per-channel carrier
+        override, `tilt_servo.py`) is one: it only scales `collective`, but a run that
+        sets duties has coils driven, and the ramp's `seq=go` is not always sent first.
         """
 
         c = cmd.strip().lower()
-        if c.startswith(("seq=go", "freq=", "mag=", "throttle=", "probe=")):
+        if c.startswith(("seq=go", "freq=", "mag=", "throttle=", "probe=", "duty=")):
             if self._drive_since is None:
                 self._drive_since = time.monotonic()
         elif c in ("stop", "land") and self._drive_since is not None:

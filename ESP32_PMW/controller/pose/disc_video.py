@@ -126,7 +126,7 @@ def _draw(gray, seg, cam, label, axes=()):
     return img
 
 
-def _both_axes(segs, rig):
+def _both_axes(segs, rig, prior=None):
     """The two reconstructions of the rotor axis, for side-by-side drawing.
 
     * **conic** -- `conic.backproject_ellipse` in each view, branches matched across views.
@@ -151,9 +151,12 @@ def _both_axes(segs, rig):
         lines.append(((cx + rig.cameras[k].K[0, 2], cy + rig.cameras[k].K[1, 2]),
                       (np.cos(a), np.sin(a))))
     out = []
-    ca, agree = da.fuse(rows[0][1], rows[1][1])
+    # Same prior as `disc_axis.solve`: without it the sign is pinned to a fixed reference
+    # the axis is near perpendicular to, and the drawn arrow reverses on noise.
+    ca, agree = da.fuse(rows[0][1], rows[1][1], prior)
     out.append((ca, CONIC_BGR, f"conic (A-vs-B {agree:.1f})"))
-    pa = disc_pose.mast_direction(lines, rig.cameras, up=da.ORIENT_REF)
+    pa = disc_pose.mast_direction(lines, rig.cameras,
+                                  up=da.ORIENT_REF if prior is None else prior)
     if pa is not None:
         from controller.pose import stereo
         out.append((pa, PLANE_BGR, f"planes (vs conic {stereo.line_angle_deg(ca, pa):.1f})"))
@@ -161,8 +164,13 @@ def _both_axes(segs, rig):
 
 
 def render(take_dir, out_path=None, stride=3, max_frames=None, fps=30.0, rig_path=None,
-           compare=True):
-    """Write the annotated side-by-side film. Returns its path."""
+           compare=True, views=(0, 1), conic=True):
+    """Write the annotated side-by-side film. Returns its path.
+
+    ``views`` selects which panes are written (``(0,)`` = A only). The segmentation still
+    runs on both, because the 3-D axis arrows are a stereo reconstruction and drawing them
+    on one view alone would be drawing a number that view did not measure.
+    """
 
     take = record.latest_flight(Path(take_dir))
     out = Path(out_path or (take / "overlay.mp4"))
@@ -170,9 +178,11 @@ def render(take_dir, out_path=None, stride=3, max_frames=None, fps=30.0, rig_pat
     caps, stamps = record.open_recording(take)
     w = int(caps[0].get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(caps[0].get(cv2.CAP_PROP_FRAME_HEIGHT))
-    vw = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (2 * w, h))
+    vw = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps,
+                         (len(views) * w, h))
 
     i = n = 0
+    prior = None
     try:
         while max_frames is None or n < max_frames:
             grabbed = [c.read() for c in caps]
@@ -182,14 +192,21 @@ def render(take_dir, out_path=None, stride=3, max_frames=None, fps=30.0, rig_pat
                 grays = [f if f.ndim == 2 else cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
                          for _, f in grabbed]
                 segs = [disc_pose.segment_disc(g) for g in grays]
-                axes = _both_axes(segs, rig) if compare else []
+                axes = _both_axes(segs, rig, prior) if compare else []
+                if axes:
+                    prior = axes[0][0]
+                # The conic arrow sits on top of the planes arrow whenever the two agree,
+                # which is most of the time -- so it reads as one fat arrow with a stray
+                # blue tip rather than as two estimates. Off when you only want the axis.
+                if not conic:
+                    axes = [a for a in axes if a[1] != CONIC_BGR]
                 panes = []
                 for k, g in enumerate(grays):
                     t = stamps[i][k] - stamps[0][0] if stamps is not None and i < len(stamps) \
                         else i / 200.0
                     panes.append(_draw(g, segs[k], rig.cameras[k],
                                        f"{'AB'[k]}  t={t:6.2f}s", axes))
-                vw.write(np.hstack(panes))
+                vw.write(np.hstack([panes[k] for k in views]))
                 n += 1
             i += 1
     finally:
@@ -386,6 +403,7 @@ def render_with_angles(take_dir, log_path=None, out_path=None, stride=4, fps=30.
     vw = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (2 * w, h + ph))
 
     i = n = 0
+    prior = None
     try:
         while max_frames is None or n < max_frames:
             grabbed = [c.read() for c in caps]
@@ -515,6 +533,10 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None)
     ap.add_argument("--stride", type=int, default=3)
     ap.add_argument("--max-frames", type=int, default=None)
+    ap.add_argument("--view", choices=("A", "B", "AB"), default="AB",
+                    help="which pane(s) to write; both are always segmented")
+    ap.add_argument("--no-conic", action="store_true",
+                    help="drop the blue conic-backprojection axis arrow")
     ap.add_argument("--spin-check", action="store_true", help="is the rotor turning?")
     ap.add_argument("--angles", action="store_true",
                     help="composite with a live radial/azimuth trace")
@@ -530,4 +552,6 @@ if __name__ == "__main__":
         for k, v in spin_check(a.take).items():
             print(f"  {k:20s} {v}")
     else:
-        render(a.take, a.out, stride=a.stride, max_frames=a.max_frames)
+        render(a.take, a.out, stride=a.stride, max_frames=a.max_frames,
+               views={"A": (0,), "B": (1,), "AB": (0, 1)}[a.view],
+               conic=not a.no_conic)

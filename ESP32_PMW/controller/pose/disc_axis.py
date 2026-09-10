@@ -56,6 +56,20 @@ from controller.pose import conic, disc_pose, stereo
 #: Sign convention for the reported axis, matching the existing takes (their `nz` sits near
 #: -0.35). A global flip changes no physics -- every tilt downstream is an angle from a datum
 #: -- but matching means old and new `axis.csv` can be plotted on one pair of axes.
+#:
+#: THIS ONLY SEEDS THE FIRST FRAME. An ellipse fixes the axis as a line and nothing more, so
+#: the sign is imposed by `v @ ref`, and that test is decided by the component of the axis
+#: ALONG the reference. A reference near perpendicular to where the axis actually lies is
+#: therefore decided by noise, and the vector flips end-for-end between adjacent frames --
+#: azimuth jumps 180 deg and any rate differenced across the flip is garbage. `(0, 0, -1)`
+#: IS near perpendicular here: over 399890 frames of `results/flights/*/axis.csv` the axis
+#: comes within 0.3 deg of the plane perpendicular to it, and the 2026-09-09 campaign sits a
+#: median 64 deg off. No fixed vector fixes this -- the rig has moved between campaigns, and
+#: the best single reference for one of them is perpendicular to another.
+#:
+#: So the sign is carried FORWARD instead: each frame is oriented to agree with the previous
+#: one, which cannot be ambiguous because the axis moves far less than 90 deg in 5 ms. The
+#: constant is used only when there is no previous frame to agree with.
 ORIENT_REF = (0.0, 0.0, -1.0)
 
 #: Only the direction out of `backproject_ellipse` is used, so the radius is a free scale.
@@ -155,7 +169,7 @@ def view_row(seg, cam, undistort=True):
     return row, normals
 
 
-def axis_from_minor(rows, cams):
+def axis_from_minor(rows, cams, prior=None):
     """Rotor axis from the minor axis treated as the projected normal. DIRECTIONS ONLY.
 
     The rotor axis and the mast are the same physical direction, and that direction projects
@@ -180,7 +194,7 @@ def axis_from_minor(rows, cams):
         a = np.radians(ang + 90.0)                       # minor axis: major angle + 90
         lines.append(((ex, ey), (np.cos(a), np.sin(a))))
         centres.append((ex, ey))
-    axis = disc_pose.mast_direction(lines, cams, up=ORIENT_REF)
+    axis = disc_pose.mast_direction(lines, cams, up=ORIENT_REF if prior is None else prior)
     if axis is None:
         return None
     centre = disc_pose.triangulate_centre(centres, cams)
@@ -236,18 +250,38 @@ def fuse(normals_a, normals_b, prior=None):
     axis = na + nb
     n = np.linalg.norm(axis)
     axis = na if n < 1e-12 else axis / n
-    return stereo.orient(axis, ORIENT_REF), d
+    # Sign it against the PREVIOUS frame, not against a fixed vector -- see ORIENT_REF.
+    # `prior` is the last accepted axis and `solve` already refuses one older than
+    # PRIOR_MAX_AGE_S, so a stale prior cannot pin the sign of a frame it knows nothing about.
+    return stereo.orient(axis, ORIENT_REF if prior is None else prior), d
 
 
 def solve(take_dir, out_dir=None, rig_path=None, progress=True, stride=1):
     """Segment, fit and fuse a recording. Returns the output directory.
 
-    ``stride`` solves every Nth frame. The measurement this feeds is a ~3 s transient, which
-    210 Hz oversamples by a factor of hundreds; stride 3 leaves ~70 Hz and cuts the solve,
-    which is the whole cost of a 55-take campaign, by the same factor. The `frame` column
-    still carries the true index and `t` the true stamp, so nothing downstream has to know --
-    and `alignment_rate` reads real timestamps rather than assuming a rate, so a strided
-    take and a full one give the same answer.
+    ``stride`` solves every Nth frame. **KEEP IT AT 1 FOR ALIGNMENT-RATE TAKES.** The rule is
+    Nyquist against the ROTOR, not against the transient:
+
+        solved rate must exceed 2 * drive_hz
+
+    because the once-per-rev wobble sits AT the drive frequency and is large -- measured 18.2
+    deg in azimuth at 40 Hz, against a ~45 deg swing -- so `alignment_rate.rev_window` has to
+    null it with a boxcar of a whole number of revolutions. That null only exists if the
+    revolution is resolved. Below Nyquist the wobble folds to |f - n*fs| and the boxcar
+    removes a frequency the data no longer contains.
+
+    The cameras deliver 210 fps each and the tracker fires on either view, so a full solve
+    runs ~230 Hz: 5.8 samples per revolution at 40 Hz, and Nyquist 115 Hz covers the whole
+    sweep. Stride 4 cuts that to 51 Hz -- 1.3 samples per revolution -- and folds 40 Hz onto
+    11.1 Hz, whose 92 ms period is comparable to the ramp being measured.
+
+    This docstring previously said the measurement is "a ~3 s transient, which 210 Hz
+    oversamples by a factor of hundreds", and that "a strided take and a full one give the
+    same answer". Both were wrong and together they cost a campaign. The ramp is ~150 ms, not
+    3 s; and on take 2026-09-10_012419 at 40 Hz, stride 1 against stride 4 moves trace
+    roughness 9.30 -> 0.96 deg and the fitted rate 1262 -> 597 deg/s. Stride is safe only for
+    something that reads the trace at frequencies far below the rotor -- the `frame` and `t`
+    columns do still carry true indices and stamps, which is what made the error invisible.
     """
 
     take_dir = record.latest_flight(Path(take_dir))
@@ -321,7 +355,11 @@ def solve(take_dir, out_dir=None, rig_path=None, progress=True, stride=1):
                 wa.writerow([i, f"{t[0]:.6f}"] + [f"{v:.6f}" for v in axis]
                             + [f"{agree:.3f}"])
                 n_axis += 1
-                got = axis_from_minor(list(zip(rows, norms)), cams)
+                # Signed against THIS frame's conic axis, not against its own previous
+                # frame: the two are the same physical direction a few degrees apart, so
+                # `axis` is the tighter prior, and it keeps the two CSVs in one hemisphere
+                # where the whole point of axis_minor.csv is comparing them.
+                got = axis_from_minor(list(zip(rows, norms)), cams, prior=axis)
                 if got is not None:
                     m_ax, xyz, radius = got
                     wm.writerow([i, f"{t[0]:.6f}"] + [f"{v:.6f}" for v in m_ax]
@@ -421,8 +459,25 @@ def _self_check():
     assert agree < 2.0, agree
     assert abs(float(axis @ stereo.orient(np.array([0.6, 0.0, 0.8]), ORIENT_REF))) > 0.99
 
+    # 5. an axis sweeping THROUGH the plane perpendicular to ORIENT_REF must not flip.
+    #    This is the failure the prior exists to remove: with a fixed reference the sign is
+    #    decided by a dot product that passes through zero, and the vector reverses.
+    ref = np.asarray(ORIENT_REF, float)
+    perp = stereo._unit(np.cross(ref, [1.0, 0.0, 0.0]))
+    prior = None
+    flips = 0
+    for deg in np.arange(-20.0, 20.5, 0.5):          # crosses perpendicular at deg = 0
+        a = np.radians(deg)
+        truth = stereo._unit(np.cos(a) * perp + np.sin(a) * ref)
+        got = stereo.orient(truth * (1 if deg % 2 else -1),   # arbitrary incoming sign
+                            ORIENT_REF if prior is None else prior)
+        if prior is not None and float(got @ prior) < 0.0:
+            flips += 1
+        prior = got
+    assert flips == 0, f"{flips} sign flips sweeping through the ORIENT_REF singularity"
+
     print("disc_axis: self-check passed (legacy formula, thin-feature opening, axis "
-          "recovery, branch pick)")
+          "recovery, branch pick, sign continuity)")
 
 
 if __name__ == "__main__":

@@ -4101,3 +4101,488 @@ Zero phase authority (18.18): the 13 deg per-coil phase spread makes an elliptic
 no amplitude trim removes. The disc and the mast disagree by a systematic 5 deg, so a bias
 in either becomes a bias in "upright" until one is shown to carry it. And nothing here
 transfers to free flight -- the seated Jacobian is a property of the rod.
+
+## 25. The rotation that was never measured, because it was never commanded
+
+Written 2026-09-08.
+
+`attitude.fit_rotation` has returned `None` on every flight this project has flown. The
+recorded reason (18.16, 19.14, and `attitude.py`'s own docstring) is a weak response: over
+the 95-110 Hz band the measured tilt change is **0.006-0.054 deg against a 0.49 deg
+resolution**, so the refusal is correct and any angle read off it would be, in the
+docstring's phrase, "noise wearing a number's clothes".
+
+That reading is wrong, and the consequences of it being wrong are large. It is not a weak
+response. **It is no response**, and it is no response for three independent reasons, none
+of which is in the estimator.
+
+### 25.1 The three faults
+
+**One: the dither commanded a direction with no magnitude.** The identification block sent
+`az=` and never `mag=`. `main_flight.cpp::applyMixer` computes
+
+$$\text{drop}_k = \texttt{MIX\_GAIN}\cdot\texttt{magSet}\cdot\max\!\big(0,\ \cos(az-\texttt{COIL\_AZ}_k)\big)$$
+
+so the entire lateral authority is proportional to `magSet`, and `magSet` is zero unless
+something sends it. Nothing did: `RunConfig.trim_mag` is `0.0`, so the trim's `mag=` never
+fires; `RunConfig.auto_mag_max` is `0.0` and `viz.mag_max` starts at 0, so the closed
+loop's `mag = min(hypot(ux, uy), mag_max)` is identically zero. Every coil sat at
+`collective` for the whole run, whatever azimuth was commanded. The field the rotor saw did
+not change when `az=` changed, because there was no lateral field to steer.
+
+**Two: the gate was on the wrong quantity.** The dither fired on `link.freq >= trim_at_hz`
+-- the *field* rate, which says nothing about whether the robot has left the pad.
+`ThrustVector` returns `None` below `AIRBORNE_MM` for the reason 18.14 establishes: seated,
+the pad's reaction cancels lateral acceleration and the sensor reads zero whatever the true
+tilt is. So the samples being regressed were taken through a sensor that was, at the same
+moment, reporting its own refusal. Gating on `tv.valid` lets the sensor say when its
+reading means anything, which is the only thing that can.
+
+**Three: the command never reached the log.** `mag_cmd` and `az_cmd` were assigned only
+inside `if armed:`. An identification run is disarmed by construction -- `auto_mag_max` is
+0 and `attitude_closed` is `False` until `rot_deg` exists -- so the `az` column was blank
+for the entire flight, and `fit_rotation_from_csv` dropped every row on
+`np.isfinite(az)`. Even had the excitation been real, there would have been nothing to
+segment it by.
+
+Each fault alone is sufficient to produce exactly the observed null. Together they made a
+null indistinguishable from a measurement, for long enough that 19.14 spent a session
+pricing headroom against an uncertainty that a working dither would have collapsed.
+
+### 25.2 Why this hid
+
+The null was self-consistent. `fit_rotation` refused, and its refusal message names the
+noise floor -- so the number it printed was *true* and pointed at the sensor. Nothing in
+the chain was broken in a way that raises an error: a `mag` of zero is a legal command, a
+seated `ThrustVector` returns `None` rather than lying, and a blank CSV column is the
+project's deliberate convention for "not measured". Three correct-looking behaviours
+composed into a silent one.
+
+The comment on the dither records the near miss. An earlier version keyed the gate off
+`trim_sent`, and was fixed because it "silently did nothing whenever `trim_mag` was 0" --
+the right diagnosis of the wrong half. The gate was moved off the trim; the *amplitude* was
+left behind, still supplied only by a trim that defaults to off.
+
+**The rule this is an instance of:** an actuator command is not an excitation until
+something downstream of the actuator has been shown to move. `fit_rotation`'s floor check
+tests whether the *response* clears the noise; nothing tested whether the *input* was ever
+applied. A refusal is only informative about the sensor if the input is known to have
+happened, and that premise had never been checked.
+
+### 25.3 The fix, and what it is worth
+
+`id_mag` (default 0.30) is the excitation amplitude, matching `mixer_sign.MAG`: through
+`MIX_GAIN = 0.6` it is an 18 % duty drop on the lead coil, and 24.2's seated sweep measures
+a 20 % drop moving the rotor axis 3-5 deg. Against the 0.49 deg floor that is roughly
+**6x per sample**, where the previous attempt was 0.1x. The dither is gated on `tv.valid`,
+owns `az=`/`mag=` while it runs (the closed loop's sends are suppressed, or with
+`auto_mag_max` at 0 the loop would cancel the excitation with `mag=0.000` on the following
+tick), and writes what it commanded into the CSV.
+
+The improvement is roughly two orders of magnitude in SNR and **none of it is a better
+estimator**. It is `mag = 0.30` instead of `mag = 0`, and a sensor that is airborne instead
+of on the pad. `attitude.py` is unchanged.
+
+`test_panel.run_dither` is the guard, and it asserts against all three faults separately:
+that a non-zero `mag=` reaches the wire on the same frame as every `az=`; that both reach
+the CSV on a *disarmed* run; that nothing is commanded while the robot is on the pad or
+when `id_mag` is 0. Then end to end: `fit_rotation_from_csv` must reach its own noise-floor
+refusal on measured responses, because the failure being guarded is the *other* message --
+"no usable command changes -- the dither never ran while airborne", which is what all three
+faults produce and what every flight in `results/takeoff` produced. On the stub, which does not move,
+it now segments four responses and refuses honestly. Being unable to find a response to
+refuse is not a pass.
+
+One constraint the harness had to learn and now asserts: **`id_dwell_s` must exceed
+`WINDOW_S`**. `fit_rotation_from_csv` skips the first 0.25 s of each segment so a sample
+never straddles two commands; a dwell inside that window leaves fewer than five samples per
+segment and the consumer reports "the dither never ran" -- the exact message that means the
+fault is back. A dwell that is too short is indistinguishable, at the output, from no
+excitation at all.
+
+### 25.4 What is still not measured
+
+`k_lat` and `psi` are still unknown. This chapter does not measure them; it removes the
+reason they could not be measured. The seed `K_LAT_DEFAULT = 0.05` stands until a flight
+with the dither actually running produces a fit, and 19.14's headroom stays insured against
+rather than known until then. What has changed is that the experiment can now return
+something other than zero.
+
+### 25.5 MEASURED 2026-09-08: the airborne window is 0.55 s, and the stepped dither cannot fit in it
+
+With the logging fault of 25.1 understood, the three flights that carry `acc_tilt` columns
+(`results/takeoff/20260901_1631{24,216,255}.csv`) answer a question nobody had asked of
+them: **how long is `ThrustVector` actually valid?**
+
+| take | valid rows | contiguous windows | span |
+|---|---|---|---|
+| 20260901_163124 | 273 | 1 | **0.550 s** |
+| 20260901_163216 | 274 | 1 | **0.546 s** |
+| 20260901_163255 | 274 | 1 | **0.546 s** |
+
+One window per flight, and the three agree to 4 ms. The "1-2 s airborne window" the runner's
+comments quote is optimistic by a factor of two to four; the sensor is usable for **0.55 s**.
+
+That number closes the stepped dither arithmetically, and the argument needs no experiment:
+
+- `fit_rotation` regresses the *change* between consecutive segments, so it needs
+  `len(good) >= 2` responses, hence **at least three segments**.
+- `fit_rotation_from_csv` discards the first `WINDOW_S = 0.25 s` of every segment (a sample
+  inside it straddles two commands) and then requires five samples, so a segment costs
+  **at least 0.26 s**.
+- Three segments is therefore **0.78 s minimum, against 0.55 s measured.**
+
+There is no dwell that satisfies both constraints. Shortening the dwell below `WINDOW_S`
+does not help: the consumer then finds fewer than five samples per segment, drops them all,
+and reports "the dither never ran while airborne" -- which is 25.1's failure message again,
+now produced by a dither that *did* run. **The stepped dwell is not a tuning choice that was
+set badly; it does not fit, and it never did.**
+
+This is what promotes the continuous-rotation lock-in of the identification plan from
+preferred to required. A lock-in correlates against a known reference and needs no
+segmentation, so it extracts a complex gain from whatever record exists rather than from a
+whole number of dwells. Its own cost is stated plainly: at 0.5 Hz, 0.55 s is **0.27 of a
+cycle**, which does not separate in-phase from quadrature on its own. Three ways out, in the
+order they should be tried:
+
+1. **Lengthen the window.** 24.2's balanced duty vector `d_bal` removes the 1.63 A dipole at
+   145 deg that 18.18 measures, which is the most likely reason the robot leaves the tracked
+   volume at 0.08 g before thrust accumulates (18.13). This is the only option that improves
+   every other measurement too, and it is the one to try first.
+2. **Accumulate across flights at different start phases.** Four flights at 0.27 cycle each
+   cover the circle if their phases are spread deliberately rather than left to chance.
+   Cheap, but it assumes the gain is stationary flight to flight, which nothing has shown.
+3. **Raise the dither rate** so a cycle fits: 0.55 s is one period at 1.8 Hz. That is above
+   the 0.78 Hz closed-loop pole and uncomfortably near the 4 Hz wobble the 0.25 s estimator
+   window is averaging away, so it trades a known problem for an unmeasured one. Last.
+
+**What must not be done:** shortening `WINDOW_S` to make the arithmetic close. The 0.49 deg
+floor `fit_rotation` refuses below is a property of that window (`attitude.py` measures
+4.67 / 3.38 / 2.54 deg from the pose normal at 0.25 / 0.50 / 1.00 s, and 0.49 / 0.11 / 0.02
+deg from acceleration). A shorter window buys segments and loses the floor that makes a
+response readable, which is the same trade as fitting noise.
+
+### 25.6 MEASURED 2026-09-08 (free): the resonance is not 174 Hz, and Q says R is ~1.3 ohm
+
+`sysid.py --stage 0` fits $(f_0, Q)$ per channel from the `i_a..i_d` columns of run CSVs
+already on disk. It costs no hardware, no heat and no waiting -- the ramp is a frequency
+sweep that was recorded for another purpose. 48 takeoff runs, of which 34 fit at least one
+channel:
+
+| | A | B | C | D |
+|---|---|---|---|---|
+| $f_0$ median, all runs | 120.1 | 151.1 | 149.7 | 130.4 Hz |
+| $Q$ median | 1.23 | 1.05 | 1.13 | 1.25 |
+
+Two things follow, one solid and one merely directional.
+
+**Solid: the disputed series resistance is the small one.** For a series RLC,
+$Q = \sqrt{L/C}\,/R$, and $\sqrt{1.4\,\text{mH}/800\,\mu\text{F}} = 1.323\ \Omega$. The
+measured $Q \approx 1.1$ therefore implies $R \approx 1.2\ \Omega$ -- against the two
+values the tree carries, **6.9 ohm and 1.3 ohm**, which `constants.py` records as an
+unresolved factor of five in every $Q$ prediction. 6.9 ohm would require $Q = 0.19$, which
+is six times smaller than four independent channels measure. The 1.3 ohm figure is the
+right one, and every phase prediction that used 6.9 was wrong by that factor.
+
+**Directional only: the resonance moved with the bank, as it must.** Splitting the runs at
+the 2026-09-01 capacitor change (400 -> 800 uF, $f_0 \propto C^{-1/2}$, so a $\times 0.707$
+shift is expected):
+
+| | A | B | C | D |
+|---|---|---|---|---|
+| before, 400 uF | 121.6 | 151.1 | 154.6 | 131.4 Hz |
+| after, 800 uF | 105.7 | 145.0 | 130.8 | 119.3 Hz |
+
+Every channel moves down, which is the right direction, but the inter-quartile ranges
+overlap heavily (B spans 118-190 Hz after) and the shifts are far smaller than $0.707$
+predicts. **This does not settle the resonance and must not be pasted into
+`constants.py`.** What it does settle is that `F_RESONANCE_HZ = 174.0` is not supported by
+either bank's data, which is what the constant's own STALE marker already said.
+
+**The per-run fits are over-confident.** Median `f0_sigma` is 0.7-1.3 Hz while the run-to-run
+spread is 20-70 Hz. The fit's own error bar describes the noise within one ramp and says
+nothing about whatever differs between ramps -- coil temperature is the obvious candidate,
+since copper gains 0.39 %/degC and the runs were taken at unknown and varying temperature.
+Quoting `f0_sigma` as the uncertainty on $f_0$ would be off by more than an order of
+magnitude.
+
+So stage 0 does what a free stage should: it eliminates a wrong number, resolves a
+five-fold ambiguity in another, and hands stage E a much narrower band to sweep. It does
+not replace stage E.
+
+## 26. The wire: one stream, two framings
+
+Written 2026-09-08.
+
+The host commands four amplitudes, four phases and one field frequency. Nine numbers, at
+200 Hz. As ASCII that is ~60 bytes to format, parse and echo two hundred times a second,
+with an Arduino `String` allocation per field on a device whose heap is the first thing to
+fail -- and `main_flight`'s `dispatch` prints a ~70-byte state line on every accepted
+command, which at 200 Hz is 14 kB/s of back-channel competing with telemetry for the same
+UART.
+
+### 26.1 The frame, and why each field is the width it is
+
+26 bytes: sync, type, `seq` (u16), four amplitudes (u16), four phases (u16), frequency
+(u32 milliHz), CRC-16/CCITT-FALSE over everything but the sync byte. Fixed length and no
+length field -- a corrupted length is a desync source and nothing here is variable.
+
+Amplitude is duty percent at 655.35 counts per percent, an LSB of 0.0015 %, far below what
+the LEDC hardware resolves. Phase is degrees at 182.044 counts per degree, 0.0055 deg per
+LSB. **u8 phase was considered and rejected**: 1.41 deg/LSB is finer than the 1.8 deg the
+25 us commutation callback resolves at a 200 Hz field, but *coarser* than the 0.45 deg it
+resolves at 50 Hz -- and the ramp runs through that band on every flight.
+
+At 200 Hz the frame is 5.2 kB/s, **0.56 % of 921600**; at 500 Hz, 1.4 %. Bandwidth was
+never the constraint and is not now.
+
+### 26.2 The constraint is the USB bridge, not the baud
+
+19.13 replaced a bandwidth argument with a latency one and got the big win: 29 bytes at
+115200 is 2.5 ms on the wire, and at 921600 it is 0.31 ms. The 26-byte frame is 0.28 ms.
+
+But the board reaches the host through a USB-UART bridge, which batches into USB frames on
+the order of a millisecond. A 0.28 ms wire time sits *inside* ~1 ms of latency and jitter
+that no baud rate removes. The consequence, stated plainly so the next session does not
+re-derive it: **commanding at 500 Hz over this bridge buys nothing over 200 Hz** -- the
+link quantises the difference away. Tick at 500 Hz internally, send at 200, and keep the
+deadband and `RESEND_S` rules from 19.10, which now exist for the latency of a line and
+because every byte not sent is a byte that cannot arrive corrupted.
+
+If sub-millisecond command latency ever becomes the binding term, the fix is a native-USB
+MCU (an ESP32-S3's CDC) or a different bridge. It is not a protocol change. **The bridge's
+actual quantum has not been measured on this bench** -- it is a P3 item and the number
+above is from the part's behaviour class, not from this rig.
+
+### 26.3 How ASCII and binary share one stream
+
+Every ASCII command the host sends is 7-bit. Both sync bytes have the high bit set. So a
+`0xA5` **at a line boundary** cannot be text, and that single fact is the whole framing
+rule: an empty accumulator plus a high bit means a frame is starting; a high bit part-way
+through a line is corruption *in a line*, and treating it as a frame would eat the next 25
+bytes of good ASCII. `drive_frame.demo()` asserts the 7-bit property over every command the
+host actually sends, so if a future command breaks it the framer's premise fails loudly.
+
+A frame that stalls mid-flight must not hold the parser out of ASCII forever, or one stray
+byte makes `stop` unreachable. An inter-byte gap over 2 ms (about 184 byte-times at 921600,
+so a real frame never trips it) drops back to ASCII.
+
+**`stop` is not a flag inside the frame, and that is deliberate.** A stop that depends on a
+CRC passing is a stop a bit error can swallow. It goes as `"\nstop\n"` three times: the
+leading newline ends any partial line, the gap ends any partial frame, and `stop` is
+idempotent -- `safe_off.py` already relies on that. Also worth saying in the firmware, and
+said there: **`amp = 0` in a frame is not a stop.** It leaves the state machine in FLIGHT
+with the sequencer alive. Only `stop` de-energises, and only telemetry proves it.
+
+### 26.4 Reliability is measured, not asserted
+
+Every 20th frame the board answers with an 11-byte ACK: the sequence it last applied, how
+many frames it has accepted, how many it rejected, and its state. At 200 Hz that is 10 Hz
+and 110 B/s.
+
+From it the host derives **drop rate**, $1 - n_{rx}/n_{sent}$, with `n_crc` separating
+*corrupted* from *never arrived* -- two different faults with two different fixes -- and
+**round-trip latency**, from a ring of send timestamps keyed on the echoed sequence. The
+RTT contains both USB quanta and is reported as an upper bound on one-way, never halved:
+nothing here measures the split.
+
+These are printed in the exit summary beside the clock line. They are deliberately **not**
+new CSV columns: the 21-column schema has to stay byte-identical or `takeoff_report.compare`
+stops working across the Python/native boundary and old flights stop being comparable.
+
+### 26.5 One definition of the format
+
+`lib/DriveFrame/src/drive_frame.h` is plain C++ with no Arduino and no STL, included by
+the firmware and by the host's native controller. `controller/control/drive_frame.py` is a
+Python mirror for tooling, and it is held to the header rather than to itself: its `demo()`
+decodes byte vectors emitted by the **C++ encoder**.
+
+That check earned its place immediately. At `amp = 50.0 %` the header computes
+`50.0f * 655.35f + 0.5f` in float32 -- 32767.4988 + 0.5, truncating to **32767** -- while
+the same expression in Python's float64 is 32767.5000000000011 + 0.5, truncating to
+**32768**. One LSB apart, on a round number a host is very likely to send, and invisible to
+any round trip that stays inside one language. The mirror rounds through float32 at each
+step now. The consequence was small (0.0015 % of duty); the principle is not, in a format
+with no per-frame acknowledgement to catch it. Same lesson as `pose/theory.md` 21.2, where
+one float32 ulp moved the pose solve by 0.4 mm.
+
+## 27. The loop in C++: what it fixed, and what it did not
+
+Written 2026-09-08. `pose/theory.md` 21 ported the per-frame pose work; this is the rest of
+the loop -- filter, predictor, control law, serial and the clock -- in one process with no
+Python in the tick.
+
+### 27.1 The reason, which is not the rate
+
+19.13 measured the Python loop at **498.5 Hz, dt median 2.00 ms, p95 2.08 ms, max 16.70 ms,
+0.1 % overrun**. The mean rate was never the problem and 19.1 priced it: against a 0.78 Hz
+closed loop, 200 Hz of command costs 0.7 deg of phase lag and 500 Hz costs 0.28. **The
+prize is the 16.70 ms tail**, which is a GC or scheduler stall, plus removing the GIL hop
+between the pose worker and the controller.
+
+Measured, 60 s, same 500 Hz design, on the same machine:
+
+| | achieved | dt med | p95 | p99.9 | max | overrun |
+|---|---|---|---|---|---|---|
+| Python (19.13, 10 s) | 498.5 Hz | 2.00 ms | 2.08 ms | -- | **16.70 ms** | 0.1 % |
+| **native (60 s)** | **500.0 Hz** | **2.00** | **2.00** | **2.00** | **2.07 ms** | **0 %** |
+
+The distribution is essentially degenerate: median, p95 and p99.9 are all the period, over
+six times the observation window, with not one overrun in 30,001 ticks. The tail went
+16.70 -> 2.07 ms.
+
+**Read that honestly.** The tick body in this measurement does the clock, the pacing, the
+command drain and the safety ladder -- there is no camera on this machine, so it does not
+do a pose fetch or a serial write. What is demonstrated is that the *clock and the pacing*
+are sound and that nothing in the loop's own structure produces a tail. The full tick cost
+is untested and stays untested until the rig is present.
+
+### 27.2 What actually removes the tail
+
+Three things, and the first is the one that matters:
+
+- **`THREAD_TIME_CONSTRAINT_POLICY`** puts the control thread on the real-time run queue
+  ahead of every timeshare thread. `computation` must come from a measurement of the tick
+  body -- a thread that overruns it is *demoted*, so a guessed value fights the scheduler
+  it is asking for help from. It is not a guarantee: page faults, malloc arena locks and
+  the USB and WindowServer interrupt paths can still stall the thread. Expect p99.9 under
+  a millisecond and a worst case of a few, which is what was measured.
+- **Nothing in the tick allocates, blocks or does IO.** Fixed-size Eigen throughout
+  (everything is at most 6x6), `O_NONBLOCK` writes where `EAGAIN` is counted and never
+  waited on, and CSV rows into a preallocated single-producer ring drained by a writer
+  thread. A full ring **drops the row and counts it**: a dropped log line is always better
+  than a missed deadline, and one that is not counted is worse than either.
+- **`sleep_until(deadline - 250 us)` then spin.** macOS sleep granularity is ~1 ms, which
+  at a 2 ms period is the whole question; 19.13 expected it to force a busy-wait and found
+  the Python loop got away without one. A bounded 250 us spin costs ~12 % of one core and
+  removes the granularity term outright.
+
+### 27.3 One clock, and why it is a correctness requirement
+
+`std::chrono::steady_clock` everywhere -- on Darwin libc++ that is `mach_absolute_time`,
+the same counter `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` reads. `tracker.h` had its own
+identical definition, which was harmless only while nothing else in the process needed the
+time. It does not any more: the filter propagates from a frame's **shutter stamp** rather
+than from the tick (19.6's `t_pred` rule), so the tracker and the controller must read the
+same counter. Two definitions that agree today are two definitions that can stop agreeing;
+there is one now, in `rt.h`.
+
+### 27.4 Robustness: the gate that was written and never armed
+
+`pose/filter.py::PoseFilter` has always implemented a Mahalanobis innovation gate with a
+`MAX_GATED = 5` escape, and armed it by default at `GATE_SIGMA = 4.0`. **Nothing in the
+flight loop ever called it.** `hover_controller_runner.py:752` feeds the raw `tick.xyz_mm`
+straight into `StatePredictor`; `PoseFilter` is imported by the viz, the demo video, the
+noise tool and the parity harness, and by nothing that flies. An outlier pose reached the
+controller unchallenged for the project's whole life.
+
+So most of the hardening was wiring, not writing. One nuance had to survive the port:
+`filter.py` measures **filtered position as 1.4 % worse than raw**, because per-frame error
+is not white -- depth error autocorrelates at r = 0.966 after one frame and stays above 0.5
+for 408 ms. The filter is therefore a **rejector and a velocity source**, never a position
+smoother: raw position, gated; velocity from the filter (3.5 mm/s against 64.0 mm/s for raw
+differencing); dropouts covered by `StatePredictor`'s model-forward.
+
+The escape is not optional and the parity stage exercises it deliberately, with three
+isolated outliers *and* a sustained excursion: a gate that can lock itself on is worse than
+no gate, because the filter grows more confident in its extrapolation every frame while
+drifting further from the robot.
+
+**Measurement-noise inflation, and what would falsify it.** One term ships:
+$R_{\text{eff}} = \big(1 + (\text{discrepancy\_mm}/\text{suspect\_mm})^2\big) R$.
+`discrepancy_mm` is the only per-frame quality signal in millimetres, hence the only one
+commensurate with $R$ without a fitted scale nobody has measured; `refine_rms_px`,
+`union_coverage` and `ambiguity_margin_deg` are pixels, a fraction and degrees. The hard
+gate stays underneath it, because inflation alone would let a quarter-turn branch flip
+(84 deg out) through with merely a larger $R$. To test it: bin recorded frames by
+`discrepancy_mm` and measure the position residual against a forward-backward smoothed
+track. Flat means the signal carries no information about the error -- delete the inflation
+and keep the gate. Rising means the fitted slope *is* the scale and replaces `suspect_mm`.
+Score it by the trajectory's second difference with the usual guards, because an inflation
+that fires constantly and a filter that has stopped listening to the image look identical
+in a jitter metric.
+
+### 27.5 The chokepoint problem a native binary creates
+
+`CLAUDE.md` has one rule about the coils: every drive path goes through the thing that
+stamps energised seconds into `ai/thermal/coil_thermal.py`. Coils reach 80 C after four
+ramps and there is no temperature sensor. A binary that opened its own serial port would
+walk straight around it.
+
+Three fixes were considered. **The binary writing the stamp** duplicates three measured
+constants and the Newton-cooling arithmetic in C++ -- two homes for numbers that burn
+hardware when wrong -- and races two writers on one file. **The binary shelling out** costs
+~200 ms a spawn and still needs a parent to hold `wait_until_safe()`, which blocks for
+minutes. What ships is a **supervising Python parent**: it gates, it stamps, and it is the
+only writer, forever; the child ticks and owns the port exclusively, so there is no
+DTR/RTS race either.
+
+Four rules make that a chokepoint rather than a claim. The child **refuses to arm without
+`--armed-token`**, which only the supervisor issues and only after `wait_until_safe()`
+returns -- there is no way to run `pmw_fly` by hand and energise a coil. The child mirrors
+`_note_drive` and reports its intervals. If it dies without reporting, the parent charges
+wall clock from the first `DRIVE on`, which over-charges heat, and over-charging is the
+safe direction -- `coil_thermal`'s own unreadable-stamp branch fails to the ceiling for the
+same reason. And **EOF on the child's stdin means the supervisor is gone, so the child cuts
+the coils**: a host-side liveness backstop for free, covering a supervisor crash.
+
+**It does not cover the cable.** With no firmware watchdog -- an operating decision, 4.0 --
+the host is the only thing that can stop the coils, so a USB unplug leaves them driven
+until the bench supply's limit or the GPIO14 button. Said once, and not pretended away.
+
+### 27.6 Parity, extended, and a gate that had been passing on nothing
+
+Everything ported is held to the Python by `native_parity`. Two stages were added and one
+defect in the harness was fixed; `pose/theory.md` 21.5 has the details, but the headline
+belongs here too: **`_report` returned `ok` on an empty comparison**, so `--stage refine`
+and `--stage solve` verified nothing on every recording in `results/` and the harness still
+printed `native parity ok`. An empty stage fails now.
+
+Measured, on the new stages:
+
+| stage | samples | agreement |
+|---|---|---|
+| `filter` | 1320 steps, 177 gated identically | position 2.8e-14 mm, rate 7.4e-13 mm/s |
+| `control` | 1600 steps over 4 trials | mag 2.2e-16, f_field and integrator exact |
+
+And the cheap strong check: the C++ law is substituted into `simulate_hover` and run
+through **all seven acceptance scenarios the shipped design was signed off on** -- noise,
+15 ms latency, trim mismatch, and the 0.25x-4x `k_lat` sweep. Seven validated closed-loop
+tests for the cost of one adapter, and they exercise the law against a nonlinear truth
+plant in ways no scripted input can. All seven pass.
+
+### 27.7 The rehearsal, measured
+
+The whole chain below the camera runs and is checked without one, through `--sim-pose` --
+the C++ twin of `stub_ticks` and `fly(dry_run=True)`, and there for the same reason. A
+12 s run at a 100 Hz source against the 500 Hz loop:
+
+| | |
+|---|---|
+| clock | 6001 ticks, 500.1 Hz, dt med/p95/p99.9 2.00 ms, max 2.04, 0 overrun |
+| coast | 4801 of 6001 ticks -- exactly the 4-in-5 a 100 Hz source implies |
+| gate | 30 injected outliers, **30 rejected** |
+| CSV | 21 columns, unmeasured fields blank |
+
+And the ladder, driven deliberately: dropouts of 0.2 s against `MAX_COAST_S = 0.10` give
+630 stale ticks over 201 dropped poses, which is the ~500 the arithmetic predicts plus the
+start-up transient.
+
+Two bugs surfaced that no unit test would have. The simulated source seeded its schedule
+at `next_ = 0`, and `steady_clock` counts from boot -- so every tick looked due and the
+source fired at the CONTROL rate rather than its own, with 5 coast ticks in 6001 where
+4800 were expected. **A rate that is never exercised is a rate that is not implemented**,
+and the coast path is the whole point. Second, `--sim-outlier-every 1` gates nothing, and
+that is correct: every pose carrying the same offset is a bias, not a stream of outliers,
+and after the first there is no innovation to reject. Reading `0 gated` there as a failure
+would have been the wrong conclusion from a right answer.
+
+### 27.8 What is not done
+
+No camera is wired into the tick: `Tracker` exists and is native, but this machine has no
+ELP attached, and a loop that fetches poses it cannot get would be untested code that
+looks tested. `--sim-pose` is what stands in until the rig is present. The same goes for the DRIVE frame's phase field -- it is carried and the firmware
+applies it, but **no control law commands per-coil phase**, deliberately: `theory.md` 22 is
+about *compensating* the RLC, 18.18's 29 % asymmetry is an amplitude effect, and a control
+law around an actuator nobody has characterised is a guessed trim with more code. Chapter
+25's stage S is what would characterise it.

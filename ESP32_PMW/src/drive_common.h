@@ -38,6 +38,13 @@ static const float COIL_Q[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 // first in setup(), before ctl.begin(), so the coils can't glitch on and the
 // ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
 inline void driveBoot() {
+  // Before begin(), or it has no effect. The default RX FIFO is 256 bytes, and one
+  // blocking 120-byte `driveTelemetry` printf at 921600 takes ~1.3 ms, during which ~120
+  // more bytes arrive -- so a 200 Hz command stream plus one telemetry line already sits
+  // inside a factor of two of overflowing it, and an overflow is silent: the framer sees
+  // a truncated frame, counts a CRC failure, and the coils hold their last command.
+  // 1 kB buys ~5 ms of slack for the cost of 768 bytes of RAM.
+  Serial.setRxBufferSize(1024);
   Serial.begin(SERIAL_BAUD);
   delay(1000);
   forceAllGatesLow();

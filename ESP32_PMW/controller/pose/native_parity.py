@@ -14,8 +14,18 @@ Hold the compiled pose core to the Python reference, stage by stage.
 
     ``evidence``  ring_weight / sample_map / ellipse_points, on the frames' own ROIs.
     ``segment``   segment() on saved plates: hull, area, ellipse, None-agreement.
-    ``refine``    the image-mode solve on the exact inputs the Python estimator built.
-    ``solve``     both estimators end to end on identical frames, stamps and motion.
+    ``refine``    the image-mode solve. Uses the Python estimator's own inputs when the
+                  recording solves; otherwise synthesises well-posed ones (21.5), so the
+                  stage runs on any recording rather than only on a rim robot's.
+    ``solve``     both estimators end to end. NEEDS a recording that solves -- it cannot
+                  be synthesised on this rig's symmetric geometry (21.6).
+    ``filter``    the constant-velocity Kalman filter, its innovation gate, and the
+                  MAX_GATED escape, on a scripted stream that visits all three.
+    ``control``   the LQR law: saturation, slew limiting and anti-windup, plus every
+                  `simulate_hover` acceptance scenario re-run against the C++ controller.
+
+    ``filter`` and ``control`` need no recording at all. **A stage with no samples FAILS**
+    rather than reporting `ok` on an empty comparison; see 21.5.
 """
 
 from __future__ import annotations
@@ -25,10 +35,14 @@ import sys
 from pathlib import Path
 
 import cv2
+import json
+import math
+
 import numpy as np
 
 from controller.pose import background as bgmod
 from controller.pose import segment as segmod
+from controller.pose import conic
 from controller.pose import stereo
 from controller.pose import stereo_native as nat
 from controller.pose.filter import PoseFilter
@@ -78,14 +92,44 @@ def _estimators(plates):
     return rig, py
 
 
-def _report(name, diffs, tol):
+def _report(name, diffs, tol, outlier_frac=0.0):
+    """One comparison line. **A stage with no samples FAILS.**
+
+    `outlier_frac` allows a stated fraction of samples past `tol`, and is used by exactly
+    one caller: the synthetic refine seeds. It is not slack. `pose/theory.md` 21.3
+    measured that one float32 ulp in the shared arithmetic moves the trust-region solve by
+    ~0.4 mm on ~5 % of frames -- the two cores take a different number of steps and settle
+    in a different basin. That is a property of the problem, established before this
+    harness existed, not of the port. Grading `max` alone would either fail a correct port
+    or force a tolerance loose enough to hide a real one; grading the bulk tightly and
+    bounding the outlier COUNT keeps both. The count is always printed.
+
+    An empty `diffs` used to print `max 0.000e+00 ... ok`, so a run that compared nothing
+    was indistinguishable from a run that compared everything and agreed. That is not a
+    hypothetical: on a `tilt_sweep` recording the rim estimator solves 0 of 250 frames
+    ("tilt robots have no rim" -- `pose/theory.md`), so `--stage refine` and `--stage
+    solve` capture zero solves and the harness reported `native parity ok` while
+    exercising neither the trust-region solve nor the fuse. The harness is the gate the
+    C++ port is held to; a gate that passes on no evidence is not a gate.
+
+    Same rule as every other refusal in this tree: say what is missing, do not average it
+    away. `fit_rotation` refuses below its noise floor, `ramp.check` refuses instead of
+    clamping, `coil_phase.fit_channel` refuses a peak on the band edge. This is that.
+    """
+
     d = np.asarray(diffs, dtype=np.float64)
     d = d[np.isfinite(d)]
-    mx = float(d.max()) if len(d) else 0.0
-    p95 = float(np.percentile(d, 95)) if len(d) else 0.0
+    if len(d) == 0:
+        print(f"  {name:28s} n=   0  NO SAMPLES -- nothing was compared, so nothing "
+              f"is verified")
+        return False
+    mx, p95 = float(d.max()), float(np.percentile(d, 95))
+    over = int((d > tol).sum())
+    ok = over == 0 or (outlier_frac > 0.0 and over <= math.ceil(outlier_frac * len(d)))
+    note = "" if over == 0 else f"  [{over}/{len(d)} over tol]"
     print(f"  {name:28s} n={len(d):4d}  max {mx:.3e}  p95 {p95:.3e}  tol {tol:.0e}"
-          f"  {'ok' if mx <= tol else 'FAIL'}")
-    return mx <= tol
+          f"  {'ok' if ok else 'FAIL'}{note}")
+    return ok
 
 
 # ---------------------------------------------------------------------------- stages
@@ -157,6 +201,131 @@ def stage_segment(args):
     return ok
 
 
+def _rim_map(cam, c_world, n_world, radius_mm, shape, sigma=5.0):
+    """A float32 evidence map with a real rim drawn into it, as `ring_weight` would see.
+
+    The circle of `radius_mm` about `n_world` centred at `c_world` is projected through
+    `cam` and rasterised as a soft bright ring on a dim ground. `refine(mode="image")`
+    maximises sampled evidence along the predicted silhouette, so a map built this way has
+    its optimum exactly at the pose that drew it -- which is what makes it a test with an
+    answer rather than a comparison of two wanderings.
+    """
+
+    h, w = shape
+    m = np.full((h, w), 2.0, dtype=np.float32)
+    t1, t2 = stereo._tangent_basis(np.asarray(n_world, dtype=np.float64))
+    th = np.linspace(0.0, 2.0 * np.pi, 1440, endpoint=False)
+    pts = (np.asarray(c_world, dtype=np.float64)[None, :]
+           + radius_mm * (np.cos(th)[:, None] * t1[None, :]
+                          + np.sin(th)[:, None] * t2[None, :]))
+    R = cam.T_world_cam[:3, :3]
+    T = cam.T_world_cam[:3, 3]
+    pc = (pts - T[None, :]) @ R                      # world -> camera
+    pc = pc[pc[:, 2] > 1.0]
+    if pc.shape[0] < 32:
+        return None
+    uv = (cam.K @ pc.T).T
+    uv = uv[:, :2] / uv[:, 2:3]
+    ok = np.isfinite(uv).all(axis=1)
+    uv = uv[ok]
+    xi = np.rint(uv[:, 0]).astype(int)
+    yi = np.rint(uv[:, 1]).astype(int)
+    inside = (xi >= 0) & (xi < w) & (yi >= 0) & (yi < h)
+    if inside.sum() < 32:
+        return None
+    # Anti-aliased polyline with real width, then a wide blur. Setting isolated pixels
+    # and blurring narrowly leaves a SPECKLED ridge: the rasterised samples land on
+    # integer pixels at uneven spacing, so the surface carries high-frequency structure
+    # the solver descends into differently in each core. That is chaos, not divergence --
+    # it took the synthetic refine parity from 1/24 seeds over tolerance to 9/24, with a
+    # p95 normal error of 1.8 deg, none of which said anything about the port. A smooth
+    # ridge is what `ring_weight` actually produces and what the residual assumes.
+    poly = np.stack([xi[inside], yi[inside]], axis=1).astype(np.int32)
+    cv2.polylines(m, [poly], True, 255.0, thickness=3, lineType=cv2.LINE_AA)
+    return np.ascontiguousarray(cv2.GaussianBlur(m, (0, 0), sigma), dtype=np.float32)
+
+
+def _synthetic_refine_inputs(args, rig, py, shape, n=24):
+    """Deterministic (cams, seed_c, seed_n, weights, r_py) tuples with a KNOWN answer.
+
+    Used when the recording solves nothing, which is every `tilt_sweep` take in `results/`
+    -- a tilt robot has no rim for the rim segmenter to find, so the estimator calls
+    `refine` zero times and there is nothing to spy on.
+
+    Two properties make this a real test rather than a substitute for one:
+
+    **The problem is well posed.** Evidence maps are rasterised from a known pose
+    (`_rim_map`), so the residual surface has a true optimum and both cores must descend
+    to it. An earlier version of this used real frames from a rim-less recording with
+    arbitrary seeds; it measured chaos, not parity -- p95 agreed to 0.45 mm while the
+    worst seed diverged by 1.2 m, because a solve with no optimum to find amplifies the
+    last ulp without bound. Two correct implementations disagree on that surface. Never
+    grade a port on an ill-posed problem.
+
+    **The pose is realisable.** Seeds are perturbations of a back-projected truth, so the
+    cone is never degenerate. A pose picked as three world numbers usually is: camera A
+    sits at the world origin looking along +z, so a centre near the origin is a centre at
+    the optical centre, and `refine` returns None from inside its own
+    `np.percentile(evidence(p0))` guard for every such seed.
+    """
+
+    rng = np.random.default_rng(20260908)
+    # `py.rig`, NOT the rig `_estimators` returned: `_ensure_scale` REBINDS `py.rig` to a
+    # rescaled copy on the first frame, so the caller's reference still carries the
+    # calibrated 1280x800 intrinsics while the frames are 640x400. Projecting with those
+    # puts the rotor at x=671 in a 640-wide image, i.e. off the edge, and every rendered
+    # pose is silently rejected.
+    rig = py.rig
+    cams = list(rig.cameras)
+    cam_a = cams[0]
+    K = cam_a.K
+    f = 0.5 * (K[0, 0] + K[1, 1])
+    R = py.radius_mm
+    out = []
+    while len(out) < n:
+        depth = rng.uniform(115.0, 145.0)
+        major = 2.0 * f * R / depth
+        tilt = math.radians(rng.uniform(3.0, 22.0))
+        e = ((float(K[0, 2] + rng.uniform(-20, 20)), float(K[1, 2] + rng.uniform(-20, 20))),
+             (float(major), float(major * math.cos(tilt))), float(rng.uniform(0, 180)))
+        poses = conic.backproject_ellipse(e, K, R)
+        if not poses:
+            continue
+        c_cam, n_cam = poses[0]
+        c_true, n_true = cam_a.to_world(np.asarray(c_cam, float), np.asarray(n_cam, float))
+        n_true = n_true / np.linalg.norm(n_true)
+        maps = [_rim_map(c, c_true, n_true, R, shape) for c in cams]
+        if any(m is None for m in maps):
+            continue
+        # Seeded CLOSE -- 0.05 mm and ~0.1 deg. Deliberately, and the distance was chosen
+        # by measurement, not taste. Sweeping it against both cores:
+        #
+        #   seed offset   centre p50    centre p95    max |d nfev|   seeds over 1e-2 mm
+        #   0.00 mm       9.5e-10       4.6e-06       0              0 / 16
+        #   0.05 mm       8.8e-10       3.7e-08       0              0 / 16
+        #   0.25 mm       1.7e-09       2.1e-02       4              1 / 16
+        #   1.00 mm       1.9e-08       3.8e-02       1              2 / 16
+        #
+        # The median is at rounding everywhere: the cores compute the same thing. What
+        # grows with distance is the FRACTION of seeds whose descent takes a different
+        # number of steps and settles in a different basin -- 21.3's one-ulp sensitivity,
+        # amplified by a longer path. A far seed therefore measures basin-hopping, and a
+        # test that measures basin-hopping cannot see a real port bug underneath it.
+        #
+        # A short descent is strictly more sensitive to the thing this exists to catch:
+        # any genuine arithmetic difference shows up at 1e-7 here, where the tolerance is
+        # 1e-2. So the tolerances stay tight and NOTHING is allowed past them.
+        c0 = c_true + rng.normal(scale=0.05, size=3)
+        nn = n_true + rng.normal(scale=0.002, size=3)
+        n0 = nn / np.linalg.norm(nn)
+        r_py = stereo.refine(
+            None, rig, c0, n0, R, loss="cauchy", reference=py.reference,
+            tilt_cal=py.tilt_cal, centre_cal=py.centre_cal, ellipses=None,
+            mode="image", weights=maps)
+        out.append((cams, c0, n0, maps, r_py))
+    return out
+
+
 def stage_refine(args):
     print("refine: image-mode solve on the Python estimator's own inputs")
     plates = plates_of(args.plates, "AB", args.scale)
@@ -170,11 +339,35 @@ def stage_refine(args):
         return r
 
     stereo.refine = spy
+    shape = None
     try:
         for i, fr, row in frames_of(args.recording, args.frames, args.scale):
+            # The estimator rescales its rig to the first frame it sees, so the synthetic
+            # maps below must be that size too -- not the calibrated size.
+            shape = fr[0].shape[:2]
             py.update(fr, t=i / 60.0, frame_index=i, stamps=row)
     finally:
         stereo.refine = orig
+    if not captured:
+        # The estimator solved nothing on this recording, so it called `refine` zero
+        # times and there is nothing to compare. That is not a reason to pass: it is a
+        # reason to make the inputs ourselves.
+        #
+        # Parity is a question about two IMPLEMENTATIONS, not about the robot. The solve
+        # takes an evidence map per view and a seed pose; both are constructible from any
+        # frames at all. So when the spy comes back empty -- which is every `tilt_sweep`
+        # take in `results/`, because a tilt robot has no rim for the rim segmenter to
+        # find -- synthesise deterministic seeds over the working volume and put the same
+        # problem to both cores.
+        #
+        # An arbitrary seed on a real evidence map is a HARDER parity test than a clean
+        # one, not a weaker one. The solve wanders, hits its iteration cap, and takes
+        # branches a converging solve never reaches; the two cores must wander
+        # identically, including diverging identically. `theory.md` 21.3 records that one
+        # float32 ulp of `fitEllipseDirect` moves the solve by 0.4 mm on 5% of frames --
+        # exactly the sensitivity this exercises.
+        captured = _synthetic_refine_inputs(args, rig, py, shape, n=args.seeds)
+        print(f"  no solves on this recording -- {len(captured)} synthetic seed(s) instead")
     cfg = nat.native_config(py)
     cc = nat.centre_cal_dict(py.centre_cal)
     ref = np.ascontiguousarray(py.reference, dtype=np.float64)
@@ -201,6 +394,28 @@ def stage_refine(args):
 
 
 def stage_solve(args):
+    """Both estimators end to end. **Needs a recording the estimator can actually solve.**
+
+    Unlike `--stage refine`, this one cannot be driven synthetically, and the reason is a
+    property of the rig rather than a gap in the harness. `calib/stereo_rig.json` places
+    the reference axis at 41.4 deg from BOTH optical axes -- the deliberate symmetry of a
+    45 deg / 90 deg rig. Back-projecting one ellipse always yields two circle poses, and
+    on a symmetric synthetic target view A's FALSE branch carries the same normal as view
+    B's TRUE one, so `match` -- which scores orientation agreement -- pairs them, agrees
+    perfectly, and lands ~1000 mm out. Measured over a 9x4 tilt/azimuth sweep at the
+    axes' crossing point, with a filled disc and with a rim: 0 solves, every frame
+    refused by the discrepancy gate.
+
+    Real recordings do not hit this, because the estimator carries a temporal
+    `prior_normal` once it has solved a frame and a real rim is not perfectly symmetric.
+    **That dependence is worth knowing for its own sake**: first-frame stereo
+    disambiguation on this rig is structurally degenerate, so acquisition leans on the
+    prior rather than on the geometry. `pose/theory.md` 21.5.
+
+    On a recording that solves nothing this reports NO SAMPLES and fails, which is
+    correct: it has verified nothing.
+    """
+
     print("solve: both estimators end to end on identical frames, stamps and motion")
     plates_py = plates_of(args.plates, "AB", args.scale)
     plates_c = plates_of(args.plates, "AB", args.scale)
@@ -245,8 +460,160 @@ def stage_solve(args):
     return ok
 
 
+def stage_filter(args):
+    """`filter._ConstantVelocity` against its C++ port, on a scripted measurement stream.
+
+    No recording needed and none wanted: the filter is a recurrence, so what has to match
+    is the whole trajectory of the state through predicts, accepted updates, GATED updates
+    and the `MAX_GATED` escape. A stream built here can visit all four deliberately, where
+    a recording visits whichever the robot happened to produce.
+    """
+
+    from controller.control import native_config
+    from controller.pose.filter import _ConstantVelocity, GATE_SIGMA, MAX_GATED
+
+    print("filter: constant-velocity Kalman, including the gate and its escape")
+    cfg = native_config.control_config()
+    rng = np.random.default_rng(4242)
+    dpos, drate, dacc = [], [], []
+    n_gated_py = n_gated_c = 0
+
+    for trial in range(6):
+        py = _ConstantVelocity(cfg["accel_mm_s2"], cfg["p0_pos"], cfg["p0_vel"])
+        cc = nat.pmw_pose.ConstantVelocity(cfg["accel_mm_s2"], cfg["p0_pos"], cfg["p0_vel"])
+        truth = np.array([0.0, 0.0, 60.0])
+        vel = rng.normal(scale=8.0, size=3)
+        sig = np.array([0.05, 0.05, 0.35])
+        r = np.diag(sig ** 2)
+        for k in range(220):
+            dt = 0.005 if k % 3 else 0.011      # uneven, as a real pose feed is
+            truth = truth + vel * dt
+            py.predict(dt)
+            cc.predict(dt)
+            z = truth + rng.normal(scale=sig)
+            # Deliberate outliers, and then a SUSTAINED excursion: the first must be
+            # gated, the second must force its way in through MAX_GATED. A port that
+            # dropped the escape passes an outlier-only test and locks on in flight.
+            if k in (60, 61, 130):
+                z = z + np.array([25.0, -18.0, 40.0])
+            if 160 <= k < 160 + 3 * MAX_GATED:
+                z = z + np.array([0.0, 0.0, 30.0])
+            ok_py = py.update(z, r, gate=GATE_SIGMA)[1]
+            ok_c = cc.update(np.ascontiguousarray(z), np.ascontiguousarray(r),
+                             GATE_SIGMA, MAX_GATED)
+            if ok_py != ok_c:
+                print(f"  trial {trial} step {k}: python {'took' if ok_py else 'gated'}, "
+                      f"native {'took' if ok_c else 'gated'}")
+                return False
+            n_gated_py += (not ok_py)
+            n_gated_c += (not ok_c)
+            dpos.append(float(np.abs(py.value - cc.value).max()))
+            drate.append(float(np.abs(py.rate - cc.rate).max()))
+            dacc.append(0.0 if py.n_gated == cc.n_gated else 1.0)
+
+    print(f"  {len(dpos)} steps, {n_gated_py} gated on both sides, escape exercised")
+    ok = _report("position max|dp| (mm)", dpos, 1e-9)
+    ok &= _report("rate max|dv| (mm/s)", drate, 1e-9)
+    ok &= _report("n_gated |dn|", dacc, 0.0)
+    return ok
+
+
+def stage_control(args):
+    """`simulate_hover.DiscreteHoverController` against its C++ port.
+
+    Scalar arithmetic, so it should agree to ~1e-12; the point is not the numbers but the
+    BRANCHES -- saturation on both signs, the slew limit, and conditional-integration
+    anti-windup, which is three predicates and the place a port silently differs.
+    """
+
+    from controller.control import native_config
+    from controller.control.reference_profiles import Profile
+    from controller.control.simulate_hover import DiscreteHoverController
+
+    print("control: LQR law, saturation, slew limit and anti-windup")
+    gains = json.loads((Path(__file__).resolve().parents[1] /
+                        "control" / "hover_controller.json").read_text())
+    cfg = native_config.control_config(gains)
+    rng = np.random.default_rng(99)
+    dmag, dfreq, dq = [], [], []
+
+    for trial, (x0, z0, drive) in enumerate([
+            (0.0, 0.0, 0.0),        # at the setpoint: nothing saturates
+            (8.0, 5.0, 0.0),        # large error: mag saturates, freq slews
+            (-8.0, -5.0, 0.0),      # and on the other sign
+            (0.0, 0.0, 1.0)]):      # driven by noise, so the branches interleave
+        prof = Profile.hold()
+        py = DiscreteHoverController(gains, prof)
+        cc = nat.pmw_pose.HoverController(cfg)
+        x, z = x0 * 1e-3, z0 * 1e-3
+        for k in range(400):
+            t = k * cfg["ts"]
+            # A tick with no new fix passes dt=None on the Python side and have_dt=False
+            # on the C++ side; the rate estimate must be HELD, not re-differenced.
+            fresh = (k % 5 == 0)
+            dt = 0.01 if fresh else None
+            x += drive * rng.normal(scale=2e-4)
+            z += drive * rng.normal(scale=2e-4)
+            m_py, f_py = py.step(t, x, z, dt)
+            rp, rv, ra = prof.eval(t)
+            m_c, f_c = cc.step(x, z, 0.01 if fresh else 0.0, fresh,
+                               (float(rp[0]), float(rp[1])), (float(rv[0]), float(rv[1])),
+                               (float(ra[0]), float(ra[1])))
+            dmag.append(abs(m_py - m_c))
+            dfreq.append(abs(f_py - f_c))
+            dq.append(float(np.abs(np.asarray(py.q) - np.asarray(cc.q)).max()))
+    print(f"  {len(dmag)} steps over 4 trials")
+    ok = _report("mag |dm|", dmag, 1e-12)
+    ok &= _report("f_field |df| (Hz)", dfreq, 1e-12)
+    ok &= _report("integrator |dq|", dq, 1e-12)
+
+    # THE CHEAP STRONG CHECK. The law is also run through `simulate_hover`'s own
+    # acceptance scenarios -- the ones the shipped design was signed off on -- by
+    # substituting the C++ controller for the Python one inside `simulate`. Seven
+    # validated closed-loop tests for the cost of an adapter, and they exercise the law
+    # against a nonlinear truth plant with noise, latency, trim mismatch and a 0.25x-4x
+    # gain sweep, which no scripted input can imitate.
+    class _NativeCtrl:
+        """`DiscreteHoverController`'s surface, delegating to the C++ implementation."""
+
+        def __init__(self, gains_, profile):
+            self.ts = gains_["design"]["ts"]
+            self.f_hover = gains_["params"]["f_hover"]
+            self._prof = profile
+            self._c = nat.pmw_pose.HoverController(native_config.control_config(gains_))
+
+        def step(self, t, x_meas, z_meas, dt=None):
+            # `simulate` steps once per measurement, so every tick carries a real dt --
+            # which is exactly the case the Python's `_UNSET` default stands for.
+            rp, rv, ra = self._prof.eval(t)
+            return self._c.step(x_meas, z_meas, self.ts, True,
+                                (float(rp[0]), float(rp[1])), (float(rv[0]), float(rv[1])),
+                                (float(ra[0]), float(ra[1])))
+
+    import controller.control.simulate_hover as SHmod
+    orig_ctrl = SHmod.DiscreteHoverController
+    n_pass = n_fail = 0
+    try:
+        SHmod.DiscreteHoverController = _NativeCtrl
+        for group in SHmod.build_scenarios().values():
+            for sc in group:
+                out = SHmod.simulate(sc, gains)
+                good, msgs = SHmod.evaluate(sc, out, gains)
+                n_pass += bool(good)
+                n_fail += (not good)
+                if not good:
+                    print(f"  scenario {sc.name}: FAIL under the C++ law")
+                    for m in msgs:
+                        print(f"    {m}")
+    finally:
+        SHmod.DiscreteHoverController = orig_ctrl
+    print(f"  simulate_hover scenarios under the C++ law: {n_pass} pass, {n_fail} fail")
+    ok &= (n_fail == 0)
+    return ok
+
+
 STAGES = {"evidence": stage_evidence, "segment": stage_segment, "refine": stage_refine,
-          "solve": stage_solve}
+          "solve": stage_solve, "filter": stage_filter, "control": stage_control}
 
 
 def _self_check(args):
@@ -265,6 +632,8 @@ if __name__ == "__main__":
     ap.add_argument("--stage", choices=[*STAGES, "all"], default="all")
     ap.add_argument("--recording", default=str(DEFAULT_RECORDING))
     ap.add_argument("--frames", type=int, default=250)
+    ap.add_argument("--seeds", type=int, default=24,
+                    help="synthetic refine seeds when the recording solves nothing")
     ap.add_argument("--scale", type=float, default=0.5)
     ap.add_argument("--plates", choices=["running", "saved"], default="running")
     _self_check(ap.parse_args())

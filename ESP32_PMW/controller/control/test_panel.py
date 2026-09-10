@@ -11,6 +11,9 @@ Run: uv run python controller/control/test_panel.py
 
 from __future__ import annotations
 
+import contextlib
+import csv
+import io
 import json
 import sys
 from pathlib import Path
@@ -19,6 +22,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 
+from controller.control import attitude as A
+from controller.control import constants as C
 from controller.control import hover_controller_runner as R
 from controller.control import ramp
 from controller.control import z_track
@@ -116,6 +121,73 @@ def run_coast(gap_frames, log_dir):
     finally:
         link.close()
     return sent, lost_at
+
+
+class _Idle(PanelViz):
+    """PanelViz with the lateral loop disarmed -- the identification configuration."""
+
+    armed, mag_max = False, 0.0
+
+
+def run_dither(log_dir, z_mm=60.0, id_mag=0.30, n=1000, dwell=0.4, csv_path=None):
+    """Fly with the identification dither on. Returns ([(frame, cmd)], csv_rows).
+
+    The regression guard for theory.md 25. `attitude.fit_rotation` refused every flight the
+    project ever flew, and the recorded reason was a 0.006-0.054 deg response against a
+    0.49 deg floor -- read as a weak response. It was NO response, for three independent
+    reasons, and this exercises all three:
+
+      1. the dither sent `az=` and never `mag=`, and `applyMixer`'s drop is proportional
+         to `magSet`, which defaults to 0 everywhere;
+      2. it was gated on `link.freq`, which says nothing about whether the robot is off the
+         pad, so the samples were taken through a sensor reporting its own refusal;
+      3. `az_cmd` was assigned only under `if armed:`, so a disarmed identification run
+         wrote a blank `az` column and `fit_rotation_from_csv` dropped every row.
+
+    `z_mm` below `attitude.AIRBORNE_MM` reproduces the seated case; `id_mag=0` reproduces
+    the old amplitude. Both must produce no excitation at all.
+    """
+
+    gains = json.load(open(HERE / "hover_controller.json"))
+    cfg = R.RunConfig(dry_run=True, takeoff=False, enable_freq_cmd=True,
+                      id_azimuths=(0.0, 90.0, 180.0, 270.0), id_dwell_s=dwell, id_mag=id_mag,
+                      log=str(Path(log_dir) / "dither.log"))
+    ctrl = tuple(DiscreteHoverController(gains, Profile.hold()) for _ in range(2))
+    ztrk = z_track.ZTracker(np.array([0.0, 1e9]), np.array([0.06, 0.06]))
+    link = R.CommandLink(None, True, cfg.log, takeoff_cmd=ramp.seq_lines(cfg.segments))
+    # DISARMED, which is the identification configuration: `auto_mag_max` is 0 and
+    # `attitude_closed` is False until `rot_deg` is measured, so the lateral loop is not
+    # in play and the dither is the ONLY writer of az=/mag=. An armed viz here would let
+    # the LQR's own lateral sends into the trace and the assertions could not tell whose
+    # command they were reading.
+    viz, frame, sent = _Idle({}), [0], []
+    link.send = lambda c: sent.append((frame[0], c))
+    # `id_dwell_s` MUST exceed the estimator's window, or `fit_rotation_from_csv` skips
+    # the first 0.25 s of every segment, finds fewer than 5 samples left, and reports "the
+    # dither never ran" -- indistinguishable from the fault this file exists to catch.
+    assert dwell > A.WINDOW_S, f"dwell {dwell} s inside the {A.WINDOW_S} s estimator window"
+    buf = io.StringIO()
+    rows = csv.writer(buf)
+
+    def ticks():
+        for i in range(n):
+            frame[0] = i
+            link.state = FLIGHT
+            # `t` is the shutter stamp and paces `ThrustVector`'s 0.25 s window; the loop
+            # runs on its own 500 Hz wall clock, which is what paces the dwell. Both have
+            # to advance far enough, so the stub's frame rate and `n` are chosen against
+            # `id_dwell_s`, not against each other.
+            yield Tick(t=i / 60.0, xyz_mm=np.array([0.0, 0.0, z_mm]), pose=None,
+                       frames=None, lost=0, viz=viz)
+
+    try:
+        R.controller_loop(ticks(), link, ctrl, cfg, ztrk, rows=rows)
+    finally:
+        link.close()
+    if csv_path is not None:
+        Path(csv_path).write_text(",".join(C.CSV_COLUMNS) + "\n" + buf.getvalue())
+    buf.seek(0)
+    return sent, list(csv.DictReader(buf, fieldnames=C.CSV_COLUMNS))
 
 
 def run_lost(gap_frames, log_dir, lost_land_s=0.05):
@@ -231,6 +303,62 @@ def demo(log_dir="/tmp"):
     sent = run({}, SPINUP, False, log_dir)
     assert not [c for _, c in sent if is_takeoff(c)], sent
     print("no presses          : zero takeoff commands")
+
+    # 3b. THE IDENTIFICATION DITHER. theory.md 25. Three independent faults made every
+    # `fit_rotation` in the project's history refuse, and all three are guarded here.
+    sent, rows = run_dither(log_dir)
+    mags = [float(c.split("=")[1]) for _, c in sent if c.startswith("mag=")]
+    azs = [float(c.split("=")[1]) for _, c in sent if c.startswith("az=")]
+    # (1) The excitation exists at all. This is the whole fault: `applyMixer` scales its
+    # drop by `magSet`, so an `az=` with no `mag=` steers a field of zero strength.
+    assert mags, "the dither sent no mag= -- the coils see no excitation, only a direction"
+    assert max(mags) == 0.30, mags
+    # Every azimuth is exercised, and each one arrives with a magnitude on the same frame.
+    assert set(azs) == {0.0, 90.0, 180.0, 270.0}, azs
+    az_frames = {i for i, c in sent if c.startswith("az=")}
+    mag_frames = {i for i, c in sent if c.startswith("mag=")}
+    assert az_frames <= mag_frames, sorted(az_frames - mag_frames)
+    # (3) The command reaches the CSV, or `fit_rotation_from_csv` drops every row on
+    # `np.isfinite(az)` and segments nothing -- even when the excitation was real.
+    logged = {r["az"] for r in rows if r["az"]}
+    assert logged == {"0", "90", "180", "270"}, logged
+    assert {r["mag"] for r in rows if r["mag"]} == {"0.300"}, "mag not logged"
+    # The closed loop must not overwrite the excitation. With `auto_mag_max` at its
+    # default 0 the loop's own send is `mag=0.000`, which would cancel the dither on the
+    # tick after it was issued -- a fight that leaves the wire looking busy and the
+    # coils steady.
+    assert 0.0 not in mags, f"the loop clobbered the dither: {mags}"
+    print(f"dither airborne     : {len(mags)} mag= sends at 0.30, "
+          f"{len(set(azs))} azimuths, all logged to CSV")
+
+    # END TO END. The consumer must reach its own noise-floor decision. The stub robot
+    # does not move, so the honest verdict is REFUSED -- but the failure being guarded is
+    # the OTHER message, "no usable command changes", which is what a run with no
+    # excitation, no airborne gate, or no logged az produces. Reaching a refusal on
+    # measured responses is the pass; being unable to find a response to refuse is not.
+    path = Path(log_dir) / "dither_e2e.csv"
+    run_dither(log_dir, csv_path=str(path))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rot, conc = A.fit_rotation_from_csv([str(path)])
+    msg = out.getvalue().strip()
+    assert "never ran while airborne" not in msg, msg
+    assert "REFUSED" in msg, msg
+    assert rot is None, "the stub robot does not move; a rotation here would be fitted noise"
+    print(f"dither end to end   : fit_rotation segments the run and refuses honestly "
+          f"({msg.split(':')[1].strip().split(',')[0]})")
+
+    # (2) Seated, the dither must not run. `ThrustVector` cancels to zero on the pad, so a
+    # dither that fires there feeds `fit_rotation` a command with no readable response --
+    # which is what gating on `link.freq` instead of `tv.valid` did.
+    sent_pad, rows_pad = run_dither(log_dir, z_mm=0.0)
+    assert not [c for _, c in sent_pad if c.startswith("mag=") and float(c.split("=")[1])], \
+        "the dither excited the coils while the robot was on the pad"
+    assert not {r["az"] for r in rows_pad if r["az"]}, "logged a command taken on the pad"
+    # ...and `id_mag=0` is the old behaviour exactly: a direction with no magnitude.
+    sent_zero, _ = run_dither(log_dir, id_mag=0.0)
+    assert not [c for _, c in sent_zero if c.startswith("az=")], sent_zero
+    print("dither seated / off : silent on the pad, silent at id_mag=0")
 
     # 5. The CSV's spin column. A witness that declines (aliased, or no blade signal)
     # must leave the cell BLANK: a manufactured `stopped` there reads as a rotor

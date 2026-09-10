@@ -31,6 +31,7 @@
 
 #include "capture.h"
 #include "pmw.h"
+#include "rt.h"
 
 #include <opencv2/imgproc.hpp>
 
@@ -48,12 +49,12 @@
 
 namespace pmw {
 
-namespace {
-double now_s() {
-    using namespace std::chrono;
-    return duration<double>(steady_clock::now().time_since_epoch()).count();
-}
-}  // namespace
+// `now_s` comes from `rt.h`, which is the single definition of this rig's clock. It used
+// to be defined here too, and the duplicate was harmless only while nothing else in the
+// process needed the time. The control loop propagates the filter from a frame's SHUTTER
+// stamp rather than from the tick (`control/theory.md` 19.6), so the tracker and the
+// controller MUST read the same counter -- two definitions that agree today are two
+// definitions that can stop agreeing.
 
 //: `background.RunningPlate`, in the worker.
 //:

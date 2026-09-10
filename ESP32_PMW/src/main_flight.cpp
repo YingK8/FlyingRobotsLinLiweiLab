@@ -4,7 +4,7 @@
 // can be retuned without a reflash; this firmware compiles in no ramp of its own.
 #include "coil_probe.h"
 #include "drive_common.h"
-#include "SerialComm.h"
+#include "frame_link.h"
 #include "constants.h"
 
 static const float SPINUP_THROTTLE = 100.0f;
@@ -16,7 +16,25 @@ static const float MIX_GAIN = 0.6f;
 
 static PwmController ctl(PWM_PINS, SPIN_PHASES, INITIAL_DUTY, NUM_CHANNELS);
 static PwmSequencer seq(&ctl);
-static SerialComm comm;
+// `frame_link` rather than `SerialComm`: the ASCII commands below are unchanged and still
+// arrive as lines, but the periodic DRIVE frame shares the same stream, and SerialComm
+// accumulates into an Arduino `String` one character at a time -- a heap allocation per
+// command, 200 times a second. SerialComm is untouched; three other mains still use it.
+static drive_frame::Framer framer;
+
+// Per-channel phase as COMMANDED. Kept here rather than read back from PwmController
+// because `getPhase` would report the RLC-trimmed value, and the echo should say what was
+// asked for. Seeded from the compile-time spin phases so `phase=` with no prior frame is
+// a delta from the rotation the ramp used, not from zero.
+static float phaseDeg[NUM_CHANNELS] = {SPIN_PHASES[0], SPIN_PHASES[1],
+                                       SPIN_PHASES[2], SPIN_PHASES[3]};
+
+// ACK bookkeeping. One ACK per ACK_EVERY frames: at 200 Hz that is 10 Hz and 110 B/s,
+// enough for the host to measure drop rate and round-trip latency without adding a
+// back-channel that competes with telemetry.
+static const uint16_t ACK_EVERY = 20;
+static uint16_t lastDriveSeq = 0;
+static uint16_t sinceAck = 0;
 
 enum State { IDLE, SPINUP, FLIGHT, LANDING, OFF }; // the host parses these numbers
 static State state = IDLE;
@@ -62,6 +80,23 @@ static bool cmdDuty(const String &arg) {
   splitFloats(arg, v, NUM_CHANNELS);
   for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(v[i], 0.0f, 100.0f);
   dutySet = true;
+  return true;
+}
+
+// `phase=A:B:C:D` -- per-channel commutation phase in degrees. The library has had
+// `setPhase` since the beginning and nothing ever exposed it, so the host could only ever
+// command four amplitudes and one frequency; the phases were whatever `SPIN_PHASES`
+// compiled in. Identifying the actuation map needs them (control/theory.md 25), and the
+// DRIVE frame carries them, so the ASCII form exists too for bench work.
+//
+// NOT counted as drive by `link._note_drive`: changing a phase energises nothing on its
+// own. It is the carrier that puts current in the coils.
+static bool cmdPhase(const String &arg) {
+  float v[NUM_CHANNELS];
+  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = phaseDeg[i];   // short command keeps the rest
+  splitFloats(arg, v, NUM_CHANNELS);
+  for (int i = 0; i < NUM_CHANNELS; i++) phaseDeg[i] = v[i];
+  ctl.setPhases(phaseDeg);
   return true;
 }
 
@@ -207,8 +242,9 @@ static void dispatch(String cmd) {
   else if (key == "seq")    ok = cmdSeq(arg);
   else if (key == "probe")  ok = cmdProbe(arg);
   else if (key == "duty")   ok = cmdDuty(arg);
+  else if (key == "phase")  ok = cmdPhase(arg);
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|hover|land|stop|freq=|probe=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|phase=|hover|land|stop|freq=|probe=)\n",
                   cmd.c_str());
     return;
   }
@@ -232,9 +268,52 @@ void setup() {
                 ctl.phaseTrimActive() ? "ARMED from drive_common.h" : "off (uncalibrated)");
 }
 
+// One DRIVE frame -> the coils. Reuses the state `duty=` already drives rather than
+// adding a parallel path: `dutySet` makes `applyMixer` take the per-channel branch, and
+// `collective` still scales it, so `throttle=` and the LANDING ramp behave identically
+// whether the host is sending frames or ASCII.
+//
+// **`amp = 0` in a frame is NOT a stop.** It leaves the state machine in FLIGHT with the
+// sequencer alive and the bridges driving at zero duty. Only `stop` de-energises, and
+// only telemetry proves it (`safe_off.py`). A stop that depended on a CRC passing would
+// be a stop a corrupted link could eat, which is why it is not a flag in here.
+static void applyDrive(const drive_frame::Drive &d) {
+  // Same gate as `cmdFreq`: a frame must not be able to drive the coils from IDLE, where
+  // the operator believes the board is quiet.
+  if (state != SPINUP && state != FLIGHT) return;
+  for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(d.amp_pct[i], 0.0f, 100.0f);
+  dutySet = true;
+  for (int i = 0; i < NUM_CHANNELS; i++) phaseDeg[i] = d.phase_deg[i];
+  ctl.setPhases(phaseDeg);
+  if (d.freq_hz > 0.0f) ctl.setGlobalFrequency(d.freq_hz);
+  lastDriveSeq = d.seq;
+  // No echo. `dispatch` prints a ~70-byte state line on every accepted ASCII command;
+  // at 200 Hz that is 14 kB/s of back-channel competing with telemetry for the same
+  // UART. The ACK below carries the same information at 10 Hz and 11 bytes.
+  if (++sinceAck >= ACK_EVERY) {
+    sinceAck = 0;
+    drive_frame::Ack a;
+    a.seq_echo = lastDriveSeq;
+    a.n_rx = framer.n_rx();
+    a.n_crc = (uint16_t)(framer.n_crc() + framer.n_gap());
+    a.state = (uint8_t)state;
+    uint8_t buf[drive_frame::ACK_LEN];
+    drive_frame::encode_ack(a, buf);
+    Serial.write(buf, drive_frame::ACK_LEN);
+  }
+}
+
 void loop() {
-  String line = comm.handleSerialComm();
-  if (line.length()) dispatch(line);
+  // Drain everything waiting, not one line per call. `SerialComm` returned at most one
+  // line per `loop()`, which was fine for a command a second and is not for 200 a second:
+  // anything the loop does not take stays in the 1 kB FIFO until it overflows.
+  while (Serial.available()) {
+    drive_frame::Got g = framer.feed((uint8_t)Serial.read(), (uint32_t)micros());
+    if (g == drive_frame::Got::Frame) applyDrive(framer.drive());
+    else if (g == drive_frame::Got::Line) dispatch(String(framer.line()));
+    else if (g == drive_frame::Got::Overflow)
+      Serial.println("! line over 128 chars, truncated");
+  }
 
   ctl.run(); // sense + balance + overcurrent trip
 

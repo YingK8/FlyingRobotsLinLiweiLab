@@ -229,7 +229,15 @@ def run(port=None, freqs=(100.0,), identify_only=False, hold_hz=100.0, out_dir=N
     except ImportError:
         raise SystemExit("ai/thermal/coil_thermal.py missing -- refusing to arm (CLAUDE.md Safety)")
 
-    freqs = [hold_hz] if identify_only else list(freqs)
+    # `--identify` used to collapse to ONE frequency, from when the Jacobian was wanted
+    # only as a sign certification. It is now also the input to `coil_map.fit_geometry`,
+    # which needs several: a coil's fixed azimuth and the frequency-dependent phase its own
+    # RLC adds enter the measured angle as a SUM, and one measurement of a sum is not two
+    # numbers (`theory.md` 25.1). A caller that passes freqs explicitly gets them swept; the
+    # documented single-frequency CLI still works by falling back to `hold_hz`.
+    freqs = list(freqs) if (freqs and len(freqs) > 1) else ([hold_hz] if identify_only
+                                                            else list(freqs))
+    jac_by_freq = {}
     per_point = ramp_s + 4 * PROBE_S + TRIM_MAX_S + (0 if identify_only else HOLD_S) + DOWN_S
     coil_thermal.wait_until_safe(per_point * len(freqs))
 
@@ -345,6 +353,7 @@ def run(port=None, freqs=(100.0,), identify_only=False, hold_hz=100.0, out_dir=N
                      + " ".join(f"{x:.4f}" for x in J.ravel()) + "\n")
             print("J =\n", np.round(J, 3))
             if identify_only:
+                jac_by_freq[float(f)] = J
                 link.send("land")
                 _wait_state(link, OFF, DOWN_S + 3.0, feed)
                 continue
@@ -410,7 +419,11 @@ def run(port=None, freqs=(100.0,), identify_only=False, hold_hz=100.0, out_dir=N
         link.close()
         feed.close()
     print(f"wrote {out_dir}")
-    return out_dir
+    # `{f: J}` for `coil_map.fit_geometry`, which is what an identification run is FOR.
+    # The take directory is still written and still the record; returning the Jacobians
+    # rather than only printing them is what lets `sysid.py` chain the stages without
+    # re-parsing its own log.
+    return jac_by_freq if identify_only else out_dir
 
 
 # ---- self-check ----------------------------------------------------------------------------

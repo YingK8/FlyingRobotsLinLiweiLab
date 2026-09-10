@@ -3526,3 +3526,91 @@ survive, and a preview is the one place a robot is likely to sit still.
 | Which camera stopped (22.6) | `TrackerStats::age_ms`, `stereo_frames`'s stop message |
 | Why the poses stopped (22.8) | `live_viz._why_no_pose`, differenced across the silence |
 | Plate step held per-second (22.8) | `pose/tracker.py` `PLATE_STEP_REF_HZ`, `plate_step` |
+
+### 21.5 Parity without a solvable recording, and what a gate on no evidence is worth
+
+Written 2026-09-08.
+
+`native_parity` compares the C++ core against the Python reference, and `CLAUDE.md` makes
+it the gate the port is held to. Two things were wrong with it as a gate.
+
+**It passed on zero evidence.** `_report` computed `max()` of an empty array as `0.0` and
+printed `ok`. Every recording now in `results/flights` is a `tilt_sweep` take, and a tilt
+robot has no rim for the rim segmenter to find, so `--stage refine` and `--stage solve`
+captured *nothing* and the harness still ended with `native parity ok`. A run that compared
+nothing was indistinguishable from a run that compared everything and agreed. An empty
+stage now FAILS and says `NO SAMPLES`, which is the same rule the rest of the tree already
+follows: `fit_rotation` refuses below its noise floor, `ramp.check` refuses instead of
+clamping, `coil_phase.fit_channel` refuses a peak on the band edge.
+
+**The refine stage needed a robot it did not have.** It spies on the estimator's own
+`refine` calls, so a recording that solves nothing yields nothing to compare. But parity is
+a question about two *implementations*: the solve takes an evidence map per view and a seed
+pose, and both are constructible. `_rim_map` rasterises the circle of a known pose through
+each camera, so the residual surface has a true optimum, and `_synthetic_refine_inputs`
+seeds near it. The stage now runs on any recording at all -- or, in principle, on none.
+
+Three things had to be got right, and each was wrong first:
+
+1. **The pose must be realisable.** Seeds drawn as three world numbers are not: camera A
+   sits at the world origin looking along +z, so a centre near the origin is a centre at
+   the optical centre, and `refine` returned None from inside its own
+   `np.percentile(evidence(p0))` guard for all 24. Seeds are back-projected from an
+   ellipse now, so the cone cannot be degenerate.
+2. **The rig must be the estimator's current one.** `_ensure_scale` REBINDS `py.rig` to a
+   rescaled copy on the first frame; the object the caller is holding still carries the
+   calibrated 1280x800 intrinsics. Projecting with those put the rotor at x = 671 in a
+   640-wide image.
+3. **The surface must be smooth.** Setting isolated rasterised pixels and blurring narrowly
+   leaves a speckled ridge with high-frequency structure, and the two cores descend into it
+   differently. An anti-aliased polyline under a wider blur is what `ring_weight` actually
+   produces.
+
+**The seed distance is the whole test, and it was chosen by measurement.** Sweeping it:
+
+| seed offset | centre p50 | centre p95 | max \|Δnfev\| | seeds over 1e-2 mm |
+|---|---|---|---|---|
+| 0.00 mm | 9.5e-10 | 4.6e-06 | 0 | 0 / 16 |
+| **0.05 mm** | **8.8e-10** | **3.7e-08** | **0** | **0 / 16** |
+| 0.25 mm | 1.7e-09 | 2.1e-02 | 4 | 1 / 16 |
+| 1.00 mm | 1.9e-08 | 3.8e-02 | 1 | 2 / 16 |
+
+**The median is at rounding at every distance.** The cores compute the same thing. What
+grows with seed distance is the *fraction* of seeds whose descent takes a different number
+of steps and settles in a different basin -- 21.3's one-ulp sensitivity, amplified by a
+longer path. So a far seed measures basin-hopping, and a test dominated by basin-hopping
+cannot see a real port bug underneath it: at 1 mm the stage reported 9 of 24 seeds past
+tolerance and a p95 normal error of 1.8 deg, none of which was about the port.
+
+A short descent is **strictly more sensitive** to what the harness exists to catch. Any
+genuine arithmetic difference appears at 1e-7 where the tolerance is 1e-2. The stage now
+seeds at 0.05 mm, keeps the tight tolerances, and allows nothing past them: 24 seeds, max
+1.2e-08 mm, normal angle identically zero, identical iteration counts.
+
+**Never grade a port on an ill-posed problem.** The first version of this used real frames
+from a rim-less recording with arbitrary seeds; p95 agreed to 0.45 mm while the worst seed
+diverged by 1.2 m, because a solve with no optimum to find amplifies the last ulp without
+bound. Two correct implementations disagree on that surface, and any tolerance that passes
+them is loose enough to pass a broken one.
+
+### 21.6 Why `--stage solve` cannot be synthesised, and what that says about acquisition
+
+The same trick fails end to end, for a reason that belongs to the rig rather than the
+harness. `stereo_rig.json` puts the reference axis at **41.4 deg from BOTH optical axes** --
+the deliberate symmetry of a 45 deg elevation, 90 deg azimuth pair. Back-projecting one
+ellipse always yields two circle poses, and on a symmetric synthetic target view A's
+*false* branch carries the same normal as view B's *true* one. `match` scores orientation
+agreement, so it pairs them, agrees perfectly, and lands about a metre out. Measured over a
+9x4 tilt/azimuth sweep at the crossing point of the two axes, with a filled disc and with a
+rim: **0 solves, every frame refused by the discrepancy gate**, discrepancies of 900-1050 mm.
+
+Real recordings do not hit this, and the reason is worth stating because it is not obvious:
+the estimator carries a temporal `prior_normal` once it has solved a frame, and a real rim
+is not perfectly symmetric. **First-frame stereo disambiguation on this rig is structurally
+degenerate.** Acquisition leans on the prior, not on the geometry. That is a robustness
+property of the live loop -- it says the pipeline is hardest to (re)acquire exactly when it
+has just lost the robot and has no prior to lean on, which is the moment a controller most
+needs it back.
+
+`--stage solve` therefore still requires a recording the estimator can solve, and reports
+NO SAMPLES when handed one it cannot. That is honest: it has verified nothing.

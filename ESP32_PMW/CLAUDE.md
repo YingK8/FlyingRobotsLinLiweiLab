@@ -10,7 +10,9 @@ a two-camera stereo rig.
 | `src/main_flight.cpp` | the flight firmware. One `main_*.cpp` per experiment, one PlatformIO env each |
 | `lib/` | firmware libraries (`PwmController`, `SerialComm`, ...) |
 | `controller/` | the live host pipeline: `camera/` -> `calib/` -> `pose/` -> `control/`, plus `viz/`. A real Python package -- import by full path, `from controller.pose import stereo` |
-| `controller/native/` | `pmw_pose`: the C++ port of everything `StereoPoseEstimator.update` does per frame (`pose/theory.md` 21), plus the live capture and the interleaved tracker (22). Built by `uv sync --extra native`; `pose/stereo_native.py` wraps the estimator, `pose/tracker.py` the tracker, and `live_viz._stereo_estimator` picks the native core when it is importable. The Python estimator stays as the reference and `pose/native_parity.py` holds the two together |
+| `controller/native/` | `pmw_pose`: the C++ port of everything `StereoPoseEstimator.update` does per frame (`pose/theory.md` 21), plus the live capture and the interleaved tracker (22), plus the control core -- filter, predictor, LQR (`control/theory.md` 27). Built by `uv sync --extra native`; `pose/stereo_native.py` wraps the estimator, `pose/tracker.py` the tracker, and `live_viz._stereo_estimator` picks the native core when it is importable. The Python stays as the reference and `pose/native_parity.py` holds the two together |
+| `pmw_fly` | the standalone controller built from the same objects as `pmw_pose`, opted into with `-DPMW_FLY=ON`. Driven ONLY by `controller/control/fly_native.py`, which owns arming and the thermal stamp -- see Safety |
+| `lib/DriveFrame/` | the binary DRIVE/ACK wire format, included by the firmware AND by `controller/native/`. One definition; `controller/control/drive_frame.py` mirrors it for tooling and is held to the C++ encoder's own bytes |
 | `ai/` | gitignored scratchpad: bench harnesses and offline design tooling. `ai/thermal/coil_thermal.py` is load-bearing (see Safety) |
 | `controller/report.py` | one command for the whole offline pass on a take: solve, mast, angles, the command record, the plots and the overlay video, all into `<take>/report/`. The stages are the modules above; this only orders them |
 | `controller/run.ipynb` | the operator notebook, one cell per stage; cell 12 flies |
@@ -60,10 +62,18 @@ argument for putting them back is in `controller/control/theory.md` 4.0. The kil
 
 **Coils overheat before anything else breaks.** Measured: +1 C per 2 s of drive, and 80 C
 reached after four ramps. There is no temperature sensor, so `ai/thermal/coil_thermal.py`
-models it (heat rate, Newton cooling, a 70 C ceiling) and `link.SerialComm` stamps every
-energised interval on `close()`. **Drive the coils only through `SerialComm`** -- it is the
-one chokepoint every path goes through, which is why the stamping lives there and not in
-the caller. `fly()` calls `coil_thermal.wait_until_safe()` for you and **refuses to arm if
+models it (heat rate, Newton cooling, a 70 C ceiling) and the stamping lives at the
+chokepoint rather than in the caller. There are exactly TWO chokepoints and no others:
+
+- **Python paths: `link.SerialComm`**, which stamps on `close()`.
+- **The native binary: `controller/control/fly_native.py`**, which is the only issuer of
+  the `--armed-token` `pmw_fly` refuses to run without, and the only writer of the stamp
+  on that path. `pmw_fly` cannot be run by hand and energise a coil. `control/theory.md`
+  27.5 has the argument and the three rejected alternatives.
+
+**With no firmware watchdog, a USB unplug leaves the coils driven indefinitely.** The
+child's stdin-EOF backstop covers a supervisor that crashed; nothing covers the cable. The
+bench supply's 10 A limit and the GPIO14 button are the whole story there. `fly()` calls `coil_thermal.wait_until_safe()` for you and **refuses to arm if
 that file is missing**, because `ai/` is gitignored and a fresh clone does not have it.
 
 Keep a single ramp under a minute. `ramp.check` refuses a profile over `MAX_RAMP_S` rather
@@ -131,6 +141,14 @@ argument, 18.6 the history.
 blocks for its burst, during which neither the GPIO14 button nor a host `stop` is serviced
 -- which is why it is capped at 2 s and cuts the coils the instant it returns.
 
+**`phase=A:B:C:D` sets the per-channel commutation phase**, in degrees. `PwmController`
+has had `setPhase` since the beginning and nothing exposed it, so the host could only ever
+command four amplitudes and one frequency. It is NOT a drive path -- changing a phase
+energises nothing; the carrier is what puts current in the coils. The binary DRIVE frame
+carries the same four phases. **No control law commands phase yet**, deliberately:
+`theory.md` 22 is about compensating the RLC, and a loop around an uncharacterised actuator
+is a guessed trim with more code.
+
 **`duty=A:B:C:D` is a drive path too.** Per-channel carrier ceilings that replace the az/mag
 mixer while set (`duty=off` clears). It exists for `controller/control/tilt_servo.py`, which
 needs four independent amplitudes; `link._note_drive` counts it. It scales `collective`, so
@@ -145,6 +163,14 @@ pio run -e <env> -t uploadfs       # schedule-driven envs only; flight takes its
                                    #   over serial and reads no SPIFFS schedule
 uv sync --extra native                          # build pmw_pose (needs cmake + Homebrew opencv, eigen)
 uv run python controller/pose/native_parity.py  # hold the C++ core to the Python reference
+                                                #   --stage filter/control need NO recording
+cmake -S controller/native -B build/fly -DPMW_FLY=ON -DPMW_MODULE=OFF \
+  -DCMAKE_BUILD_TYPE=Release && cmake --build build/fly   # the standalone controller
+uv run python controller/control/fly_native.py --self-check   # arming + liveness backstops
+uv run python controller/control/sysid.py --list              # the identification stages
+uv run python controller/control/sysid.py --stage 0           # free: fits (f0,Q) from old runs
+c++ -std=c++17 -O2 -I lib/DriveFrame/src -o /tmp/tdf \
+  lib/DriveFrame/test_drive_frame.cpp && /tmp/tdf              # the wire format
 uv run python controller/pose/tracker.py        # pairing, skew guard, view-cache exactness (no camera)
 uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives

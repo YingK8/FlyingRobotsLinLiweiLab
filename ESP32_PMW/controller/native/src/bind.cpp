@@ -3,6 +3,7 @@
 // buffers wrapped in cv::Mat headers -- never as cv::Mat objects, because the cv2
 // wheel and Homebrew's OpenCV are different builds with different ABIs.
 // See controller/pose/theory.md 21.
+#include "control.h"
 #include "pmw.h"
 #include "tracker.h"
 
@@ -314,6 +315,51 @@ nb::object stats_py(const TrackerStats& s) {
 
 }  // namespace
 
+
+// ---- control core ---------------------------------------------------------------------
+// Bound so `native_parity.py --stage filter --stage control` can put the same inputs to
+// both implementations, and so `simulate_hover`'s seven scenarios can be run against the
+// C++ law -- seven validated scenarios for the cost of one `nb::class_`.
+namespace {
+
+pmw::ControlConfig control_config(const nb::dict& d) {
+    // Throws on a missing key, exactly as `pmw::Config`'s loader does: a number that
+    // silently defaults is a number with two homes.
+    auto req = [&](const char* k) -> nb::object {
+        if (!d.contains(k))
+            throw std::runtime_error(std::string("control config missing key '") + k + "'");
+        return nb::object(d[k]);
+    };
+    pmw::ControlConfig c{};
+    c.accel_mm_s2 = nb::cast<double>(req("accel_mm_s2"));
+    c.p0_pos = nb::cast<double>(req("p0_pos"));
+    c.p0_vel = nb::cast<double>(req("p0_vel"));
+    c.gate_sigma = nb::cast<double>(req("gate_sigma"));
+    c.max_gated = nb::cast<int>(req("max_gated"));
+    c.sigma_normal = nb::cast<double>(req("sigma_normal"));
+    c.max_coast_s = nb::cast<double>(req("max_coast_s"));
+    c.gravity = nb::cast<double>(req("gravity"));
+    c.tau_vel_s = nb::cast<double>(req("tau_vel_s"));
+    c.ts = nb::cast<double>(req("ts"));
+    c.f_hover = nb::cast<double>(req("f_hover"));
+    c.g = nb::cast<double>(req("g"));
+    c.k_lat = nb::cast<double>(req("k_lat"));
+    c.mag_max = nb::cast<double>(req("mag_max"));
+    c.freq_min = nb::cast<double>(req("freq_min"));
+    c.freq_max = nb::cast<double>(req("freq_max"));
+    c.freq_slew_hz_per_s = nb::cast<double>(req("freq_slew_hz_per_s"));
+    c.vel_cutoff_hz = nb::cast<double>(req("vel_cutoff_hz"));
+    c.suspect_mm = nb::cast<double>(req("suspect_mm"));
+    auto Kv = nb::cast<std::vector<std::vector<double>>>(req("K"));
+    if (Kv.size() != 2 || Kv[0].size() != 6 || Kv[1].size() != 6)
+        throw std::runtime_error("control config K must be 2x6");
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 6; ++j) c.K(i, j) = Kv[i][j];
+    return c;
+}
+
+}  // namespace
+
 NB_MODULE(pmw_pose, m) {
     m.attr("__version__") = "0.1.0";
     m.def("opencv_threads", [](int n) { if (n >= 0) cv::setNumThreads(n); return cv::getNumThreads(); },
@@ -621,4 +667,67 @@ NB_MODULE(pmw_pose, m) {
             }
             return stats_py(s);
         });
+
+    // ---- control core -------------------------------------------------------------
+    nb::class_<pmw::ConstantVelocity>(m, "ConstantVelocity")
+        .def("__init__", [](pmw::ConstantVelocity* self, double accel, double p0_pos,
+                            double p0_vel) {
+            new (self) pmw::ConstantVelocity(accel, p0_pos, p0_vel);
+        }, "accel"_a, "p0_pos"_a, "p0_vel"_a)
+        .def("reset", &pmw::ConstantVelocity::reset)
+        .def("predict", &pmw::ConstantVelocity::predict, "dt"_a)
+        .def("update", [](pmw::ConstantVelocity& f, Vec z, Mat r, double gate, int max_gated) {
+            Vector3d zz(z.data()[0], z.data()[1], z.data()[2]);
+            Matrix3d rr;
+            for (int i = 0; i < 3; ++i)
+                for (int j = 0; j < 3; ++j) rr(i, j) = r.data()[i * 3 + j];
+            return f.update(zz, rr, gate, max_gated);
+        }, "z"_a, "r"_a, "gate"_a, "max_gated"_a)
+        .def_prop_ro("value", [](const pmw::ConstantVelocity& f) { return vec3(f.value()); })
+        .def_prop_ro("rate", [](const pmw::ConstantVelocity& f) { return vec3(f.rate()); })
+        .def_prop_ro("initialised", &pmw::ConstantVelocity::initialised)
+        .def_prop_ro("n_gated", &pmw::ConstantVelocity::n_gated)
+        .def("peek", [](const pmw::ConstantVelocity& f, double dt) { return vec3(f.peek(dt)); },
+             "dt"_a);
+
+    nb::class_<pmw::StatePredictor>(m, "StatePredictor")
+        .def("__init__", [](pmw::StatePredictor* self, nb::dict cfg) {
+            new (self) pmw::StatePredictor();
+            self->init(control_config(cfg));
+        }, "cfg"_a)
+        .def("reset", &pmw::StatePredictor::reset)
+        .def("update", [](pmw::StatePredictor& p, Vec xyz, double t) {
+            return vec3(p.update(Vector3d(xyz.data()[0], xyz.data()[1], xyz.data()[2]), t));
+        }, "xyz_mm"_a, "t"_a)
+        .def("predict", [](pmw::StatePredictor& p, double f_cmd, double f_hat, double dt) {
+            return vec3(p.predict(pmw::Command{f_cmd, f_hat}, dt));
+        }, "f_cmd"_a, "f_hat"_a, "dt"_a)
+        .def("accel_mm_s2", [](const pmw::StatePredictor& p, double f_cmd, double f_hat) {
+            return vec3(p.accel_mm_s2(pmw::Command{f_cmd, f_hat}));
+        }, "f_cmd"_a, "f_hat"_a)
+        .def_prop_ro("stale", &pmw::StatePredictor::stale)
+        .def_prop_ro("initialised", &pmw::StatePredictor::initialised)
+        .def_prop_ro("coast_s", &pmw::StatePredictor::coast_s)
+        .def_prop_ro("t", &pmw::StatePredictor::t)
+        .def_prop_ro("xyz_mm", [](const pmw::StatePredictor& p) { return vec3(p.xyz_mm()); })
+        .def_prop_ro("vel_mm_s", [](const pmw::StatePredictor& p) { return vec3(p.vel_mm_s()); });
+
+    nb::class_<pmw::HoverController>(m, "HoverController")
+        .def("__init__", [](pmw::HoverController* self, nb::dict cfg) {
+            new (self) pmw::HoverController();
+            self->init(control_config(cfg));
+        }, "cfg"_a)
+        .def("reset", &pmw::HoverController::reset)
+        .def("anchor", &pmw::HoverController::anchor, "f_reached"_a)
+        .def("step", [](pmw::HoverController& c, double x, double z, double dt, bool have_dt,
+                        std::pair<double, double> rp, std::pair<double, double> rv,
+                        std::pair<double, double> ra) {
+            Vector2d u = c.step(x, z, dt, have_dt, Vector2d(rp.first, rp.second),
+                                Vector2d(rv.first, rv.second), Vector2d(ra.first, ra.second));
+            return std::make_pair(u(0), u(1));
+        }, "x_meas"_a, "z_meas"_a, "dt"_a, "have_dt"_a, "ref_p"_a, "ref_v"_a, "ref_a"_a)
+        .def_prop_ro("q", [](const pmw::HoverController& c) {
+            return std::make_pair(c.q()(0), c.q()(1));
+        })
+        .def_prop_ro("prev_f_field", &pmw::HoverController::prev_f_field);
 }

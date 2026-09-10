@@ -4368,6 +4368,329 @@ and is nearly a straight line across that window, so there is little for the dep
 remove there in the first place. **Nothing in `alignment_rate.py` was changed on the strength
 of this**, and `coupling.py` stays a separate read-only analysis.
 
+### 24.11 A label lost to boot garbage threw away five takes
+
+24.2 records a label placed last labelling nothing. This is the same failure at the other end
+of the schedule, and it cost more.
+
+`tilt_sweep` resets the board to start a run, and the first serial bytes back are boot noise.
+On some takes the opening `FREQ_<f>HZ` is lost inside it. `2026-09-09_213502` (70 Hz) is one:
+18 null bytes in its first 4 KB, no `FREQ_070HZ` — but `SETTLE_070HZ`, `HOLD_070HZ`,
+`KILL_070HZ` and `DOWN_070HZ` all present, and a complete 58 s run ending in `TILT_OFF`.
+
+`timeline()` opened a point only on `FREQ_`, so `cur` stayed `None`, the `KILL_` was dropped
+on the floor, and the take was reported as having no usable kill. **A perfectly good kill
+marker, discarded because the label before it was missing.**
+
+Letting any of the point's labels open the record — the frequency comes from the label's own
+tag, which every one of them carries — recovers **five takes**: two at 20 Hz, one each at 30,
+60 and 70. The effect on the campaign is small and in the right direction:
+
+| drive | repeats | rotation median (deg) | rotation MAD (deg) |
+|---|---|---|---|
+| 20 | 14 → 16 | 42.89 → 42.59 | 2.33 → 2.65 |
+| 30 | 9 → 10 | 38.11 → 38.03 | 1.24 → 2.06 |
+| 60 | 8 → 9 | 42.00 → 42.05 | 8.60 → 8.22 |
+| 70 | 4 → 5 | 47.15 → 46.59 | **28.17 → 19.97** |
+
+The medians move by less than 1.3%, which is the check that the recovered takes belong to the
+same population and are not junk being readmitted. 70 Hz gains most in both directions: it was
+the thinnest frequency in the sweep at four repeats, and its scatter falls by a third.
+
+In the settling metric the correction is larger, because 70 Hz had only four measured repeats
+to take a median over: the swing median moves **19.88 → 13.79 deg**, back in line with its
+neighbours at 13.89 (80 Hz), 13.66 (90) and 12.91 (100). The 19.88 was one outlier in a set of
+four, and it had been sitting in the table as a peak.
+
+**This does not weaken 23.2.** The kill instant still comes from `KILL_<f>HZ` and from nothing
+else; no offset is fitted and `find_kills` is still not used on any take that has a log. What
+changed is only which label is allowed to open the record that the kill belongs to.
+
+`campaign.csv` and every figure beside it were regenerated on 2026-09-10 with these five takes
+included. A number quoted from the previous table will differ in the fourth significant figure
+at 20/30/60 Hz and in the second at 70.
+
+## 25. Settling: where the axis ends up, and how long until it stays there
+
+§24 measures how fast the lean *starts* — `rate_relu_deg_s` is the gradient of the rising
+edge. This section measures where the axis *ends up* and how long until it stays there. The
+measurement is `alignment_rate.py --settle`; it writes `settling.csv`,
+`settling_by_freq.csv` and `axis_vs_time_*.png` beside the §24 outputs and overwrites none
+of them.
+
+### 25.1 Settling time and rise time are different quantities
+
+Both are standard and they are not interchangeable:
+
+* **rise time** — 10% to 90% of the final value. §24's `t10_s` / `t90_s` are this.
+* **settling time** — the elapsed time to the last instant the response *leaves* a band about
+  its final value. The band here is ±10%; the control-systems defaults are 2% and 5%.
+
+§24's rate is neither: it is a gradient, in deg/s. The three answer different questions and
+the campaign should quote whichever it means, by name.
+
+### 25.2 The band goes on a scalar, and the axis is a vector
+
+With $\bar n(t)$ the running average axis and $n_f$ the final resting axis,
+
+$$\Delta(t) = \arccos\big(\bar n(t)\cdot n_f\big), \qquad
+\text{swing} = \Delta(t_{\text{kill}}), \qquad
+t_{\text{settle}} = \max\{\,t : \Delta(t) > 0.10\,\text{swing}\,\} - t_{\text{kill}}.$$
+
+Frame-independent, no unwrap, no branch to flip, and it does not assume the swing is planar.
+*Last* crossing, not first: entering the band and coming back out is not settled, and a
+response with a 2–4 Hz mode in it does exactly that.
+
+**The swing is the great-circle arc, not the azimuth change**, and the two differ by a lot.
+§24's `rot_median_deg` is the change in lean *direction*; this is the angle the axis actually
+turned through. They are related by $\text{swing} = 2\arcsin(\sin\theta\,\sin(\Delta\phi/2))$
+for a radial tilt $\theta$, and that relation holds across this campaign to better than
+0.5 deg at every frequency — 5.63 against 5.15 predicted at 10 Hz, 11.55 against 11.25 at 40,
+12.81 against 12.70 at 110. A 45 deg azimuth swing at a 16 deg tilt is only a 12 deg arc.
+That is the check that the two metrics are consistent; they are not the same number and
+neither should be quoted as the other.
+
+### 25.3 A centred boxcar has zero group delay, so there is nothing to compensate
+
+`_smooth` is symmetric and applied centred at **odd** length. A symmetric impulse response has
+exactly linear phase with group delay zero — not small, zero. Two cascaded are still zero. A
+causal moving average would need a $(k-1)/2$ sample correction and a one-pole IIR a
+frequency-dependent one, and both would put the correction's own error into the timing.
+`_self_check` asserts it against a ramp (every level crossed within one sample of the raw
+trace) rather than restating it.
+
+At **even** $k$ the centre falls between two samples and `pad = k // 2` then `[:len(y)]` left
+the output half a sample early — ~2.4 ms at the 204 Hz stride-1 rate. Forcing $k$ odd fixes
+it, and `_smooth(..., odd=True)` does that.
+
+**It is not the default, and the reason is a measurement.** An earlier draft of this section
+claimed 2.4 ms was below the precision §24 quotes and that no published number would move.
+That was wrong. Re-running `--campaign` with $k$ forced odd moves `rate_mean_deg_s` at 60 Hz
+from 620.6 to 263.3 deg/s and `rate_relu_med` at 40 Hz from 677.3 to 902.8; the default path
+reproduces the committed `campaign.csv` to 0.00% and the fixed one does not.
+
+2.4 ms does not do that on its own. `relu_window` picks its edge by **discrete index** — the
+last sample in the bottom band, the first in the top — so a half-sample shift can move a
+threshold crossing by a whole sample, and on a ~50 ms edge carrying a handful of samples that
+is a large lever on the fitted slope. The frequencies that move most are the ones 24.5 and
+24.7 already call unreliable; 60 Hz is 5 of 9 repeats.
+
+So the settling path passes `odd=True`, because it times a step and must not carry a timing
+bias, and §24's rate path keeps the behaviour its published table was made with. Flipping it
+there is an operator's decision about a published table, not a side effect of adding a metric.
+
+**Zero group delay is the same fact as non-causality, seen from the other side**, and that has
+a consequence the rise time pays for. A centred filter spreads the step *symmetrically* about
+the cut, so the smoothed trace is already part-way up at $t_{\text{kill}}$ itself: measured on
+the synthetic case, a 0.66 s rise read `t10 = 0.000`. So the two quantities are read over
+different windows — the settling time from $t_{\text{kill}}$ on, because it is a property of
+the tail where the smear has nothing left to do; the rise time from
+$t_{\text{kill}} - W$, because the rise legitimately begins before the cut in a non-causally
+filtered trace and the rise time is a *difference* of crossings, in which the symmetric smear
+largely cancels.
+
+### 25.4 Why the rod mode is removed by least squares and the cone by a boxcar
+
+Two wobbles have to come off the trajectory, and they are removed by different methods.
+
+The once-per-rev cone comes off with a boxcar of a whole number of revolutions — an exact null
+at the cone and every harmonic, ~0.25 s (`rev_window`, 24.7).
+
+The 2–4 Hz mechanical mode of 24.10 does **not** come off with it: $\mathrm{sinc}(3.1 \times
+0.25) = 0.47$, so half of it passes straight through. Leaving it in is not cosmetic. On three
+40 Hz repeats the settling time reads 0.87, 2.16 and 0.54 s with the mode present against
+0.23, 0.92 and 0.19 s with it gone — **without this removal the metric times the rod, not the
+alignment.**
+
+The obvious fix is a second boxcar of one mode period. It is the wrong one, because it costs
+0.33 s of width and the settling times being measured are 0.2–0.9 s. A centred boxcar biases
+a settling time **late** whenever the event is shorter than the window. Measured against known
+exponentials, with $W$ the window and $t_s$ the true settling time:
+
+| $t_s / W$ | 0.46 | 0.92 | 1.84 | 4.6 | 9.2 |
+|---|---|---|---|---|---|
+| measured / true | 1.36 | 1.11 | 1.02 | 1.00 | 1.00 |
+
+So the line is removed by **least squares instead** (`_fit_line_at`) — `deproject`'s method,
+already in this module for the same reason: one sinusoid, fitted and subtracted, no passband
+distortion either side of it and, the point here, **no time-domain width at all**. The trace
+is high-passed against a boxcar copy of itself before the fit so the settling curve cannot
+leak into the amplitude, and the fit takes only the component at that one frequency anyway.
+
+The only smoother left in the path is then the 0.25 s cone window, and the table above sets
+the gate: a settling time shorter than $W$ is refused, which caps the residual bias at about
+10% on everything that is reported. 24.7 set that precedent for the rate.
+
+### 25.5 The settled window has to stop at the DOWN_ label
+
+`DROP_MS = 5000` leaves the robot leaning for 5.0 s and then the down-ramp starts.
+`POST_FROM_S / POST_TO_S = 4.0 / 6.0` straddles that boundary, so a second of *spin-down* sits
+inside what §24 calls the settled window. A resting axis measured through a frequency ramp is
+not one. `timeline()` already returns `t_end` as the `DOWN_` instant, and the final window is
+clamped to it; a kill whose window is then too short is refused rather than measured through
+the ramp.
+
+### 25.6 The tail gate, and the constant that was not taken
+
+A settling time is a crossing of a band. For that crossing to be a measurement rather than a
+coin flip, the trace has to be *inside* the band once it has arrived. On `2026-09-10_012419`
+(40 Hz) it is not: the tail wanders to 1.190 deg against a 1.190 deg band, and the settling
+time read 0.87 s or 2.09 s depending on which line was removed. Neither was a measurement.
+
+So the tail's own excursion over the last 1.5 s is measured and required to clear the band.
+**The threshold is 1.0, which is the definition and not a margin** — "settled" means inside
+the band. Anything below 1.0 is an extra safety factor, and it decides the answer:
+
+| `TAIL_CLEAR` | 0.3 | 0.5 | 0.7 | 1.0 | 1.5 | 2.0 |
+|---|---|---|---|---|---|---|
+| repeats keeping a settled state (of 98) | 6 | 36 | 61 | 77 | 87 | 94 |
+
+A constant that swings the result thirteen-fold is not one to pick quietly, so it is not
+picked: every reported settling time carries its own `tail_over_band` in `settling.csv`, and a
+reader who wants a stricter cut can make it from that column. The median ratio over the
+campaign is 0.59.
+
+### 25.7 The cone frequency is measured now, not assumed
+
+`campaign` sets `spin_hz = freq_hz` and never checks it; every `rev_window` null rests on that.
+At stride 1 the solve is ~204 Hz and the line is simply resolved, so `cone_line` reads it off
+with `dft` on the actual timestamps. Measured, it sits at **1.00 × the drive at every
+frequency from 20 to 100 Hz** (0.92 at 110, and 0.755 at 10 Hz where it is mostly not
+detectable at all).
+
+**This does not establish that the rotor spins at the drive frequency.** The field itself
+rotates at $f_{\text{drive}}$ and can shake the robot at that rate whatever the rotor is
+doing, so the observed line is consistent with a friction-capped rotor as well as a tracking
+one. What it does establish is where the line *is*, which is all the null needs to know — and
+that is strictly better than assuming it. The rotor-rate question stays open and stays with
+18.9's reappearance test.
+
+The mode search band matters. An earlier version looked ±1 Hz around 24.10's fitted seed and
+reported "not measured" on takes with an obvious 0.17 deg line in them, because over a grid
+that narrow the median sits on the shoulder of the peak itself and there is no floor to clear.
+Searched over 1.5–6.0 Hz instead, the line is found on 53 of 102 repeats with a median of
+2.98 Hz — and on `2026-09-10_012419` (40 Hz, seed 3.24) it is at **2.40 Hz**. 24.10's
+relation is a campaign-wide fit, not a per-take truth, so it is used as a seed and reported
+against as a cross-check, never as a constraint.
+
+### 25.8 What the campaign says
+
+Per repeat, 67 of 102 repeats settle. Medians:
+
+| drive | settled | $t_{\text{settle}}$ (s) | rise (s) | swing (deg) | $\Delta\phi$ (deg) | precession (deg) |
+|---|---|---|---|---|---|---|
+| 10 | 3/22 | 3.11 | — | 5.63 | 35.7 | 2.68 |
+| 20 | 6/14 | 0.73 | 0.49 | 7.82 | 46.8 | 1.58 |
+| 30 | 8/9 | 1.51 | 0.36 | 10.12 | 44.8 | 3.66 |
+| 40 | 13/14 | 1.41 | 0.27 | 11.55 | 47.3 | 4.42 |
+| 50 | 8/10 | 2.02 | 0.66 | 12.19 | 43.0 | 2.99 |
+| 60 | 7/9 | 1.49 | 0.33 | 12.96 | 46.2 | 2.07 |
+| 70 | 4/4 | 1.47 | 0.38 | 19.88 | 49.7 | 2.34 |
+| 80 | 5/5 | 1.83 | 0.74 | 13.89 | 49.7 | 2.26 |
+| 90 | 5/5 | 1.99 | 0.72 | 13.66 | 45.0 | 1.87 |
+| 100 | 4/5 | 2.31 | 1.33 | 12.91 | 42.8 | 1.29 |
+| 110 | 4/5 | 2.41 | 1.27 | 12.81 | 40.7 | 1.24 |
+
+Three things to read off it.
+
+**The settling time RISES with drive, from 0.73 s at 20 Hz to 2.41 s at 110.** That is the
+opposite direction from §24's rate, which rises with drive too — and both are true, because
+they measure opposite ends of the same transient. The drive sets how hard the robot is thrown
+at its new equilibrium; it does not set how quickly it stops ringing once it gets there. **A
+faster start and a longer finish is not a contradiction, and a report that quotes only the
+rate is telling half of it.**
+
+**The azimuth swing is 40.7–49.7 deg at every frequency**, recovered here from the resting
+axes independently of §24's estimator, which read it from the pre-cut lean direction. That is
+the geometric constant `azimuth_from_rest` predicts — A and C removed at 0 and 180 deg leaves
+B and D at 90/270, so the remaining asymmetry sits 45 deg away — arrived at twice by two
+different routes.
+
+**Precession is EXCITED by the cut, then damps.** The RMS cone half-angle runs 2–6 deg before
+the cut, peaks at 8–15 deg within ~0.4 s of it, and decays back to ~4 deg by 5 s
+(`axis_vs_time_040hz.png`, middle panel). This is 11.3 being visible: gyroscopic action alone
+gives steady coning, and only dissipation spirals it in, so the decay time of that envelope is
+a measurement of $c_t$ that this campaign contains and has not yet had extracted. The cone is
+elliptical rather than circular — circular:linear runs 1.5–4.8, against the 9.6:1 20.7
+measured on one earlier take.
+
+10 Hz settles 3 of 22, which is consistent with everything else known about it (24.7, 24.9):
+least current, least authority, friction dominant. 110 Hz loses its takes to the tail gate,
+not to the swing.
+
+### 25.9 The cone has its own settling time, and it is longer than the axis's
+
+The axis metric times a step. The cone is a **pulse**: it sits at its driven level, jumps when
+the coils are cut, and decays. So the quantity that plays the role of the swing is the
+**excursion**, $\text{peak} - \text{final}$, and the band is 10% of that about the final
+level — the same convention as 25.2, applied to the thing that actually changes.
+`precession_settle` does this; `prec_settle_s` and `prec_tau_s` are the columns.
+
+**The cut excites the cone, and only transiently.** Over 107 repeats the half-angle rises on
+**101** of them, from a median 2.62 deg before the cut to a 6.79 deg peak — reached early, at
+0.10–0.40 s — and then damps to a settled 1.81 deg, which is *at or below where it started*.
+An earlier note in this section said the cut made the coning worse. That is true of the peak
+and false of the steady state, and the distinction is the whole content of the measurement.
+
+| drive | axis settling (s) | cone settling (s) | n | cone $\tau$ (s) | pre → peak → final (deg) |
+|---|---|---|---|---|---|
+| 10 | 3.11 | — | 0/22 | 0.86 | 3.27 → 4.56 → 3.01 |
+| 20 | 0.66 | 2.49 | 12/16 | 0.72 | 1.46 → 4.00 → 1.52 |
+| 30 | 1.22 | 3.11 | 1/10 | 1.16 | 2.90 → 7.33 → 3.41 |
+| 40 | 1.41 | 2.95 | 5/14 | 1.19 | 4.77 → 8.08 → 4.03 |
+| 50 | 2.02 | 2.88 | 8/10 | 1.32 | 8.38 → 10.53 → 1.61 |
+| 60 | 1.50 | 2.77 | 6/10 | 1.27 | 1.87 → 7.53 → 1.22 |
+| 70 | 1.48 | 2.68 | 5/5 | 1.16 | 1.43 → 8.85 → 1.19 |
+| 80 | 1.83 | 2.61 | 5/5 | 1.38 | 1.01 → 7.65 → 1.35 |
+| 90 | 1.99 | 2.41 | 5/5 | 1.21 | 0.96 → 7.12 → 1.26 |
+| 100 | 2.31 | 3.25 | 3/5 | 0.64 | 0.95 → 5.66 → 1.14 |
+| 110 | 2.41 | — | 0/5 | 0.72 | 0.92 → 4.41 → 1.57 |
+
+**The cone settles later than the axis at every frequency where both exist** — 2.41–3.25 s
+against 0.66–2.41 s. The robot arrives at its new attitude well before it stops wobbling about
+it, which is a distinction the §24 rate cannot make and the axis settling time alone does not
+either.
+
+**Why a decay constant is reported next to the settling time.** Because the band often refuses
+and the fit does not. `DROP_MS` is 5 s and the envelope is still falling at the end of it — on
+five 40 Hz repeats the median drops another 9–22% between 2–3 s and 4–5 s — so a band about a
+"final" level that is not yet final is correctly refused and says nothing. An exponential
+fitted from the peak does not need the asymptote to be *reached* to measure how fast it is
+being approached. Measured: **97 of 107 repeats give a $\tau$ against 50 that give a settling
+time.** The fit is $C + A e^{-(t - t_{peak})/\tau}$, with $A$ and $C$ solved linearly at each
+$\tau$ on a grid, in the manner of `fit_second_order` and for the same reason — no scipy.
+
+$\tau$ runs **0.64–1.38 s** and is close to flat at ~1.2 s across 30–90 Hz. That flatness is
+the result: the axis takes *longer* to arrive as the drive rises (0.66 s at 20 Hz to 2.41 at
+110), while the cone damps at about the same rate regardless. A dissipation-limited mode should
+behave exactly that way — 11.3 has gyroscopic action alone giving steady coning at fixed
+half-angle, with only $c_t$ spiralling it in, and $c_t$ is aerodynamic drag on the blades
+rather than anything the drive sets. **This is the $c_t$ measurement 11.3 asks for, and it was
+in the campaign all along.**
+
+Two cautions before that is quoted as a damping coefficient. $\tau$ here is the decay of an
+RMS envelope, not of the tilt amplitude in the 11.3 complex variable, and the two differ by a
+factor this section has not derived. And 10 Hz and 110 Hz refuse the settling time entirely —
+at 10 Hz because the cut barely moves the cone (4.56 against 3.27 deg), at 110 Hz because the
+envelope is still falling when the down-ramp starts.
+
+### 25.9 What this does not settle
+
+* **The rise time is unavailable wherever the rise is short.** 7 of 102 repeats refuse on it
+  outright, and the reported values sit at 0.27–1.33 s against a 0.25 s smoother, so the
+  faster ones carry ~10% of filter in them. This is 24.7's ceiling, unmoved.
+* **35 of 102 repeats do not settle at all inside the 5 s window.** Whether that is the robot
+  or the rig is not established here; `DROP_MS` would have to be lengthened to find out, and
+  that costs coil heat at exactly the frequencies where heat is already the binding
+  constraint (24.3, 24.4).
+* **The precession decay constant is not converted to $c_t$.** It is fitted (25.9) and it is
+  flat across the sweep, which is what a dissipation-limited mode should do — but $\tau$ is
+  the decay of an RMS envelope and 11.3's $c_t$ multiplies $\dot\chi$ in a complex tilt
+  variable. The factor between them is not derived here.
+* **40 Hz mixes hold times** (the campaign README's caveat) and it is visible here as two
+  populations in `axis_vs_time_040hz.png` — two traces at 49 deg of swing against twelve at
+  11.5. The median is quoted over both and should not be.
+
 ## Appendix A: Correspondence with the MATLAB implementation
 
 Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`

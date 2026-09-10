@@ -4,6 +4,12 @@
     uv run python controller/control/alignment_rate.py                  # self-check
     uv run python controller/control/alignment_rate.py <take_dir>       # one take
     uv run python controller/control/alignment_rate.py <take> --log <sweep.log>
+    uv run python controller/control/alignment_rate.py --settle <campaign_root>
+
+`--settle` answers a DIFFERENT question from the rest of this module: not how fast the lean
+starts, but where the axis ends up and how long until it stays there. Resting axes, a +-10%
+settling time, the 10-90% rise time, and the precession cone about the running average axis.
+See theory.md 25, and read 25.1 before quoting any of the three timing numbers by name.
 
 Input is the `axis.csv` + `tilt_A/B.csv` layout that `pose/disc_axis.py` writes, plus the
 `sweep.log` `tilt_sweep.py` records alongside it. Output is one row per kill and one summary
@@ -202,6 +208,23 @@ def timeline(log_path):
 
     Only points that reached their `DOWN_` label are returned -- an interrupted point has
     no rest window and therefore no datum.
+
+    A POINT CAN OPEN ON ITS KILL, NOT ONLY ON ITS `FREQ_`
+    ----------------------------------------------------
+    24.2 records a label placed last labelling nothing. This is the same failure at the other
+    end: the board is reset to start a schedule, the first serial bytes are boot garbage, and
+    the opening `FREQ_<f>HZ` is lost inside it. `2026-09-09_213502` (70 Hz) is one -- 18 null
+    bytes in its first 4 KB, no `FREQ_070HZ`, but `SETTLE_070HZ`, `HOLD_070HZ`, `KILL_070HZ`
+    and `DOWN_070HZ` all present and correct.
+
+    Requiring `FREQ_` to open the point threw that take away, and it was 1 of only 5 flown at
+    70 Hz -- the thinnest frequency in the campaign. So any of the labels opens a point, and
+    the frequency comes from the label's own tag, which every one of them carries.
+
+    This does NOT weaken 23.2's rule that the label is the only event and no offset is fitted.
+    The kill instant still comes from `KILL_<f>HZ` and from nothing else; what changed is only
+    which label is allowed to open the record it belongs to. `t_start` becomes the first label
+    seen rather than the ramp's start, and nothing reads it except the debug plot's axis.
     """
 
     entries, _ = sync.read_log(log_path)
@@ -214,7 +237,10 @@ def timeline(log_path):
         if (f := FREQ_RE.match(name)):
             cur = {"freq": float(f.group(1)), "t_start": t, "kills": [], "t_end": None}
             pts.append(cur)
-        elif (k := KILL_RE.match(name)) and cur is not None:
+        elif (k := KILL_RE.match(name)):
+            if cur is None:                  # opening FREQ_ lost to boot garbage
+                cur = {"freq": float(k.group(1)), "t_start": t, "kills": [], "t_end": None}
+                pts.append(cur)
             cur["kills"].append(t)
         elif (d := DOWN_RE.match(name)) and cur is not None:
             cur["t_end"] = t
@@ -345,6 +371,23 @@ def tilt_from(axis, up):
     return np.degrees(np.arccos(np.clip(np.abs(axis @ up), 0.0, 1.0)))
 
 
+def _basis(ref):
+    """Orthonormal ``(e1, e2)`` spanning the plane perpendicular to ``ref``.
+
+    The tangent plane is the right coordinate for anything the axis does off ``ref``
+    (`pose/theory.md` 20.7): it has no ``1/sin(theta)`` singularity, unlike azimuth, so a
+    small motion near the reference stays small instead of being amplified into noise.
+    """
+
+    ref = np.asarray(ref, float)
+    ref = ref / np.linalg.norm(ref)
+    e1 = np.cross(ref, [0.0, 0.0, 1.0])
+    if np.linalg.norm(e1) < 1e-6:
+        e1 = np.cross(ref, [0.0, 1.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    return e1, np.cross(ref, e1)
+
+
 def angles(axis, ref):
     """``(radial_deg, azimuth_deg)`` of the axis about a reference direction.
 
@@ -357,13 +400,9 @@ def angles(axis, ref):
     is a step in radial with azimuth fixed.
     """
 
+    e1, e2 = _basis(ref)
     ref = np.asarray(ref, float)
     ref = ref / np.linalg.norm(ref)
-    e1 = np.cross(ref, [0.0, 0.0, 1.0])
-    if np.linalg.norm(e1) < 1e-6:
-        e1 = np.cross(ref, [0.0, 1.0, 0.0])
-    e1 /= np.linalg.norm(e1)
-    e2 = np.cross(ref, e1)
     a = _hemisphere(axis, ref)          # a line, so put it all in one hemisphere first
     radial = np.degrees(np.arccos(np.clip(a @ ref, -1.0, 1.0)))
     azimuth = np.degrees(np.unwrap(np.arctan2(a @ e2, a @ e1)))
@@ -536,15 +575,40 @@ def rev_window(spin_hz, target_s=SMOOTH_S):
     return n / float(spin_hz)
 
 
-def _smooth(t, y, span_s=SMOOTH_S):
-    """Box smoother with EDGE padding.
+def _smooth(t, y, span_s=SMOOTH_S, odd=False):
+    """Box smoother with EDGE padding. ``odd=True`` centres it exactly; see the warning.
 
     `np.convolve(..., "same")` zero-pads, which drags the first half-window toward 0 --
     and the first half-window is exactly where the step being measured begins. That put
     `frac` far negative right after the kill and fitted tau at 8.7 s against a true 0.8.
+
+    THERE IS A HALF-SAMPLE BIAS AT EVEN `k`, AND IT IS LEFT IN BY DEFAULT
+    --------------------------------------------------------------------
+    A boxcar is symmetric, so applied centred it has exactly linear phase and zero group
+    delay (theory.md 25.3). That argument needs a true centre to sit on. At EVEN `k` the
+    centre falls between two samples, and `pad = k // 2` then `[:len(y)]` leaves the output
+    half a sample early -- ~2.4 ms at the 204 Hz stride-1 rate.
+
+    Forcing `k` odd fixes it, and `odd=True` does that. It is NOT the default, because it is
+    not a free change: re-running `--campaign` with it moves `rate_mean_deg_s` at 60 Hz from
+    620.6 to 263.3 deg/s and `rate_relu_med` at 40 Hz from 677.3 to 902.8. The published
+    `campaign.csv` is reproduced to 0.00% by the default path and not by the fixed one.
+
+    2.4 ms does not do that on its own. `relu_window` picks the edge by DISCRETE index --
+    the last sample in the bottom band, the first in the top -- so a half-sample shift can
+    move a threshold crossing by a whole sample, and on a ~50 ms edge carrying a handful of
+    samples that is a large lever on the fitted slope. The frequencies it moves most are the
+    ones 24.5 and 24.7 already call unreliable (60 Hz is 5 of 9 repeats).
+
+    So the settling path (which times a step and must not have a timing bias) passes
+    `odd=True`, and the 24 rate path keeps the behaviour its published table was made with
+    until someone re-runs that table deliberately. Whether to flip it is an operator's call,
+    not a side effect of adding a new metric.
     """
 
     k = max(1, int(round(span_s / max(np.median(np.diff(t)), 1e-9))))
+    if odd:
+        k += 1 - k % 2
     pad = k // 2
     yp = np.pad(np.asarray(y, float), pad, mode="edge")
     return np.convolve(yp, np.ones(k) / k, mode="valid")[:len(y)]
@@ -1976,6 +2040,926 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
     return out
 
 
+# ---------------------------------------------------------------- settling and precession
+#
+# A DIFFERENT QUESTION FROM THE ONE ABOVE. Everything before this point measures how fast the
+# lean STARTS -- `rate_relu_deg_s` is the gradient of the rising edge. This section measures
+# where the axis ENDS UP and how long until it stays there, which needs the axis itself rather
+# than a scalar departure from where it used to be. See theory.md 25.
+#
+# The two names are the standard ones and are not interchangeable (theory.md 25.1):
+#
+#   settling time -- t_kill to the last instant the response LEAVES the +-band about its
+#                    final value. The headline here.
+#   rise time     -- 10% to 90% of the final value. Reported alongside, and the same
+#                    quantity `campaign.csv` already carries as `t10_s` / `t90_s`.
+
+#: Fraction of the swing that defines the settled band. The operator asked for 10%; the
+#: control-systems default is 2% or 5%. It is an argument and not a constant because the
+#: choice is a convention rather than a measurement.
+SETTLE_BAND = 0.10
+
+#: Where the FINAL resting axis is read, relative to the kill. `tilt_schedule.DROP_MS` leaves
+#: the robot leaning 5.0 s and then the DOWN_ ramp starts, so 1.5 s is what there is. The
+#: window is ALSO clamped to the DOWN_ label -- see `resting_axis` and theory.md 25.5.
+FINAL_FROM_S = 3.5
+
+#: The 2-4 Hz mechanical mode, `control/theory.md` 24.10: `f = 3.86 - 0.0155 * f_drive`, most
+#: likely the 8 mm takeoff rod. This is the rise-peak-fall structure that makes a rise time
+#: mis-specified on the RAW trace; nulling it is what leaves an average axis that can settle.
+#: Used as a SEED only -- the null lands on the peak this take actually has, within
+#: MECH_LO_HZ..MECH_HI_HZ, and 24.10's relation is reported against it as a cross-check.
+MECH_A, MECH_B = 3.86, -0.0155
+#: The band the mode is actually looked for in. Wide enough that the median over it is an
+#: off-peak floor, and wide enough to hold the line wherever the take puts it.
+MECH_LO_HZ, MECH_HI_HZ = 1.5, 6.0
+
+#: A `dft` peak has to clear this multiple of the median amplitude over the search grid before
+#: it is believed. Below it the line is not there and the caller falls back to its assumption.
+PEAK_OVER_FLOOR = 3.0
+
+#: Minimum swing for a settling time to mean anything. Below it there is no step to settle
+#: from, and the band would be narrower than the segmentation noise.
+MIN_SWING_DEG = 5.0
+
+#: The settled tail: how much of the end of the window is treated as "arrived", and how far
+#: inside the band its wander has to sit before a settling time off that band means anything.
+#:
+#: TAIL_CLEAR IS 1.0 BECAUSE THAT IS THE DEFINITION, NOT A MARGIN. "Settled" means inside the
+#: band; a tail that wanders wider than the band has not settled, whatever the last crossing
+#: says. Any value below 1.0 is an extra safety margin, and it decides the answer -- over this
+#: campaign 0.3 keeps 6 of 98 repeats, 0.5 keeps 36, 0.7 keeps 61, 1.0 keeps 77, 2.0 keeps 94.
+#: A number that swings the result by 13x is not something to pick quietly, so the margin is
+#: not taken here at all: every reported settling time carries its own `tail_over_band` in the
+#: CSV, and a reader who wants a stricter cut can make it from that column. See theory.md 25.6.
+TAIL_S = 1.5
+TAIL_CLEAR = 1.0
+
+
+def _polar(n, ref):
+    """``(radial_deg, azimuth_deg)`` of ONE axis about ``ref``. The vector form of `angles`.
+
+    Azimuth is in [0, 360) here rather than unwrapped: a single attitude has no history to
+    unwrap against.
+    """
+
+    e1, e2 = _basis(ref)
+    ref = np.asarray(ref, float)
+    ref = ref / np.linalg.norm(ref)
+    n = np.asarray(n, float)
+    n = n / np.linalg.norm(n)
+    if float(n @ ref) < 0.0:            # a LINE, like everything else in this module
+        n = -n
+    return (float(np.degrees(np.arccos(np.clip(n @ ref, -1.0, 1.0)))),
+            float(np.degrees(np.arctan2(n @ e2, n @ e1))) % 360.0)
+
+
+def cone_line(t, axis, t0, t1, f_drive):
+    """``(f_hz, amp_deg, measured)``: the once-per-rev cone frequency, MEASURED not assumed.
+
+    `campaign` sets `spin_hz = freq_hz` and never checks it, and every `rev_window` null in
+    this module rests on that. It is not a safe assumption: the rotor is friction-capped on
+    the takeoff rod and saturates well below the field above ~50 Hz drive, so the null can sit
+    somewhere the wobble is not.
+
+    At stride 1 the solve is ~204 Hz and the line is simply RESOLVED, so it can be read off
+    instead of assumed -- which is a thing stride 4 could not do, and the reason this function
+    did not exist before. `dft` is used rather than `np.fft` because the pose stream is
+    non-uniform (see its docstring). Above ~92 Hz drive the line passes Nyquist and cannot be
+    measured; the caller is told so via ``measured`` rather than being handed a fold.
+    """
+
+    m = (t >= t0) & (t < t1)
+    if m.sum() < 64:
+        return float(f_drive), float("nan"), False
+    fs = 1.0 / float(np.median(np.diff(t[m])))
+    lo, hi = max(0.5 * f_drive, 1.0), min(1.6 * f_drive, 0.45 * fs)
+    if hi <= lo + 1.0:
+        return float(f_drive), float("nan"), False
+
+    # The cone lives in the plane perpendicular to the window's own mean axis, where it has
+    # no 1/sin(theta) amplification (20.7). One component is enough to locate the line.
+    ref = _hemisphere(axis[m], axis[m][0]).mean(0)
+    if np.linalg.norm(ref) < 1e-9:
+        return float(f_drive), float("nan"), False
+    ref /= np.linalg.norm(ref)
+    e1, _e2 = _basis(ref)
+    c1 = np.degrees(_hemisphere(axis[m], ref) @ e1)
+
+    grid = np.arange(lo, hi, 0.05)
+    amp = dft(c1, t[m], grid)
+    i = int(np.argmax(amp))
+    if amp[i] < PEAK_OVER_FLOOR * float(np.median(amp)):
+        return float(f_drive), float("nan"), False
+    return float(grid[i]), float(amp[i]), True
+
+
+def mech_line(t, y, f_drive):
+    """``(f_hz, measured)``: the 2-4 Hz mechanical mode, seeded from 24.10 and refined here.
+
+    24.10 fitted `f = 3.86 - 0.0155 * f_drive` across the campaign and concluded the mode is
+    mechanical -- it does not track the drive the way a coning or nutation term would. That
+    line is the seed; the null is placed on whatever peak this take actually has near it,
+    because a null in the wrong place attenuates rather than removes.
+    """
+
+    seed = MECH_A + MECH_B * float(f_drive)
+    if len(t) < 64:
+        return max(seed, 0.5), False
+    # Searched over a real BAND, not +-1 Hz of the seed. Two reasons. The floor test needs
+    # somewhere off-peak to measure a floor -- over a narrow grid the median sits on the
+    # shoulder of the peak itself, which is why an earlier +-1 Hz version reported
+    # `mech_measured = 0` on takes with an obvious 0.17 deg line in them. And the seed is a
+    # fit across the campaign, not a per-take truth: on `2026-09-10_012419` (40 Hz, seed
+    # 3.24) the line is at 2.40 Hz. 24.10's relation is a cross-check here, not a constraint.
+    grid = np.arange(MECH_LO_HZ, MECH_HI_HZ, 0.02)
+    amp = dft(y, t, grid)
+    i = int(np.argmax(amp))
+    if amp[i] < PEAK_OVER_FLOOR * float(np.median(amp)):
+        return float(max(seed, MECH_LO_HZ)), False
+    return float(grid[i]), True
+
+
+def average_axis(t, axis, cone_hz, mech_hz):
+    """``(avg_unit_axis, valid_mask, span_s)``. The trajectory with both wobbles removed.
+
+    This is the "average axis of rotation vs time" the settling time is read from, and the
+    thing precession is measured ABOUT. Two wobbles come out, by two DIFFERENT methods, and
+    the difference is the point:
+
+    * the once-per-rev cone, by a centred boxcar of a whole number of rotor revolutions
+      (`rev_window`) -- an exact null at the cone and every harmonic of it. ~0.25 s.
+    * the 2-4 Hz mechanical mode of 24.10, by least-squares removal of that one line
+      (`_fit_line_at`) -- NOT by a second boxcar.
+
+    The first window does not already remove the second mode: it is ~0.25 s, and
+    `sinc(3.1 Hz * 0.25 s) = 0.47`, so half the mode passes straight through. That residue is
+    the rise-peak-fall the zip MANIFEST names when it says a rise time is mis-specified here,
+    and it is not cosmetic -- measured on three 40 Hz repeats, leaving it in reads settling
+    times of 0.87, 2.16 and 0.54 s against 0.23, 0.92 and 0.19 s with it gone. Without this
+    removal the metric times the rod, not the alignment.
+
+    WHY THE SECOND ONE IS NOT A BOXCAR
+    ----------------------------------
+    Because it would cost 0.33 s of width, and the settling times being measured are 0.2-0.9 s.
+    A centred boxcar biases a settling time LATE whenever the event is shorter than the
+    window -- measured against known exponentials, 1.02x at 0.46 s but 1.83x at 0.12 s
+    (theory.md 25.4). Removing the line by least squares costs no time-domain width at all,
+    so the only smoother left in the path is the 0.25 s cone window and the gate in `settling`
+    has something most repeats can clear.
+
+    ZERO PHASE DELAY, AND NOTHING TO COMPENSATE
+    -------------------------------------------
+    Each boxcar is symmetric and applied centred at odd length, so its phase is exactly linear
+    with group delay zero (`_smooth`); two cascaded are still zero. This is a property of the
+    filter, not an approximation to be corrected afterwards -- a causal moving average would
+    need a `(k-1)/2` sample correction and a one-pole IIR a frequency-dependent one, and both
+    would put the correction's own error into the timing. `_self_check` asserts it against a
+    ramp rather than restating it.
+
+    The cost is at the ENDS. `_smooth` pads `mode="edge"`, so the outer half-window of each
+    pass is biased toward the boundary value. Those samples are returned as invalid rather
+    than silently used: the guard is half the total span, and the caller has a 1 s baseline
+    and a 1.5 s settled window to spend it out of.
+    """
+
+    a = np.asarray(axis, float)
+    out, span = a, 0.0
+    if cone_hz and np.isfinite(cone_hz) and cone_hz > 0:
+        span = rev_window(cone_hz)
+        out = np.column_stack([_smooth(t, a[:, i], span, odd=True) for i in range(3)])
+    if mech_hz and np.isfinite(mech_hz) and mech_hz > 0:
+        wide = 1.0 / mech_hz
+        for i in range(3):
+            trend = _smooth(t, out[:, i], wide, odd=True)
+            out[:, i] -= _fit_line_at(t, out[:, i] - trend, mech_hz)
+    n = np.linalg.norm(out, axis=1)
+    out = out / np.maximum(n, 1e-12)[:, None]
+    guard = 0.5 * span
+    valid = (t >= t[0] + guard) & (t <= t[-1] - guard) & (n > 1e-9)
+    return out, valid, span
+
+
+def _fit_line_at(t, y, f_hz):
+    """The component of ``y`` at exactly ``f_hz``, by least squares. Returns it to subtract.
+
+    `deproject`'s method, applied per axis component: one sinusoid, fitted and removed, with
+    no passband distortion either side of it -- and, the reason it is used here, NO WIDTH.
+    A boxcar long enough to null 3 Hz is 0.33 s, which is longer than most of the settling
+    times being measured and biases them up to 1.8x (theory.md 25.4). A least-squares line
+    removal costs nothing in the time domain, so the only smoother left in the path is the
+    0.25 s cone window.
+
+    ``y`` is passed already high-passed by the caller -- the trace minus a boxcar-smoothed
+    copy of itself -- so the settling curve is mostly gone before the fit sees it and cannot
+    leak into the amplitude. Whatever does leak, the fit rejects anyway: it takes only the
+    component at this one frequency.
+    """
+
+    t = np.asarray(t, float)
+    A = np.c_[np.cos(2 * np.pi * f_hz * t), np.sin(2 * np.pi * f_hz * t)]
+    coef, *_ = np.linalg.lstsq(A, np.asarray(y, float), rcond=None)
+    return A @ coef
+
+
+def precession(t, axis, avg, ref, cone_hz, window):
+    """Motion of the axis ABOUT its running average: how big, and is it a cone or a shake.
+
+    ``half_deg`` is the instantaneous angle between the axis and the average axis -- the cone
+    half-angle, and the "precession vs time" trace.
+
+    ``(c1, c2)`` are the residual's components in the tangent plane of ``ref``, which is where
+    20.7 established this motion should be read. A lock-in on ``c1 + i c2`` at ``cone_hz``
+    splits it into CO-rotating and COUNTER-rotating parts, and their ratio says which motion
+    it is: a circular cone puts everything into one sense, a linear wobble splits evenly
+    between the two. 20.7 measured 9.6:1 in favour of circular on one take by this test; the
+    ratio is returned per repeat so it stops being one take's number.
+
+    Reported direction-agnostically as larger/smaller, so it does not depend on which way the
+    rig happens to spin (`PHASES_CW` is labelled inverted on this bench).
+    """
+
+    dot = np.clip(np.sum(np.asarray(axis, float) * np.asarray(avg, float), axis=1), -1.0, 1.0)
+    half = np.degrees(np.arccos(dot))
+    e1, e2 = _basis(ref)
+    r = np.asarray(axis, float) - np.asarray(avg, float)
+    c1, c2 = np.degrees(r @ e1), np.degrees(r @ e2)
+
+    m = np.asarray(window, bool)
+    ratio = float("nan")
+    if m.sum() >= 32 and cone_hz and np.isfinite(cone_hz) and cone_hz > 0:
+        z = c1[m] + 1j * c2[m]
+        ph = 2j * np.pi * cone_hz * t[m]
+        co = 2.0 * abs(np.mean(z * np.exp(-ph)))
+        ct = 2.0 * abs(np.mean(z * np.exp(ph)))
+        hi_, lo_ = max(co, ct), min(co, ct)
+        ratio = float(hi_ / lo_) if lo_ > 1e-12 else float("inf")
+    return half, c1, c2, ratio
+
+
+def prec_envelope(t, c1, c2, cone_hz):
+    """RMS cone half-angle over one rotor revolution: the precession ENVELOPE vs time.
+
+    The instantaneous half-angle is not a plottable trace -- it swings through the full cone
+    once per revolution, so at 40 Hz over 14 repeats it is a solid block of ink and shows
+    nothing about stability. What the eye needs is the envelope, and the RMS over a whole
+    number of revolutions is exactly that: the same window that nulls the cone in
+    `average_axis` here MEASURES it, because the mean of a squared sinusoid over whole
+    periods is its mean square regardless of phase.
+    """
+
+    w = rev_window(cone_hz) if cone_hz and np.isfinite(cone_hz) and cone_hz > 0 else SMOOTH_S
+    return np.sqrt(np.maximum(
+        _smooth(t, np.asarray(c1) ** 2 + np.asarray(c2) ** 2, w, odd=True), 0.0))
+
+
+def _band_settle(t, prog, t_kill, t_stop, valid, band=SETTLE_BAND):
+    """Settling time from a two-sided +-band about the final level of ``prog``. IN-PLANE ONLY.
+
+    This is the textbook reading of a step response, and it is what the annotated figure draws
+    because it is the one a band can be drawn on. It is reported ALONGSIDE `settle_10pct_s`
+    rather than instead of it, because the two are not the same measurement and the difference
+    is physical, not cosmetic.
+
+    `settle_10pct_s` tests `Delta`, the angle to the final axis in three dimensions, so it
+    counts motion that left the initial->final arc sideways. This one does not: it only asks
+    how far along the arc the axis has got. Measured over ten 40 Hz repeats they agree to
+    0.01-0.06 s on eight of them and disagree by 0.51 and 0.80 s on the other two, which are
+    exactly the repeats with the largest out-of-plane excursion. `perp_max_deg` is carried in
+    the CSV so that gap can be attributed rather than guessed at.
+
+    Where they differ, `settle_10pct_s` is the stricter and the more physical: an axis 3 deg
+    off to the side has not arrived, whatever its progress along the arc says.
+    """
+
+    m = valid & (t >= t_kill) & (t <= t_stop)
+    pre = valid & (t >= t_kill - PRE_S) & (t < t_kill)
+    fin = valid & (t >= t_kill + FINAL_FROM_S) & (t <= t_stop)
+    if m.sum() < 20 or pre.sum() < 20 or fin.sum() < 10:
+        return float("nan")
+    ini_l, fin_l = float(np.median(prog[pre])), float(np.median(prog[fin]))
+    tol = band * abs(fin_l - ini_l)
+    if tol <= 0:
+        return float("nan")
+    out = np.flatnonzero(np.abs(prog[m] - fin_l) > tol)
+    if not out.size:
+        return 0.0
+    if out[-1] >= m.sum() - 2:
+        return float("nan")
+    return float(t[m][out[-1]] - t_kill)
+
+
+def great_circle(avg, n_0, n_f):
+    """``(progress_deg, out_of_plane_deg)`` of a trajectory along the initial->final arc.
+
+    `Delta`, the angle to the final axis, is what the settling band is applied to, and it is
+    the right scalar for that: it is unsigned, so a departure from `n_f` in ANY direction
+    increases it and a one-sided test on it is already a two-sided band in every direction at
+    once. What it cannot do is SHOW anything -- it folds an overshoot past `n_f` onto the same
+    side as a shortfall, so a plot of it cannot be read the way a step response is read.
+
+    This is the signed companion, for the figures. Build an orthonormal frame on the great
+    circle through `n_0` and `n_f`: ``b1 = n_0``, ``b2`` the part of `n_f` perpendicular to it.
+    Then ``progress`` is the angle around that circle from `n_0`, which starts near 0, ends
+    near the swing, and goes PAST it on an overshoot; ``out_of_plane`` is the component that
+    left the arc, which is the part of the motion the swing does not describe.
+    """
+
+    b1 = np.asarray(n_0, float) / np.linalg.norm(n_0)
+    r = np.asarray(n_f, float) - float(np.asarray(n_f, float) @ b1) * b1
+    nr = float(np.linalg.norm(r))
+    if nr < 1e-9:                       # n_0 and n_f coincide: no arc to measure along
+        return np.zeros(len(avg)), np.zeros(len(avg))
+    b2 = r / nr
+    b3 = np.cross(b1, b2)
+    a = np.asarray(avg, float)
+    return (np.degrees(np.arctan2(a @ b2, a @ b1)),
+            np.degrees(np.arcsin(np.clip(a @ b3, -1.0, 1.0))))
+
+
+#: Search window for the peak of the precession envelope after the cut. Measured, the peak
+#: lands at 0.13-0.38 s on the 40 Hz repeats, so 1.5 s is generous and still well clear of
+#: the settled window the final level is read from.
+PREC_PEAK_MAX_S = 1.5
+
+#: Floor on the excursion (peak minus settled level) for a precession settling time to mean
+#: anything. Below it the cut did not measurably excite the cone and there is no decay to
+#: time. Measured excursions at 40 Hz run 3.2-12.1 deg, so this refuses only the flat ones.
+MIN_PREC_EXC_DEG = 1.0
+
+
+def precession_settle(t, env, t_kill, t_stop, valid, span_s, band=SETTLE_BAND):
+    """How long the CONE takes to stop ringing, as opposed to how long the axis takes to move.
+
+    The axis metric times a step: one level, a cut, another level. This times a PULSE. The
+    envelope sits at its driven level, jumps when the coils are cut, and decays -- so the
+    quantity that plays the role of the swing is the EXCURSION, ``peak - final``, and the band
+    is 10% of that about the final level. Same convention as `settling`, applied to the thing
+    that actually changes.
+
+    Returns ``peak_deg``, ``t_peak_s``, ``final_deg``, ``settle_s``, ``tau_s``, ``asym_deg``.
+
+    WHY A DECAY CONSTANT IS REPORTED NEXT TO THE SETTLING TIME
+    ---------------------------------------------------------
+    Because on this campaign the settling time is often not available and the decay constant
+    is. The window is 5 s (`DROP_MS`) and the envelope is still falling at the end of it --
+    measured on five 40 Hz repeats, the median drops another 9-22% between 2-3 s and 4-5 s.
+    A band about a "final" level that is not final refuses, correctly, and says nothing.
+
+    An exponential fitted from the peak does not need the asymptote to be reached to measure
+    how fast it is being approached, so it survives where the band does not. Three parameters
+    -- ``C + A exp(-(t - t_peak) / tau)`` -- with ``A`` and ``C`` solved linearly at each
+    ``tau`` on a grid, in the manner of `fit_second_order` and for the same reason: two
+    nested loops and no dependency on scipy being present.
+
+    That constant is the one 11.3 wants. Gyroscopic action alone gives steady coning at fixed
+    half-angle; only dissipation spirals it in. So `tau_s` is the aerodynamic damping `c_t`
+    made visible, and it is the number this campaign was carrying all along.
+    """
+
+    out = {"peak_deg": float("nan"), "t_peak_s": float("nan"), "final_deg": float("nan"),
+           "settle_s": float("nan"), "tau_s": float("nan"), "asym_deg": float("nan"),
+           "note": ""}
+    m = valid & (t >= t_kill) & (t <= t_stop)
+    pk = valid & (t >= t_kill) & (t <= t_kill + PREC_PEAK_MAX_S)
+    fin_m = valid & (t >= t_kill + FINAL_FROM_S) & (t <= t_stop)
+    if m.sum() < 20 or pk.sum() < 10 or fin_m.sum() < 10:
+        out["note"] = "post-kill window too short"
+        return out
+
+    i = int(np.argmax(env[pk]))
+    out["peak_deg"] = float(env[pk][i])
+    out["t_peak_s"] = float(t[pk][i] - t_kill)
+    out["final_deg"] = float(np.median(env[fin_m]))
+    exc = out["peak_deg"] - out["final_deg"]
+    if exc < MIN_PREC_EXC_DEG:
+        out["note"] = (f"the cut moved the cone by {exc:.2f} deg, under the "
+                       f"{MIN_PREC_EXC_DEG:.1f} deg floor -- no decay to time")
+        return out
+
+    # Decay constant first: it is the number that survives an unfinished window.
+    out.update(_decay_fit(t[m] - t_kill - out["t_peak_s"], env[m],
+                          t[m] - t_kill >= out["t_peak_s"]))
+
+    x, y = t[m] - t_kill, np.abs(env[m] - out["final_deg"])
+    tol = band * exc
+    tail = x >= max(x[-1] - TAIL_S, 0.5 * x[-1])
+    if tail.sum() > 5 and float(np.max(y[tail])) > TAIL_CLEAR * tol:
+        out["note"] = (f"the envelope is still moving {float(np.max(y[tail])):.2f} deg at the "
+                       f"end of the window against a {tol:.2f} deg band -- still decaying")
+        return out
+    outside = np.flatnonzero(y > tol)
+    if not outside.size:
+        out["settle_s"] = 0.0
+    elif outside[-1] >= len(x) - 2:
+        out["note"] = f"still outside the {100 * band:.0f}% band when the down-ramp starts"
+    elif float(x[outside[-1]]) < span_s:
+        out["note"] = (f"settle {float(x[outside[-1]]):.3f} s is inside the {span_s:.3f} s "
+                       f"smoother -- not measurable")
+    else:
+        out["settle_s"] = float(x[outside[-1]])
+    return out
+
+
+def _decay_fit(t_rel, y, mask):
+    """``C + A exp(-t / tau)`` from the peak on. ``A`` and ``C`` linear at each grid ``tau``."""
+
+    x, yy = np.asarray(t_rel, float)[mask], np.asarray(y, float)[mask]
+    if len(x) < 30:
+        return {}
+    best = None
+    for tau in np.geomspace(0.05, 20.0, 140):
+        A = np.c_[np.exp(-x / tau), np.ones_like(x)]
+        coef, *_ = np.linalg.lstsq(A, yy, rcond=None)
+        r = float(np.mean((yy - A @ coef) ** 2))
+        if best is None or r < best[0]:
+            best = (r, tau, coef)
+    r, tau, coef = best
+    # A decay that fits with a NEGATIVE amplitude is a rise, not a decay, and a tau at the
+    # end of the grid is the fit running away rather than converging. Neither is a number.
+    if coef[0] <= 0 or tau >= 19.0 or tau <= 0.06:
+        return {}
+    return {"tau_s": float(tau), "asym_deg": float(coef[1])}
+
+
+def resting_axis(t, axis, t0, t1, min_n=20):
+    """``(unit_axis, n, spread_deg)`` over a window, or ``None``. A settled attitude.
+
+    Averaged from the RAW axis, not the smoothed one: a window of 1 s or more is already
+    many cone periods long, so it nulls the wobble by itself, and it does so without the
+    edge bias `average_axis` carries at its ends.
+    """
+
+    m = (t >= t0) & (t < t1)
+    if m.sum() < min_n:
+        return None
+    V = _hemisphere(axis[m], axis[m][0])       # sign-align BEFORE averaging, or the mean
+    n = V.mean(0)                              #   shortens and reads as tilt
+    norm = float(np.linalg.norm(n))
+    if norm < 1e-9:
+        return None
+    n = n / norm
+    spread = float(np.degrees(np.arccos(np.clip(V @ n, -1.0, 1.0))).std())
+    return n, int(m.sum()), spread
+
+
+def settling(t, delta, t_kill, t_stop, swing, span_s=0.0, band=SETTLE_BAND):
+    """``dict`` with the settling time and the rise time, or a ``note`` saying why not.
+
+    ``delta`` is the angle from the running average axis to the FINAL resting axis, so it
+    starts at ``swing`` and ends at zero. Two standard quantities are read off it:
+
+    * **settling time**: the last instant ``delta`` exceeds ``band * swing``. Last, not first
+      -- entering the band and coming back out again is not settled, and a response with a
+      2-4 Hz mode in it does exactly that, which is the whole reason the mode is nulled first.
+    * **rise time**: 10% to 90% of the final value, on the response ``swing - delta``.
+
+    REFUSES RATHER THAN CLAMPS, like everything else here. A repeat whose trace is still
+    outside the band when the down-ramp starts has not settled inside the record, and the
+    honest answer is that the record cannot say -- not `t_stop`, which would be a censored
+    value entering the statistics as a measurement.
+
+    ``span_s`` IS THE SMOOTHER'S SUPPORT, AND THE RISE TIME NEEDS IT
+    ---------------------------------------------------------------
+    A zero-phase filter is non-causal. That is the same fact as its zero group delay, seen
+    from the other side: `average_axis` is centred, so it spreads the step SYMMETRICALLY
+    about the cut and the smoothed trace is already part-way up at ``t_kill`` itself. Measured
+    on the synthetic case in `_self_check`, a 0.66 s rise read `t10 = 0.000` -- not a fast
+    response, the filter's own half-window.
+
+    So the two quantities are read over different windows, and for a reason:
+
+    * the SETTLING time is read from ``t_kill`` on. It is a property of the tail, far from
+      the step, where the smear has nothing left to do.
+    * the RISE time is read from ``t_kill - span_s``, because the rise legitimately begins
+      before the cut in a non-causally filtered trace. It is a DIFFERENCE of two crossings,
+      so the symmetric smear largely cancels in it -- but only largely, which is why it is
+      then refused outright when it does not outlast ``span_s``.
+
+    That refusal is `control/theory.md` 24.7's rule -- "the rate is only measurable where the
+    rise outlasts the smoother" -- restated for two cascaded windows instead of one. There it
+    cost 10 Hz its rate; here the cascade is wider still, so it will cost more.
+    """
+
+    out = {"settle_s": float("nan"), "rise_s": float("nan"), "t10_s": float("nan"),
+           "t90_s": float("nan"), "tail_max_deg": float("nan"), "note": ""}
+    if not np.isfinite(swing) or swing < MIN_SWING_DEG:
+        out["note"] = f"swing {swing:.1f} deg below the {MIN_SWING_DEG:.0f} deg floor"
+        return out
+    m = (t >= t_kill) & (t <= t_stop)
+    if m.sum() < 20:
+        out["note"] = "post-kill window too short"
+        return out
+    x, y = t[m] - t_kill, delta[m]
+
+    # How far the average axis still wanders once it is supposed to have arrived. The band is
+    # measured against THIS, so it has to clear it: a band the same size as the residual
+    # wander is decided by the wander, and on `2026-09-10_012419` (40 Hz) that read 0.87 s or
+    # 2.09 s depending on which line was removed, for a tail max of 1.190 deg against a
+    # 1.190 deg band. Neither number was a measurement.
+    tail = x >= max(x[-1] - TAIL_S, 0.5 * x[-1])
+    out["tail_max_deg"] = float(np.max(y[tail])) if tail.sum() > 5 else float("nan")
+    if np.isfinite(out["tail_max_deg"]) and out["tail_max_deg"] > TAIL_CLEAR * band * swing:
+        out["note"] = (f"tail still wanders {out['tail_max_deg']:.2f} deg against a "
+                       f"{band * swing:.2f} deg band -- no settled state to time")
+        return out
+
+    outside = np.flatnonzero(y > band * swing)
+    if not outside.size:
+        out["settle_s"] = 0.0
+        out["note"] = "already inside the band at the cut"
+    elif outside[-1] >= len(x) - 2:
+        out["note"] = (f"still outside the {100 * band:.0f}% band at "
+                       f"{x[-1]:.2f} s, when the down-ramp starts")
+        return out
+    elif float(x[outside[-1]]) < span_s:
+        # The smoother is wider than the event. A centred boxcar biases a settling time LATE
+        # when the response is shorter than the window -- measured against known exponentials
+        # (theory.md 25.4): 1.02x at settle = 1.8 W, 1.11x at 0.9 W, 1.36x at 0.5 W and 1.83x
+        # at 0.2 W. Refusing below one window caps the residual bias at about 10% on
+        # everything that IS reported, and 24.7 set the precedent for the rate.
+        out["note"] = (f"settle {float(x[outside[-1]]):.3f} s is inside the {span_s:.3f} s "
+                       f"smoother -- not measurable")
+        return out
+    else:
+        out["settle_s"] = float(x[outside[-1]])
+
+    # FIRST crossings: unlike the settling time this one is about how quickly the motion got
+    # going, and a later re-crossing is the overshoot, not the rise.
+    mr = (t >= t_kill - span_s) & (t <= t_stop)
+    xr, resp = t[mr] - t_kill, swing - delta[mr]
+    for key, frac in (("t10_s", 0.10), ("t90_s", 0.90)):
+        hit = np.flatnonzero(resp >= frac * swing)
+        if hit.size:
+            out[key] = float(xr[hit[0]])
+    if np.isfinite(out["t10_s"]) and np.isfinite(out["t90_s"]):
+        rise = out["t90_s"] - out["t10_s"]
+        if rise < span_s:
+            out["note"] = (out["note"] + "; " if out["note"] else "") + \
+                f"rise {rise:.3f} s is inside the {span_s:.3f} s smoother -- not measurable"
+            out["t10_s"] = out["t90_s"] = float("nan")
+        else:
+            out["rise_s"] = rise
+    return out
+
+
+def settle_take(take, log_path, freq_hz, which=None):
+    """Every kill in one take, as settling rows. ``[]`` when the take cannot support one."""
+
+    t, axis, _q = load(take, which=which)
+    if len(t) < 200:
+        return []
+    fs = 1.0 / float(np.median(np.diff(t)))
+    pts = timeline(log_path) if Path(log_path).exists() else []
+    if not pts:
+        return []
+    try:
+        up = datum(t, axis, pts)[0]
+    except SystemExit:
+        return []
+    a = orient_continuous(axis, up)
+
+    rows = []
+    for p in pts:
+        for tk in p["kills"]:
+            # The settled window is clamped to the DOWN_ label. `POST_TO_S = 6.0` against
+            # `DROP_MS = 5000` puts a second of SPIN-DOWN inside what the rest of this module
+            # calls settled; a resting axis measured through a frequency ramp is not one.
+            t_stop = min(tk + POST_TO_S, p["t_end"])
+            fin = resting_axis(t, a, tk + FINAL_FROM_S, t_stop)
+            ini = resting_axis(t, a, tk - PRE_S, tk)
+            if fin is None or ini is None:
+                continue
+            n_f, n_fin, spread_f = fin
+            n_0, n_ini, spread_0 = ini
+            if float(n_f @ n_0) < 0.0:
+                n_f = -n_f                      # both are lines; report them on one branch
+
+            cone_hz, cone_amp, cone_meas = cone_line(t, a, tk - PRE_S, tk, freq_hz)
+            post = (t >= tk) & (t <= t_stop)
+            mech_hz, mech_meas = mech_line(
+                t[post], np.degrees(np.arccos(np.clip(a[post] @ n_f, -1.0, 1.0))), freq_hz)
+            avg, valid, span = average_axis(t, a, cone_hz, mech_hz)
+            guard = 0.5 * span
+
+            delta = np.degrees(np.arccos(np.clip(avg @ n_f, -1.0, 1.0)))
+            pre = (t >= tk - PRE_S) & (t < tk) & valid
+            if pre.sum() < 20:
+                continue
+            swing = float(np.median(delta[pre]))
+            got = settling(t, delta, tk, t_stop - guard, swing, span_s=span)
+
+            half, c1, c2, ratio = precession(t, a, avg, n_f, cone_hz, post & valid)
+            prog, perp = great_circle(avg, n_0, n_f)
+            band_s = _band_settle(t, prog, tk, t_stop - guard, valid)
+            ps = precession_settle(t, prec_envelope(t, c1, c2, cone_hz), tk,
+                                   t_stop - guard, valid, span)
+            r0, az0 = _polar(n_0, up)
+            rf, azf = _polar(n_f, up)
+            rows.append({
+                "freq_hz": freq_hz, "take": Path(take).name, "t_kill": round(tk, 3),
+                "fs_hz": round(fs, 1), "swing_deg": round(swing, 3),
+                "n0_x": round(n_0[0], 6), "n0_y": round(n_0[1], 6), "n0_z": round(n_0[2], 6),
+                "nf_x": round(n_f[0], 6), "nf_y": round(n_f[1], 6), "nf_z": round(n_f[2], 6),
+                "radial0_deg": round(r0, 3), "azim0_deg": round(az0, 3),
+                "radialf_deg": round(rf, 3), "azimf_deg": round(azf, 3),
+                "d_radial_deg": round(rf - r0, 3),
+                "d_azim_deg": round((azf - az0 + 180.0) % 360.0 - 180.0, 3),
+                "spread0_deg": round(spread_0, 3), "spreadf_deg": round(spread_f, 3),
+                "settle_10pct_s": (round(got["settle_s"], 4)
+                                   if np.isfinite(got["settle_s"]) else ""),
+                "settle_band_s": round(band_s, 4) if np.isfinite(band_s) else "",
+                "perp_max_deg": round(float(np.max(np.abs(perp[post & valid]))), 3)
+                if (post & valid).sum() else "",
+                "rise_1090_s": round(got["rise_s"], 4) if np.isfinite(got["rise_s"]) else "",
+                "t10_s": round(got["t10_s"], 4) if np.isfinite(got["t10_s"]) else "",
+                "t90_s": round(got["t90_s"], 4) if np.isfinite(got["t90_s"]) else "",
+                "tail_max_deg": round(got["tail_max_deg"], 3)
+                if np.isfinite(got["tail_max_deg"]) else "",
+                "tail_over_band": round(got["tail_max_deg"] / (SETTLE_BAND * swing), 3)
+                if np.isfinite(got["tail_max_deg"]) and swing > 0 else "",
+                "prec_pre_deg": round(float(np.median(half[pre])), 3),
+                "prec_peak_deg": _r(ps["peak_deg"]), "prec_t_peak_s": _r(ps["t_peak_s"], 4),
+                "prec_final_deg": _r(ps["final_deg"]), "prec_settle_s": _r(ps["settle_s"], 4),
+                "prec_tau_s": _r(ps["tau_s"], 4), "prec_asym_deg": _r(ps["asym_deg"]),
+                "prec_note": ps["note"],
+                "prec_post_deg": round(float(np.median(half[post & valid])), 3)
+                if (post & valid).sum() else "",
+                "cone_hz": round(cone_hz, 2), "cone_amp_deg": round(cone_amp, 3)
+                if np.isfinite(cone_amp) else "", "cone_measured": int(cone_meas),
+                "circ_ratio": round(ratio, 2) if np.isfinite(ratio) else "",
+                "mech_hz": round(mech_hz, 3), "mech_measured": int(mech_meas),
+                "n_pre": n_ini, "n_post": n_fin, "note": got["note"],
+                # kept out of the CSV by `extrasaction="ignore"`, used by the figures
+                "_t": t - tk, "_delta": delta, "_env": prec_envelope(t, c1, c2, cone_hz),
+                "_c1": c1, "_c2": c2, "_gc": great_circle(avg, n_0, n_f),
+                "_axis": a, "_avg": avg, "_n0": n_0, "_nf": n_f, "_up": up,
+                "_valid": valid, "_post": post, "_stop": t_stop - tk,
+            })
+    return rows
+
+
+SETTLE_COLS = ["freq_hz", "take", "t_kill", "fs_hz", "swing_deg",
+               "n0_x", "n0_y", "n0_z", "nf_x", "nf_y", "nf_z",
+               "radial0_deg", "azim0_deg", "radialf_deg", "azimf_deg",
+               "d_radial_deg", "d_azim_deg", "spread0_deg", "spreadf_deg",
+               "settle_10pct_s", "settle_band_s", "perp_max_deg", "rise_1090_s", "t10_s", "t90_s", "tail_max_deg", "tail_over_band",
+               "prec_pre_deg", "prec_post_deg", "prec_peak_deg", "prec_t_peak_s",
+               "prec_final_deg", "prec_settle_s", "prec_tau_s", "prec_asym_deg",
+               "prec_note", "cone_hz", "cone_amp_deg",
+               "cone_measured", "circ_ratio", "mech_hz", "mech_measured",
+               "n_pre", "n_post", "note"]
+
+
+def settle_rows(root, which=None, only_hz=None):
+    """``(rows, skipped)`` for a campaign. The measurement, with no files written.
+
+    Split out of `settle_campaign` so `settle_report.py` can draw from the same rows the CSV
+    is written from, rather than re-deriving the traces from it -- the per-frame arrays a
+    figure needs (`_delta`, `_env`, `_c1`, `_c2`) are deliberately not columns.
+    """
+
+    root = Path(root)
+    rows, skipped = [], []
+    for idx_path in sorted(root.glob("*hz/index.csv")):
+        idx = [r for r in csv.DictReader(open(idx_path)) if r["outcome"] == "ok"]
+        if not idx:
+            continue
+        f = float(idx[0]["freq_hz"])
+        if only_hz is not None and abs(f - only_hz) > 0.01:
+            continue
+        for r in idx:
+            take = Path(r["flight"])
+            if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
+                skipped.append((f, take.name, "no axis.csv"))
+                continue
+            t, _axis, _q = load(take, which=which)
+            # The same Nyquist gate `campaign` applies, and for the same reason: the cone sits
+            # AT the drive frequency and `rev_window`'s null only exists if it is resolved.
+            fs = 1.0 / float(np.median(np.diff(t))) if len(t) > 2 else 0.0
+            if fs < 2.0 * f:
+                skipped.append((f, take.name, f"aliased: solved at {fs:.1f} Hz"))
+                continue
+            got = settle_take(take, r["log"], f, which=which)
+            if not got:
+                skipped.append((f, take.name, "no usable kill"))
+            rows.extend(got)
+    return rows, skipped
+
+
+def settle_campaign(root, out_dir=None, which=None, only_hz=None):
+    """Settling time, resting axes and precession for every repeat in a campaign.
+
+    Per repeat, not pooled. The campaign README records that pooling reads 19% of the
+    per-repeat rate and flattens the frequency dependence, because repeats do not share a
+    dead time; the same objection applies here and more so, since a settling time is a
+    property of one trajectory and an average of trajectories does not have one.
+    """
+
+    import matplotlib
+    matplotlib.use("Agg")
+
+    root = Path(root)
+    out = Path(out_dir) if out_dir else root / "report"
+    out.mkdir(parents=True, exist_ok=True)
+    rows, skipped = settle_rows(root, which=which, only_hz=only_hz)
+
+    if not rows:
+        print("no usable takes")
+        return []
+
+    _write(out / "settling.csv", rows, SETTLE_COLS)
+    per_freq = _settle_by_freq(rows)
+    _write(out / "settling_by_freq.csv", per_freq, list(per_freq[0]))
+    for f in sorted({r["freq_hz"] for r in rows}):
+        _settle_figure([r for r in rows if r["freq_hz"] == f], f,
+                       out / f"axis_vs_time_{int(round(f)):03d}hz.png")
+    _settle_vs_frequency(per_freq, out / "settle_vs_frequency.png")
+
+    _print_settle(per_freq)
+    if skipped:
+        print(f"\n{len(skipped)} take(s) not measured:")
+        for f, name, why in skipped:
+            print(f"  {f:5.0f} Hz  {name}  {why}")
+    print(f"\nwrote {out}/settling.csv, settling_by_freq.csv, "
+          f"axis_vs_time_*.png, settle_vs_frequency.png")
+    return rows
+
+
+def _med_mad(vals):
+    v = np.asarray([x for x in vals if x != "" and x is not None], dtype=float)
+    v = v[np.isfinite(v)]
+    if not v.size:
+        return float("nan"), float("nan"), 0
+    med = float(np.median(v))
+    return med, float(np.median(np.abs(v - med))), int(v.size)
+
+
+def _settle_by_freq(rows):
+    out = []
+    for f in sorted({r["freq_hz"] for r in rows}):
+        g = [r for r in rows if r["freq_hz"] == f]
+        s_med, s_mad, n_s = _med_mad([r["settle_10pct_s"] for r in g])
+        r_med, r_mad, n_r = _med_mad([r["rise_1090_s"] for r in g])
+        sw_med, sw_mad, _ = _med_mad([r["swing_deg"] for r in g])
+        pr_med, _, _ = _med_mad([r["prec_post_deg"] for r in g])
+        pp_med, _, _ = _med_mad([r["prec_pre_deg"] for r in g])
+        pk_med, _, _ = _med_mad([r["prec_peak_deg"] for r in g])
+        pf_med, _, _ = _med_mad([r["prec_final_deg"] for r in g])
+        pset_med, pset_mad, n_ps = _med_mad([r["prec_settle_s"] for r in g])
+        ptau_med, ptau_mad, n_pt = _med_mad([r["prec_tau_s"] for r in g])
+        cz_med, _, _ = _med_mad([r["cone_hz"] for r in g])
+        ci_med, _, _ = _med_mad([r["circ_ratio"] for r in g])
+        mh_med, _, _ = _med_mad([r["mech_hz"] for r in g])
+        dr_med, _, _ = _med_mad([r["d_radial_deg"] for r in g])
+        da_med, _, _ = _med_mad([r["d_azim_deg"] for r in g])
+        out.append({
+            "freq_hz": f, "n_repeats": len(g),
+            "settle_10pct_med_s": round(s_med, 4), "settle_10pct_mad_s": round(s_mad, 4),
+            "n_settled": n_s, "n_refused": len(g) - n_s,
+            "rise_1090_med_s": round(r_med, 4), "rise_1090_mad_s": round(r_mad, 4),
+            "n_rise": n_r,
+            "swing_med_deg": round(sw_med, 3), "swing_mad_deg": round(sw_mad, 3),
+            "d_radial_med_deg": round(dr_med, 3), "d_azim_med_deg": round(da_med, 3),
+            "prec_pre_med_deg": round(pp_med, 3), "prec_post_med_deg": round(pr_med, 3),
+            "prec_peak_med_deg": round(pk_med, 3), "prec_final_med_deg": round(pf_med, 3),
+            "prec_settle_med_s": round(pset_med, 4), "prec_settle_mad_s": round(pset_mad, 4),
+            "n_prec_settled": n_ps,
+            "prec_tau_med_s": round(ptau_med, 4), "prec_tau_mad_s": round(ptau_mad, 4),
+            "n_prec_tau": n_pt,
+            "cone_med_hz": round(cz_med, 2), "cone_over_drive": round(cz_med / f, 3),
+            "circ_ratio_med": round(ci_med, 2), "mech_med_hz": round(mh_med, 3),
+        })
+    return out
+
+
+def _print_settle(per_freq):
+    print(f"{'f':>5} {'n':>3} {'settled':>7} {'t_settle':>9} {'rise':>8} {'swing':>8} "
+          f"{'d_azim':>7} | {'pre':>5} {'peak':>5} {'final':>6} {'p_set':>7} {'p_tau':>6} "
+          f"{'n_tau':>5}")
+    for r in per_freq:
+        print(f"{r['freq_hz']:5.0f} {r['n_repeats']:3d} "
+              f"{r['n_settled']:3d}/{r['n_repeats']:<3d} "
+              f"{r['settle_10pct_med_s']:9.3f} {r['rise_1090_med_s']:8.3f} "
+              f"{r['swing_med_deg']:8.2f} {r['d_azim_med_deg']:7.1f} | "
+              f"{r['prec_pre_med_deg']:5.2f} {r['prec_peak_med_deg']:5.2f} "
+              f"{r['prec_final_med_deg']:6.2f} {r['prec_settle_med_s']:7.3f} "
+              f"{r['prec_tau_med_s']:6.3f} {r['n_prec_tau']:3d}/{r['n_repeats']:<3d}")
+
+
+def _settle_figure(rows, freq_hz, path):
+    """Three panels: the average axis settling, the precession about it, and its shape."""
+
+    import matplotlib.pyplot as plt
+
+    fig, axs = plt.subplots(3, 1, figsize=(9.5, 11.5), facecolor="white")
+    band = 100 * SETTLE_BAND
+
+    ax = axs[0]
+    for r in rows:
+        m = r["_valid"] & (r["_t"] >= -PRE_S) & (r["_t"] <= r["_stop"])
+        ax.plot(r["_t"][m], r["_delta"][m], color=C_TILT, lw=0.8, alpha=0.45)
+        if r["settle_10pct_s"] != "":
+            ax.plot([r["settle_10pct_s"]], [SETTLE_BAND * r["swing_deg"]],
+                    "o", color=C_MARK, ms=4, zorder=5)
+    sw = float(np.median([r["swing_deg"] for r in rows]))
+    ax.axhline(SETTLE_BAND * sw, color=C_FIT, lw=1.4, ls="--",
+               label=f"{band:.0f}% of the median swing ({sw:.1f} deg)")
+    ax.axvline(0.0, color=MUTED, lw=1.0)
+    ax.legend(frameon=False, fontsize=8.5, labelcolor=MUTED)
+    _style(ax, f"{freq_hz:.0f} Hz  -- angle from the AVERAGE axis to the final resting axis"
+                f"  (dots: settling time, n={len(rows)})",
+           "time from the cut (s)", "angle to final axis (deg)")
+
+    ax = axs[1]
+    for r in rows:
+        m = r["_valid"] & (r["_t"] >= -PRE_S) & (r["_t"] <= r["_stop"])
+        ax.plot(r["_t"][m], r["_env"][m], color=C_TILT, lw=0.9, alpha=0.5)
+    ax.axvline(0.0, color=MUTED, lw=1.0)
+    _style(ax, "precession about that average axis -- RMS cone half-angle over one rev",
+           "time from the cut (s)", "half-angle (deg)")
+
+    ax = axs[2]
+    rep = max(rows, key=lambda r: (r["_post"] & r["_valid"]).sum())
+    lc = spiral(ax, rep)
+    if lc is not None:
+        cb = fig.colorbar(lc, ax=ax, pad=0.02)
+        cb.set_label("time from the cut (s)", color=MUTED, fontsize=9)
+        cb.ax.tick_params(colors=MUTED, labelsize=8)
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=170, facecolor="white")
+    plt.close(fig)
+
+
+def spiral(ax, rep, t_from=0.0, t_to=None, cmap="viridis"):
+    """The residual in the tangent plane, coloured by TIME. The cone decaying, as a spiral.
+
+    Plotted as a plain line this is a disc of ink: several hundred revolutions overdrawn, and
+    nothing in it says which pass came first. The motion underneath is a cone whose half-angle
+    decays (the envelope falls 8-15 deg to ~4 deg over the window), so what it should look
+    like is a spiral winding inward -- and it only looks like one if time is visible.
+
+    A `LineCollection` with one colour per segment is the way to do that without resampling:
+    every solved frame is drawn, and the colour carries the axis the plane cannot.
+    """
+
+    from matplotlib.collections import LineCollection
+
+    t = rep["_t"]
+    t_to = rep["_stop"] if t_to is None else t_to
+    m = rep["_valid"] & (t >= t_from) & (t <= t_to)
+    x, y, tt = rep["_c1"][m], rep["_c2"][m], t[m]
+    if len(x) < 4:
+        return None
+    seg = np.stack([np.column_stack([x[:-1], y[:-1]]),
+                    np.column_stack([x[1:], y[1:]])], axis=1)
+    lc = LineCollection(seg, cmap=cmap, linewidths=0.85, alpha=0.9)
+    lc.set_array(tt[:-1])
+    ax.add_collection(lc)
+    lim = 1.08 * float(np.max(np.hypot(x, y)))
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal")
+    _style(ax, f"residual in the tangent plane, coloured by time — the cone spiralling in\n"
+               f"circ:linear {rep['circ_ratio']}, cone {rep['cone_hz']} Hz",
+           "e1 (deg)", "e2 (deg)")
+    return lc
+
+
+def _settle_vs_frequency(per_freq, path):
+    import matplotlib.pyplot as plt
+
+    f = [r["freq_hz"] for r in per_freq]
+    fig, axs = plt.subplots(1, 3, figsize=(14, 4.2), facecolor="white")
+    axs[0].errorbar(f, [r["settle_10pct_med_s"] for r in per_freq],
+                    yerr=[r["settle_10pct_mad_s"] for r in per_freq],
+                    fmt="o-", color=C_TILT, ms=4, lw=1.2, capsize=3)
+    # n settled / n repeats on every point. 10 Hz is 3 of 22 and 70 Hz is 4 of 4; without
+    # this they are drawn identically and read as equally solid.
+    for r in per_freq:
+        axs[0].annotate(f"{r['n_settled']}/{r['n_repeats']}",
+                        (r["freq_hz"], r["settle_10pct_med_s"]), textcoords="offset points",
+                        xytext=(0, 9), ha="center", fontsize=7, color=MUTED)
+    _style(axs[0], f"settling time ({100 * SETTLE_BAND:.0f}% band)  -- label is n settled / n",
+           "drive frequency (Hz)", "median +- MAD (s)")
+    axs[1].errorbar(f, [r["swing_med_deg"] for r in per_freq],
+                    yerr=[r["swing_mad_deg"] for r in per_freq],
+                    fmt="o-", color=C_FIT, ms=4, lw=1.2, capsize=3)
+    _style(axs[1], "swing: initial to final resting axis",
+           "drive frequency (Hz)", "median +- MAD (deg)")
+    axs[2].plot(f, [r["prec_post_med_deg"] for r in per_freq], "o-",
+                color=C_MARK, ms=4, lw=1.2, label="after the cut")
+    axs[2].plot(f, [r["prec_pre_med_deg"] for r in per_freq], "o--",
+                color=MUTED, ms=4, lw=1.0, label="before")
+    axs[2].legend(frameon=False, fontsize=8.5, labelcolor=MUTED)
+    _style(axs[2], "precession half-angle about the average axis",
+           "drive frequency (Hz)", "median (deg)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor="white")
+    plt.close(fig)
+
+
 def _style(ax, title, xl, yl):
     ax.set_title(title, fontsize=11.5, color=INK, loc="left")
     ax.set_xlabel(xl, fontsize=9.5, color=MUTED)
@@ -1987,6 +2971,12 @@ def _style(ax, title, xl, yl):
     for sp in ("left", "bottom"):
         ax.spines[sp].set_color(GRID)
     ax.tick_params(colors=MUTED, labelsize=8.5)
+
+
+def _r(v, nd=3):
+    """Round for the CSV, or an empty cell if it is not a number. Never writes `nan`."""
+
+    return round(float(v), nd) if v is not None and np.isfinite(v) else ""
 
 
 def _nanmean(vals):
@@ -2095,7 +3085,165 @@ def _self_check():
     assert not rs["settled"], rs
     assert "extrapolation" in rs.get("note", ""), rs
 
-    print("alignment_rate: self-check passed (tau, rate, no-response, kill finder, sigma)")
+    _settle_self_check()
+    print("alignment_rate: self-check passed (tau, rate, no-response, kill finder, sigma, "
+          "settling, zero-delay, cone)")
+
+
+def _settle_self_check():
+    """The settling metric, on a trajectory whose answer is known analytically."""
+
+    rng = np.random.default_rng(1)
+    fs, cone_f, mech_f = 204.0, 40.0, 3.2
+    t = np.arange(0, 20, 1 / fs)
+    tk, tau = 8.0, 0.30
+
+    # A known axis: n0 -> nf as a settling exponential, plus a circular cone at cone_f and a
+    # smaller circular one at the mechanical rate. Both wobbles are put in the tangent plane
+    # of nf, which is where `precession` reads them.
+    n0 = np.array([0.20, -0.10, -0.974]); n0 /= np.linalg.norm(n0)
+    nf = np.array([0.05, 0.18, -0.982]); nf /= np.linalg.norm(nf)
+    swing_true = float(np.degrees(np.arccos(np.clip(n0 @ nf, -1, 1))))
+    e1, e2 = _basis(nf)
+    frac = np.where(t >= tk, 1.0 - np.exp(-(t - tk) / tau), 0.0)
+    base = n0[None, :] + frac[:, None] * (nf - n0)[None, :]
+    # The rotor cone is CIRCULAR -- 20.7 measured equal amplitudes in quadrature. The rod
+    # mode is put in as LINEAR, along one tangent direction, which is both what a swinging
+    # mast does and the only shape that shows up in `delta` at all: a circular wobble of
+    # constant half-angle leaves `arccos(avg . nf)` constant and would make the test below
+    # pass against a filter that does nothing.
+    cone_deg, mech_deg = 2.0, 0.8
+    wob = (np.radians(cone_deg) * (np.cos(2 * np.pi * cone_f * t)[:, None] * e1
+                                   + np.sin(2 * np.pi * cone_f * t)[:, None] * e2)
+           + np.radians(mech_deg) * np.cos(2 * np.pi * mech_f * t)[:, None] * e2)
+    axis = base + wob + rng.normal(0, 2e-4, base.shape)
+    axis /= np.linalg.norm(axis, axis=1)[:, None]
+
+    # ZERO GROUP DELAY. A monotone ramp must cross every level at the same time smoothed as
+    # raw. This is the assertion that stands in for "compensating" a delay a centred boxcar
+    # does not have -- a causal moving average of the same length would fail it by (k-1)/2
+    # samples, which at these spans is 25 to 32 of them.
+    ramp = np.column_stack([np.linspace(0, 1, len(t)), np.zeros(len(t)), np.ones(len(t))])
+    sm, val, _sp = average_axis(t, ramp / np.linalg.norm(ramp, axis=1)[:, None],
+                                cone_f, mech_f)
+    raw_u = ramp / np.linalg.norm(ramp, axis=1)[:, None]
+    for lev in (0.2, 0.4, 0.6):
+        i_raw = int(np.argmax(raw_u[:, 0] >= lev))
+        i_sm = int(np.argmax((sm[:, 0] >= lev) & val))
+        assert abs(i_raw - i_sm) <= 1, ("group delay is not zero", lev, i_raw, i_sm)
+
+    f_cone, _amp, meas = cone_line(t, axis, tk - PRE_S, tk, cone_f)
+    assert meas and abs(f_cone - cone_f) < 0.2, (f_cone, cone_f)
+
+    avg, valid, span = average_axis(t, axis, f_cone, mech_f)
+    delta = np.degrees(np.arccos(np.clip(avg @ nf, -1.0, 1.0)))
+    pre = (t >= tk - PRE_S) & (t < tk) & valid
+    swing = float(np.median(delta[pre]))
+    assert abs(swing - swing_true) < 0.3, (swing, swing_true)
+
+    got = settling(t, delta, tk, tk + 5.0, swing, span_s=span)
+    # A settling exponential enters the 10% band at -tau*ln(0.1) and never leaves.
+    assert abs(got["settle_s"] + tau * np.log(SETTLE_BAND)) < 0.05, got
+    # The 10-90% rise of the same exponential is tau*ln(9) = 0.659 s, against a 0.56 s
+    # cascade. It clears the gate, and the measurement comes back ~11% wide -- which IS the
+    # smoother, symmetric smear and all, and is why the gate is set at the full span and not
+    # at some fraction of it.
+    assert abs(got["rise_s"] - tau * np.log(9.0)) < 0.15, got
+    assert got["rise_s"] > tau * np.log(9.0), \
+        ("a centred boxcar can only widen a rise, never sharpen it", got["rise_s"])
+
+    # A rise SHORTER than the cascade is refused rather than reported as the filter's width.
+    # tau = 0.05 s is a 0.11 s rise inside a 0.56 s smoother: 24.7's rule, which cost 10 Hz
+    # its rate on one window and will cost more on two.
+    fast = n0[None, :] + np.where(t >= tk, 1.0 - np.exp(-(t - tk) / 0.05),
+                                  0.0)[:, None] * (nf - n0)[None, :] + wob
+    fast /= np.linalg.norm(fast, axis=1)[:, None]
+    avg_q, val_q, sp_q = average_axis(t, fast, f_cone, mech_f)
+    d_q = np.degrees(np.arccos(np.clip(avg_q @ nf, -1.0, 1.0)))
+    sw_q = float(np.median(d_q[(t >= tk - PRE_S) & (t < tk) & val_q]))
+    got_q = settling(t, d_q, tk, tk + 5.0, sw_q, span_s=sp_q)
+    assert not np.isfinite(got_q["rise_s"]) and "not measurable" in got_q["note"], got_q
+
+    # Removing BOTH wobbles is what makes that possible. The once-per-rev boxcar does not
+    # touch the rod mode -- sinc(3.2 * 0.25) = 0.23, so a quarter of it survives, and on the
+    # real 40 Hz takes leaving it in reads settling times of 0.87/2.16/0.54 s against
+    # 0.23/0.92/0.19 s with it gone. Asserted on the settled TAIL, where the only thing left
+    # to wobble is the mode itself.
+    one, val1, _ = average_axis(t, axis, f_cone, None)
+    d1 = np.degrees(np.arccos(np.clip(one @ nf, -1.0, 1.0)))
+    tail, tail1 = (t > tk + 3) & valid, (t > tk + 3) & val1
+    assert np.ptp(d1[tail1]) > 4.0 * np.ptp(delta[tail]), \
+        ("removing the rod mode must flatten the tail",
+         np.ptp(d1[tail1]), np.ptp(delta[tail]))
+
+    # Circular vs linear, told apart by the lock-in and not by eye.
+    post = (t >= tk) & (t <= tk + 5.0) & valid
+    _h, _c1, _c2, ratio = precession(t, axis, avg, nf, f_cone, post)
+    assert ratio > 5.0, ("a circular cone must lock in on one sense", ratio)
+    lin = base + np.radians(cone_deg) * np.cos(2 * np.pi * cone_f * t)[:, None] * e1
+    lin /= np.linalg.norm(lin, axis=1)[:, None]
+    avg_l, val_l, _ = average_axis(t, lin, f_cone, mech_f)
+    _h, _c1, _c2, ratio_l = precession(t, lin, avg_l, nf, f_cone,
+                                       (t >= tk) & (t <= tk + 5.0) & val_l)
+    assert ratio_l < 2.0, ("a linear wobble must split evenly", ratio_l)
+
+    # A trace still outside the band when the window ends is REFUSED, not censored to the
+    # window length. tau = 3 s against 5 s of record: risen, nowhere near settled.
+    slow = n0[None, :] + np.where(t >= tk, 1.0 - np.exp(-(t - tk) / 3.0),
+                                  0.0)[:, None] * (nf - n0)[None, :]
+    slow /= np.linalg.norm(slow, axis=1)[:, None]
+    avg_s, val_s, _ = average_axis(t, slow, f_cone, mech_f)
+    d_s = np.degrees(np.arccos(np.clip(avg_s @ nf, -1.0, 1.0)))
+    got_s = settling(t, d_s, tk, tk + 5.0, float(np.median(d_s[(t < tk) & val_s])))
+    assert not np.isfinite(got_s["settle_s"]), got_s
+    # Either refusal is the right one and the tail gate is the stricter, so it fires first:
+    # at tau = 3 s the trace is still 5.67 deg from its final axis where it is supposed to
+    # have arrived, which is not a slow settle, it is no settled state at all.
+    assert ("still outside" in got_s["note"] or "no settled state" in got_s["note"]), got_s
+
+    # No swing, no settling time -- a floor, not a small number.
+    flat = np.tile(n0, (len(t), 1)) + rng.normal(0, 1e-3, (len(t), 3))
+    flat /= np.linalg.norm(flat, axis=1)[:, None]
+    avg_f, val_f, _ = average_axis(t, flat, f_cone, mech_f)
+    d_f = np.degrees(np.arccos(np.clip(avg_f @ n0, -1.0, 1.0)))
+    got_f = settling(t, d_f, tk, tk + 5.0, float(np.median(d_f[(t < tk) & val_f])))
+    assert not np.isfinite(got_f["settle_s"]) and "floor" in got_f["note"], got_f
+
+    # THE PRECESSION SETTLING TIME, on an envelope whose answer is known.
+    # A pulse: flat at 2 deg, jumps to 12, decays to 3 with tau = 0.8 s.
+    tau_p, pre_p, pk_p, fin_p = 0.8, 2.0, 12.0, 3.0
+    env = np.full_like(t, pre_p)
+    md = t >= tk
+    env[md] = fin_p + (pk_p - fin_p) * np.exp(-(t[md] - tk) / tau_p)
+    val = np.ones_like(t, dtype=bool)
+    got = precession_settle(t, env, tk, tk + 11.0, val, 0.25)
+    assert abs(got["peak_deg"] - pk_p) < 0.05, got
+    assert abs(got["final_deg"] - fin_p) < 0.05, got
+    assert abs(got["tau_s"] - tau_p) < 0.08, got
+    assert abs(got["asym_deg"] - fin_p) < 0.1, got
+    # |env - final| falls below 10% of the excursion at tau*ln(10)
+    assert abs(got["settle_s"] - tau_p * np.log(10.0)) < 0.05, got
+
+    # A window that ends before the decay finishes must REFUSE the settling time and still
+    # return tau -- which is the whole reason tau is reported. 5 s against tau = 4 s.
+    env2 = np.full_like(t, pre_p)
+    env2[md] = fin_p + (pk_p - fin_p) * np.exp(-(t[md] - tk) / 4.0)
+    g2 = precession_settle(t, env2, tk, tk + 5.0, val, 0.25)
+    assert not np.isfinite(g2["settle_s"]), g2
+    assert "still decaying" in g2["note"], g2
+    assert np.isfinite(g2["tau_s"]) and abs(g2["tau_s"] - 4.0) < 1.0, g2
+
+    # A cut that does not move the cone has no decay to time.
+    g3 = precession_settle(t, np.full_like(t, 4.0) + rng.normal(0, 0.01, t.shape),
+                           tk, tk + 5.0, val, 0.25)
+    assert not np.isfinite(g3["settle_s"]) and "floor" in g3["note"], g3
+
+    # The resting axis must recover nf from the settled window, and _polar must round-trip.
+    fin = resting_axis(t, axis, tk + FINAL_FROM_S, tk + 5.0)
+    assert fin is not None and np.degrees(np.arccos(abs(fin[0] @ nf))) < 0.1, fin
+    r, az = _polar(nf, n0)
+    assert abs(r - swing_true) < 1e-6, (r, swing_true)
+    assert 0.0 <= az < 360.0, az
 
 
 if __name__ == "__main__":
@@ -2106,7 +3254,11 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None)
     ap.add_argument("--sweep", default=None,
                     help="a results/alignment_rate/<stamp> root: solve and pool every take")
-    ap.add_argument("--stride", type=int, default=3, help="solve every Nth frame (--sweep)")
+    # KEEP THIS AT 1. The cone sits AT the drive frequency and `rev_window`'s null only
+    # exists if it is resolved; `disc_axis.solve` was fixed to 1 and this was missed.
+    ap.add_argument("--stride", type=int, default=1, help="solve every Nth frame (--sweep)")
+    ap.add_argument("--settle", default=None,
+                    help="a campaign root: resting axes, settling time and precession")
     ap.add_argument("--campaign", default=None,
                     help="a results/alignment_rate/<stamp> root: pool every chunk")
     ap.add_argument("--which", default=None, choices=("minor", "conic"))
@@ -2124,6 +3276,9 @@ if __name__ == "__main__":
     ap.add_argument("--no-log", action="store_true",
                     help="ignore any sweep.log and find the kills in the data")
     a = ap.parse_args()
+    if a.settle:
+        settle_campaign(a.settle, out_dir=a.out, which=a.which, only_hz=a.only_hz)
+        sys.exit()
     if a.fits:
         fit_figure(a.fits, out_path=a.out, which=a.which)
         sys.exit()

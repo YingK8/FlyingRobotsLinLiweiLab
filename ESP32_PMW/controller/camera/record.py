@@ -357,7 +357,14 @@ def open_recording(rec_dir):
     """
 
     rec_dir = latest_flight(rec_dir)
-    videos = sorted(rec_dir.glob("*/*.mp4")) or sorted(rec_dir.glob("*.mp4"))
+    # `<tag>/<tag>.mp4` only -- what FlightWriter writes. Anything ELSE dropped in a view
+    # directory (an overlay render, a trimmed clip) used to be opened as an extra camera,
+    # silently: `disc_axis` then read view 1 as the overlay of view 0 and every stereo
+    # number downstream came from a pair that was never a pair.
+    # ponytail: the flat fallback below cannot apply this rule -- it has no tag to match --
+    # so keep renders out of a flat take dir.
+    videos = sorted(v for v in rec_dir.glob("*/*.mp4") if v.stem == v.parent.name) \
+        or sorted(rec_dir.glob("*.mp4"))
     if not videos:
         raise FileNotFoundError(f"no video in {rec_dir}")
     stamps, _ = read_index(rec_dir)

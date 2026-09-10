@@ -266,10 +266,23 @@ def run_chunk(freq, repeats=5, port=None, out_dir=None, dry_run=False, cool=True
     while rep <= last:
         print(f"\n-- {freq:g} Hz repeat {rep}/{last} "
               f"(model says ~{coil_thermal.temp_now():.0f} C) --")
+        t_before = coil_thermal.temp_now()
         flight, log, outcome = tilt_sweep.run(
             port=port, drive_s=p["drive_s"], ignore_thermal=True,
             timeout_s=p["drive_s"] + tilt_schedule.OFF_MS / 1000.0 + 60.0, **kw)
         c, n = heat_c(log, p["drive_s"])
+        # Re-anchor the stamp to the MEASURED heat. `tilt_sweep.run` stamps through
+        # SerialComm's flat 0.5 C/s model, which bills every energised second at the
+        # resonance current whatever the drive frequency -- and coil current is strongly
+        # frequency dependent (2.4 A summed at 20 Hz against 13.9 at 150+). On 2026-09-10 a
+        # 10 Hz chunk that measured 5.1 C stamped 85.6 C, roughly 40x over, and the gate
+        # then refused all eight remaining chunks of an unattended overnight run. The I^2
+        # integral is the measurement; the flat model is a worst case, and using a worst
+        # case as a running total compounds it.
+        if n > 0:
+            coil_thermal.STAMP.parent.mkdir(parents=True, exist_ok=True)
+            coil_thermal.STAMP.write_text(
+                f"{t_before + c:.1f}  {time.strftime('%Y-%m-%d %H:%M:%S')}")
         rows.append({"freq_hz": freq, "repeat": rep, "outcome": outcome,
                      "flight": str(flight), "log": str(log),
                      "heat_c": round(c, 3), "telemetry_samples": n})

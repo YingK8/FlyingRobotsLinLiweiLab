@@ -106,16 +106,21 @@ SETTLE_MS = 3000
 #: 1 s, so HIGH_HOLD_MS cannot go below about 2 s without starving the baseline.
 HIGH_F_HZ = 60.0
 HIGH_SETTLE_MS = 2000
-HIGH_HOLD_MS = 500
+HIGH_HOLD_MS = 3000
 HIGH_SEG2_RATE_HZ_S = 2.8
-#: Level hold after the settle. Cut 7000 -> 500 on 2026-09-10 at the operator's
+#: Level hold after the settle. Briefly cut to 500 then 2000 ms on 2026-09-10 for
+#: thermal reasons, then RESTORED to the original 7000 (3000 above HIGH_F_HZ) at the
+#: operator's instruction: hold sets how settled the robot is when the coils are cut,
+#: so a take recorded at a different hold is a different condition, and the campaign's
+#: 100+ existing takes all used the original. Consistency beat the ~6 s of coil heat.
+#: Original note follows -- the arithmetic in it still holds for the shortened case:
 #: instruction: at 120 Hz this is the hottest second of the schedule, and 6.5 s of it per
 #: repeat bought nothing. The 1 s baseline `alignment_rate` needs (`theta_from` is the
 #: median of the 1 s before the kill) is NOT lost -- SETTLE_MS/HIGH_SETTLE_MS is also at
 #: the target frequency, so the pre-kill dwell is still 3.5 s (2.5 s above HIGH_F_HZ) and
 #: the median keeps margin either side. Do not cut the settle to match without redoing
 #: that arithmetic.
-HOLD_MS = 500
+HOLD_MS = 7000
 #: How long the robot is left leaning. The measured transient is ~3 s (2026-09-08 take).
 DROP_MS = 5000
 #: Spin-down. Not a capture -- nothing has to be caught on the way back to zero.

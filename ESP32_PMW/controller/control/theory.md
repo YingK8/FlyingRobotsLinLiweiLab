@@ -4268,6 +4268,106 @@ is worth the 0.06 C a 10 Hz point costs.
 The datum machinery works: the coils-off tail gives 1787 rest-window rows at 0.41 deg of
 scatter, well inside the 2 deg that says the robot was hanging still.
 
+### 24.10 The radial and azimuth angles share a 2-4 Hz line, and it is not the drive
+
+The operator asked whether radial and azimuthal rotation share frequencies, and if so whether
+removing them leaves a cleaner post-kill ramp. Both halves were tested on the ten-repeat
+campaign `results/alignment_rate/20260909_205843`, in `controller/control/coupling.py`. The
+answer is yes to the first and **half** to the second, and the two halves matter separately.
+
+**The method.** For every usable kill, both angles are taken about the SAME coils-off rest
+datum -- radial from `angles()`, azimuth from `azimuth_from_rest()` -- over the kill to +2 s
+window, and both are transformed with `alignment_rate.dft` on the ACTUAL timestamps. A "shared
+line" is a peak in both spectra within half a Hanning main lobe (1 Hz on a 2 s record). Lines
+found in at least half a frequency's repeats are then deprojected from every repeat of that
+frequency, so the before/after is like for like.
+
+**Sampling sets a hard ceiling at 25.4-25.8 Hz.** The solved axis arrives at 50.0-52.2 Hz.
+Non-uniform timestamps do let `dft` resolve above half of that -- injected 30 and 40 Hz lines
+on the real stamps of `2026-09-09_210442` come back at 30.00 and 40.00 Hz at full amplitude --
+but the jitter does not kill the aliases: a 5 Hz line puts 0.915 of its amplitude at 57.65 Hz
+against 1.011 at 5 Hz. A 10% difference cannot decide between $f$ and $f - f_s$, so peaks are
+only identified below $f_s/2$. The 45-58 Hz forest visible in every azimuth spectrum lives
+entirely in that band and is left alone.
+
+**The shared line.** Every drive frequency from 10 to 110 Hz has exactly one dominant shared
+line, and it sits at 2-4 Hz with an amplitude of 13-37 deg -- which is larger than the ~45 deg
+azimuth swing being measured is over its whole 2 s, and is the single biggest feature in the
+azimuth trace:
+
+| drive | shared line | amplitude | repeats |
+|---|---|---|---|
+| 10 Hz | 3.60 Hz (also 4.20, 10.00, 20.00) | 14.9 deg | 8/10 |
+| 20 | 3.60 (also 6.80, 19.95) | 13.0 | 9/9 |
+| 30 | 3.50 (also 22.75) | 26.8 | 9/9 |
+| 40 | 3.18 (also 12.30) | 26.0 | 10/10 |
+| 50 | 3.00 | 22.6 | 10/10 |
+| 60 | 2.85 | 25.2 | 9/9 |
+| 70 | 2.85 | 37.0 | 3/4 |
+| 80 | 2.65 | 23.3 | 5/5 |
+| 90 | 2.75 | 15.8 | 5/5 |
+| 100 | 2.25 (also 1.10) | 14.5 | 5/5 |
+| 110 | 1.95 | 17.4 | 5/5 |
+
+**It is a mechanical mode, not the drive.** Regressing the line on the drive frequency gives
+
+$$f_{\text{line}} = 3.86 - (0.0155 \pm 0.0013)\,f_{\text{drive}}\ \text{Hz},\qquad
+\text{rms } 0.13\ \text{Hz over 11 points.}$$
+
+That slope is **763 sigma from 1.0** (the synchronous coning of 20.3, a body-fixed COM offset
+turning with the body) and **1251 sigma from 1.65** (nutation, 20.3). Both are excluded
+outright. It is also 12 sigma from zero, so it is not perfectly constant either: the mode
+*softens* by 1.6 Hz across a 100 Hz change in drive. A constant fits the eleven points at
+0.51 Hz rms and a $1/f$ law at 0.35; the linear softening at 0.13 beats both.
+
+So this is the mechanical resonance the operator hypothesised, spin-softened. **It is not the
+1.2 Hz precession pole of the hover model** (12.x) -- the intercept is three times that -- and
+attributing it will need a bench measurement rather than more of this data. The obvious
+candidate is the rig itself: the robot hangs on the 8 mm takeoff rod, and 2-4 Hz is a pendulum
+period, not a rotor one.
+
+**The lines that DO track the drive are there, where they can be seen.** At 10 Hz the shared
+set contains 10.00 and 20.00 Hz and at 20 Hz it contains 19.95 -- the synchronous coning of
+20.3, at $f$ and $2f$, exactly where it is predicted. Above 25 Hz drive it cannot be seen
+directly. The secondary lines at 30 and 40 Hz (22.75, 12.30) move with the per-take sample
+rate the way an alias of the drive should, but sit 1-1.5 Hz above where $|f_{drive} - f_s|$
+puts them; that residual is either rotor slip or alias bias and this sampling cannot separate
+the two. **Do not quote them.**
+
+**Removing the shared lines cleans a single ramp and does NOT make the campaign more
+repeatable.** Against a straight line fitted over the kill to +2 s window:
+
+| drive | RMS about the line, before -> after | gradient sd across repeats, before -> after |
+|---|---|---|
+| 10 Hz | 32.4 -> 24.8 deg (-23%) | 5.38 -> 5.78 deg/s (+8%) |
+| 20 | 14.8 -> 10.1 (-32%) | 4.18 -> 4.07 (-3%) |
+| 30 | 34.8 -> 26.4 (-24%) | 25.10 -> 26.24 (+5%) |
+| 40 | 28.2 -> 19.9 (-29%) | 4.36 -> 4.40 (+1%) |
+| 50 | 29.7 -> 23.7 (-20%) | 5.85 -> 4.70 (-20%) |
+| 60 | 39.6 -> 33.8 (-15%) | 26.47 -> 28.40 (+7%) |
+| 70 | 45.4 -> 34.8 (-23%) | 33.68 -> 32.92 (-2%) |
+| 80 | 19.8 -> 11.4 (-43%) | 0.69 -> 2.28 (+231%) |
+| 90 | 16.7 -> 11.5 (-31%) | 0.86 -> 0.92 (+7%) |
+| 100 | 14.3 -> 9.8 (-31%) | 1.83 -> 1.67 (-9%) |
+| 110 | 14.8 -> 8.5 (-42%) | 1.17 -> 0.48 (-59%) |
+
+The first column improves at **every one of the eleven frequencies**, by 15-43%, median 29%.
+The second column is a coin toss: six worse, five better, and the largest single change is
+80 Hz getting *three times worse*. That is the honest result and it is the one that decides
+what to do:
+
+* **The ramp is genuinely cleaner to look at, and that is a real 29%** -- a third of the
+  scatter about the post-kill ramp is one identified oscillation, not measurement noise.
+* **The measurement does not get more reliable.** The gradient scatter across repeats is set
+  by something else -- and at 30, 60 and 70 Hz it is set by the repeats not being one
+  population at all (24.5), where a 25-34 deg/s spread dwarfs anything a 3 Hz line does to it.
+
+So deprojection is worth having in a FIGURE and is not worth putting in the rate path. The
+rate is measured by `relu_window` over a ~150 ms ramp; a 2-4 Hz line has a 250-500 ms period
+and is nearly a straight line across that window, so there is little for the deprojection to
+remove there in the first place. **Nothing in `alignment_rate.py` was changed on the strength
+of this**, and `coupling.py` stays a separate read-only analysis.
+
 ## Appendix A: Correspondence with the MATLAB implementation
 
 Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`

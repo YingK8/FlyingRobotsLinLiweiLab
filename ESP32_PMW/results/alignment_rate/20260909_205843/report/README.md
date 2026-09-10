@@ -13,6 +13,7 @@ All commands run from the repo root, against `results/alignment_rate/20260909_20
 | `rate_scatter.png` | `alignment_rate.py --scatter <root>` — swing and rate, every repeat |
 | `trial_fits.png` | `alignment_rate.py --trials <root>` — one median-rate trial per frequency |
 | `trials_0NNhz.png` | `alignment_rate.py --trials <root> --only-hz NN` — EVERY repeat at that frequency |
+| `rate_fits.png` | `alignment_rate.py --fits <root>` — a DIAGNOSTIC, not a result: what the same rule reads off the POOLED curve, against the per-repeat median |
 | `coupling.png` | `coupling.py <root>` — radial/azimuth shared lines and what deprojecting them does |
 
 ## Stale — do not read
@@ -36,6 +37,23 @@ failure that was found in these takes and fixed, and each names the take that fo
 `PEAK_FRAC` in particular is not a judgement call: it was scanned over all 101 kill windows
 and 0.30 sits mid-plateau (fits landing later than 200 ms after the cut go 5, 4, 3, 2, 1, 1,
 1, 1 as it falls 0.70 -> 0.20, while the number of windows fitted stays at 89-92).
+
+**Pooled and per-repeat rates are both available, and they are not the same number.**
+`rate_fits.png` runs the identical estimator on the pooled curve; `campaign.csv` and
+`rate_scatter.png` report per-repeat. Pooling reads **19% of the per-repeat rate** (range 11%
+to 35%), because repeats do not share a dead time — 33-102 ms across this campaign — so
+averaging smears an edge that is itself only ~50 ms wide, and the pooled edge begins a median
+of 40 ms before the cut.
+
+The consequence that matters for reading the sweep: **pooling also flattens the frequency
+dependence.** Per-repeat the rate runs 353-2012 deg/s with a clear rise to 80 Hz; pooled it
+sits at 139-256 deg/s across 20-110 Hz with almost no structure. Quote one or the other
+consistently, and say which.
+
+The negative-lag refusal (`LAG_TOL_S`) is a PER-REPEAT precondition — it asks whether that
+run's rise was already underway at the cut — so it is disabled for pooled curves via
+`transient(pooled=True)`. On an average a negative lag is the smearing, not evidence that any
+run responded early.
 
 The angle plotted is the **separation between the robot's lean direction now and its
 pre-cut lean direction**, an `arccos` of two unit vectors. It is in [0, 180] and never

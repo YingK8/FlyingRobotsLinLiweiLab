@@ -581,7 +581,7 @@ def relu_rate(ts, ys, t_kill, win_s):
     return float(coef[1]), float(np.sqrt(np.mean(resid ** 2))), int(m.sum())
 
 
-def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None):
+def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None, allow_early=False):
     """The rising edge of the response: trough-before-peak to peak. ``(slope, lag, span)``.
 
     THE RULE
@@ -725,12 +725,19 @@ def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None):
     # rate -- 50 Hz take 2026-09-09_234425 was a -94 ms "dead time" with its fitted ramp drawn
     # entirely left of zero. It doubles as the quiescence precondition, which is why there is
     # no separate flatness test. The tolerance is two samples of fit noise, not an allowance.
-    if np.isfinite(lag) and lag < -LAG_TOL_S:
+    #
+    # `allow_early` scopes it to SINGLE repeats, which is the only place the question makes
+    # sense. On a pooled curve a negative lag is not evidence that any run responded early --
+    # it is the averaging: repeats land 33-102 ms apart, so the mean edge is smeared
+    # symmetrically and starts a median of 40 ms before the cut even though no repeat did.
+    # Applying a per-repeat precondition to an average refused the pooled fit at 10 of 11
+    # frequencies; the pooled rate is reported with its lag as measured instead.
+    if np.isfinite(lag) and lag < -LAG_TOL_S and not allow_early:
         return float("nan"), float("nan"), float("nan")
     return slope, lag, float(x[q_] - x[p_])
 
 
-def transient(t, tilt, agree, t_kill, min_amp=MIN_AMP_DEG, spin_hz=None):
+def transient(t, tilt, agree, t_kill, min_amp=MIN_AMP_DEG, spin_hz=None, pooled=False):
     """Metrics for one coil-kill step. ``None`` if the windows are not in the record.
 
     ``min_amp`` is the step size below which no rate is reported at all. It defaults to a
@@ -839,7 +846,8 @@ def transient(t, tilt, agree, t_kill, min_amp=MIN_AMP_DEG, spin_hz=None):
         # and 10, 40 and 50 Hz reported no rate on every repeat.
         pre2 = (t[w2] >= t_kill - PRE_S) & (t[w2] < t_kill)
         sd2 = float(ys2[pre2].std()) if pre2.sum() >= 5 else out["baseline_sd_deg"]
-        m_relu, lag, win = relu_window(t[w2], ys2, t_kill, sgn, sd_base=sd2)
+        m_relu, lag, win = relu_window(t[w2], ys2, t_kill, sgn, sd_base=sd2,
+                                       allow_early=pooled)
         if np.isfinite(m_relu):
             out["rate_relu_deg_s"] = abs(m_relu)
             out["relu_lag_s"], out["relu_win_s"] = lag, win
@@ -1240,7 +1248,7 @@ def pool_transients(curves, spin_hz=None):
     # 10 Hz is still refused (1.3 deg at 0.94 sem, ~1.4 sigma).
     sem_med = float(np.median(sem))
     got = transient(grid, mean, np.zeros_like(grid), 0.0,
-                    min_amp=max(3.0 * sem_med, 0.3), spin_hz=spin_hz)
+                    min_amp=max(3.0 * sem_med, 0.3), spin_hz=spin_hz, pooled=True)
     if got is not None:
         got["n_pooled"] = len(stack)
         got["sem_deg"] = sem_med
@@ -1834,18 +1842,24 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
 
 
 def fit_figure(root, out_path=None, which=None, freqs=None):
-    """Pooled angle-vs-time per frequency with BOTH rate fits drawn on it.
+    """Pooled angle per frequency with the rate fit on it, AND what pooling costs.
 
-    The two estimators differ only in how they use the same 10-90% band:
+    This is not a second way of looking at `--trials`. It answers one question that per-trial
+    panels cannot: is the pooled curve safe to fit? Every panel carries both numbers -- the
+    rate the current rule reads off the POOLED curve, and the median of the rates it reads
+    off the INDIVIDUAL repeats -- so the penalty is printed rather than argued about.
 
-    * **jump** -- the gradient of the first 10 deg rise after the kill, over its own span
-      decide it. `0.8 * amp / (t90 - t10)`.
-    * **least squares** -- the best-fit line through every sample between those crossings,
-      about 40 of them at this sample rate.
+    It is expected to be negative, and the reason is worth keeping in view. Repeats do not
+    share a dead time to the millisecond (measured here: 59 ms median, but 33-102 ms across
+    frequencies), so averaging them smears the corner the fit is built on and the pooled edge
+    is gentler than any single run actually flew. That is precisely why the headline numbers
+    in `campaign.csv` are per-repeat and this figure is a diagnostic.
 
-    On a concave rise a 10-90% line is the shallower (it follows the flattening middle, while
-    the fitted line follows the flattening middle), which is why the least-squares number
-    the jump gradient reads only the sharp leading edge), and the two must never be mixed.
+    Both numbers come from the same estimator, so the difference between them is the smearing
+    and nothing else. Until 2026-09-10 this figure drew two RETIRED metrics instead -- the
+    first-10-deg jump gradient and a least-squares line over the 10-90% band -- and its
+    caption compared them to each other, which is a comparison of two things neither of which
+    is reported any more.
     """
 
     import matplotlib
@@ -1861,12 +1875,14 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
         f = float(idx[0]["freq_hz"])
         if freqs and f not in freqs:
             continue
-        curves = []
+        curves, singles = [], []
         for r in idx:
             take = Path(r["flight"])
-            if not (take / "axis.csv").exists():
+            if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             t, axis, _q = load(take, which=which)
+            if len(t) > 2 and 1.0 / float(np.median(np.diff(t))) < 2.0 * f:
+                continue                      # aliased -- see the Nyquist gate in `campaign`
             pts = timeline(r["log"]) if Path(r["log"]).exists() else []
             rest = None
             try:
@@ -1880,9 +1896,23 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
                     continue
                 m = (t >= tk + POOL_FROM_S - 0.2) & (t <= tk + POOL_TO_S + 0.2)
                 curves.append((t[m] - tk, rot[m]))
+                # the same estimator on the single repeat, for the comparison
+                one = transient(t, rot, np.zeros_like(t), tk, min_amp=0.0, spin_hz=f)
+                if one and np.isfinite(one.get("rate_relu_deg_s", np.nan)):
+                    singles.append(float(one["rate_relu_deg_s"]))
         got = pool_transients(curves, spin_hz=f)
         if got:
-            picks.append((f, got))
+            # When does the POOLED curve start moving? Measured against its own pre-cut
+            # level and scatter, so it is the pooling artifact and not a threshold choice.
+            grid_, mean_ = got[0], got[1]
+            ys_ = _smooth(grid_, mean_, 1.0 / f)
+            pre_ = (grid_ >= -PRE_S) & (grid_ < 0)
+            lvl_ = float(np.median(ys_[pre_]))
+            sd_ = float(ys_[pre_].std())
+            up_ = np.flatnonzero((grid_ > -PRE_S) & (ys_ > lvl_ + 2.0 * sd_))
+            onset = float(grid_[up_[0]]) if up_.size else float("nan")
+            picks.append((f, got, float(np.median(singles)) if singles else float("nan"),
+                          len(singles), onset))
     if not picks:
         raise SystemExit(f"{root}: nothing to draw")
 
@@ -1891,35 +1921,57 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
     rows = int(np.ceil(n / cols))
     fig, axs = plt.subplots(rows, cols, figsize=(4.6 * cols, 3.5 * rows),
                             facecolor="white", squeeze=False)
-    for ax, (f, (grid, mean, sem, g)) in zip(axs.ravel(), picks):
+    costs, onsets, fitted = [], [], 0
+    for ax, (f, (grid, mean, sem, g), med_single, n_single, onset) in zip(axs.ravel(), picks):
+        if np.isfinite(onset):
+            onsets.append(onset)
         ax.fill_between(grid, mean - sem, mean + sem, color=C_TILT, alpha=0.18, lw=0)
         ax.plot(grid, mean, color=C_TILT, lw=1.8, label="pooled angle")
-        t10, t90, amp = g["t10"], g["t90"], g["amp_deg"]
-        if np.isfinite(t10) and np.isfinite(t90) and t90 > t10:
-            y10, y90 = g["theta_from"] + 0.1 * amp, g["theta_from"] + 0.9 * amp
-            ax.plot([t10, t90], [y10, y90], color=C_FIT, lw=2.4, ls="--",
-                    label=f"jump {abs(g['rate_jump_deg_s']):.0f} deg/s")
-            ax.plot([t10, t90], [y10, y90], "o", color=C_FIT, ms=6)
-            if np.isfinite(g.get("rate_fit_deg_s", np.nan)):
-                band = (grid >= t10) & (grid <= t90)
-                sl, ic = np.polyfit(grid[band], mean[band], 1)
-                xs = np.array([t10 - 0.15, t90 + 0.15])
-                ax.plot(xs, sl * xs + ic, color=C_MARK, lw=2.4,
-                        label=f"least squares {abs(sl):.0f} deg/s")
-            ax.axvspan(t10, t90, color="#f2f4f7", zorder=0)
+        rate, lag, span = (g.get("rate_relu_deg_s", np.nan), g.get("relu_lag_s", np.nan),
+                           g.get("relu_win_s", np.nan))
+        if np.isfinite(rate) and np.isfinite(lag) and np.isfinite(span):
+            lvl = g["theta_from"]
+            xs = np.linspace(lag, lag + span, 40)
+            ax.plot(xs, lvl + rate * (xs - lag), color=C_FIT, lw=2.4,
+                    label=f"pooled fit {rate:.0f} deg/s")
+            ax.axvspan(0.0, max(lag, 0.0), color="#f2f4f7", zorder=0)
+            fitted += 1
+        else:
+            ax.plot([], [], " ", label="pooled fit REFUSED")
+        if np.isfinite(onset):
+            ax.axvline(onset, color=C_MARK, lw=1.2, ls="--")
+            ax.plot([], [], " ", label=f"pooled edge starts {onset * 1e3:+.0f} ms")
+        if np.isfinite(med_single):
+            ax.plot([], [], " ", label=f"per-repeat median {med_single:.0f} deg/s")
+            if np.isfinite(rate) and med_single > 0:
+                costs.append(rate / med_single - 1.0)
         ax.axvline(0, color="#9aa0a6", lw=1.1, ls=":")
-        ax.set_xlim(-0.5, min(3.0, grid[-1]))
-        _style(ax, f"{f:g} Hz  (n={g['n_pooled']})", "time from cut (s)", "angle (deg)")
+        ax.set_xlim(-0.3, 0.8)
+        _style(ax, f"{f:g} Hz  (pooled n={g['n_pooled']}, repeats n={n_single})",
+               "time from cut (s)", "angle from pre-cut direction (deg)")
         ax.legend(frameon=False, fontsize=7.5, labelcolor=MUTED, loc="lower right")
     for ax in axs.ravel()[n:]:
         ax.axis("off")
-    fig.suptitle("Rate fits on the pooled angle: first 10 deg jump vs least squares over the "
-                 "10-90% band", fontsize=12, color=INK, x=0.01, ha="left")
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    om = np.median(onsets) * 1e3 if onsets else float("nan")
+    cm = np.median(costs) * 100 if costs else float("nan")
+    fig.suptitle(
+        f"Rate fit on the POOLED angle ({fitted} of {n} frequencies), against the median of "
+        f"the individual repeats\n"
+        f"Pooling reads {cm:+.0f}% of the per-repeat rate; pooled edge starts {om:+.0f} ms "
+        "from the cut (median).\nRepeats land 33-102 ms apart, so averaging smears an edge "
+        "that is itself only ~50 ms wide -- which also flattens the rate's variation with "
+        "drive frequency.",
+        fontsize=11, color=INK, x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
     out = Path(out_path or (root / "report" / "rate_fits.png"))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=140, facecolor="white")
     plt.close(fig)
+    print(f"pooled fit accepted at {fitted}/{n} frequencies; pooled edge onset median "
+          f"{om:+.0f} ms")
+    if costs:
+        print(f"pooling reads {np.median(costs) * 100:+.0f}% of the per-repeat rate "
+              f"(range {min(costs) * 100:+.0f}% to {max(costs) * 100:+.0f}%)")
     print(f"-> {out}")
     return out
 

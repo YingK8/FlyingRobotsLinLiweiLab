@@ -240,8 +240,12 @@ def latest_flight(root=DEFAULT_DIR):
 
 
 def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=120.0,
-           rotate180=True, max_skew_s=None, preview=True, start=False):
+           rotate180=True, max_skew_s=None, preview=True, start=False, note=None):
     """Live preview; SPACE starts and stops recording, q quits. Returns the directory.
+
+    ``note`` is free text written into ``meta.json`` verbatim -- the operator's own
+    record of what this take was measuring (e.g. "150 Hz hold, ch0 carrier 30%"),
+    which the folder timestamp cannot say.
 
     ``start=True`` rolls from the first frame and needs no key, which is the only way to
     shoot from a notebook cell: `sources.Sink.show` returns -1 inline, so SPACE never
@@ -266,6 +270,8 @@ def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=120.0,
                                rotate180=rotate180))
 
     meta = {"camera_indices": idx, "rotate180": bool(rotate180)}
+    if note:
+        meta["note"] = str(note)
 
     fw, recording, t0 = None, False, 0.0
     done = []
@@ -407,13 +413,18 @@ def main(argv=None):
     p.add_argument("--mode", default="1280x800")
     p.add_argument("--fps", type=float, default=120.0)
     p.add_argument("--no-flip", action="store_true")
+    p.add_argument("--note", default=None,
+                   help="free text into meta.json, e.g. \"align C 100Hz coil A C shut down\"")
+    p.add_argument("--start", action="store_true",
+                   help="roll from the first frame instead of waiting for SPACE")
     p.add_argument("--self-check", action="store_true", help="no camera needed")
     a = p.parse_args(argv)
     if a.self_check:
         _self_check()
         return 0
     w, h = (int(v) for v in a.mode.lower().split("x"))
-    record(a.out, a.indices, width=w, height=h, fps=a.fps, rotate180=not a.no_flip)
+    record(a.out, a.indices, width=w, height=h, fps=a.fps, rotate180=not a.no_flip,
+           start=a.start, note=a.note)
     return 0
 
 

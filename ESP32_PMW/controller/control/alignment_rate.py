@@ -97,6 +97,47 @@ SWING_MAX_S = 0.40
 #: ~150 ms against ~19.6 ms sampling is 8 samples, so 0.2 a side leaves about 5 to fit.
 BUFFER_FRAC = 0.2
 
+#: A qualifying ramp must also be STEEP: at least this fraction of the steepest qualifying
+#: ramp in the search window. "First pair over JUMP_DEG" alone is only half the operator's
+#: rule and it mis-fires -- at 40 and 50 Hz a shallow early wander clears 10 deg before the
+#: real swing starts, and the fit landed on that instead. Relative, not an absolute deg/s,
+#: so it stays scale-free across a rate that runs 300-1500 deg/s over the sweep.
+STEEP_FRAC = 0.5
+
+#: Radial lean (deg) below which the azimuth is DROPPED rather than believed. Azimuth is the
+#: direction of lean, so its noise is sigma/sin(radial) and it has a coordinate singularity at
+#: the datum -- with the measured 3.18 deg of per-frame axis scatter that is 6 deg/frame of
+#: azimuth noise at 30 deg of lean but 61 at 3 deg, which at 19.6 ms sampling is 3100 deg/s.
+#: That is the whole explanation for the near-vertical spikes: 82.4% of physically impossible
+#: jumps sit below 5 deg of lean against 5.5% of samples, a 15x enrichment.
+#:
+#: It is NOT a hemisphere or sign error, which was the first hypothesis and was tested and
+#: rejected: only 0.75% of frames sit below the rest datum, they sit at LARGE lean (median
+#: 39.2 deg), take 2026-09-09_212646 has zero of them and still shows both its jumps, and
+#: enforcing the constraint a priori removes 7% of jumps and leaves 93%.
+#:
+#: 5 deg is the knee of the cost curve: 1 deg drops 25% of jumps for 0.7% of samples, 5 deg
+#: drops 82% for 5.5%, 8 deg drops 96% for 16.8%. `disc_video` uses 1.0 for the same idea,
+#: which is "meaningless" rather than "noisier than the signal".
+AZIMUTH_MIN_RADIAL_DEG = 5.0
+
+#: Sample-to-sample azimuth rate (deg/s) above which the step is not physical and the ramp
+#: containing it is refused. The axis's own great-circle speed -- sign-invariant, so blind to
+#: every hemisphere and branch question -- is median 125 deg/s over all kill windows with a
+#: p99.9 of 1002, and the measured alignment rates run 500-1500. Jumps cluster at 3000-15000
+#: with NOTHING between 1000 and 3000, so the threshold sits in a real gap rather than on a
+#: judgement call. The AZIMUTH_MIN_RADIAL_DEG mask removes 82% of these; this refuses to fit
+#: the rest instead of reporting a gradient made of one corrupt sample.
+IMPOSSIBLE_DEG_S = 3000.0
+
+#: Latest a ramp may START, measured from the cut, to count as the alignment event. Every
+#: clean trial in the campaign lags 11-66 ms (median ~50), which is coil-current decay plus
+#: rotor inertia. A ramp beginning hundreds of ms later is a LATER swing of the oscillation,
+#: not the response to the cut -- an unguarded search put a 422 ms "dead time" and a downward
+#: gradient on 50 Hz take 2026-09-09_234949. 200 ms is 3x the largest real lag and still well
+#: inside the first swing.
+MAX_LAG_S = 0.20
+
 
 # ---------------------------------------------------------------- reading the take
 
@@ -363,7 +404,20 @@ def azimuth_from_rest(t, axis, up, t_kill, pre_s=PRE_S):
     e1 /= np.linalg.norm(e1)
     e2 = np.cross(up, e1)
     a = orient_continuous(axis, up)
-    azi = np.degrees(np.unwrap(np.arctan2(a @ e2, a @ e1)))
+    raw = np.arctan2(a @ e2, a @ e1)
+    # Drop the samples where the azimuth is not defined well enough to unwrap, BEFORE
+    # unwrapping. Order matters: a spike carried into `unwrap` is taken for a real excursion
+    # and shifts every later sample's branch, so masking afterwards does not undo it. The
+    # gaps are then interpolated across, which is honest for a lean that stays away from the
+    # datum and a guess for one that crosses it -- see the caveat below.
+    lean = tilt_from(a, up)
+    ok = lean >= AZIMUTH_MIN_RADIAL_DEG
+    if ok.sum() < 20:
+        return None
+    azi = np.full(len(raw), np.nan)
+    azi[ok] = np.degrees(np.unwrap(raw[ok]))
+    if (~ok).any():
+        azi = np.interp(t, t[ok], azi[ok])
     m = (t >= t_kill - pre_s) & (t < t_kill)
     if m.sum() < 20:
         return None
@@ -518,10 +572,31 @@ def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None):
             sign = sk
     turns.append(len(y) - 1)
 
+    # Every ramp that is LARGE enough, with its gradient, so "steep" can be judged against
+    # the steepest of them rather than against a constant.
+    cand = []
     for p_, q_ in zip(turns, turns[1:]):
-        if q_ - p_ < 2:
+        if q_ - p_ < 2 or abs(y[q_] - y[p_]) < JUMP_DEG:
             continue
-        if abs(y[q_] - y[p_]) < JUMP_DEG:
+        dt_ = x[q_] - x[p_]
+        if dt_ <= 0:
+            continue
+        if x[p_] - t_kill > MAX_LAG_S:
+            continue
+        # A ramp is only a ramp if every step inside it is physical. Without this a single
+        # corrupt sample is the steepest "ramp" in the record and wins outright -- it is what
+        # put a -1648 deg/s fit on 40 Hz take 2026-09-09_211543, whose trace jumps 280 deg
+        # between two samples.
+        steps = np.abs(np.diff(y[p_:q_ + 1])) / np.maximum(np.diff(x[p_:q_ + 1]), 1e-9)
+        if steps.size and steps.max() > IMPOSSIBLE_DEG_S:
+            continue
+        cand.append((p_, q_, abs(y[q_] - y[p_]) / dt_))
+    if not cand:
+        return float("nan"), float("nan"), float("nan")
+    steepest = max(c[2] for c in cand)
+
+    for p_, q_, g_ in cand:
+        if g_ < STEEP_FRAC * steepest:
             continue
         # Trim the buffer, then fit the middle. Backed off if the ramp is too short to
         # spare it -- a biased slope beats no slope, and the bias is toward under-reading.

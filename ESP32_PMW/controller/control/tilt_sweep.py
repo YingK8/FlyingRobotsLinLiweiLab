@@ -76,7 +76,8 @@ SCHEDULE_DRIVE_S = 340.5
 
 
 def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=True,
-        indices=None, timeout_s=560.0, ignore_thermal=False, drone=None):
+        indices=None, timeout_s=560.0, ignore_thermal=False, drone=None,
+        drive_s=None):
     """Reset the board, film the schedule, stop when it says `TILT_OFF`.
 
     Returns ``(flight_dir, log_path)``. Both are needed by `stills`, and both are
@@ -97,16 +98,20 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
     # Same gate as `fly()`, for the same reason: ~95 s of drive per sweep and no
     # temperature sensor anywhere on the rig. Missing model = refuse, never assume cold.
     from ai.thermal import coil_thermal
+    # `SCHEDULE_DRIVE_S` is a measured total for the OLD 8-point schedule. Any caller
+    # flashing a different schedule must pass its own, or the gate budgets for a run that
+    # is not the one about to happen.
+    _budget = SCHEDULE_DRIVE_S if drive_s is None else float(drive_s)
     if ignore_thermal:
         # Deliberate operator override. Printed, not silent, and the heat is still
         # stamped afterwards -- skipping the WAIT must not also skip the BOOKKEEPING,
         # or the next run reads a cold coil that is not cold.
         print(f"[coils] THERMAL GATE BYPASSED at the operator's instruction: "
               f"~{coil_thermal.temp_now():.0f}C now, this run adds "
-              f"~{coil_thermal.HEAT_C_PER_S * SCHEDULE_DRIVE_S:.0f}C, ceiling is "
+              f"~{coil_thermal.HEAT_C_PER_S * _budget:.0f}C, ceiling is "
               f"{coil_thermal.T_CEILING_C:.0f}C. Watch the coils.")
     else:
-        coil_thermal.wait_until_safe(SCHEDULE_DRIVE_S)
+        coil_thermal.wait_until_safe(_budget)
 
     idx = (identify.elp_indices() if indices is None else list(indices))
     tags = "AB"[:len(idx)]
@@ -150,8 +155,14 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
             # GPIO14, the only kill this firmware has. The firmware parks in a while
             # loop and stops printing, so waiting for TILT_OFF after this means waiting
             # out the whole timeout -- 180 s of nothing, measured 2026-09-01.
+            #
+            # The button prints TWO different lines and they are different events:
+            #   "-- gates off"  press 1: coils dead, firmware parked, run is void
+            #   "-- restarting" press 2: ESP.restart(), schedule re-runs from step 0
+            # A substring test for "[block]" cannot tell them apart, and a caller that
+            # wants to retry the point needs to know which one it got.
             print(f"  {line.strip()}")
-            blocked.append(line)
+            blocked.append("restarting" if "restarting" in line else "gates off")
     link.on_line = on_line
 
     t_start = time.monotonic()
@@ -181,10 +192,12 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
         # all, with nothing watching it. Measured 2026-09-01: the first successful sweep
         # left the rig re-ramping unattended. There is no `stop` this firmware can hear,
         # so parking the chip out of the app is the only software kill.
-        park()
+        park(port) if port else park()
+    outcome = ("ok" if done else
+               f"gpio14:{blocked[0]}" if blocked else "timeout")
     print("schedule finished" if done else
-          "schedule did NOT finish; board parked in the bootloader, coils off")
-    return flight, log_path
+          f"schedule did NOT finish ({outcome}); board parked in the bootloader, coils off")
+    return flight, log_path, outcome
 
 
 def park(port="/dev/cu.SLAB_USBtoUART"):
@@ -442,8 +455,8 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if args.run:
-        flight, log = run(port=args.port, ignore_thermal=args.ignore_thermal,
-                          drone=args.drone)
+        flight, log, _outcome = run(port=args.port, ignore_thermal=args.ignore_thermal,
+                                    drone=args.drone)
         stills(flight, log, drone=args.drone)
     elif args.stills:
         log = args.log or max(OUT_DIR.glob("*/sweep.log"), key=lambda p: p.stat().st_mtime)

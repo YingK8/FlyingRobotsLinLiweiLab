@@ -97,13 +97,6 @@ SWING_MAX_S = 0.40
 #: ~150 ms against ~19.6 ms sampling is 8 samples, so 0.2 a side leaves about 5 to fit.
 BUFFER_FRAC = 0.2
 
-#: A qualifying ramp must also be STEEP: at least this fraction of the steepest qualifying
-#: ramp in the search window. "First pair over JUMP_DEG" alone is only half the operator's
-#: rule and it mis-fires -- at 40 and 50 Hz a shallow early wander clears 10 deg before the
-#: real swing starts, and the fit landed on that instead. Relative, not an absolute deg/s,
-#: so it stays scale-free across a rate that runs 300-1500 deg/s over the sweep.
-STEEP_FRAC = 0.5
-
 #: Radial lean (deg) below which the azimuth is DROPPED rather than believed. Azimuth is the
 #: direction of lean, so its noise is sigma/sin(radial) and it has a coordinate singularity at
 #: the datum -- with the measured 3.18 deg of per-frame axis scatter that is 6 deg/frame of
@@ -121,22 +114,54 @@ STEEP_FRAC = 0.5
 #: which is "meaningless" rather than "noisier than the signal".
 AZIMUTH_MIN_RADIAL_DEG = 5.0
 
-#: Sample-to-sample azimuth rate (deg/s) above which the step is not physical and the ramp
-#: containing it is refused. The axis's own great-circle speed -- sign-invariant, so blind to
-#: every hemisphere and branch question -- is median 125 deg/s over all kill windows with a
-#: p99.9 of 1002, and the measured alignment rates run 500-1500. Jumps cluster at 3000-15000
-#: with NOTHING between 1000 and 3000, so the threshold sits in a real gap rather than on a
-#: judgement call. The AZIMUTH_MIN_RADIAL_DEG mask removes 82% of these; this refuses to fit
-#: the rest instead of reporting a gradient made of one corrupt sample.
-IMPOSSIBLE_DEG_S = 3000.0
+#: Sample-to-sample azimuth DISPLACEMENT (deg) above which the step is not physical and the
+#: ramp containing it is refused. A displacement and not a rate: at stride 1 the record is
+#: solved every 4.3 ms, so any rate threshold that made sense at stride 4 now condemns the
+#: real event (see `relu_window`). The corrupt samples this exists for jump 100-280 deg
+#: between neighbours, while the fastest genuine step measured across the campaign is 16 deg
+#: -- so 45 sits in a wide gap rather than on a judgement call, and it stays put whatever
+#: stride the take was solved at. The AZIMUTH_MIN_RADIAL_DEG mask removes 82% of these;
+#: this refuses to fit the rest instead of reporting a gradient made of one corrupt sample.
+IMPOSSIBLE_STEP_DEG = 45.0
 
-#: Latest a ramp may START, measured from the cut, to count as the alignment event. Every
-#: clean trial in the campaign lags 11-66 ms (median ~50), which is coil-current decay plus
-#: rotor inertia. A ramp beginning hundreds of ms later is a LATER swing of the oscillation,
-#: not the response to the cut -- an unguarded search put a 422 ms "dead time" and a downward
-#: gradient on 50 Hz take 2026-09-09_234949. 200 ms is 3x the largest real lag and still well
-#: inside the first swing.
-MAX_LAG_S = 0.20
+#: How long after the cut to look for the response's PEAK. It has to be wide enough to hold
+#: a delayed rise -- 60 Hz takes 2026-09-09_213341 and 2026-09-10_000608 do nothing for
+#: 220-270 ms and then climb to 175 deg -- and short enough that the oscillation's SECOND
+#: swing cannot be mistaken for the first. Both hold at 1 s: the first overshoot of an
+#: underdamped response is always the largest, and measured across this campaign the return
+#: swings come back to 60-80% of it, peaking around 500 ms.
+PEAK_MAX_S = 1.0
+
+#: How high a swing must reach, as a fraction of the response's full height in the window,
+#: to count as THE peak rather than a preliminary hump.
+#:
+#: It only has to clear the humps, and they are small: the ones that used to capture the fit
+#: are 10 deg of a 178 deg record. Set high it does damage instead, because the FIRST swing
+#: is not always the tallest -- 30 Hz take 2026-09-10_011809 peaks at ~50 deg and a later
+#: swing reaches 77, so at 0.7 the crossing skipped the response entirely and fitted the
+#: second rising edge with a 367 ms "dead time".
+#:
+#: Scanned over all 101 kill windows in the campaign (2026-09-10). Fits landing later than
+#: 200 ms after the cut go 5, 4, 3, 2, 1, 1, 1, 1 as the fraction falls 0.70 -> 0.20, while
+#: the number of windows fitted stays at 88-90 and the median rate does not move off
+#: 740 deg/s. So it is a plateau, not a trade, and 0.30 sits in the middle of it -- 3x the
+#: hump level and well below the smallest genuine first swing.
+PEAK_FRAC = 0.30
+
+#: How long after that crossing to look for the swing's actual top. Long enough to contain
+#: the last of the rise, short enough that the following swing cannot get in.
+PEAK_SETTLE_S = 0.25
+
+#: Where the foot of the rising edge sits, as a fraction of the rise above its minimum.
+#: Small on purpose: the fit is meant to cover the edge, not just its steepest middle, and
+#: `BUFFER_FRAC` already trims the ends afterwards. 10% skips the part of the record that is
+#: still flat without eating into the edge itself.
+FOOT_FRAC = 0.10
+
+#: How far before the cut a fitted ramp's extrapolated onset may land before the trial is
+#: refused. Physically the answer is zero -- nothing responds before the step -- so this is
+#: purely the fit's own noise on the intercept: two samples at the stride-1 rate of 231 Hz.
+LAG_TOL_S = 0.010
 
 
 # ---------------------------------------------------------------- reading the take
@@ -382,7 +407,7 @@ def deproject(azimuth, t, f_hz):
 
 
 def azimuth_from_rest(t, axis, up, t_kill, pre_s=PRE_S):
-    """Lean DIRECTION about the rest datum, referenced to its pre-cut value.
+    """Lean DIRECTION about the rest datum, as an angle from its pre-cut direction.
 
     This, not the total rotation, is what the coil cut actually changes. Measured across the
     campaign, the azimuth swings 41-50 deg at EVERY frequency from 10 to 90 Hz -- MAD 0.83 deg
@@ -394,38 +419,68 @@ def azimuth_from_rest(t, axis, up, t_kill, pre_s=PRE_S):
     constant being recovered, not a drive-dependent response, which is why it does not scale
     with frequency the way `rotation_from_baseline` appears to. That apparent growth is mostly
     geometry: a fixed azimuth swing sweeps a longer great-circle arc at a larger radial tilt.
+
+    RETURNED VALUES ARE IN [0, 180] AND NEVER NEGATIVE
+    --------------------------------------------------
+    The number is the angle BETWEEN two directions in the plane about the datum -- where the
+    robot leans now, and where it leaned in the second before the cut. An angle between two
+    directions is by definition in [0, 180]: there is no sense to it, because the robot lives
+    in the upper hemisphere and the field left by cutting A and C is symmetric about the A-C
+    line, so a lean that swings one way and one that swings the other are the same event seen
+    from opposite sides.
+
+    It is computed as that angle DIRECTLY -- an arccos of two unit vectors -- and not by
+    unwrapping an `arctan2` and referencing it afterwards, which is how it was done until
+    2026-09-10. `unwrap` puts each take on its own arbitrary +-360 branch, so pooling repeats
+    mixed 54 deg with -306; wrapping the referenced angle back into +-180 to fix that then
+    put a discontinuity at exactly 180 deg, and a swing that genuinely reached it jumped the
+    full 360 -- which is the 50 Hz take 2026-09-09_212525 diving from +140 to -120 deg
+    between two samples, and every other reported sign flip. An arccos has no branch to
+    choose, so there is nothing left to flip: the angle simply turns around at 180 and comes
+    back, which is what the geometry does too.
+
+    The cost, stated plainly: near zero the measurement is rectified, so a zero-mean wobble
+    in the pre-cut window reads as a small positive floor of about 0.8 sigma rather than as
+    zero. That is a property of the quantity, not of this estimator -- an unsigned angle
+    cannot be negative -- and it is why the pre-cut level is taken as a median over the whole
+    window rather than as an assumed zero.
     """
 
     up = np.asarray(up, float)
     up = up / np.linalg.norm(up)
-    e1 = np.cross(up, [0.0, 0.0, 1.0])
-    if np.linalg.norm(e1) < 1e-6:
-        e1 = np.cross(up, [0.0, 1.0, 0.0])
-    e1 /= np.linalg.norm(e1)
-    e2 = np.cross(up, e1)
     a = orient_continuous(axis, up)
-    raw = np.arctan2(a @ e2, a @ e1)
-    # Drop the samples where the azimuth is not defined well enough to unwrap, BEFORE
-    # unwrapping. Order matters: a spike carried into `unwrap` is taken for a real excursion
-    # and shifts every later sample's branch, so masking afterwards does not undo it. The
-    # gaps are then interpolated across, which is honest for a lean that stays away from the
-    # datum and a guess for one that crosses it -- see the caveat below.
+
+    # The lean direction: the axis with its component along the datum removed, normalised.
+    # This is a unit vector in the plane perpendicular to `up`, and its direction IS the
+    # azimuth -- carried as a vector so no angle is ever unwrapped.
+    u = a - np.outer(a @ up, up)
+    n = np.linalg.norm(u, axis=1)
+
+    # Samples where the lean is too small for its direction to mean anything are dropped
+    # BEFORE the reference is built and interpolated across afterwards. Near the datum the
+    # direction's noise goes as sigma / sin(lean), so a nearly-upright sample points
+    # essentially at random; below 5 deg that is 82% of the wild excursions in the record.
     lean = tilt_from(a, up)
-    ok = lean >= AZIMUTH_MIN_RADIAL_DEG
+    ok = (lean >= AZIMUTH_MIN_RADIAL_DEG) & (n > 1e-9)
     if ok.sum() < 20:
         return None
-    azi = np.full(len(raw), np.nan)
-    azi[ok] = np.degrees(np.unwrap(raw[ok]))
-    if (~ok).any():
-        azi = np.interp(t, t[ok], azi[ok])
-    m = (t >= t_kill - pre_s) & (t < t_kill)
+    u = u / np.maximum(n, 1e-12)[:, None]
+
+    m = (t >= t_kill - pre_s) & (t < t_kill) & ok
     if m.sum() < 20:
         return None
-    # Wrap the CHANGE into +-180. `unwrap` fixes the within-record continuity but leaves each
-    # repeat on an arbitrary +-360 branch, so pooling them mixed 54 deg with -306 and blew the
-    # variance up by four orders of magnitude. The swing is ~45 deg, comfortably inside a half
-    # turn, so wrapping cannot fold a real signal.
-    return (azi - np.median(azi[m]) + 180.0) % 360.0 - 180.0
+    # The reference direction is the MEAN pre-cut lean direction, not one sample of it.
+    ref = u[m].mean(0)
+    nr = float(np.linalg.norm(ref))
+    if nr < 1e-6:            # the pre-cut lean direction never settled -- no reference exists
+        return None
+    ref /= nr
+
+    dev = np.full(len(t), np.nan)
+    dev[ok] = np.degrees(np.arccos(np.clip(u[ok] @ ref, -1.0, 1.0)))
+    if (~ok).any():
+        dev = np.interp(t, t[ok], dev[ok])
+    return dev
 
 
 def rotation_from_baseline(t, axis, t_kill, pre_s=PRE_S):
@@ -527,24 +582,44 @@ def relu_rate(ts, ys, t_kill, win_s):
 
 
 def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None):
-    """First steep, large ramp after the cut. Returns ``(slope, lag, span)``.
+    """The rising edge of the response: trough-before-peak to peak. ``(slope, lag, span)``.
 
-    The operator's definition, and it is the whole rule: find the turning points of the
-    smoothed trace after the coils drop, take the FIRST consecutive pair whose height differs
-    by at least ``JUMP_DEG``, and fit a line between them. That pair IS the alignment event.
+    THE RULE
+    --------
+    Find the PEAK of the response -- the largest value the smoothed trace reaches within
+    ``PEAK_MAX_S`` of the cut. Walk back to the last turning point before it, which is the
+    trough the rise starts from. That trough-to-peak segment IS the alignment event. Trim
+    ``BUFFER_FRAC`` off each end so the turning points themselves do not flatten the line,
+    fit the middle, and extrapolate back to the pre-cut level for the dead time.
 
-    "Large" is defined turning-point to turning-point rather than against a baseline, which
-    is what makes it self-contained: it needs no departure threshold, no noise estimate, no
-    swing direction supplied from elsewhere, and no window search. Every one of those was
-    tried first (2026-09-10) and every one had a failure mode of its own -- a residual-scored
-    window search overfits, because three samples fit a line whatever they are; a threshold
-    off `baseline_sd_deg` reads the raw wobble and never fires; a direction taken from `amp`
-    at 4-6 s points the wrong way once the response has swung back. A rise between two turning
-    points has none of those degrees of freedom.
+    There is no search, no candidate list and no ranking: the peak is unique and the trough
+    before it is determined by the peak, so the segment is a function of the data alone.
 
-    The response is a lightly damped oscillation, not a step to a new equilibrium (measured
-    2026-09-10, 110 Hz: flat ~50 ms, peak 65 deg at 200 ms, back to 18 deg by 500 ms), so
-    "first pair" and not "largest pair" is what keeps the return swings out of the rate.
+    WHY IT IS ANCHORED ON THE PEAK AND NOT ON THE FIRST QUALIFYING RISE
+    ------------------------------------------------------------------
+    The previous rule (2026-09-10, morning) took the FIRST consecutive pair of turning points
+    differing by at least ``JUMP_DEG``. Two failure modes, both found by the operator reading
+    the per-repeat panels, and both fixed by anchoring on the peak instead:
+
+    * **Initial humps win by being first.** 60 Hz take 2026-09-09_213341 rises 18 deg in a
+      small early bump, falls back, and only then makes its real 175 deg climb; the old rule
+      fitted the bump at 246 deg/s. 2026-09-10_000608 is the same shape and read 182. The
+      peak of the record is not in either bump, so neither can be selected now.
+    * **A rough edge gets chopped into slivers.** At 120 Hz the rising edge carries enough
+      scatter to put turning points inside itself, and the first pair between two of them is
+      a fraction of the edge -- 2026-09-09_213218 was fitted over 20 ms of a 190 ms rise.
+      Intermediate turning points are simply passed over now, because the segment runs from
+      the trough to the peak whatever happens between them.
+
+    It also retires two thresholds that existed only to prop the old rule up: ``STEEP_FRAC``
+    (a steepness bar to reject shallow first pairs) and ``MAX_LAG_S`` (a bar on how late a
+    ramp could start, which was rejecting the real rise in exactly the two takes above).
+
+    WHAT IS STILL REFUSED
+    ---------------------
+    A rise smaller than ``JUMP_DEG``; a segment containing a physically impossible
+    sample-to-sample step; and a fit whose extrapolated onset lands before the cut, which
+    says the rise was already underway when the coils dropped.
     """
 
     ts, ys = np.asarray(ts, float), np.asarray(ys, float)
@@ -554,72 +629,105 @@ def relu_window(ts, ys, t_kill, amp_sign=None, sd_base=None):
     i0 = int(post[0])
     y, x = ys[i0:], ts[i0:]
 
-    # Turning points: where the first difference changes sign. The cut instant itself opens
-    # the list, since the trace is flat before it and the first ramp starts there.
-    d = np.diff(y)
-    nz = np.flatnonzero(d != 0)
-    if nz.size < 2:
+    # The peak of the response: the FIRST swing that reaches the height of the record, not
+    # the tallest sample in it. A plain argmax over the window assumes the first overshoot is
+    # strictly the largest, and when the damping is light enough the later swings come within
+    # a percent of it -- 60 Hz take 2026-09-09_213341 peaks at 175 deg at 480 ms and again at
+    # 179 at 873, so argmax chose the third swing and the segment straddled a whole down-up
+    # cycle, fitting a rising 162 deg edge at MINUS 144 deg/s.
+    #
+    # So: find where the trace first reaches `PEAK_FRAC` of the window's full height, then
+    # take the largest sample in the `PEAK_SETTLE_S` that follow. The fraction is what makes
+    # an early hump ineligible -- 213341's hump is 18 deg of a 178 deg record, nowhere near
+    # 70% -- and the short settle window is what makes "the peak of that swing" robust to
+    # scatter without needing a local-maximum test that noise would trip.
+    win = np.flatnonzero(x <= t_kill + PEAK_MAX_S)
+    if win.size < 5:
         return float("nan"), float("nan"), float("nan")
-    # Seeded at the first sample that MOVES, not at the cut: the trace is flat through the
-    # dead time (~50 ms of coil-current decay and rotor inertia), and opening the list at the
-    # cut would fold that flat run into the ramp and shallow the gradient.
-    turns = [int(nz[0])]
-    sign = np.sign(d[nz[0]])
-    for k in nz[1:]:
-        sk = np.sign(d[k])
-        if sk != sign:
-            turns.append(int(k))
-            sign = sk
-    turns.append(len(y) - 1)
-
-    # Every ramp that is LARGE enough, with its gradient, so "steep" can be judged against
-    # the steepest of them rather than against a constant.
-    cand = []
-    for p_, q_ in zip(turns, turns[1:]):
-        if q_ - p_ < 2 or abs(y[q_] - y[p_]) < JUMP_DEG:
-            continue
-        dt_ = x[q_] - x[p_]
-        if dt_ <= 0:
-            continue
-        if x[p_] - t_kill > MAX_LAG_S:
-            continue
-        # A ramp is only a ramp if every step inside it is physical. Without this a single
-        # corrupt sample is the steepest "ramp" in the record and wins outright -- it is what
-        # put a -1648 deg/s fit on 40 Hz take 2026-09-09_211543, whose trace jumps 280 deg
-        # between two samples.
-        steps = np.abs(np.diff(y[p_:q_ + 1])) / np.maximum(np.diff(x[p_:q_ + 1]), 1e-9)
-        if steps.size and steps.max() > IMPOSSIBLE_DEG_S:
-            continue
-        cand.append((p_, q_, abs(y[q_] - y[p_]) / dt_))
-    if not cand:
+    yw = y[win]
+    lo, hi = float(yw.min()), float(yw.max())
+    if hi - lo < JUMP_DEG:
         return float("nan"), float("nan"), float("nan")
-    steepest = max(c[2] for c in cand)
+    cross = int(win[int(np.argmax(yw >= lo + PEAK_FRAC * (hi - lo)))])
+    settle = np.flatnonzero((x >= x[cross]) & (x <= x[cross] + PEAK_SETTLE_S))
+    q_ = int(settle[int(np.argmax(y[settle]))]) if settle.size else cross
+    if q_ < 2:
+        return float("nan"), float("nan"), float("nan")
 
-    for p_, q_, g_ in cand:
-        if g_ < STEEP_FRAC * steepest:
-            continue
-        # Trim the buffer, then fit the middle. Backed off if the ramp is too short to
-        # spare it -- a biased slope beats no slope, and the bias is toward under-reading.
-        n_ = q_ - p_ + 1
-        cut = int(round(BUFFER_FRAC * n_))
-        while cut > 0 and n_ - 2 * cut < 4:
-            cut -= 1
-        a_, b_ = p_ + cut, q_ - cut
-        slope, icept = (float(v) for v in np.polyfit(x[a_:b_ + 1], y[a_:b_ + 1], 1))
+    # The trough the rise starts from: the LAST time before the peak that the trace was at
+    # its lowest, within a tolerance. Not "walk back while the trace is non-increasing" --
+    # that was tried first and it terminates after two samples on anything noisy, because
+    # noise alone breaks monotonicity; it returned no rate at all on the self-check's noisy
+    # underdamped case. Taking the last visit to the minimum instead is what makes it the
+    # start of the FINAL approach to the peak: on 60 Hz take 2026-09-09_213341 the trace sits
+    # near its minimum at the cut AND again at 215 ms after the early hump falls back, and
+    # only the later one begins the 175 deg climb.
+    #
+    # "At its lowest" is the FOOT of the rise, not the exact minimum. A trace that dips
+    # without returning all the way down never satisfies an exact-minimum test, and 60 Hz
+    # take 2026-09-10_000608 is that shape: it sits at 0 at the cut, humps to 18 deg, falls
+    # back only to 5, then climbs to 178. Anchored on the exact minimum the foot stayed at
+    # the cut and the fit was dragged across 490 ms of mostly-flat record at 210 deg/s.
+    #
+    # The band is the larger of two scales, so neither a quiet record nor a noisy one breaks
+    # it: twice the pre-cut scatter of this same smoothed trace, and FOOT_FRAC of the rise.
+    mn = float(np.min(y[:q_ + 1]))
+    tol = FOOT_FRAC * (y[q_] - mn)
+    if sd_base is not None and np.isfinite(sd_base) and sd_base > 0:
+        tol = max(tol, 2.0 * sd_base)
+    low = np.flatnonzero(y[:q_ + 1] <= mn + tol)
+    p_ = int(low[-1]) if low.size else 0
 
-        # Dead time by extrapolation, not by "the first sample that moved". Run the fitted
-        # ramp back to where it crosses the level the trace held before it, and the lag is
-        # that crossing minus the cut. Reading it off the first moving sample instead makes
-        # it a function of where the samples happen to fall (19.6 ms apart) and of whichever
-        # noise excursion crossed first; a two-line intersection uses every sample in both.
-        # The level is taken from the cut to the ramp's own start, so it spans the flat dead
-        # time as well as the pre-cut baseline.
-        flat = (ts >= t_kill - PRE_S) & (ts <= x[p_])
-        lag = float("nan")
-        if flat.sum() >= 3 and slope != 0:
-            lag = float((float(np.median(ys[flat])) - icept) / slope - t_kill)
-        return slope, lag, float(x[q_] - x[p_])
-    return float("nan"), float("nan"), float("nan")
+    # And the top of the edge is the FIRST entry into the top band, mirroring the foot. The
+    # response often reaches its level and then sits there: 30 Hz take 2026-09-10_011809 is
+    # flat until 76 ms, climbs 10 -> 46 deg by 132 ms, and then PLATEAUS at 45-49 deg until
+    # 216 ms. Taking the highest sample put the end of the edge at 213 ms, so the fit spent
+    # most of its span on the plateau and read 167 deg/s against a 625 deg/s rise -- and the
+    # shallow line, run backwards, crossed the pre-cut level 85 ms BEFORE the cut, which got
+    # the trial refused for a dead time it never had.
+    top = np.flatnonzero(y[p_:q_ + 1] >= y[q_] - tol)
+    if top.size:
+        q_ = p_ + int(top[0])
+    if q_ - p_ < 2 or y[q_] - y[p_] < JUMP_DEG:
+        return float("nan"), float("nan"), float("nan")
+
+    # A rise is only a rise if every step inside it is physical -- one corrupt sample would
+    # otherwise BE the peak and drag the segment to itself.
+    steps = np.abs(np.diff(y[p_:q_ + 1]))
+    if steps.size and steps.max() > IMPOSSIBLE_STEP_DEG:
+        return float("nan"), float("nan"), float("nan")
+
+    # Trim the buffer, then fit the middle. Backed off if the rise is too short to spare it
+    # -- a biased slope beats no slope, and the bias is toward under-reading.
+    n_ = q_ - p_ + 1
+    cut = int(round(BUFFER_FRAC * n_))
+    while cut > 0 and n_ - 2 * cut < 4:
+        cut -= 1
+    a_, b_ = p_ + cut, q_ - cut
+    slope, icept = (float(v) for v in np.polyfit(x[a_:b_ + 1], y[a_:b_ + 1], 1))
+    if slope <= 0:
+        return float("nan"), float("nan"), float("nan")
+
+    # Dead time by extrapolation, not by "the first sample that moved". Run the fitted ramp
+    # back to where it crosses the level the trace held before it, and the lag is that
+    # crossing minus the cut. Reading it off the first moving sample instead makes it a
+    # function of where the samples happen to fall and of whichever noise excursion crossed
+    # first; a two-line intersection uses every sample in both. The level spans the pre-cut
+    # baseline and the flat dead time, since it runs from the cut to the rise's own start.
+    flat = (ts >= t_kill - PRE_S) & (ts <= x[p_])
+    lag = float("nan")
+    if flat.sum() >= 3:
+        lag = float((float(np.median(ys[flat])) - icept) / slope - t_kill)
+
+    # A dead time cannot be negative: the response does not precede the cut. When the
+    # extrapolation lands before t_kill the rise was ALREADY UNDERWAY when the coils dropped,
+    # so it is not the response to them and the trial is refused rather than credited with a
+    # rate -- 50 Hz take 2026-09-09_234425 was a -94 ms "dead time" with its fitted ramp drawn
+    # entirely left of zero. It doubles as the quiescence precondition, which is why there is
+    # no separate flatness test. The tolerance is two samples of fit noise, not an allowance.
+    if np.isfinite(lag) and lag < -LAG_TOL_S:
+        return float("nan"), float("nan"), float("nan")
+    return slope, lag, float(x[q_] - x[p_])
 
 
 def transient(t, tilt, agree, t_kill, min_amp=MIN_AMP_DEG, spin_hz=None):
@@ -692,19 +800,37 @@ def transient(t, tilt, agree, t_kill, min_amp=MIN_AMP_DEG, spin_hz=None):
     # not: the trace overshoots and comes back, so at 4-6 s it can sit near the baseline or
     # the wrong side of it, and 10/40/50 Hz reported no rate at all because the sign handed
     # to the swing search pointed away from the swing.
-    early = (t >= t_kill) & (t <= t_kill + SWING_MAX_S)
-    sgn = 1.0 if amp >= 0 else -1.0
+    # THE RESPONSE GOES UP. Both metrics fed to this function are non-negative angular
+    # separations from an attitude the robot held before the cut -- `azimuth_from_rest` from
+    # the pre-cut lean DIRECTION, `rotation_from_baseline` from the pre-cut axis -- so the
+    # only thing the coil cut can do to either is increase it. The sign was inferred from the
+    # data until 2026-09-10 and it was a liability rather than a degree of freedom: on 10 Hz
+    # take 2026-09-09_210122 the largest early excursion was downward, which pointed the ramp
+    # search at a falling limb and returned -522 deg/s.
+    #
+    # A dominant DOWNWARD excursion is therefore not a swing to be followed -- it is the
+    # trial telling us the pre-cut window was not a settled reference. If the lean direction
+    # was still moving through that second, the mean of it points somewhere the robot never
+    # sat, the trace starts high and falls toward it, and there is no alignment event to
+    # measure. That trial is refused rather than fitted, the same way a ramp that starts
+    # before the cut is (see `relu_window`). 210122 is exactly this: it drops 40 deg in the
+    # 76 ms after the cut.
+    early = (ts >= t_kill) & (ts <= t_kill + SWING_MAX_S)
+    sgn, ref_settled = 1.0, True
     if early.sum() >= 5:
-        dev = tilt[early] - theta_from
-        far = dev[np.argmax(np.abs(dev))]
-        if np.isfinite(far) and far != 0:
-            sgn = 1.0 if far > 0 else -1.0
+        dev = ys_j[early] - theta_from
+        far = float(dev[np.argmax(np.abs(dev))])
+        if np.isfinite(far) and far < 0:
+            ref_settled = False
+            out["note"] = (f"pre-cut lean direction not settled -- the trace falls "
+                           f"{abs(far):.1f} deg below it within {SWING_MAX_S:.2f} s of the "
+                           f"cut, so there is no reference to align away from")
 
     # The headline rate: a hinge pinned at the known cut instant. It spans the kill, so it
     # needs the flat pre-kill samples too -- `w` above starts AT the kill and would leave the
     # intercept resting on the ramp alone.
     w2 = (t >= t_kill - PRE_S - 0.2) & (t <= t_kill + POST_TO_S)
-    if w2.sum() >= 12:
+    if ref_settled and w2.sum() >= 12:
         ys2 = _smooth(t[w2], tilt[w2], span_j)
         # The threshold must be the scatter of the trace the search actually reads.
         # `baseline_sd_deg` is measured on the RAW tilt, which carries the full once-per-rev
@@ -1143,6 +1269,7 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
     out.mkdir(parents=True, exist_ok=True)
     pooled, summary = {}, []
     all_pre, pre_by = [], {}
+    skipped_nyquist = []
     for idx_path in sorted(root.glob("*/index.csv")):
         idx = [r for r in csv.DictReader(open(idx_path)) if r["outcome"] == "ok"]
         if not idx:
@@ -1154,6 +1281,21 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             t, axis, _q = load(take, which=which)
+            # NYQUIST GATE. The once-per-rev wobble sits AT the drive frequency and is
+            # large -- 18.2 deg in azimuth at 40 Hz against a ~45 deg swing -- and
+            # `rev_window` nulls it with a boxcar of a whole number of revolutions, a null
+            # that exists only if the revolution is RESOLVED. A take solved below 2*f has
+            # that wobble folded onto |f - n*fs| where the boxcar cannot touch it: at 40 Hz
+            # a stride-4 solve (51 Hz) folds it to 11.1 Hz, whose 92 ms period is comparable
+            # to the ~150 ms ramp being measured, and the fitted rate came out 2.1x high.
+            #
+            # The take is kept on disk and in index.csv -- this refuses to average a
+            # corrupted rate into the frequency, nothing more. The only takes this can catch
+            # are ones whose video was deleted on 2026-09-10 and so cannot be re-solved.
+            fs_take = 1.0 / float(np.median(np.diff(t))) if len(t) > 2 else 0.0
+            if fs_take < 2.0 * f:
+                skipped_nyquist.append((f, take.name, fs_take))
+                continue
             pts = timeline(r["log"]) if Path(r["log"]).exists() else []
             # `azimuth` needs the rest datum; fall back to total rotation without one.
             rest = None
@@ -1292,6 +1434,11 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
         med = float(np.median(ap))
         sig = float(np.median(np.abs(ap - med))) * 1.4826
         lo, hi = med - PRE_TILT_SIGMA * sig, med + PRE_TILT_SIGMA * sig
+        if skipped_nyquist:
+            print(f"  {len(skipped_nyquist)} take(s) REFUSED -- solved below 2x the drive "
+                  f"frequency, so the once-per-rev wobble is aliased (kept on disk):")
+            for f_, n_, fs_ in skipped_nyquist:
+                print(f"    {f_:5.0f} Hz  {n_}  solved {fs_:5.1f} Hz, needs {2*f_:.0f}")
         print(f"pre-cut tilt band: {lo:.1f}-{hi:.1f} deg "
               f"(median {med:.1f}, robust sigma {sig:.1f})")
         for srow in summary:
@@ -1319,8 +1466,8 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
     top.set_xlim(-0.4, 2.0)
     top.axvline(0, color="#6b7280", lw=1.2, ls="--")
     top.axhline(0, color="#c9ced4", lw=0.8)
-    _style(top, "Swing of the lean bearing after the cut",
-           "time from the cut (s)", "swing (deg)")
+    _style(top, "Azimuthal swing $\\Delta\\theta_{az}$ after the cut",
+           "time from the cut (s)", "$\\Delta\\theta_{az}$ (deg)")
     top.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncol=5, loc="lower right")
 
     # The rise alone, stretched. This is where the frequencies actually differ.
@@ -1358,7 +1505,7 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
            "drive frequency (Hz)", "azimuth change (deg)")
     rmed, rmad = [], []
     for s_ in summary:
-        rr = np.array([x_["rate_jump_deg_s"] for x_ in pooled[s_["freq_hz"]][4]], float)
+        rr = np.array([x_["rate_relu_deg_s"] for x_ in pooled[s_["freq_hz"]][4]], float)
         rr = rr[np.isfinite(rr)]
         m_ = float(np.median(rr)) if len(rr) else float("nan")
         rmed.append(m_)
@@ -1367,7 +1514,12 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
             a2.plot([s_["freq_hz"]], [v], "o", color=C_FIT, ms=3, alpha=0.35)
     a2.errorbar(x, rmed, yerr=rmad, color=C_FIT, lw=2, marker="o", ms=6, capsize=3,
                 elinewidth=1.4, zorder=3)
-    _style(a2, "Tilt rate, 10-90%  (median +- MAD)", "drive frequency (Hz)", "rate (deg/s)")
+    # The CURRENT metric. This panel plotted `rate_jump_deg_s` -- the gradient of the first
+    # 10 deg of rise -- until 2026-09-10, and before that the 10-90% band its title still
+    # named; both are retired and neither agreed with `campaign.csv`, which is the table a
+    # reader compares this figure against.
+    _style(a2, "Alignment rate, rising edge  (median +- MAD)",
+           "drive frequency (Hz)", "rate (deg/s)")
     fig.tight_layout()
     fig.savefig(out / "rate_vs_frequency.png", dpi=140, facecolor="white")
     plt.close(fig)
@@ -1390,8 +1542,14 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
     return summary
 
 
-def trial_panels(root, out_path=None, which=None, metric="azimuth"):
+def trial_panels(root, out_path=None, which=None, metric="azimuth", only_hz=None):
     """One CHOSEN trial per frequency with the fit drawn on it, not a pooled average.
+
+    With ``only_hz`` set, EVERY repeat at that one frequency is drawn instead, one panel per
+    take, in the order they were flown. That is the figure to reach for when a frequency's
+    rate scatters (50 Hz sits at CV 0.63 against 0.12 at 80): the per-frequency summary can
+    only say the spread is large, while the panels say which repeats caused it and whether
+    the cause is the fit or the flight.
 
     A pooled curve is the wrong picture for judging this fit. Repeats do not share a dead
     time to the millisecond, so averaging rounds the corner the fit is built on and shows a
@@ -1415,6 +1573,8 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
         if not idx:
             continue
         f = float(idx[0]["freq_hz"])
+        if only_hz is not None and abs(f - only_hz) > 0.5:
+            continue
         cand = []
         for r in idx:
             take = Path(r["flight"])
@@ -1437,6 +1597,9 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
                     cand.append((f, take.name, t, rot, tk, res))
         if not cand:
             continue
+        if only_hz is not None:
+            picks.extend(sorted(cand, key=lambda c: c[1]))
+            continue
         med = float(np.median([c[5]["rate_relu_deg_s"] for c in cand]))
         picks.append(min(cand, key=lambda c: abs(c[5]["rate_relu_deg_s"] - med)))
 
@@ -1455,30 +1618,44 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
         rel = t - tk
         m = (rel >= -0.30) & (rel <= 0.70)
         ys = _smooth(t[m], rot[m], 1.0 / f)
+        # The AZIMUTH ITSELF, not the azimuth minus its pre-cut level. Subtracting the level
+        # to put the baseline on zero draws every dip below it as a negative angle, which the
+        # quantity cannot be -- it is a separation between two directions, in [0, 180]. The
+        # pre-cut level is drawn where it actually sits instead.
         pre_lvl = float(np.median(rot[(rel >= -PRE_S) & (rel < 0)]))
-        ax.plot(rel[m] * 1e3, rot[m] - pre_lvl, lw=0.8, color=C_RAW, label="raw", zorder=1)
-        ax.plot(rel[m] * 1e3, ys - pre_lvl, lw=1.8, color=C_SM,
+        ax.plot(rel[m] * 1e3, rot[m], lw=0.8, color=C_RAW, label="raw", zorder=1)
+        ax.plot(rel[m] * 1e3, ys, lw=1.8, color=C_SM,
                 label="smoothed (1 rev)", zorder=3)
 
-        ax.axhline(0.0, color=C_PRE, lw=1.4, ls="--", zorder=2,
+        ax.axhline(pre_lvl, color=C_PRE, lw=1.4, ls="--", zorder=2,
                    label="pre-cut tilt (mean)")
+        ax.set_ylim(bottom=0.0)
         lag, span = res["relu_lag_s"], res["relu_win_s"]
         rate = res["rate_relu_deg_s"]
-        sgn = 1.0
+        sgn, peak_dev = 1.0, None
         w_pk = (rel >= 0) & (rel <= SWING_MAX_S)
         if w_pk.sum():
             dev = (ys - pre_lvl)[(rel[m] >= 0) & (rel[m] <= SWING_MAX_S)]
             if dev.size:
-                sgn = 1.0 if dev[np.argmax(np.abs(dev))] > 0 else -1.0
-                ax.axhline(float(dev[np.argmax(np.abs(dev))]), color=C_POST, lw=1.4,
+                peak_dev = float(dev[np.argmax(np.abs(dev))])
+                sgn = 1.0 if peak_dev > 0 else -1.0
+                ax.axhline(pre_lvl + peak_dev, color=C_POST, lw=1.4,
                            ls="--", zorder=2, label="post-cut tilt (swing peak)")
 
         ax.axvline(0.0, color=C_CUT, lw=1.6, ls="--", zorder=4, label="A,C off")
         if np.isfinite(lag) and np.isfinite(span) and np.isfinite(rate):
             t0 = lag
-            xs = np.linspace(t0, t0 + span, 40)
-            ax.plot(xs * 1e3, sgn * rate * (xs - t0), lw=2.4, color=C_RAMP, zorder=5,
-                    label="fitted ramp")
+            # Stop the drawn line at the swing peak. The fitted slope is steeper than the
+            # chord across the ramp by design -- BUFFER_FRAC trims the shoulders and fits the
+            # middle -- so a line drawn over the ramp's full span climbs well above anything
+            # the robot did, which reads as a bad fit rather than as a deliberately trimmed
+            # one.
+            span_d = span
+            if peak_dev and abs(rate) > 0:
+                span_d = min(span, abs(peak_dev) / abs(rate))
+            xs = np.linspace(t0, t0 + span_d, 40)
+            ax.plot(xs * 1e3, pre_lvl + sgn * rate * (xs - t0), lw=2.4, color=C_RAMP,
+                    zorder=5, label="fitted ramp")
             ax.axvspan(0.0, max(t0, 0.0) * 1e3, color=C_CUT, alpha=0.10, zorder=0,
                        label="dead time")
             ax.annotate(f"{abs(rate):.0f} deg/s\ndead {lag*1e3:.0f} ms",
@@ -1489,7 +1666,7 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
         ax.grid(alpha=0.25, lw=0.5)
         ax.tick_params(labelsize=8)
         if k % ncol == 0:
-            ax.set_ylabel("azimuth from pre-cut (deg)", fontsize=9)
+            ax.set_ylabel("azimuth from pre-cut direction (deg)", fontsize=9)
         if k // ncol == nrow - 1:
             ax.set_xlabel("time from A,C off (ms)", fontsize=9)
     for k in range(n, nrow * ncol):
@@ -1502,10 +1679,17 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
             seen.add(b_); hh.append(a_); ll.append(b_)
     fig.legend(hh, ll, loc="lower center", ncol=len(ll), fontsize=9, frameon=False,
                bbox_to_anchor=(0.5, -0.01))
-    fig.suptitle("Alignment fit on one representative trial per drive frequency "
-                 "(median-rate trial, not an average)", fontsize=12)
+    if only_hz is not None:
+        rr = np.array([p_[5]["rate_relu_deg_s"] for p_ in picks], float)
+        fig.suptitle(f"{only_hz:g} Hz -- every repeat, alignment fit drawn "
+                     f"(n={len(picks)}, rate {np.median(rr):.0f} +- "
+                     f"{np.median(np.abs(rr - np.median(rr))):.0f} deg/s MAD)", fontsize=12)
+    else:
+        fig.suptitle("Alignment fit on one representative trial per drive frequency "
+                     "(median-rate trial, not an average)", fontsize=12)
     fig.tight_layout(rect=(0, 0.035, 1, 0.97))
-    out = Path(out_path or (root / "report" / "trial_fits.png"))
+    default = ("trial_fits.png" if only_hz is None else f"trials_{only_hz:03.0f}hz.png")
+    out = Path(out_path or (root / "report" / default))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -1514,28 +1698,19 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth"):
 
 
 def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
-    """Alignment rate against drive frequency: every repeat, coloured by frequency.
+    """Swing and alignment rate against drive frequency: every repeat, coloured by frequency.
 
-    Two panels because there are two defensible definitions of "rate" and they differ by a
-    near-constant factor, so they must never be mixed:
+    Left panel is the azimuthal swing $\\Delta\\theta_{az}$, right panel is the rate: the gradient of the
+    first steep ramp of at least JUMP_DEG after the coils drop, which is the operator's
+    definition and the only rate this module now reports. The two 10-90% metrics that used to
+    share this figure are gone -- the crossing chord on 2026-09-10, the least-squares slope
+    over the same band with it. Both were anchored on `amp`, the median over 4-6 s after the
+    cut, and the response does not settle there: it overshoots and swings back, so `amp`
+    could sit near the baseline or on the wrong side of it, and on a synthetic step with a
+    known answer the least-squares band read 17.1 deg/s against a true 50.0.
 
-    * **jump** -- the gradient of the first JUMP_DEG (10 deg) rise after the kill. This is
-      the headline rate. It is anchored in absolute degrees, so it neither dilutes when the
-      swing drifts on after the jump (30 and 50 Hz) nor vanishes when a 10-90% crossing
-      fails to resolve (60 and 70 Hz).
-    * **least squares** -- the gradient over the 10% to 90% band of the total swing, kept for
-      continuity. Formerly also a **chord** across that band, removed 2026-09-10: two noisy
-      samples reading the same flawed window the least-squares line already reads in full.
-      90% crossings. This is what the 2026-09-03 report used (verified against its own stored
-      values) and it is the conventional rise-time number.
-    * **least-squares** -- the gradient of a line fitted through every sample in that same
-      band. Same window, so equally objective, but it uses all ~40 samples instead of two
-      crossings that are each one noisy sample.
-
-    Measured across this campaign, the least-squares slope has the lower repeat-to-repeat MAD
-    at seven of eight frequencies (5.70 -> 1.24 deg/s at 20 Hz, 10.61 -> 4.18 at 40), and it
-    The jump gradient and the least-squares gradient are different measurements, not two
-    estimates of one number, and must never be mixed in a single series.
+    Points are jittered in x only, so a column's vertical spread is the real repeat-to-repeat
+    scatter at that frequency.
     """
 
     import matplotlib
@@ -1570,11 +1745,14 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
                        else rotation_from_baseline(t, axis, tk))
                 if rot is None:
                     continue
-                g = np.arange(POOL_FROM_S, POOL_TO_S, POOL_DT)
-                m = (t >= tk + POOL_FROM_S - 0.2) & (t <= tk + POOL_TO_S + 0.2)
-                y = _smooth(g, np.interp(g, t[m] - tk, rot[m]), rev_window(f))
-                y = y - np.median(y[g < 0])
-                gi = transient(g, y, np.zeros_like(g), 0.0, min_amp=0.0, spin_hz=f)
+                # On the take's OWN timebase, unsmoothed. Resampling to the 10 ms pooling
+                # grid and pre-smoothing with `rev_window` (0.25 s at every frequency) is
+                # what `campaign` used to do and it was removed there for the same reason:
+                # the boxcar is 3-6x wider than the 40-80 ms event, so it read gradients
+                # several times too low -- 85-200 deg/s here against the campaign's
+                # 355-1437 on the very same takes. `transient` does its own smoothing, one
+                # revolution wide, which is the narrowest window that still nulls the wobble.
+                gi = transient(t, rot, np.zeros_like(t), tk, min_amp=0.0, spin_hz=f)
                 if gi:
                     rows.append(gi)
         if rows:
@@ -1595,8 +1773,9 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
     # the constant. The least-squares column stays in `campaign.csv` for continuity with the
     # report, which used it.
     for ax, key, name, unit in (
-            (axes[0], "amp_deg", "Swing of the lean bearing", "swing (deg)"),
-            (axes[1], "rate_fit_deg_s", "Alignment rate (least-squares)", "rate (deg/s)")):
+            (axes[0], "amp_deg", "Azimuthal swing $\\Delta\\theta_{az}$", "$\\Delta\\theta_{az}$ (deg)"),
+            (axes[1], "rate_relu_deg_s", "Alignment rate (first steep ramp)",
+             "rate (deg/s)")):
         band = []
         for f in fs:
             amps = np.array([x["amp_deg"] for x in per[f]], float)
@@ -1629,7 +1808,7 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
             ax.plot(bx, bm, color="#4b5563", lw=1.6, alpha=0.75, zorder=2)
         _style(ax, name + "  (band = +-1 SD, modal repeats)", "drive frequency (Hz)", unit)
     axes[0].legend(frameon=False, fontsize=8, labelcolor=MUTED, loc="upper left", ncol=2)
-    fig.suptitle("How far the lean bearing swings when coils A and C are cut, and how fast",
+    fig.suptitle("Azimuthal swing $\\Delta\\theta_{az}$ when coils A and C are cut, and how fast",
                  fontsize=12.5, color=INK, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     out = Path(out_path or (root / "report" / "rate_scatter.png"))
@@ -1637,18 +1816,19 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
     fig.savefig(out, dpi=140, facecolor="white")
     plt.close(fig)
 
-    print(f"{'freq':>5} {'n':>3} | {'jump mean':>11} {'var':>9} {'sd':>7} "
-          f"| {'fit mean':>9} {'var':>9} {'sd':>7}")
+    print(f"{'freq':>5} {'n':>3} | {'swing':>7} {'sd':>6} "
+          f"| {'rate':>8} {'sd':>7} {'CV':>5} | {'dead ms':>7} {'sd':>5}")
     for f in fs:
         amps = np.array([x["amp_deg"] for x in per[f]], float)
         keep = np.abs(amps - np.median(amps)) <= MODAL_BAND_DEG
-        c = np.abs(np.array([x["rate_jump_deg_s"] for x in per[f]], float)[keep])
-        q = np.abs(np.array([x["rate_fit_deg_s"] for x in per[f]], float)[keep])
-        c, q = c[np.isfinite(c)], q[np.isfinite(q)]
-        cv = float(np.var(c, ddof=1)) if len(c) > 1 else float("nan")
-        qv = float(np.var(q, ddof=1)) if len(q) > 1 else float("nan")
-        print(f"{f:5.0f} {len(c):3d} | {c.mean():11.2f} {cv:9.2f} {np.sqrt(cv):7.2f} "
-              f"| {q.mean():9.2f} {qv:9.2f} {np.sqrt(qv):7.2f}")
+        a = amps[keep]
+        r = np.abs(np.array([x["rate_relu_deg_s"] for x in per[f]], float)[keep])
+        d = np.array([x["relu_lag_s"] for x in per[f]], float)[keep] * 1e3
+        r, d = r[np.isfinite(r)], d[np.isfinite(d)]
+        rs = float(np.std(r, ddof=1)) if len(r) > 1 else float("nan")
+        print(f"{f:5.0f} {len(r):3d} | {a.mean():7.2f} {a.std():6.2f} "
+              f"| {r.mean():8.1f} {rs:7.1f} {rs / max(r.mean(), 1e-9):5.2f} "
+              f"| {d.mean():7.1f} {d.std():5.1f}")
     print(f"\n-> {out}")
     return out
 
@@ -1884,6 +2064,8 @@ if __name__ == "__main__":
                     help="a campaign root: pooled angle with both rate fits drawn")
     ap.add_argument("--trials", default=None,
                     help="a campaign root: one representative trial per frequency, fit drawn")
+    ap.add_argument("--only-hz", type=float, default=None,
+                    help="with --trials: draw EVERY repeat at this one frequency instead")
     ap.add_argument("--scatter", default=None,
                     help="a campaign root: rate-vs-frequency scatter, coloured per frequency")
     ap.add_argument("--plot", action="store_true", help="tilt-vs-time png for one take")
@@ -1894,7 +2076,8 @@ if __name__ == "__main__":
         fit_figure(a.fits, out_path=a.out, which=a.which)
         sys.exit()
     if a.trials:
-        trial_panels(a.trials, out_path=a.out, which=a.which, metric=a.metric)
+        trial_panels(a.trials, out_path=a.out, which=a.which, metric=a.metric,
+                     only_hz=a.only_hz)
         sys.exit()
     if a.scatter:
         rate_scatter(a.scatter, out_path=a.out, which=a.which, metric=a.metric)

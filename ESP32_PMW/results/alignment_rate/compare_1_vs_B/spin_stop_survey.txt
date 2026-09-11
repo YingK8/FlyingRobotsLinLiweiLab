@@ -1,0 +1,28 @@
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+== design 1: rotor stop, s after the cut (inf = still spinning at the end of the hold)
+     10 Hz   0/22 stopped within the hold  []
+     20 Hz   0/16 stopped within the hold  []
+     30 Hz   0/10 stopped within the hold  []
+     40 Hz   0/14 stopped within the hold  []
+     50 Hz   0/10 stopped within the hold  []
+     60 Hz   0/10 stopped within the hold  []
+     70 Hz   0/ 5 stopped within the hold  []
+     80 Hz   0/ 5 stopped within the hold  []
+     90 Hz   0/ 5 stopped within the hold  []
+    100 Hz   0/ 5 stopped within the hold  []
+    110 Hz   0/ 5 stopped within the hold  []
+== design B: rotor stop, s after the cut (inf = still spinning at the end of the hold)
+     10 Hz   0/10 stopped within the hold  []
+     20 Hz   0/10 stopped within the hold  []
+     30 Hz   2/ 9 stopped within the hold  [13.2, 14.9]
+     40 Hz   3/ 9 stopped within the hold  [6.0, 9.3, 14.5]   BEFORE 6 s: ['2026-09-11_001935']
+     50 Hz   5/ 8 stopped within the hold  [7.3, 11.7, 12.8, 13.6, 14.1]
+     60 Hz   1/ 3 stopped within the hold  [9.3]
+     70 Hz   1/ 5 stopped within the hold  [11.6]
+  check 2026-09-11_001243: 9.3
+  check 2026-09-11_001935: 6.0
+  check 2026-09-11_002350: 16.2
+  check 2026-09-11_002719: 7.3
+  check 2026-09-11_003049: 11.7
+  check 2026-09-11_003756: 16.2

@@ -15,16 +15,16 @@ All commands run from the repo root, against `results/alignment_rate/20260909_20
 | `trials_0NNhz.png` | `alignment_rate.py --trials <root> --only-hz NN` — EVERY repeat at that frequency |
 | `rate_fits.png` | `alignment_rate.py --fits <root>` — a DIAGNOSTIC, not a result: what the same rule reads off the POOLED curve, against the per-repeat median |
 | `coupling.png` | `coupling.py <root>` — radial/azimuth shared lines and what deprojecting them does |
-| `settling.csv` | `alignment_rate.py --settle <root>` — per repeat: resting axes, settling time, rise time, precession |
+| `settling.csv` | `alignment_rate.py --settle <root>` — per repeat: resting axes, settling time, rise time, coning |
 | `settling_by_freq.csv` | same command — the per-frequency medians |
-| `axis_vs_time_0NNhz.png` | same command — settling, precession envelope, and the cone's shape, every repeat at that frequency |
-| `settle_vs_frequency.png` | same command — settling time, swing and precession against drive |
+| `axis_vs_time_0NNhz.png` | same command — settling, coning envelope, and the cone's shape, every repeat at that frequency |
+| `settle_vs_frequency.png` | same command — settling time, swing and coning against drive |
 | `settle_report.html` | `settle_report.py <root>` — the standalone report, every figure inlined |
 | `settle_step_response.png` | same command — one repeat marked: t_c, initial average, final average, ±10% band |
-| `settle_precession_overlay.png` | same command — the disc drawn precessing about its average axis, swing removed |
-| `settle_precession_time.png` | same command — the cone's own settling time and its fitted decay |
-| `settle_spiral.png` | same command — the residual coloured by time; the cone spiralling in |
-| `settle_envelope_heatmap.png` | same command — cone half-angle against time and drive |
+| `settle_coning_overlay.png` | same command — the disc drawn coning about its average axis, swing removed |
+| `settle_coning_time.png` | same command — the coning's own settling time and its fitted decay |
+| `settle_spiral.png` | same command — the residual coloured by time; the coning spiralling in |
+| `settle_envelope_heatmap.png` | same command — coning half-angle against time and drive |
 | `settle_metrics.png` | same command — rate, rise time and settling time side by side |
 
 ## Stale — do not read
@@ -82,21 +82,29 @@ scatter tightens: 70 Hz goes from 4 repeats to 5 and its rotation MAD from 28.17
 Full account in `control/theory.md` 24.11. **Numbers quoted from the pre-2026-09-10 table will
 differ in the fourth significant figure at 20/30/60 Hz and the second at 70.**
 
-## The cone has its own settling time (2026-09-10)
+## The coning has its own settling time (2026-09-10)
 
 `settling.csv` carries two settling times, and they answer different questions.
 
 * `settle_10pct_s` — how long the AXIS takes to arrive at its new attitude.
-* `prec_settle_s` — how long the CONE takes to stop ringing about it. The cone is a pulse
-  rather than a step, so the band is ±10% of the excursion (peak − final), not of a swing.
+* `cone_settle_s` — how long the CONING takes to stop ringing about it. The coning is a
+  pulse rather than a step, so the band is ±10% of the excursion (peak − final), not a swing.
 
-**The cone settles later than the axis at every frequency where both exist** — 2.41–3.25 s
+**The coning settles later than the axis at every frequency where both exist** — 2.41–3.25 s
 against 0.66–2.41 s. The robot arrives well before it stops wobbling.
 
-`prec_tau_s` is a fitted exponential decay constant, and it is reported because the band often
+`cone_tau_s` is a fitted exponential decay constant, and it is reported because the band often
 refuses where the fit does not: `DROP_MS` is 5 s and the envelope is still falling at the end
 of it, so **97 of 107 repeats give a τ against 50 that give a settling time**. τ runs
 0.64–1.38 s and is flat at ~1.2 s over 30–90 Hz.
+
+**Renamed 2026-09-10: coning, not precession.** What is measured sits at 1.00× the drive
+frequency at every frequency from 20 to 100 Hz, which is a body-fixed asymmetry carried round
+by the rotor — synchronous coning. `control/theory.md` 11.3's free precession is a *different*
+mode at a roughly constant ~1.2 Hz, and 24.10's 2–4 Hz line is a third, mechanical, tracking
+neither. Three frequencies, three modes; one word for all of them hid that. Columns are now
+`cone_*`. Argument in `control/theory.md` 25.10, and 25.11 on why the decomposition is only
+half an Euler transform.
 
 **Correction.** An earlier note here said the cut makes the coning worse. It excites it — the
 half-angle rises on 101 of 107 repeats, median 2.62° → 6.79° peak — but it then damps to a
@@ -107,7 +115,7 @@ Full account in `control/theory.md` 25.9.
 
 `--settle` (added 2026-09-10) does not measure the rate. It measures where the axis ENDS UP
 and how long until it stays there: the initial and final resting axes, the time to enter and
-remain in a ±10% band about the final one, the classical 10–90% rise time, and the precession
+remain in a ±10% band about the final one, the classical 10–90% rise time, and the coning
 cone about the running average axis. Full argument in `control/theory.md` 25.
 
 Three things to know before quoting it.

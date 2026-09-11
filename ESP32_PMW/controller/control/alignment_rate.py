@@ -8,7 +8,8 @@
 
 `--settle` answers a DIFFERENT question from the rest of this module: not how fast the lean
 starts, but where the axis ends up and how long until it stays there. Resting axes, a +-10%
-settling time, the 10-90% rise time, and the precession cone about the running average axis.
+settling time, the 10-90% rise time, and the SYNCHRONOUS CONING about the running average
+axis. On the naming, which is not cosmetic here, see theory.md 25.10.
 See theory.md 25, and read 25.1 before quoting any of the three timing numbers by name.
 
 Input is the `axis.csv` + `tilt_A/B.csv` layout that `pose/disc_axis.py` writes, plus the
@@ -67,9 +68,14 @@ KILL_RE = re.compile(r"^KILL_(\d+)HZ(?:_(\d+))?$")
 FREQ_RE = re.compile(r"^FREQ_(\d+)HZ$")
 DOWN_RE = re.compile(r"^DOWN_(\d+)HZ$")
 
-#: Rest window after a point's DOWN label: 4 s of down-ramp, then the carrier is cut for
-#: 10 s. Trimmed both ends so the spin-down and the next ramp stay out. Same numbers as
-#: `tilt_report.REST_FROM_S/REST_TO_S`, for the same reason.
+#: Rest window after a point's DOWN label: the down-ramp, then the carrier cut, then the
+#: coils-off tail. Trimmed both ends so the spin-down and the next ramp stay out. Same
+#: numbers as `tilt_report.REST_FROM_S/REST_TO_S`, for the same reason.
+#:
+#: The schedule these were sized against has changed twice and these numbers still hold, so
+#: do not re-derive them from the current `tilt_schedule` constants: they were 4 s of ramp
+#: then 10 s of carrier-off, and are now 0.1 s then 15 s (DOWN_MS, OFF_MS). The window sits
+#: inside both. What it must never do is start before the carrier is cut.
 REST_FROM_S, REST_TO_S = 5.0, 13.5
 #: Datum quality: over ~2 deg of RMS scatter and the robot was swinging on its wire.
 DATUM_MAX_SPREAD_DEG = 5.0
@@ -430,10 +436,10 @@ def dft(x, t, freqs):
 def deproject(azimuth, t, f_hz):
     """Remove the component of ``azimuth`` at ``f_hz`` -- least squares, not a filter.
 
-    A precessing axis puts the SAME frequency into both angles: the radial angle oscillates
-    at the precession rate and the azimuth carries it too. Subtracting the fitted sinusoid at
-    that one frequency leaves whatever the azimuth is doing that is NOT precession, without
-    the passband distortion a notch filter would add either side of it.
+    A coning axis puts the SAME frequency into both angles: the radial angle nods once per
+    cone and the azimuth carries the cone's phase too. Subtracting the fitted sinusoid at that
+    one frequency leaves whatever the azimuth is doing that is NOT the cone, without the
+    passband distortion a notch filter would add either side of it.
     """
 
     t = np.asarray(t, float)
@@ -575,7 +581,13 @@ def rev_window(spin_hz, target_s=SMOOTH_S):
     return n / float(spin_hz)
 
 
-def _smooth(t, y, span_s=SMOOTH_S, odd=False):
+#: Kernel used by `average_axis`. "box" is the shipped one and the only one with an EXACT
+#: null at the cone frequency (24.7). "gauss" exists to test whether a result depends on the
+#: kernel rather than on the robot -- see theory.md 25.12.
+SMOOTH_KERNEL = "box"
+
+
+def _smooth(t, y, span_s=SMOOTH_S, odd=False, kernel=None):
     """Box smoother with EDGE padding. ``odd=True`` centres it exactly; see the warning.
 
     `np.convolve(..., "same")` zero-pads, which drags the first half-window toward 0 --
@@ -588,6 +600,18 @@ def _smooth(t, y, span_s=SMOOTH_S, odd=False):
     delay (theory.md 25.3). That argument needs a true centre to sit on. At EVEN `k` the
     centre falls between two samples, and `pad = k // 2` then `[:len(y)]` leaves the output
     half a sample early -- ~2.4 ms at the 204 Hz stride-1 rate.
+
+    A GAUSSIAN IS AVAILABLE AND IS NOT THE DEFAULT. `kernel="gauss"` swaps in a Gaussian of
+    the same variance. It is symmetric too, so the zero-group-delay argument is unchanged, and
+    its sidelobes are far below a boxcar's -13 dB. What it does not have is a NULL: a boxcar of
+    a whole number of revolutions is exactly zero at the cone frequency and every harmonic
+    (24.7), and a Gaussian only attenuates. At THESE widths that distinction turns out not to
+    bite -- measured on a pure 40 Hz tone the boxcar leaves 3e-6 of it and the variance-matched
+    Gaussian 1e-5, because sigma spans about three cone periods and the attenuation is already
+    enormous. The boxcar still stays the default, since its null is exact rather than merely
+    large and does not depend on the width happening to be generous. The Gaussian is here as a
+    robustness test: if a result moves when the kernel does, it was the kernel, not the robot.
+    See theory.md 25.12.
 
     Forcing `k` odd fixes it, and `odd=True` does that. It is NOT the default, because it is
     not a free change: re-running `--campaign` with it moves `rate_mean_deg_s` at 60 Hz from
@@ -609,9 +633,21 @@ def _smooth(t, y, span_s=SMOOTH_S, odd=False):
     k = max(1, int(round(span_s / max(np.median(np.diff(t)), 1e-9))))
     if odd:
         k += 1 - k % 2
+    if (kernel or SMOOTH_KERNEL) == "gauss":
+        # Matched to the boxcar by VARIANCE -- a boxcar of width k has variance k^2/12 -- so
+        # the two blur the trace by the same amount and any difference between them is the
+        # kernel's SHAPE rather than its width. Truncated at 4 sigma, renormalised, odd by
+        # construction so the centring argument above still holds.
+        sd = k / np.sqrt(12.0)
+        half = max(int(round(4 * sd)), 1)
+        k = 2 * half + 1
+        w = np.exp(-0.5 * (np.arange(-half, half + 1) / max(sd, 1e-9)) ** 2)
+        w /= w.sum()
+    else:
+        w = np.ones(k) / k
     pad = k // 2
     yp = np.pad(np.asarray(y, float), pad, mode="edge")
-    return np.convolve(yp, np.ones(k) / k, mode="valid")[:len(y)]
+    return np.convolve(yp, w, mode="valid")[:len(y)]
 
 
 def relu_rate(ts, ys, t_kill, win_s):
@@ -1072,7 +1108,7 @@ def sweep_report(sweep_root, out_dir=None, solve=True, stride=3):
         if r["outcome"] != "ok":
             print(f"  skip {r['freq_hz']} Hz repeat {r['repeat']}: {r['outcome']}")
             continue
-        take = Path(r["flight"])
+        take = _take_or_die(r["flight"])
         if solve and not (take / "axis.csv").exists():
             print(f"  solving {take.name} ({r['freq_hz']} Hz repeat {r['repeat']})")
             disc_axis.solve(take, progress=False, stride=stride)
@@ -1113,6 +1149,9 @@ def sweep_report(sweep_root, out_dir=None, solve=True, stride=3):
 
 #: dataviz palette, validated for CVD separation in light mode.
 C_TILT, C_FIT, C_MARK = "#2f6fd0", "#e0721a", "#1a8f6a"
+#: The cut instant. Its own colour everywhere, because `t_c` is the one thing in these
+#: figures that is an EVENT rather than a fitted quantity (23.2).
+C_KILL = "#b4304a"
 INK, MUTED, GRID = "#1c1e21", "#6b7280", "#dfe3e8"
 
 
@@ -1341,15 +1380,18 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
     out.mkdir(parents=True, exist_ok=True)
     pooled, summary = {}, []
     all_pre, pre_by = [], {}
+    # One row per measured repeat, written beside campaign.csv. The medians there cannot say
+    # whether two campaigns DIFFER -- that needs the repeats themselves (compare_designs.py).
+    trial_rows = []
     skipped_nyquist = []
     for idx_path in sorted(root.glob("*/index.csv")):
         idx = [r for r in csv.DictReader(open(idx_path)) if r["outcome"] == "ok"]
         if not idx:
             continue
         f = float(idx[0]["freq_hz"])
-        curves, pre_tilts = [], []
+        curves, pre_tilts, curve_ids = [], [], []
         for r in idx:
-            take = Path(r["flight"])
+            take = _take_or_die(r["flight"])
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             t, axis, _q = load(take, which=which)
@@ -1389,6 +1431,7 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
                     pre_tilt = float(np.median(
                         tilt_from(orient_continuous(axis, ref_up), ref_up)[pre_m]))
                 curves.append((t[m] - tk, rot[m]))
+                curve_ids.append((take.name, r["repeat"]))
                 pre_tilts.append(pre_tilt)
         # Per-repeat measurements, so the spread across repeats is a SAMPLE VARIANCE of
         # independent trials rather than the standard error of one pooled curve. The two
@@ -1396,7 +1439,7 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
         # variance says how much the rig varies from run to run -- which is what tells you
         # whether five repeats was enough and whether a single flight can be trusted.
         per = []
-        for t_rel, rot in curves:
+        for (t_rel, rot), cid in zip(curves, curve_ids):
             grid_i = np.arange(POOL_FROM_S, POOL_TO_S, POOL_DT)
             if len(t_rel) < 10 or t_rel[0] > POOL_FROM_S or t_rel[-1] < POOL_TO_S:
                 continue
@@ -1410,6 +1453,7 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
             y = y - np.median(y[grid_i < 0])
             gi = transient(grid_i, y, np.zeros_like(grid_i), 0.0, min_amp=0.0, spin_hz=f)
             if gi:
+                gi["take"], gi["repeat"] = cid
                 per.append(gi)
 
         got = pool_transients(curves, spin_hz=f)
@@ -1430,6 +1474,10 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
         # 10 Hz variance up by four orders of magnitude once the metric became azimuth.
         keep = ((np.abs(amps - np.median(amps)) <= MODAL_BAND_DEG) if len(amps)
                 else np.array([], bool))
+        for x_, k_ in zip(per, keep):
+            trial_rows.append({"freq_hz": f, "repeat": x_["repeat"], "take": x_["take"],
+                               "rate_relu_deg_s": abs(float(x_.get("rate_relu_deg_s", np.nan))),
+                               "amp_deg": float(x_["amp_deg"]), "modal": bool(k_)})
         rates = np.abs(np.array([x["rate_jump_deg_s"] for x in per], float)[keep])
         rates = rates[np.isfinite(rates)]
         # The least-squares gradient over the same 10-90% band. Lower repeat-to-repeat
@@ -1518,6 +1566,8 @@ def campaign(root, out_dir=None, which=None, metric="azimuth"):
             n_bad = int(((pv < lo) | (pv > hi)).sum()) if len(pv) else 0
             srow["n_precondition_fail"] = n_bad
     _write(out / "campaign.csv", summary, list(summary[0]))
+    if trial_rows:
+        _write(out / "campaign_trials.csv", trial_rows, list(trial_rows[0]))
 
     cmap = plt.get_cmap("viridis")
     fs = sorted(pooled)
@@ -1649,7 +1699,7 @@ def trial_panels(root, out_path=None, which=None, metric="azimuth", only_hz=None
             continue
         cand = []
         for r in idx:
-            take = Path(r["flight"])
+            take = _take_or_die(r["flight"])
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             if not Path(r["log"]).exists():
@@ -1798,7 +1848,7 @@ def rate_scatter(root, out_path=None, which=None, metric="azimuth"):
         f = float(idx[0]["freq_hz"])
         rows = []
         for r in idx:
-            take = Path(r["flight"])
+            take = _take_or_die(r["flight"])
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             t, axis, _q = load(take, which=which)
@@ -1941,7 +1991,7 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
             continue
         curves, singles = [], []
         for r in idx:
-            take = Path(r["flight"])
+            take = _take_or_die(r["flight"])
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 continue
             t, axis, _q = load(take, which=which)
@@ -2040,7 +2090,7 @@ def fit_figure(root, out_path=None, which=None, freqs=None):
     return out
 
 
-# ---------------------------------------------------------------- settling and precession
+# ---------------------------------------------------------------- settling and coning
 #
 # A DIFFERENT QUESTION FROM THE ONE ABOVE. Everything before this point measures how fast the
 # lean STARTS -- `rate_relu_deg_s` is the gradient of the rising edge. This section measures
@@ -2184,7 +2234,7 @@ def average_axis(t, axis, cone_hz, mech_hz):
     """``(avg_unit_axis, valid_mask, span_s)``. The trajectory with both wobbles removed.
 
     This is the "average axis of rotation vs time" the settling time is read from, and the
-    thing precession is measured ABOUT. Two wobbles come out, by two DIFFERENT methods, and
+    thing the coning is measured ABOUT. Two wobbles come out, by two DIFFERENT methods, and
     the difference is the point:
 
     * the once-per-rev cone, by a centred boxcar of a whole number of rotor revolutions
@@ -2235,7 +2285,10 @@ def average_axis(t, axis, cone_hz, mech_hz):
             out[:, i] -= _fit_line_at(t, out[:, i] - trend, mech_hz)
     n = np.linalg.norm(out, axis=1)
     out = out / np.maximum(n, 1e-12)[:, None]
-    guard = 0.5 * span
+    # The guard follows the KERNEL, not just the span: a boxcar reaches half a span either
+    # side, a variance-matched Gaussian truncated at 4 sigma reaches 4/sqrt(12) = 1.155 of
+    # one. Guarding a Gaussian at the boxcar's width would let the edge-padded tails back in.
+    guard = (1.155 if SMOOTH_KERNEL == "gauss" else 0.5) * span
     valid = (t >= t[0] + guard) & (t <= t[-1] - guard) & (n > 1e-9)
     return out, valid, span
 
@@ -2262,11 +2315,24 @@ def _fit_line_at(t, y, f_hz):
     return A @ coef
 
 
-def precession(t, axis, avg, ref, cone_hz, window):
+def coning(t, axis, avg, ref, cone_hz, window):
     """Motion of the axis ABOUT its running average: how big, and is it a cone or a shake.
 
+    CALLED CONING AND NOT PRECESSION, DELIBERATELY
+    ----------------------------------------------
+    Measured, this sits at 1.00 x the drive frequency at every frequency from 20 to 100 Hz
+    (`cone_line`). `coupling.py` lists the three candidate rates and says the discriminator is
+    how the line scales with drive: synchronous coning tracks it 1:1, nutation at 1.65:1, and
+    the free precession pole of 11.3 is CONSTANT at about 1.2 Hz. A 1:1 line is the first of
+    those. It is a body-fixed asymmetry carried round by the rotor, not free precession.
+
+    So 11.3's precession is a different mode, at a different frequency, and this campaign has
+    not isolated it. The 2-4 Hz line of 24.10 is a third thing again -- mechanical, tracking
+    neither. Three separate frequencies, and calling this one "precession" merged two of them.
+    See theory.md 25.10.
+
     ``half_deg`` is the instantaneous angle between the axis and the average axis -- the cone
-    half-angle, and the "precession vs time" trace.
+    half-angle, and the "coning vs time" trace.
 
     ``(c1, c2)`` are the residual's components in the tangent plane of ``ref``, which is where
     20.7 established this motion should be read. A lock-in on ``c1 + i c2`` at ``cone_hz``
@@ -2297,8 +2363,8 @@ def precession(t, axis, avg, ref, cone_hz, window):
     return half, c1, c2, ratio
 
 
-def prec_envelope(t, c1, c2, cone_hz):
-    """RMS cone half-angle over one rotor revolution: the precession ENVELOPE vs time.
+def cone_envelope(t, c1, c2, cone_hz):
+    """RMS cone half-angle over one rotor revolution: the coning ENVELOPE vs time.
 
     The instantaneous half-angle is not a plottable trace -- it swings through the full cone
     once per revolution, so at 40 Hz over 14 repeats it is a solid block of ink and shows
@@ -2377,18 +2443,18 @@ def great_circle(avg, n_0, n_f):
             np.degrees(np.arcsin(np.clip(a @ b3, -1.0, 1.0))))
 
 
-#: Search window for the peak of the precession envelope after the cut. Measured, the peak
+#: Search window for the peak of the coning envelope after the cut. Measured, the peak
 #: lands at 0.13-0.38 s on the 40 Hz repeats, so 1.5 s is generous and still well clear of
 #: the settled window the final level is read from.
-PREC_PEAK_MAX_S = 1.5
+CONE_PEAK_MAX_S = 1.5
 
-#: Floor on the excursion (peak minus settled level) for a precession settling time to mean
+#: Floor on the excursion (peak minus settled level) for a coning settling time to mean
 #: anything. Below it the cut did not measurably excite the cone and there is no decay to
 #: time. Measured excursions at 40 Hz run 3.2-12.1 deg, so this refuses only the flat ones.
-MIN_PREC_EXC_DEG = 1.0
+MIN_CONE_EXC_DEG = 1.0
 
 
-def precession_settle(t, env, t_kill, t_stop, valid, span_s, band=SETTLE_BAND):
+def coning_settle(t, env, t_kill, t_stop, valid, span_s, band=SETTLE_BAND):
     """How long the CONE takes to stop ringing, as opposed to how long the axis takes to move.
 
     The axis metric times a step: one level, a cut, another level. This times a PULSE. The
@@ -2421,7 +2487,7 @@ def precession_settle(t, env, t_kill, t_stop, valid, span_s, band=SETTLE_BAND):
            "settle_s": float("nan"), "tau_s": float("nan"), "asym_deg": float("nan"),
            "note": ""}
     m = valid & (t >= t_kill) & (t <= t_stop)
-    pk = valid & (t >= t_kill) & (t <= t_kill + PREC_PEAK_MAX_S)
+    pk = valid & (t >= t_kill) & (t <= t_kill + CONE_PEAK_MAX_S)
     fin_m = valid & (t >= t_kill + FINAL_FROM_S) & (t <= t_stop)
     if m.sum() < 20 or pk.sum() < 10 or fin_m.sum() < 10:
         out["note"] = "post-kill window too short"
@@ -2432,9 +2498,9 @@ def precession_settle(t, env, t_kill, t_stop, valid, span_s, band=SETTLE_BAND):
     out["t_peak_s"] = float(t[pk][i] - t_kill)
     out["final_deg"] = float(np.median(env[fin_m]))
     exc = out["peak_deg"] - out["final_deg"]
-    if exc < MIN_PREC_EXC_DEG:
+    if exc < MIN_CONE_EXC_DEG:
         out["note"] = (f"the cut moved the cone by {exc:.2f} deg, under the "
-                       f"{MIN_PREC_EXC_DEG:.1f} deg floor -- no decay to time")
+                       f"{MIN_CONE_EXC_DEG:.1f} deg floor -- no decay to time")
         return out
 
     # Decay constant first: it is the number that survives an unfinished window.
@@ -2603,6 +2669,107 @@ def settling(t, delta, t_kill, t_stop, swing, span_s=0.0, band=SETTLE_BAND):
     return out
 
 
+#: ROTOR-STOPPED DETECTOR. `disc_axis` measures the axis from a DISC: a spinning rotor blurs into
+#: a filled ellipse, and the segmented mask nearly fills the ellipse fitted to it. A stopped
+#: rotor is four blades, which cover about half of it -- and the fit then returns an axis that
+#: means nothing. Measured 2026-09-11 on design B at 50 Hz, camera A: fill 0.89-0.93 while
+#: spinning, 0.47-0.51 once stopped. Design B's rotor stops 7-11 s into the 15 s drop hold on
+#: some takes, and before this detector those frames read as a 10-15 deg "late re-tilt".
+#: 0.7, not 0.75: camera B's segmentation switches between two shapes (fill 0.61 / 0.82 on
+#: take `002350`, a 0.74 ratio against its 0.82 level) and 0.75 sat right on that flicker.
+#: A real stop drops camera A to ~0.55 of its level, well clear.
+SPIN_FILL_FRAC = 0.7       #: stopped below this fraction of the camera's own spinning fill
+#: 0.5-8 s, not 0.5-5 s: take `001243` (40 Hz) solved no camera-A frames from 1 to 4 s, so the
+#: narrower window left camera A without a level and camera B alone (0.66 -> 0.50) never
+#: crossed -- a rotor plainly stopped at ~9 s read as never stopping. The 90th percentile keeps
+#: a stop inside the window from setting the level.
+SPIN_BASE_S = (0.5, 8.0)   #: seconds after the cut the spinning level is read from
+SPIN_HOLD_S = 1.0          #: and it has to stay below for this long -- a blink is not a stop
+SPIN_BIN_S = 0.1
+
+
+def spin_stop_from(t, fills, base=SPIN_BASE_S, frac=SPIN_FILL_FRAC, hold=SPIN_HOLD_S,
+                   bin_s=SPIN_BIN_S):
+    """Seconds after the cut at which the rotor stopped, or ``inf`` if it never did.
+
+    ``t`` is time from the cut; ``fills`` one array per camera on that base, NaN where the
+    frame did not solve. Each camera is compared with ITS OWN spinning level -- the 90th
+    percentile over ``base``, so a stop inside that window still leaves the spinning part to
+    set it -- because camera B's spinning fill differs take to take (0.6 or 0.8). The smaller
+    ratio of the two cameras decides, binned; stopped is the first bin from which every
+    finite bin for ``hold`` seconds sits below ``frac``.
+    """
+
+    t = np.asarray(t, float)
+    edges = np.arange(base[0], np.nanmax(t) + bin_s, bin_s)
+    per_cam = []
+    for fl in fills:
+        fl = np.asarray(fl, float)
+        mb = (t >= base[0]) & (t < base[1]) & np.isfinite(fl)
+        if mb.sum() < 10:
+            continue
+        ref = float(np.percentile(fl[mb], 90))
+        if ref <= 0:
+            continue
+        idx = np.digitize(t, edges) - 1
+        col = np.full(len(edges), np.nan)
+        for i in np.unique(idx[(idx >= 0) & (idx < len(edges)) & np.isfinite(fl)]):
+            col[i] = np.median(fl[(idx == i) & np.isfinite(fl)]) / ref
+        per_cam.append(col)
+    if not per_cam:
+        return float("inf")
+    with np.errstate(all="ignore"):
+        ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+    k = max(int(round(hold / bin_s)), 1)
+    for i in range(len(edges) - k + 1):
+        w = ratio[i:i + k]
+        w = w[np.isfinite(w)]
+        if len(w) >= k // 2 and np.all(w < frac):
+            return float(edges[i])
+    return float("inf")
+
+
+def spin_stop(take, t_kill):
+    """`spin_stop_from` on a solved take's `tilt_A.csv` / `tilt_B.csv`."""
+
+    fills, t_ref = [], None
+    for cam in "AB":
+        path = Path(take) / f"tilt_{cam}.csv"
+        if not path.exists():
+            continue
+        rows = list(csv.DictReader(open(path)))
+        if not rows:
+            continue
+        tt = np.array([float(r["t"]) for r in rows]) - t_kill
+        num = lambda k: np.array([float(r[k]) if r.get(k) not in ("", None) else np.nan
+                                  for r in rows])
+        area, d1, d2 = num("area_px"), num("d1"), num("d2")
+        with np.errstate(all="ignore"):
+            fl = area / (np.pi * d1 * d2 / 4.0)
+        if t_ref is None:
+            t_ref = tt
+            fills.append(fl)
+        else:
+            fills.append(np.interp(t_ref, tt, fl, left=np.nan, right=np.nan))
+    return spin_stop_from(t_ref, fills) if t_ref is not None else float("inf")
+
+
+def _take_or_die(flight):
+    """A take folder that does not exist is a missing DRIVE, not a missing measurement.
+
+    Design-B video lives on a USB stick that unmounted twice on 2026-09-11. Every loop here
+    used to treat an absent take like an unsolved one -- skip it, count it, carry on -- so a
+    dropout would pass as data: fewer repeats, more refusals, and a report that looks
+    finished. Stop instead, and say why.
+    """
+
+    take = Path(flight)
+    if not take.is_dir():
+        raise SystemExit(f"{take}: take folder not found -- is the drive holding the takes "
+                         f"mounted? Refusing to count it as an unusable take.")
+    return take
+
+
 def settle_take(take, log_path, freq_hz, which=None):
     """Every kill in one take, as settling rows. ``[]`` when the take cannot support one."""
 
@@ -2649,10 +2816,10 @@ def settle_take(take, log_path, freq_hz, which=None):
             swing = float(np.median(delta[pre]))
             got = settling(t, delta, tk, t_stop - guard, swing, span_s=span)
 
-            half, c1, c2, ratio = precession(t, a, avg, n_f, cone_hz, post & valid)
+            half, c1, c2, ratio = coning(t, a, avg, n_f, cone_hz, post & valid)
             prog, perp = great_circle(avg, n_0, n_f)
             band_s = _band_settle(t, prog, tk, t_stop - guard, valid)
-            ps = precession_settle(t, prec_envelope(t, c1, c2, cone_hz), tk,
+            ps = coning_settle(t, cone_envelope(t, c1, c2, cone_hz), tk,
                                    t_stop - guard, valid, span)
             r0, az0 = _polar(n_0, up)
             rf, azf = _polar(n_f, up)
@@ -2678,12 +2845,12 @@ def settle_take(take, log_path, freq_hz, which=None):
                 if np.isfinite(got["tail_max_deg"]) else "",
                 "tail_over_band": round(got["tail_max_deg"] / (SETTLE_BAND * swing), 3)
                 if np.isfinite(got["tail_max_deg"]) and swing > 0 else "",
-                "prec_pre_deg": round(float(np.median(half[pre])), 3),
-                "prec_peak_deg": _r(ps["peak_deg"]), "prec_t_peak_s": _r(ps["t_peak_s"], 4),
-                "prec_final_deg": _r(ps["final_deg"]), "prec_settle_s": _r(ps["settle_s"], 4),
-                "prec_tau_s": _r(ps["tau_s"], 4), "prec_asym_deg": _r(ps["asym_deg"]),
-                "prec_note": ps["note"],
-                "prec_post_deg": round(float(np.median(half[post & valid])), 3)
+                "cone_pre_deg": round(float(np.median(half[pre])), 3),
+                "cone_peak_deg": _r(ps["peak_deg"]), "cone_t_peak_s": _r(ps["t_peak_s"], 4),
+                "cone_final_deg": _r(ps["final_deg"]), "cone_settle_s": _r(ps["settle_s"], 4),
+                "cone_tau_s": _r(ps["tau_s"], 4), "cone_asym_deg": _r(ps["asym_deg"]),
+                "cone_note": ps["note"],
+                "cone_post_deg": round(float(np.median(half[post & valid])), 3)
                 if (post & valid).sum() else "",
                 "cone_hz": round(cone_hz, 2), "cone_amp_deg": round(cone_amp, 3)
                 if np.isfinite(cone_amp) else "", "cone_measured": int(cone_meas),
@@ -2691,10 +2858,22 @@ def settle_take(take, log_path, freq_hz, which=None):
                 "mech_hz": round(mech_hz, 3), "mech_measured": int(mech_meas),
                 "n_pre": n_ini, "n_post": n_fin, "note": got["note"],
                 # kept out of the CSV by `extrasaction="ignore"`, used by the figures
-                "_t": t - tk, "_delta": delta, "_env": prec_envelope(t, c1, c2, cone_hz),
+                "_t": t - tk, "_delta": delta, "_env": cone_envelope(t, c1, c2, cone_hz),
                 "_c1": c1, "_c2": c2, "_gc": great_circle(avg, n_0, n_f),
                 "_axis": a, "_avg": avg, "_n0": n_0, "_nf": n_f, "_up": up,
                 "_valid": valid, "_post": post, "_stop": t_stop - tk,
+                # The whole hold, to the DOWN label: 15 s on design B, 5 s on design 1. The
+                # settle METRICS stop at `_stop` (POST_TO_S) so the two campaigns stay
+                # comparable; `_delta` and `_env` are computed over the whole take, so a figure
+                # may draw them to here. `compare_designs.trace_stats` does.
+                "_end": p["t_end"] - tk,
+                # When the rotor stopped, s after the cut (inf = never, within the take). Past
+                # it the axis is not measured -- see `spin_stop_from`.
+                "_spin_end": (spin_ := spin_stop(take, tk)),
+                # The same instant as a column, "" = the rotor never stopped within the take.
+                # A repeat that stopped inside the settle window (before POST_TO_S) has no
+                # trustworthy settling time: `compare_designs.load_settle` drops it.
+                "spin_stop_s": round(spin_, 2) if np.isfinite(spin_) else "",
             })
     return rows
 
@@ -2704,11 +2883,11 @@ SETTLE_COLS = ["freq_hz", "take", "t_kill", "fs_hz", "swing_deg",
                "radial0_deg", "azim0_deg", "radialf_deg", "azimf_deg",
                "d_radial_deg", "d_azim_deg", "spread0_deg", "spreadf_deg",
                "settle_10pct_s", "settle_band_s", "perp_max_deg", "rise_1090_s", "t10_s", "t90_s", "tail_max_deg", "tail_over_band",
-               "prec_pre_deg", "prec_post_deg", "prec_peak_deg", "prec_t_peak_s",
-               "prec_final_deg", "prec_settle_s", "prec_tau_s", "prec_asym_deg",
-               "prec_note", "cone_hz", "cone_amp_deg",
+               "cone_pre_deg", "cone_post_deg", "cone_peak_deg", "cone_t_peak_s",
+               "cone_final_deg", "cone_settle_s", "cone_tau_s", "cone_asym_deg",
+               "cone_note", "cone_hz", "cone_amp_deg",
                "cone_measured", "circ_ratio", "mech_hz", "mech_measured",
-               "n_pre", "n_post", "note"]
+               "n_pre", "n_post", "note", "spin_stop_s"]
 
 
 def settle_rows(root, which=None, only_hz=None):
@@ -2729,7 +2908,7 @@ def settle_rows(root, which=None, only_hz=None):
         if only_hz is not None and abs(f - only_hz) > 0.01:
             continue
         for r in idx:
-            take = Path(r["flight"])
+            take = _take_or_die(r["flight"])
             if not (take / "axis.csv").exists() and not (take / "axis_minor.csv").exists():
                 skipped.append((f, take.name, "no axis.csv"))
                 continue
@@ -2748,7 +2927,7 @@ def settle_rows(root, which=None, only_hz=None):
 
 
 def settle_campaign(root, out_dir=None, which=None, only_hz=None):
-    """Settling time, resting axes and precession for every repeat in a campaign.
+    """Settling time, resting axes and coning for every repeat in a campaign.
 
     Per repeat, not pooled. The campaign README records that pooling reads 19% of the
     per-repeat rate and flattens the frequency dependence, because repeats do not share a
@@ -2802,12 +2981,12 @@ def _settle_by_freq(rows):
         s_med, s_mad, n_s = _med_mad([r["settle_10pct_s"] for r in g])
         r_med, r_mad, n_r = _med_mad([r["rise_1090_s"] for r in g])
         sw_med, sw_mad, _ = _med_mad([r["swing_deg"] for r in g])
-        pr_med, _, _ = _med_mad([r["prec_post_deg"] for r in g])
-        pp_med, _, _ = _med_mad([r["prec_pre_deg"] for r in g])
-        pk_med, _, _ = _med_mad([r["prec_peak_deg"] for r in g])
-        pf_med, _, _ = _med_mad([r["prec_final_deg"] for r in g])
-        pset_med, pset_mad, n_ps = _med_mad([r["prec_settle_s"] for r in g])
-        ptau_med, ptau_mad, n_pt = _med_mad([r["prec_tau_s"] for r in g])
+        pr_med, _, _ = _med_mad([r["cone_post_deg"] for r in g])
+        pp_med, _, _ = _med_mad([r["cone_pre_deg"] for r in g])
+        pk_med, _, _ = _med_mad([r["cone_peak_deg"] for r in g])
+        pf_med, _, _ = _med_mad([r["cone_final_deg"] for r in g])
+        pset_med, pset_mad, n_ps = _med_mad([r["cone_settle_s"] for r in g])
+        ptau_med, ptau_mad, n_pt = _med_mad([r["cone_tau_s"] for r in g])
         cz_med, _, _ = _med_mad([r["cone_hz"] for r in g])
         ci_med, _, _ = _med_mad([r["circ_ratio"] for r in g])
         mh_med, _, _ = _med_mad([r["mech_hz"] for r in g])
@@ -2821,12 +3000,12 @@ def _settle_by_freq(rows):
             "n_rise": n_r,
             "swing_med_deg": round(sw_med, 3), "swing_mad_deg": round(sw_mad, 3),
             "d_radial_med_deg": round(dr_med, 3), "d_azim_med_deg": round(da_med, 3),
-            "prec_pre_med_deg": round(pp_med, 3), "prec_post_med_deg": round(pr_med, 3),
-            "prec_peak_med_deg": round(pk_med, 3), "prec_final_med_deg": round(pf_med, 3),
-            "prec_settle_med_s": round(pset_med, 4), "prec_settle_mad_s": round(pset_mad, 4),
-            "n_prec_settled": n_ps,
-            "prec_tau_med_s": round(ptau_med, 4), "prec_tau_mad_s": round(ptau_mad, 4),
-            "n_prec_tau": n_pt,
+            "cone_pre_med_deg": round(pp_med, 3), "cone_post_med_deg": round(pr_med, 3),
+            "cone_peak_med_deg": round(pk_med, 3), "cone_final_med_deg": round(pf_med, 3),
+            "cone_settle_med_s": round(pset_med, 4), "cone_settle_mad_s": round(pset_mad, 4),
+            "n_cone_settled": n_ps,
+            "cone_tau_med_s": round(ptau_med, 4), "cone_tau_mad_s": round(ptau_mad, 4),
+            "n_cone_tau": n_pt,
             "cone_med_hz": round(cz_med, 2), "cone_over_drive": round(cz_med / f, 3),
             "circ_ratio_med": round(ci_med, 2), "mech_med_hz": round(mh_med, 3),
         })
@@ -2835,64 +3014,177 @@ def _settle_by_freq(rows):
 
 def _print_settle(per_freq):
     print(f"{'f':>5} {'n':>3} {'settled':>7} {'t_settle':>9} {'rise':>8} {'swing':>8} "
-          f"{'d_azim':>7} | {'pre':>5} {'peak':>5} {'final':>6} {'p_set':>7} {'p_tau':>6} "
-          f"{'n_tau':>5}")
+          f"{'d_azim':>7} | {'pre':>5} {'peak':>5} {'final':>6} {'c_set':>7} {'c_tau':>6} "
+          f"{'n_ctau':>6}")
     for r in per_freq:
         print(f"{r['freq_hz']:5.0f} {r['n_repeats']:3d} "
               f"{r['n_settled']:3d}/{r['n_repeats']:<3d} "
               f"{r['settle_10pct_med_s']:9.3f} {r['rise_1090_med_s']:8.3f} "
               f"{r['swing_med_deg']:8.2f} {r['d_azim_med_deg']:7.1f} | "
-              f"{r['prec_pre_med_deg']:5.2f} {r['prec_peak_med_deg']:5.2f} "
-              f"{r['prec_final_med_deg']:6.2f} {r['prec_settle_med_s']:7.3f} "
-              f"{r['prec_tau_med_s']:6.3f} {r['n_prec_tau']:3d}/{r['n_repeats']:<3d}")
+              f"{r['cone_pre_med_deg']:5.2f} {r['cone_peak_med_deg']:5.2f} "
+              f"{r['cone_final_med_deg']:6.2f} {r['cone_settle_med_s']:7.3f} "
+              f"{r['cone_tau_med_s']:6.3f} {r['n_cone_tau']:3d}/{r['n_repeats']:<3d}")
 
 
 def _settle_figure(rows, freq_hz, path):
-    """Three panels: the average axis settling, the precession about it, and its shape."""
+    """One frequency, four panels: the approach, the coning, its shape, and every repeat.
+
+    WHAT WAS WRONG WITH THE THREE-PANEL VERSION
+    -------------------------------------------
+    Three things, all of which made a real result harder to read rather than easier.
+
+    * **The y-axis was in degrees and the repeats do not share a swing.** At 40 Hz two takes
+      flew a different hold and swing 49 deg against twelve at 11.5 (the campaign README's
+      caveat), so the outliers set the scale and the population being measured was squashed
+      into the bottom fifth of the panel. The approach is now plotted as a FRACTION of each
+      repeat's OWN swing, which is the quantity the band is a fraction of anyway.
+    * **The band was drawn at 10% of the MEDIAN swing**, one line for repeats whose swings
+      differ four-fold, so it was the threshold for none of them. Normalised, the band is
+      exactly 0.10 for every repeat and the line means what it says.
+    * **Refused repeats were drawn identically to settled ones.** Half the repeats at some
+      frequencies report no settling time, and a reader could not see which or why.
+
+    The fourth panel is new and is the one that answers "how consistent was this frequency":
+    every repeat, both its settling times, and the refusals marked rather than omitted.
+    """
 
     import matplotlib.pyplot as plt
 
-    fig, axs = plt.subplots(3, 1, figsize=(9.5, 11.5), facecolor="white")
-    band = 100 * SETTLE_BAND
-
-    ax = axs[0]
-    for r in rows:
-        m = r["_valid"] & (r["_t"] >= -PRE_S) & (r["_t"] <= r["_stop"])
-        ax.plot(r["_t"][m], r["_delta"][m], color=C_TILT, lw=0.8, alpha=0.45)
-        if r["settle_10pct_s"] != "":
-            ax.plot([r["settle_10pct_s"]], [SETTLE_BAND * r["swing_deg"]],
-                    "o", color=C_MARK, ms=4, zorder=5)
+    fig, axs = plt.subplots(2, 2, figsize=(14.5, 9.6), facecolor="white")
     sw = float(np.median([r["swing_deg"] for r in rows]))
-    ax.axhline(SETTLE_BAND * sw, color=C_FIT, lw=1.4, ls="--",
-               label=f"{band:.0f}% of the median swing ({sw:.1f} deg)")
-    ax.axvline(0.0, color=MUTED, lw=1.0)
-    ax.legend(frameon=False, fontsize=8.5, labelcolor=MUTED)
-    _style(ax, f"{freq_hz:.0f} Hz  -- angle from the AVERAGE axis to the final resting axis"
-                f"  (dots: settling time, n={len(rows)})",
-           "time from the cut (s)", "angle to final axis (deg)")
+    swings = np.array([float(r["swing_deg"]) for r in rows])
+    spread = float(np.median(np.abs(swings - sw))) / max(sw, 1e-9)
+    n_set = sum(1 for r in rows if r["settle_10pct_s"] != "")
 
-    ax = axs[1]
+    # ---- A: the approach, each repeat against its OWN swing
+    ax = axs[0][0]
+    # Shaded from 0, not from -10%: Delta is an unsigned distance to the final axis, so the
+    # lower half of a "+-10%" band is unreachable by construction (25.2). Drawing it would
+    # suggest the trace could go there.
+    ax.axhspan(0.0, SETTLE_BAND, color=C_FIT, alpha=0.12, zorder=1)
+    ax.axhline(SETTLE_BAND, color=C_FIT, lw=1.3, ls="--", zorder=2)
+    ax.axhline(0.0, color=C_MARK, lw=1.6, zorder=2)
+    ax.axhline(1.0, color=MUTED, lw=1.3, zorder=2)
     for r in rows:
         m = r["_valid"] & (r["_t"] >= -PRE_S) & (r["_t"] <= r["_stop"])
-        ax.plot(r["_t"][m], r["_env"][m], color=C_TILT, lw=0.9, alpha=0.5)
-    ax.axvline(0.0, color=MUTED, lw=1.0)
-    _style(ax, "precession about that average axis -- RMS cone half-angle over one rev",
+        done = r["settle_10pct_s"] != ""
+        ax.plot(r["_t"][m], r["_delta"][m] / max(float(r["swing_deg"]), 1e-9),
+                color=C_TILT if done else MUTED, lw=0.9 if done else 0.7,
+                alpha=0.55 if done else 0.30, ls="-" if done else (0, (3, 2)), zorder=4)
+        if done:
+            ax.plot([float(r["settle_10pct_s"])], [SETTLE_BAND], "o", color=C_MARK,
+                    ms=4.5, zorder=6)
+    ax.axvline(0.0, color=C_KILL, lw=1.7, zorder=3)
+    ax.set_ylim(-0.30, 1.42)
+    # Placed in the gaps rather than on the lines: the traces live at 1.0 before the cut and
+    # under 0.2 after it, so the labels go above the first and below the second.
+    ax.annotate("initial resting axis", (0.5 * rows[0]["_stop"], 1.0), xytext=(0, 8),
+                textcoords="offset points", color=MUTED, fontsize=8.5, ha="center")
+    ax.annotate("final resting axis", (rows[0]["_stop"], 0.0), xytext=(-4, -14),
+                textcoords="offset points", color=C_MARK, fontsize=8.5, ha="right")
+    ax.annotate(f"settled band — within {100 * SETTLE_BAND:.0f}% of the swing",
+                (rows[0]["_stop"], SETTLE_BAND), xytext=(-4, 6),
+                textcoords="offset points", color=C_FIT, fontsize=8.5, ha="right")
+    ax.annotate("$t_c$", (0.0, 1.33), xytext=(5, 0), textcoords="offset points",
+                color=C_KILL, fontsize=10.5, fontweight="bold")
+    two = "  ·  TWO POPULATIONS, see the README" if spread > 0.3 else ""
+    _style(ax, f"{freq_hz:.0f} Hz — approach to the final axis, as a fraction of each "
+               f"repeat's own swing\n{n_set} of {len(rows)} settled (dots); refused are "
+               f"dashed grey  ·  median swing {sw:.1f}°{two}",
+           "time from the cut (s)", "Δ to final axis / swing")
+
+    # ---- B: the coning envelope, with the median drawn over it
+    ax = axs[0][1]
+    grid = np.arange(-PRE_S, max(r["_stop"] for r in rows), 0.02)
+    # A robust upper limit, computed first because the corner annotation reports it. At 10 Hz
+    # two takes reach 30 deg against a median of 3, and on a full-range axis the median --
+    # the line this panel exists to show -- is a flat smear along the bottom. Clipped at the
+    # 98th percentile, and both title and annotation say so rather than letting a reader
+    # assume the axis holds everything.
+    allv = np.concatenate([r["_env"][r["_valid"]] for r in rows])
+    hi = float(np.percentile(allv, 98)) * 1.12
+    clipped = int((allv > hi).sum())
+    stack = []
+    for r in rows:
+        m = r["_valid"] & (r["_t"] >= -PRE_S) & (r["_t"] <= r["_stop"])
+        ax.plot(r["_t"][m], r["_env"][m], color=C_TILT, lw=0.7, alpha=0.30, zorder=3)
+        if m.sum() > 50:
+            stack.append(np.interp(grid, r["_t"][m], r["_env"][m],
+                                   left=np.nan, right=np.nan))
+    if stack:
+        med = np.nanmedian(np.vstack(stack), axis=0)
+        ax.plot(grid, med, color=C_TILT, lw=2.2, zorder=5, label="median over repeats")
+        fin = [float(r["cone_final_deg"]) for r in rows if r["cone_final_deg"] != ""]
+        pk = [float(r["cone_peak_deg"]) for r in rows if r["cone_peak_deg"] != ""]
+        if fin and pk:
+            f0, p0 = float(np.median(fin)), float(np.median(pk))
+            b = SETTLE_BAND * (p0 - f0)
+            ax.axhspan(f0 - b, f0 + b, color=C_FIT, alpha=0.10, zorder=1)
+            ax.axhline(f0, color=C_MARK, lw=1.5, zorder=2)
+            ax.text(0.985, 0.80,
+                    f"peak {p0:.2f}°   settled {f0:.2f}°   band ±{b:.2f}°"
+                    + (f"\n{clipped} samples above the clip" if clipped else ""),
+                    transform=ax.transAxes, ha="right", va="top", color=C_MARK,
+                    fontsize=8.5)
+        ax.legend(frameon=False, fontsize=8.5, labelcolor=MUTED, loc="upper right")
+    ax.axvline(0.0, color=C_KILL, lw=1.7, zorder=4)
+    if hi > 0:
+        ax.set_ylim(0.0, hi)
+    _style(ax, "synchronous coning about that average axis — RMS half-angle over one rev\n"
+               "excited by the cut, then damped"
+               + ("  ·  y clipped at p98" if clipped else ""),
            "time from the cut (s)", "half-angle (deg)")
 
-    ax = axs[2]
-    rep = max(rows, key=lambda r: (r["_post"] & r["_valid"]).sum())
-    lc = spiral(ax, rep)
+    # ---- C: the shape of that coning, for the repeat with the most usable samples
+    ax = axs[1][0]
+    # Settled repeats first: at 10 Hz, picking purely on sample count drew a take that had
+    # been refused, which is the one trace a reader should not take as representative.
+    pool = [r for r in rows if r["settle_10pct_s"] != ""] or rows
+    rep = max(pool, key=lambda r: (r["_post"] & r["_valid"]).sum())
+    lc = spiral(ax, rep, title=f"the coning spiralling in — {rep['take'].split('_')[-1]}, "
+                              f"circ:linear {rep['circ_ratio']}")
     if lc is not None:
         cb = fig.colorbar(lc, ax=ax, pad=0.02)
         cb.set_label("time from the cut (s)", color=MUTED, fontsize=9)
         cb.ax.tick_params(colors=MUTED, labelsize=8)
 
+    # ---- D: every repeat, both clocks, refusals included
+    ax = axs[1][1]
+    order = sorted(rows, key=lambda r: (float(r["settle_10pct_s"])
+                                        if r["settle_10pct_s"] != "" else 1e9))
+    stop = float(np.median([r["_stop"] for r in rows]))
+    for i, r in enumerate(order):
+        a = r["settle_10pct_s"]
+        c = r["cone_settle_s"]
+        if a != "":
+            ax.plot([0, float(a)], [i, i], color=C_TILT, lw=1.2, alpha=0.55, zorder=2)
+            ax.plot([float(a)], [i], "o", color=C_TILT, ms=6, zorder=4)
+        else:
+            ax.plot([0, stop], [i, i], color=MUTED, lw=0.8, alpha=0.30,
+                    ls=(0, (3, 2)), zorder=2)
+            ax.plot([stop], [i], "x", color=MUTED, ms=6, zorder=4)
+        if c != "":
+            ax.plot([float(c)], [i], "D", color=C_KILL, ms=5, zorder=5)
+    ax.set_yticks(range(len(order)))
+    ax.set_yticklabels([r["take"].split("_")[-1] for r in order], fontsize=7.5)
+    ax.set_ylim(-0.8, len(order) - 0.2)
+    ax.invert_yaxis()
+    ax.plot([], [], "o", color=C_TILT, ms=6, label="axis settled")
+    ax.plot([], [], "D", color=C_KILL, ms=5, label="coning settled")
+    ax.plot([], [], "x", color=MUTED, ms=6, label="refused — see settling.csv")
+    # Upper right: rows are sorted fastest-first and the axis is inverted, so that corner is
+    # the one place guaranteed to be empty.
+    ax.legend(frameon=False, fontsize=8, labelcolor=MUTED, loc="upper right")
+    _style(ax, "every repeat, both clocks — sorted by axis settling time\n"
+               "refusals kept in view rather than dropped",
+           "time from the cut (s)", "take")
+
     fig.tight_layout()
-    fig.savefig(path, dpi=170, facecolor="white")
+    fig.savefig(path, dpi=165, facecolor="white")
     plt.close(fig)
 
 
-def spiral(ax, rep, t_from=0.0, t_to=None, cmap="viridis"):
+def spiral(ax, rep, t_from=0.0, t_to=None, cmap="viridis", title=None):
     """The residual in the tangent plane, coloured by TIME. The cone decaying, as a spiral.
 
     Plotted as a plain line this is a disc of ink: several hundred revolutions overdrawn, and
@@ -2921,8 +3213,9 @@ def spiral(ax, rep, t_from=0.0, t_to=None, cmap="viridis"):
     ax.set_xlim(-lim, lim)
     ax.set_ylim(-lim, lim)
     ax.set_aspect("equal")
-    _style(ax, f"residual in the tangent plane, coloured by time — the cone spiralling in\n"
-               f"circ:linear {rep['circ_ratio']}, cone {rep['cone_hz']} Hz",
+    _style(ax, title if title is not None else
+           (f"residual in the tangent plane, coloured by time — the coning spiralling in\n"
+            f"circ:linear {rep['circ_ratio']}, cone {rep['cone_hz']} Hz"),
            "e1 (deg)", "e2 (deg)")
     return lc
 
@@ -2948,12 +3241,12 @@ def _settle_vs_frequency(per_freq, path):
                     fmt="o-", color=C_FIT, ms=4, lw=1.2, capsize=3)
     _style(axs[1], "swing: initial to final resting axis",
            "drive frequency (Hz)", "median +- MAD (deg)")
-    axs[2].plot(f, [r["prec_post_med_deg"] for r in per_freq], "o-",
+    axs[2].plot(f, [r["cone_post_med_deg"] for r in per_freq], "o-",
                 color=C_MARK, ms=4, lw=1.2, label="after the cut")
-    axs[2].plot(f, [r["prec_pre_med_deg"] for r in per_freq], "o--",
+    axs[2].plot(f, [r["cone_pre_med_deg"] for r in per_freq], "o--",
                 color=MUTED, ms=4, lw=1.0, label="before")
     axs[2].legend(frameon=False, fontsize=8.5, labelcolor=MUTED)
-    _style(axs[2], "precession half-angle about the average axis",
+    _style(axs[2], "coning half-angle about the average axis",
            "drive frequency (Hz)", "median (deg)")
     fig.tight_layout()
     fig.savefig(path, dpi=150, facecolor="white")
@@ -2961,7 +3254,8 @@ def _settle_vs_frequency(per_freq, path):
 
 
 def _style(ax, title, xl, yl):
-    ax.set_title(title, fontsize=11.5, color=INK, loc="left")
+    if title:
+        ax.set_title(title, fontsize=11.5, color=INK, loc="left")
     ax.set_xlabel(xl, fontsize=9.5, color=MUTED)
     ax.set_ylabel(yl, fontsize=9.5, color=MUTED)
     ax.grid(True, color=GRID, lw=0.7)
@@ -3086,6 +3380,24 @@ def _self_check():
     assert "extrapolation" in rs.get("note", ""), rs
 
     _settle_self_check()
+    # rotor-stop detector: a camera that falls from 0.9 to 0.5 fill at +8 s is stopped there;
+    # one that stays at its own (low) spinning level is not; a 0.3 s blink is not a stop
+    tt = np.arange(-1.0, 15.0, 0.005)
+    fa = np.where(tt < 8.0, 0.9, 0.5)
+    fb = np.full(tt.shape, 0.6)
+    assert abs(spin_stop_from(tt, [fa, fb]) - 8.0) < 0.15, spin_stop_from(tt, [fa, fb])
+    assert spin_stop_from(tt, [np.full(tt.shape, 0.9), fb]) == float("inf")
+    blink = np.where((tt > 9.0) & (tt < 9.3), 0.4, 0.9)
+    assert spin_stop_from(tt, [blink, fb]) == float("inf")
+
+    # a missing take folder stops the run instead of reading as an unusable take
+    try:
+        _take_or_die("/nonexistent/volume/2026-01-01_000000")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("a missing take folder must stop the run")
+
     print("alignment_rate: self-check passed (tau, rate, no-response, kill finder, sigma, "
           "settling, zero-delay, cone)")
 
@@ -3100,7 +3412,7 @@ def _settle_self_check():
 
     # A known axis: n0 -> nf as a settling exponential, plus a circular cone at cone_f and a
     # smaller circular one at the mechanical rate. Both wobbles are put in the tangent plane
-    # of nf, which is where `precession` reads them.
+    # of nf, which is where `coning` reads them.
     n0 = np.array([0.20, -0.10, -0.974]); n0 /= np.linalg.norm(n0)
     nf = np.array([0.05, 0.18, -0.982]); nf /= np.linalg.norm(nf)
     swing_true = float(np.degrees(np.arccos(np.clip(n0 @ nf, -1, 1))))
@@ -3178,12 +3490,12 @@ def _settle_self_check():
 
     # Circular vs linear, told apart by the lock-in and not by eye.
     post = (t >= tk) & (t <= tk + 5.0) & valid
-    _h, _c1, _c2, ratio = precession(t, axis, avg, nf, f_cone, post)
+    _h, _c1, _c2, ratio = coning(t, axis, avg, nf, f_cone, post)
     assert ratio > 5.0, ("a circular cone must lock in on one sense", ratio)
     lin = base + np.radians(cone_deg) * np.cos(2 * np.pi * cone_f * t)[:, None] * e1
     lin /= np.linalg.norm(lin, axis=1)[:, None]
     avg_l, val_l, _ = average_axis(t, lin, f_cone, mech_f)
-    _h, _c1, _c2, ratio_l = precession(t, lin, avg_l, nf, f_cone,
+    _h, _c1, _c2, ratio_l = coning(t, lin, avg_l, nf, f_cone,
                                        (t >= tk) & (t <= tk + 5.0) & val_l)
     assert ratio_l < 2.0, ("a linear wobble must split evenly", ratio_l)
 
@@ -3216,7 +3528,7 @@ def _settle_self_check():
     md = t >= tk
     env[md] = fin_p + (pk_p - fin_p) * np.exp(-(t[md] - tk) / tau_p)
     val = np.ones_like(t, dtype=bool)
-    got = precession_settle(t, env, tk, tk + 11.0, val, 0.25)
+    got = coning_settle(t, env, tk, tk + 11.0, val, 0.25)
     assert abs(got["peak_deg"] - pk_p) < 0.05, got
     assert abs(got["final_deg"] - fin_p) < 0.05, got
     assert abs(got["tau_s"] - tau_p) < 0.08, got
@@ -3228,13 +3540,13 @@ def _settle_self_check():
     # return tau -- which is the whole reason tau is reported. 5 s against tau = 4 s.
     env2 = np.full_like(t, pre_p)
     env2[md] = fin_p + (pk_p - fin_p) * np.exp(-(t[md] - tk) / 4.0)
-    g2 = precession_settle(t, env2, tk, tk + 5.0, val, 0.25)
+    g2 = coning_settle(t, env2, tk, tk + 5.0, val, 0.25)
     assert not np.isfinite(g2["settle_s"]), g2
     assert "still decaying" in g2["note"], g2
     assert np.isfinite(g2["tau_s"]) and abs(g2["tau_s"] - 4.0) < 1.0, g2
 
     # A cut that does not move the cone has no decay to time.
-    g3 = precession_settle(t, np.full_like(t, 4.0) + rng.normal(0, 0.01, t.shape),
+    g3 = coning_settle(t, np.full_like(t, 4.0) + rng.normal(0, 0.01, t.shape),
                            tk, tk + 5.0, val, 0.25)
     assert not np.isfinite(g3["settle_s"]) and "floor" in g3["note"], g3
 
@@ -3258,7 +3570,7 @@ if __name__ == "__main__":
     # exists if it is resolved; `disc_axis.solve` was fixed to 1 and this was missed.
     ap.add_argument("--stride", type=int, default=1, help="solve every Nth frame (--sweep)")
     ap.add_argument("--settle", default=None,
-                    help="a campaign root: resting axes, settling time and precession")
+                    help="a campaign root: resting axes, settling time and coning")
     ap.add_argument("--campaign", default=None,
                     help="a results/alignment_rate/<stamp> root: pool every chunk")
     ap.add_argument("--which", default=None, choices=("minor", "conic"))

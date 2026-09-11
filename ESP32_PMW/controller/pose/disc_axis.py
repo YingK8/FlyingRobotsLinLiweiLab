@@ -313,11 +313,20 @@ def solve(take_dir, out_dir=None, rig_path=None, progress=True, stride=1):
     if abs(scale - 1.0) > 1e-6:
         print(f"rig calibrated at {calib[0]}x{calib[1]}, video {w}x{h} -- scaled {scale:.4f}x")
 
-    fm = open(out / "axis_minor.csv", "w", newline="")
+    # Written under `.partial` names and renamed only after the whole take is solved. Every
+    # reader (`alignment_rate.campaign`, `rate_scatter`, `sweep_report`, `settle_rows`)
+    # decides "solved" by `axis.csv` EXISTING, and the `finally` below closes the files even
+    # on an exception -- so writing the final names directly let a solve in progress, or one
+    # that crashed, pass as finished. On 2026-09-11 `campaign` read an in-flight take's
+    # still-empty axis.csv and died on `rows[0]`; a half-written one would have been worse,
+    # silently analysed as a truncated take.
+    names = ["axis_minor.csv", "axis.csv", "tilt_A.csv", "tilt_B.csv"]
+    part = {n: out / (n + ".partial") for n in names}
+    fm = open(part["axis_minor.csv"], "w", newline="")
     wm = csv.writer(fm)
     wm.writerow(MINOR_COLS)
-    fa = open(out / "axis.csv", "w", newline="")
-    fv = [open(out / f"tilt_{t}.csv", "w", newline="") for t in "AB"]
+    fa = open(part["axis.csv"], "w", newline="")
+    fv = [open(part[f"tilt_{t}.csv"], "w", newline="") for t in "AB"]
     wa, wv = csv.writer(fa), [csv.writer(f) for f in fv]
     wa.writerow(AXIS_COLS)
     for x in wv:
@@ -376,6 +385,10 @@ def solve(take_dir, out_dir=None, rig_path=None, progress=True, stride=1):
         fm.close()
         for f in fv:
             f.close()
+    # Reached only when the loop finished: an exception skips this and leaves `.partial`.
+    # `axis.csv` last, since it is the name every reader tests.
+    for n in [x for x in names if x != "axis.csv"] + ["axis.csv"]:
+        part[n].replace(out / n)
 
     print(f"{take_dir.name}: {n_axis}/{n_frame} frames solved -> {out}")
     return out

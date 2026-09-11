@@ -1,0 +1,11 @@
+freq_hz,repeat,outcome,flight,log,heat_c,telemetry_samples
+30.0,1,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235039,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235039_droneB/sweep.log,1.551,75
+30.0,2,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235201,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235201_droneB/sweep.log,1.149,75
+30.0,3,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235322,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235322_droneB/sweep.log,1.082,75
+30.0,4,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235441,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235441_droneB/sweep.log,1.166,75
+30.0,5,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235603,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235603_droneB/sweep.log,1.141,75
+30.0,6,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235725,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235725_droneB/sweep.log,1.031,75
+30.0,7,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_235854,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_235854_droneB/sweep.log,1.234,75
+30.0,8,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-11_000015,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260911_000015_droneB/sweep.log,1.112,75
+30.0,9,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-11_000135,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260911_000135_droneB/sweep.log,1.067,75
+30.0,10,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-11_000256,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260911_000256_droneB/sweep.log,1.093,75

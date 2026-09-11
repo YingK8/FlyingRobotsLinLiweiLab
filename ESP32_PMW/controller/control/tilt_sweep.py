@@ -77,7 +77,7 @@ SCHEDULE_DRIVE_S = 340.5
 
 def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=True,
         indices=None, timeout_s=560.0, ignore_thermal=False, drone=None,
-        drive_s=None):
+        drive_s=None, out_root=None):
     """Reset the board, film the schedule, stop when it says `TILT_OFF`.
 
     Returns ``(flight_dir, log_path)``. Both are needed by `stills`, and both are
@@ -127,7 +127,10 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
     stamp = time.strftime("%Y%m%d_%H%M%S") + (f"_drone{drone}" if drone else "")
     log_path = OUT_DIR / stamp / "sweep.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    fw = record.FlightWriter(record.DEFAULT_DIR, tags, fps,
+    # `out_root` films somewhere other than the internal disk -- an external drive for a
+    # long campaign. `index.csv` records ABSOLUTE flight paths, so the analysis follows it
+    # automatically, and breaks visibly if the drive is unplugged.
+    fw = record.FlightWriter(Path(out_root) if out_root else record.DEFAULT_DIR, tags, fps,
                              meta={"source": "control.tilt_sweep", "schedule": "tilt.json",
                                    "drone": drone,
                                    "camera_indices": idx, "rotate180": bool(rotate180)})
@@ -200,6 +203,10 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
     return flight, log_path, outcome
 
 
+#: esptool attempts before `park` gives up and asks for GPIO14. See the loop in `park`.
+PARK_TRIES = 4
+
+
 def park(port="/dev/cu.SLAB_USBtoUART"):
     """Reset the ESP32 into the ROM bootloader and leave it there: app off, coils off.
 
@@ -214,11 +221,22 @@ def park(port="/dev/cu.SLAB_USBtoUART"):
            str(home / ".platformio/packages/tool-esptoolpy/esptool.py"),
            "--chip", "esp32", "--port", port,
            "--before", "default_reset", "--after", "no_reset", "chip_id"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    ok = "Staying in bootloader" in r.stdout
-    print("[coils] board parked in the bootloader, app not running" if ok else
-          f"[coils] PARK FAILED -- press GPIO14 NOW.\n{r.stdout[-400:]}{r.stderr[-400:]}")
-    return ok
+    # RETRIED, because one failed attempt leaves the board LIVE: closing the port has just
+    # reset it into `main_tilt`, which starts its schedule on boot. On 2026-09-11 a single
+    # esptool connect glitch (`IndexError` in loader.py's byte() on a short read) did exactly
+    # that after the tenth 30 Hz take, and the rotor ran the schedule unfilmed until a manual
+    # retry parked it -- first time. The fault is transient; the cure is to ask again.
+    for attempt in range(1, PARK_TRIES + 1):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if "Staying in bootloader" in r.stdout:
+            print("[coils] board parked in the bootloader, app not running"
+                  + (f" (attempt {attempt})" if attempt > 1 else ""))
+            return True
+        print(f"[coils] park attempt {attempt}/{PARK_TRIES} failed: "
+              f"{(r.stdout + r.stderr).strip().splitlines()[-1:]}")
+        time.sleep(1.0)
+    print(f"[coils] PARK FAILED -- press GPIO14 NOW.\n{r.stdout[-400:]}{r.stderr[-400:]}")
+    return False
 
 
 # ---- the stills ---------------------------------------------------------------------

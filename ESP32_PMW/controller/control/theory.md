@@ -4410,6 +4410,192 @@ changed is only which label is allowed to open the record that the kill belongs 
 included. A number quoted from the previous table will differ in the fourth significant figure
 at 20/30/60 Hz and in the second at 70.
 
+### 24.12 The design-B campaign: a longer drop, a hard stop, and cooling by the clock
+
+A second robot -- design B, the half outer ring -- went on the rig on 2026-09-10 and was swept
+10-120 Hz with the same schedule generator as design A, changed in four places. Each change is
+recorded here because each one makes a design-B number mean something slightly different from
+the design-A number beside it.
+
+**The drop hold went 5 s -> 15 s** (`tilt_schedule.DROP_MS`), at the operator's instruction. It
+also removes a truncation. `alignment_rate` reads the settled axis over `POST_FROM_S..POST_TO_S`
+= 4-6 s after the kill but clamps that window to the `DOWN_` label (25.5), and at 5 s the label
+arrived at kill+5 s. Every design-A settled measurement is therefore a 4-5 s window and every
+design-B one is 4-6 s. **A design-A/B comparison of `settle_*` or `cone_final` must say which it
+is quoting.** The analysis windows themselves were deliberately not widened: that would make the
+two campaigns incomparable in a second way.
+
+**The spin-down went 4 s -> 100 ms** (`DOWN_MS`), also the operator's call. Rule 3 still holds
+in letter -- the down-ramp still precedes the carrier cut -- and the rest window `datum` takes
+its zero from (`REST_FROM_S = 5.0` after `DOWN_`) now opens 4.9 s after the cut instead of 1.0 s.
+The risk it takes is a robot set swinging on its wire by a near-step stop from up to 120 Hz;
+`datum` refuses a rest window over 5 deg of spread, so the symptom would be refused takes, not
+wrong ones.
+
+**Repeats went to 10 at 10-80 Hz and 5 above.** 24.5 is the argument: from 50 Hz the repeats
+stop being one population, and five is the minimum that can see the non-modal response at all.
+Ten below 80 Hz buys a median that a single outlier cannot move.
+
+**Cooling went from the model to the clock.** 24.3 and 24.4 are the two ways the model failed:
+the flat 0.5 C/s over-charged a 10 Hz point ~40x and then refused eight chunks of an unattended
+run, and turning the gate off booked 105.9 C over seven chunks and the operator measured 100 C.
+A gate that is wrong in both directions is not worth keeping in the loop. The campaign waits a
+fixed time instead, scaled by the point's predicted I^2 heat (`tilt_run.wait_s`):
+
+$$ t_{wait} = \mathrm{clip}\!\left(20\ \mathrm{s/C} \times \Delta T_{repeat},\ 20\ \mathrm{s},\ 600\ \mathrm{s}\right) $$
+
+and twice that, floored at 180 s, between frequencies. Where the 20 comes from: Newton cooling
+sheds $(T - T_{amb})/\tau$, which at 60 C is 38/1500 = 0.025 C/s, so honestly giving back one
+degree costs ~40 s. **20 s/C is deliberately half of honest.** It keeps the campaign near 5.3 h
+instead of 7.6 h, and it is only safe because of the second half of the policy: any wait over
+60 s asks the operator to measure the coils (`tilt_run.wait_or_prompt`). A reading is written
+into the thermal stamp -- the only real temperature the model ever receives -- and releases the
+wait early; a reading at or above the 70 C ceiling is recorded and does not.
+
+Predicted cost, from `tilt_run._predicted_c`:
+
+| drive (Hz) | repeats | drive/repeat (s) | heat/repeat (C) | chunk heat (C) | wait/repeat (s) |
+|---|---|---|---|---|---|
+| 10 | 10 | 32 | 0.07 | 0.7 | 20 |
+| 50 | 10 | 43 | 1.93 | 19.3 | 39 |
+| 80 | 10 | 52 | 6.45 | **64.5** | 129 |
+| 120 | 5 | 66 | 13.77 | 68.9 | 275 |
+
+**Coils A and C both read a negative offset, and it inflated the heat record ~20x.** The first
+design-B take (`tilt_sweep/20260910_231937_droneB`) shows A and C at -1.8 to -2.2 A throughout,
+and they HOLD -2.24 / -1.84 A with their own duty at 0% and the drive at 0 Hz -- an offset, not a
+current. B and D read ~0.4 A. `tilt_run.heat_c` already dropped rows with no drive at all, but
+while any channel was driven it summed all four magnitudes, so two phantom amps billed a 10 Hz
+take 1.66 C against 0.10 C once they are excluded. `_drive_sum` now counts a channel only while it
+is driven and charges a negative reading the mean of the channels that read sensibly. This also
+settles a contradiction between `main_tilt.cpp` (which named A) and `tilt_run.py` (which named
+C): **it is both.** The campaign's waits were never affected -- they are sized from the
+prediction -- but its `heat_c` column is recomputed from the logs rather than quoted.
+
+**What this does not guarantee.** The 80 Hz chunk books 64.5 C against a 70 C ceiling on its
+own. No wait schedule short of the honest one makes that safe by arithmetic. It is safe because
+the operator is measuring, and it would not be safe unattended.
+
+**It failed on 2026-09-11, and the model was the reason.** The operator measured the coils at
+**100 C** during the wait before the ninth 70 Hz take, after 68 good takes. At that instant the
+model read **63 C** on the corrected integral and **75 C** on the raw one (all four magnitudes,
+phantom included). Removing the A/C phantom cost 11 C of that gap; the other ~25 C is the model
+itself. Its I^2 scale hangs off `I2_ANCHOR_A` and the current sense, and 22.2 already calls the CS
+gain "the least trustworthy number on the board": on the 800 uF bank the model under-counts heat
+by roughly 2x from ~60 Hz up. The clock waits were sized from that prediction and inherited the
+error. This is 24.4 again with the sign reversed -- there the flat model was right and was
+overridden; here the I^2 model was trusted and was wrong. **Neither is a thermometer. The only
+reading that has ever been right on this rig is the operator's hand.**
+
+### 24.13 Design B against design 1: less repeatable, and nearly silent at 50-60 Hz
+
+Design B (half outer ring) was analysed with exactly the code that produced design 1's table:
+`alignment_rate.campaign` with its 15 deg modal band, stride-1 solves, per-repeat rates written
+to `campaign_trials.csv`, and `compare_designs.py rates` for the test (two-sided Mann-Whitney
+per frequency, Bonferroni over the frequencies tested; a frequency needs 3 measurable repeats
+on each side to be tested). Design B covers 10-70 Hz, with 8 of the planned 10 takes at 70 Hz;
+80-120 Hz waits behind the operator gate installed after 24.12's 100 C.
+
+| drive (Hz) | design 1 measurable / analysed | design 1 swing, median (MAD) | design B measurable / analysed | design B swing, median (MAD) |
+|---|---|---|---|---|
+| 10 | 17/22 | 24.1 (6.1) | 2/10 | 15.7 (8.9) |
+| 20 | 16/16 | 42.6 (1.8) | 2/10 | 40.9 (**25.4**) |
+| 30 | 8/10 | 38.0 (1.4) | 4/10 | 15.1 (7.1) |
+| 40 | 11/14 | 36.4 (2.9) | 5/9 | 26.2 (7.2) |
+| 50 | 5/10 | 27.9 (3.3) | **0/7** | **-1.1** (6.0) |
+| 60 | 6/9 | 42.0 (5.5) | **0/5** | **5.2** (5.2) |
+| 70 | 2/5 | 46.6 (13.5) | 3/7 | 48.5 (19.6) |
+
+**Three results, in order of how much weight they carry.**
+
+1. **Design B's response to the cut is far less repeatable.** Its swing MAD is 5-14x design 1's
+   at 20-30 Hz, and most of its repeats fall outside the modal band, so the rate measurement --
+   which needs a modal repeat with a detectable jump -- succeeds on 2-5 of ~10.
+2. **At 50 and 60 Hz design B barely realigns at all.** Median swing -1.1 and 5.2 deg against
+   27.9 and 42.0; not one repeat gives a rate. At 70 Hz the response returns (48.5 deg). The gap
+   sits where design 1's pre-cut cone peaks (25.14) and where 24.5's population split begins,
+   which makes a 40-55 Hz resonance the obvious suspect. **That is a hypothesis, not a finding.**
+3. **The rate itself: one clear difference, on thin data.** 30 Hz: design B at 0.42x design 1
+   (422 against 1008 deg/s, bootstrap CI 0.21-0.75, Bonferroni p = 0.032, n = 8 against 4).
+   40 Hz: 0.72x, CI 0.29-1.46, p = 0.36 -- no demonstrated difference. 10, 20, 50, 60 and 70 Hz
+   cannot be tested with fewer than 3 measurable repeats on a side.
+
+**It is not the measurement.** The obvious worry was that `disc_axis`, which fits an ellipse to
+a disc, segments a half ring badly. It does not segment it worse: view A against view B agrees
+to a 15.9-17.9 deg median on design 1's 10-30 Hz takes and 17.5 on design B's, and design-B
+takes that gave no rate agree exactly as well as those that did (17.5 against 17.5). An earlier
+draft of this comparison quoted design 1 at ~6.5 deg; that figure belongs to the older rim takes
+in `disc_axis`'s docstring, not to this campaign.
+
+**At 50 Hz the design-B repeats are two populations, and the split is visible before the cut.**
+Of the 8 repeats with settle traces (2 more are rejected by the settle path with "no usable
+kill" although both logs carry `KILL_050HZ`), 3 sit 8.2-9.9 deg from their final axis at the cut
+and fall to ~0.3 deg after it -- a normal response -- and 5 are already within 0.2-2.1 deg of
+their final axis when the coils are cut, so there is nothing to realign. Two of those five were
+still moving in the last second of the hold (3.8 -> 0.2 and 6.0 -> 2.1 deg), which is why the
+design-B median falls BEFORE the cut in `compare_1_vs_B/traces_1_vs_B.png`. A median over two
+populations describes neither, and that figure now draws every repeat.
+
+**RETRACTED: the "late re-tilt" is the rotor stopping, not the axis moving.** An earlier version
+of this section read design B's axis angle climbing 10-18 deg late in the 15 s drop hold as a
+second tilt. It is not one. `disc_axis` measures the axis from a DISC -- a spinning rotor blurs
+into a filled ellipse -- and in the video at +13.5 s after the cut (take `2026-09-11_002719`,
+50 Hz) the rotor has stopped: four still blades and the half-ring segments, both cameras. The
+ellipse fitted to blades returns an axis that means nothing, so the "rise" is the measurement
+failing, and its timing is the rotor's.
+
+The segmented mask's fill of its fitted ellipse measures this directly: camera A reads 0.89-0.93
+while the rotor spins and 0.47-0.51 once it stops. On three 50 Hz takes the fill falls at +7 s
+(`002719`), at +11 s (`003049`), and never within the hold (`003756`) -- and the axis "rise" in
+each starts exactly there and nowhere else. `alignment_rate.spin_stop` now finds that instant per
+take (each camera against its own spinning level; stopped when the lower ratio stays under 0.75
+for 1 s), and `compare_designs.py traces` cuts every repeat there and counts them per panel.
+
+Across every take (`compare_1_vs_B/spin_stop_survey.txt`, detector tuned on these three and on
+`001243`, whose camera A solved nothing from 1 to 4 s and hid its stop at 9.3 s from the first
+version):
+
+| | rotor stopped within the hold |
+|---|---|
+| design 1, 10-110 Hz | 0 of 102 (hold 5 s) |
+| design B, 10 and 20 Hz | 0 of 20 |
+| design B, 30 Hz | 2/9 (13.2, 14.9 s) |
+| design B, 40 Hz | 3/9 (6.0, 9.3, 14.5 s) |
+| design B, 50 Hz | **5/8** (7.3, 11.7, 12.8, 13.6, 14.1 s) |
+| design B, 60 / 70 Hz | 1/3 (9.3 s), 1/5 (11.6 s) |
+
+The axis measurement degrades up to ~1 s BEFORE the fill confirms a stop (take `002905`: 7.8 deg
+at +13 s with camera-A fill still 0.88), so `compare_designs` cuts every trace 1 s before its
+detected stop. Only one repeat stops inside the 0-6 s settle window: 40 Hz `001935`, at 6.0 s.
+
+So after coils A and C are cut, design B's rotor can spin down within the hold. Design 1's hold
+ended 5 s after the cut, before any of this, so the two designs cannot be compared on it. The
+settle metrics read 0-6 s after the cut and remain valid wherever the rotor was still turning
+through 6 s; any repeat that stopped earlier is flagged by `_spin_end` and should be excluded.
+
+**The cut is timed correctly; at 50 Hz design B's axis moves BEFORE it.** The cut instant is the
+host's timestamp of the firmware's `label=KILL_<f>HZ` line, so a late serial line would put
+the real cut before t = 0. It does not. Against the firmware's own clock: the schedule's fixed
+gaps come out exact on the suspect takes (`HOLD -> KILL` 7.00 s, `KILL -> DOWN` 15.00 s), and
+on all 20 takes of both designs at 50 Hz the telemetry's coil-A duty change -- mapped through the
+median host-firmware offset -- brackets the true cut to -0.35..+0.15 s of the stamp, which is just
+the 0.5 s telemetry period. The one caveat is host-side jitter: a few design-B takes show 0.4-1.9 s
+of it (`003426`, `003049`, whose `HOLD` label is 2.4 s late), though their `KILL` stamps still sit
+inside the bracket.
+
+So the motion is real. On 4 of design B's 8 analysed 50 Hz repeats the raw per-frame axis holds a
+steady 9.5-10.7 deg from its final orientation and then starts moving toward it 0.8-1.5 s before
+the cut (`002534` -0.92 s, `002719` -0.83 s, `002905` -1.52 s; `003240` slides from -3 s), with coils
+A and C still on -- which is why 5 of 8 are already near their final axis when the cut arrives.
+The other three move at the cut as expected. Why the onsets cluster in the last ~1.5 s of a 7 s
+hold rather than falling anywhere in it is NOT understood; it is worth a look in the overlay
+`20260910_droneB/overlays/050hz_002534_precut_overlay.mp4`.
+
+**Confound, untested.** Both campaigns sweep low to high, so drive frequency and coil temperature
+rise together, and design B's did so to a measured 100 C by 70 Hz. The 50-60 Hz silence was
+recorded with the coils modelled near 45-65 C -- which 24.12 shows under-reads by ~2x. Re-taking
+two 50 Hz repeats on cold coils would separate the two.
+
 ## 25. Settling: where the axis ends up, and how long until it stays there
 
 §24 measures how fast the lean *starts* — `rate_relu_deg_s` is the gradient of the rising
@@ -4577,7 +4763,7 @@ against as a cross-check, never as a constraint.
 
 Per repeat, 67 of 102 repeats settle. Medians:
 
-| drive | settled | $t_{\text{settle}}$ (s) | rise (s) | swing (deg) | $\Delta\phi$ (deg) | precession (deg) |
+| drive | settled | $t_{\text{settle}}$ (s) | rise (s) | swing (deg) | $\Delta\phi$ (deg) | coning (deg) |
 |---|---|---|---|---|---|---|
 | 10 | 3/22 | 3.11 | — | 5.63 | 35.7 | 2.68 |
 | 20 | 6/14 | 0.73 | 0.49 | 7.82 | 46.8 | 1.58 |
@@ -4606,7 +4792,7 @@ the geometric constant `azimuth_from_rest` predicts — A and C removed at 0 and
 B and D at 90/270, so the remaining asymmetry sits 45 deg away — arrived at twice by two
 different routes.
 
-**Precession is EXCITED by the cut, then damps.** The RMS cone half-angle runs 2–6 deg before
+**Coning is EXCITED by the cut, then damps.** The RMS cone half-angle runs 2–6 deg before
 the cut, peaks at 8–15 deg within ~0.4 s of it, and decays back to ~4 deg by 5 s
 (`axis_vs_time_040hz.png`, middle panel). This is 11.3 being visible: gyroscopic action alone
 gives steady coning, and only dissipation spirals it in, so the decay time of that envelope is
@@ -4618,13 +4804,13 @@ measured on one earlier take.
 least current, least authority, friction dominant. 110 Hz loses its takes to the tail gate,
 not to the swing.
 
-### 25.9 The cone has its own settling time, and it is longer than the axis's
+### 25.9 The coning has its own settling time, and it is longer than the axis's
 
 The axis metric times a step. The cone is a **pulse**: it sits at its driven level, jumps when
 the coils are cut, and decays. So the quantity that plays the role of the swing is the
 **excursion**, $\text{peak} - \text{final}$, and the band is 10% of that about the final
 level — the same convention as 25.2, applied to the thing that actually changes.
-`precession_settle` does this; `prec_settle_s` and `prec_tau_s` are the columns.
+`coning_settle` does this; `cone_settle_s` and `cone_tau_s` are the columns.
 
 **The cut excites the cone, and only transiently.** Over 107 repeats the half-angle rises on
 **101** of them, from a median 2.62 deg before the cut to a 6.79 deg peak — reached early, at
@@ -4632,7 +4818,7 @@ level — the same convention as 25.2, applied to the thing that actually change
 An earlier note in this section said the cut made the coning worse. That is true of the peak
 and false of the steady state, and the distinction is the whole content of the measurement.
 
-| drive | axis settling (s) | cone settling (s) | n | cone $\tau$ (s) | pre → peak → final (deg) |
+| drive | axis settling (s) | coning settling (s) | n | coning $\tau$ (s) | pre → peak → final (deg) |
 |---|---|---|---|---|---|
 | 10 | 3.11 | — | 0/22 | 0.86 | 3.27 → 4.56 → 3.01 |
 | 20 | 0.66 | 2.49 | 12/16 | 0.72 | 1.46 → 4.00 → 1.52 |
@@ -4646,7 +4832,7 @@ and false of the steady state, and the distinction is the whole content of the m
 | 100 | 2.31 | 3.25 | 3/5 | 0.64 | 0.95 → 5.66 → 1.14 |
 | 110 | 2.41 | — | 0/5 | 0.72 | 0.92 → 4.41 → 1.57 |
 
-**The cone settles later than the axis at every frequency where both exist** — 2.41–3.25 s
+**The coning settles later than the axis at every frequency where both exist** — 2.41–3.25 s
 against 0.66–2.41 s. The robot arrives at its new attitude well before it stops wobbling about
 it, which is a distinction the §24 rate cannot make and the axis settling time alone does not
 either.
@@ -4674,7 +4860,140 @@ factor this section has not derived. And 10 Hz and 110 Hz refuse the settling ti
 at 10 Hz because the cut barely moves the cone (4.56 against 3.27 deg), at 110 Hz because the
 envelope is still falling when the down-ramp starts.
 
-### 25.9 What this does not settle
+### 25.10 It is coning, not precession: three frequencies, three modes
+
+This section said "precession" throughout until 2026-09-10, and the word was wrong. The
+operator asked what the Chinese terms were and whether the decomposition was an Euler
+transform, and answering it made the conflation obvious.
+
+**What is measured here sits at $1.00\,f_{\text{drive}}$**, at every drive frequency from 20 to
+100 Hz (`cone_line`, 25.7). `coupling.py` already lists the three candidate rates and states
+that the discriminator is how the line scales with drive:
+
+| mode | scaling | this campaign |
+|---|---|---|
+| **synchronous coning** — a body-fixed asymmetry carried round by the rotor (20.3) | tracks drive 1:1 | **1.00, measured** |
+| **nutation** — $(I_s/I_t)\,\omega = 1.65\,\omega$ (11.3) | tracks drive 1.65:1 | not seen |
+| **free precession** — $\kappa_t/(I_s\omega) \approx 1.2$ Hz (11.3) | constant in drive | not isolated |
+
+A 1:1 line is the first of those, and it is not precession. Free precession is a property of
+the magnetic restoring torque against the spin angular momentum and would sit near 1.2 Hz
+whatever the drive is doing; what the axis actually does once per revolution is carried by the
+rotor itself. **They are different modes at different frequencies, and one word for both hid
+that.** Renamed accordingly: `coning`, `cone_envelope`, `coning_settle`, `cone_*` columns.
+
+There is a **third** frequency in these traces and it is neither: the 2–4 Hz line of 24.10,
+which regresses as $3.86 - 0.0155\,f_{\text{drive}}$ and is mechanical — most likely the 8 mm
+takeoff rod. It is removed by least squares before any of this is measured (25.4). So three
+lines, three modes, and this campaign has isolated the synchronous one and the mechanical one
+while saying nothing about free precession.
+
+**A caution that follows.** 11.3's timescale stack puts free precession at ~1.2 Hz, right in
+the heave band, and that argument is untouched by anything here. Nothing in 25 measures it, and
+`cone_tau_s` is not its rate.
+
+### 25.11 Is this an Euler transform? Half of one
+
+`angles(axis, ref)` is, structurally, the first two Euler angles in the $z$-$x$-$z$ (3-1-3)
+convention: `radial` is the nutation angle $\theta$ — the angle between the body axis and the
+reference — and `azimuth` is the precession angle $\phi$, its bearing in the plane
+perpendicular to that reference. The correspondence is exact and the naming in the rest of this
+document should be read against it.
+
+It is **not** a full Euler transform, for three reasons, and each is a real limitation rather
+than a formality:
+
+1. **The third angle is not observable.** The spin angle $\psi$ — where the disc has rotated to
+   about its own normal — cannot be recovered from an ellipse. The fit gives the normal and
+   nothing else, and the blade strobing that would otherwise give the phase is aliased above
+   26 Hz on this rig (18.10). Two of three angles.
+
+2. **The axis is a line, not a vector.** An ellipse cannot tell rotor-up from rotor-down, which
+   is why `_hemisphere` and `orient_continuous` exist and why every angle in this module is
+   taken sign-invariantly. A rotation needs an oriented frame; a line does not supply one.
+
+3. **The average-axis decomposition is not a coordinate transform at all.** Euler angles are
+   referred to a *fixed* space frame. `average_axis` produces a reference that moves — a
+   time-domain filter, with the coning as its residual — so `coning()` is closer to a
+   demodulation than to an Euler decomposition. `_derotate` in `settle_report.py` exists
+   precisely because that reference is moving: it applies a per-frame Rodrigues rotation to
+   take the 47 deg swing out before the residual can be drawn.
+
+### 25.12 One of the two frequency trends is real and the other is the band
+
+The operator read off the sweep that **the coning settles faster at higher drive while the
+axis settles faster at lower drive**, and asked whether that was physical or an artefact of the
+averaging. Two opposite trends out of one transient is exactly the shape of a measurement
+artefact, so it was tested rather than explained.
+
+Three tests, because there are three candidate confounds: the kernel, the band, and which
+repeats survived to be averaged.
+
+**Test 1 — swap the kernel.** `_smooth(kernel="gauss")` substitutes a variance-matched
+Gaussian. It is symmetric, so the zero-delay argument of 25.3 is untouched, and at these widths
+it attenuates the cone as hard as the boxcar does (3e-6 against 1e-5 on a pure 40 Hz tone,
+because $\sigma$ spans about three cone periods). Individual points move by up to 0.7 s, so no
+single number is kernel-proof — but both trends keep their direction and rough size.
+
+**Test 2 — fix the band.** This is the decisive one. Both settling times use a band of 10% of
+something that itself grows with drive: the swing for the axis (5.6 → 13.8 deg), the excursion
+for the coning. Re-measured against a **fixed absolute band** — 1.0 deg for the axis, 0.5 deg
+for the coning:
+
+| drive | axis, 10% band | axis, fixed 1.0° | coning, 10% band | coning, fixed 0.5° |
+|---|---|---|---|---|
+| 20 | 0.66 | 0.14 | 2.49 | 1.40 |
+| 30 | 1.22 | 1.51 | 3.11 | 2.84 |
+| 40 | 1.41 | 2.35 | 2.95 | 3.37 |
+| 50 | 2.02 | 2.53 | 2.88 | 3.30 |
+| 60 | 1.50 | 2.26 | 2.77 | 3.36 |
+| 70 | 1.48 | 2.53 | 2.68 | 3.06 |
+| 80 | 1.83 | 2.88 | 2.61 | 2.93 |
+| 90 | 1.99 | 2.40 | 2.41 | 2.71 |
+| 100 | 2.31 | 3.23 | 3.25 | 3.24 |
+| 110 | 2.41 | 3.28 | — | 4.00 |
+
+**The coning's monotone fall does not survive it.** 3.11 → 2.41 becomes 2.84 → 3.37 → 3.30 →
+3.36 → 3.06 → 2.93 → 2.71: flat to slightly rising, with no clean trend left. **The axis's rise
+does survive, and gets steeper** — 1.22 → 2.41 (span 1.19 s) becomes 1.51 → 3.28 (span 1.77 s).
+
+That the axis trend *steepens* under a fixed band is itself informative. A proportional band
+widens with drive, which biases a settling time *shorter* at high drive — so it was working
+against the observed axis trend the whole time, and the real effect is larger than the table
+said. The coning trend was pointing the same way as that bias, and it was mostly that bias.
+
+**Test 3 — the decay constant, which has no band at all.** $\tau$ is fitted from the peak and
+never touches a threshold, so nothing about the band can reach it. It is **flat**: 1.16, 1.19,
+1.32, 1.27, 1.16, 1.38, 1.21 s across 30–90 Hz, against a coning settling time that supposedly
+fell by 23% over the same span. **If the coning genuinely damped faster at higher drive, $\tau$
+would fall. It does not.** This is independent of Test 2 and agrees with it.
+
+**And the survivorship.** The medians are over repeats that settled, and the settled fraction is
+not constant: coning settles 1 of 10 at 30 Hz against 5 of 5 at 70–90. Restricting to
+frequencies with at least 80% settled and at least four repeats leaves **nine** frequencies for
+the axis (slope $+1.29$ s per 100 Hz) and only **four** for the coning, all inside 50–90 Hz.
+A four-point trend over a 40 Hz span, with the refusals concentrated at the other end, is not
+a sweep.
+
+**Verdict.**
+
+* **The axis settling more slowly at higher drive is real.** It survives the kernel swap, it
+  survives a fixed band and gets stronger, and it holds over nine well-populated frequencies.
+* **The coning settling faster at higher drive is mostly the band.** It disappears under a
+  fixed band, it is contradicted by a flat $\tau$, and what remains rests on four frequencies.
+
+The mechanism is ordinary: the cut throws the cone wider at higher drive, the band is 10% of
+that excursion, and the envelope's residual wobble does not scale with the excursion — so a
+wider absolute window is reached sooner without anything damping faster.
+
+**What this means for quoting the sweep.** `cone_tau_s` is the number to use for how fast the
+coning damps: it is band-free, it is measurable on 97 of 107 repeats against 50, and it says
+the damping rate is **flat in drive** — which is what a dissipation-limited mode should do
+(11.3), and a cleaner result than the trend it replaces. `cone_settle_s` remains in the CSV
+because it is the quantity that was asked for, but it carries the band's frequency dependence
+and should not be read as a rate.
+
+### 25.13 What this does not settle
 
 * **The rise time is unavailable wherever the rise is short.** 7 of 102 repeats refuse on it
   outright, and the reported values sit at 0.27–1.33 s against a 0.25 s smoother, so the
@@ -4683,13 +5002,63 @@ envelope is still falling when the down-ramp starts.
   or the rig is not established here; `DROP_MS` would have to be lengthened to find out, and
   that costs coil heat at exactly the frequencies where heat is already the binding
   constraint (24.3, 24.4).
-* **The precession decay constant is not converted to $c_t$.** It is fitted (25.9) and it is
+* **The coning decay constant is not converted to $c_t$.** It is fitted (25.9) and it is
   flat across the sweep, which is what a dissipation-limited mode should do — but $\tau$ is
   the decay of an RMS envelope and 11.3's $c_t$ multiplies $\dot\chi$ in a complex tilt
   variable. The factor between them is not derived here.
 * **40 Hz mixes hold times** (the campaign README's caveat) and it is visible here as two
   populations in `axis_vs_time_040hz.png` — two traces at 49 deg of swing against twelve at
   11.5. The median is quoted over both and should not be.
+
+### 25.14 Two things the campaign table already said, and one it could not
+
+**A pre-cut coning peak at 40-50 Hz.** `settling_by_freq.csv` (design A) carries it and no prose
+above reads it off:
+
+| drive (Hz) | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `cone_pre_med_deg` | 3.27 | 1.46 | 2.90 | 4.77 | **8.38** | 1.87 | 1.43 | 1.02 | 0.97 | 0.95 | 0.92 |
+| seg2 ramp rate (Hz/s) | 3.5 | 3.5 | 3.5 | 3.5 | 3.5 | 2.8 | 2.8 | 2.8 | 2.8 | 2.8 | 2.8 |
+
+It is not the lean: the swing median rises smoothly through the same band (11.5, 12.2, 13.0 deg
+at 40, 50, 60 Hz) while the cone jumps and collapses. A forced 1:1 response (25.10) that peaks at
+one drive frequency is a resonance, and this one sits where 24.5's population split and the
+~52 Hz rod-friction saturation (17, 18.13) already are.
+
+**The ramp cannot have set it, with one exception.** `cone_pre` is measured over the second
+before the kill. `cone_tau` is 0.64-1.38 s (25.9) and the pre-kill dwell at target is 10 s
+(5 s above 60 Hz): seven to sixteen time constants. Anything the ramp *excites* has decayed
+before the window opens, so buying ramp seconds to reduce coning spends coil heat on something
+this table says cannot work.
+
+The exception is the second row. The two-tier ramp changes rate at exactly 60 Hz, and the cone
+collapses at exactly 60 Hz. A ramp can leave the robot in a different *equilibrium* -- 24.6's
+tilt-up happens during the ramp or the hold -- even though it cannot leave it *ringing*, and the
+design-A data cannot separate the two because rate and frequency change together. The control is
+a **rate swap**: 50 Hz at 2.8 Hz/s and 60 Hz at 3.5 Hz/s (`tilt_run --seg2-rate`), compared
+against the same robot's campaign at its normal rates. If the cone follows the rate, the ramp is
+a lever; if it follows the frequency, it is not. Run on design B; the result belongs here.
+
+**A candidate cause, not yet measured.** A 1:1 cone needs a once-per-revolution asymmetry. 20.3
+ruled out the two body-fixed ones it examined. The lab-frame one has been *measured* and never
+connected: 18.18 finds the field 29% stronger toward 151 deg, with one coil strongest at every
+frequency, and 18.15 finds the robot resting 1.6 deg toward ~146 deg -- two instruments sharing
+nothing. One strong coil in four is a dipolar asymmetry, which a rotating field carries round
+once per revolution. **This is a hypothesis.** 22.7 records that the per-channel phase and
+amplitude calibration that would test it (`coil_phase.py --measure`, `coil_balance.py`) has never
+been run.
+
+**What the table could not say: the coning ceiling is ~104 Hz.** The cone sits at the drive
+frequency, so it needs the solve rate above twice the drive. At stride 1 the campaign solved at
+222-247 Hz, not the ~204 Hz quoted in 25.7. `cone_line` searches up to $0.45 f_s$, which puts the
+last honest drive frequency near 104 Hz. Every 120 Hz take of the design-A campaign was refused by
+the Nyquist gate -- five good takes, solved at 222.7-235.0 Hz against the 240 Hz required -- which
+is why the settling tables stop at 110 Hz, and why 110 Hz reads `cone_over_drive = 0.915`: a fold,
+not a new mode. The 110 and 120 Hz points still give an alignment *rate*, which is slow and not
+aliased. They cannot give coning at this capture mode, and the design-B campaign inherits that.
+
+A stale cross-reference while here: 25.8 cites "20.7" for the 9.6:1 circular:linear figure, and
+20.7 contains no such number; `alignment_rate.py` repeats it.
 
 ## Appendix A: Correspondence with the MATLAB implementation
 

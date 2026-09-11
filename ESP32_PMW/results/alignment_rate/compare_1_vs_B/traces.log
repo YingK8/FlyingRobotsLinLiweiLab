@@ -1,0 +1,11 @@
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+-> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/alignment_rate/compare_1_vs_B/traces_1_vs_B.png
+-> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/alignment_rate/compare_1_vs_B/traces_1_vs_B.csv
+    10 Hz  n 22 / 10
+    20 Hz  n 16 / 10
+    30 Hz  n 10 /  9
+    40 Hz  n 14 /  9
+    50 Hz  n 10 /  8
+    60 Hz  n 10 /  3
+    70 Hz  n  5 /  5

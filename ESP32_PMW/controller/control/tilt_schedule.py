@@ -122,9 +122,29 @@ HIGH_SEG2_RATE_HZ_S = 2.8
 #: that arithmetic.
 HOLD_MS = 7000
 #: How long the robot is left leaning. The measured transient is ~3 s (2026-09-08 take).
-DROP_MS = 5000
+#:
+#: Raised 5000 -> 15000 on 2026-09-10 at the operator's instruction, and it fixes a
+#: measurement bug at the same time. `alignment_rate` reads the settled axis over
+#: POST_FROM_S..POST_TO_S (4-6 s after the kill) but CLAMPS that window to the DOWN_ label
+#: -- `t_stop = min(tk + POST_TO_S, p["t_end"])` at alignment_rate.py:2677. At 5000 the label
+#: landed at kill+5 s, so every settled measurement the campaign has ever taken was truncated
+#: to 4-5 s, and `theory.md` 25.5 says so in as many words. 15 s un-clamps it.
+#:
+#: CONSEQUENCE FOR COMPARISONS: takes recorded before 2026-09-10 measured the truncated
+#: window and takes after it measure the full one. A design-A/design-B comparison of any
+#: `settle_*` or `cone_final` column must say which it is quoting.
+DROP_MS = 15000
 #: Spin-down. Not a capture -- nothing has to be caught on the way back to zero.
-DOWN_MS = 4000
+#:
+#: Cut 4000 -> 100 on 2026-09-10 at the operator's instruction: a near-step stop rather than
+#: a ramp. Rule 3 still holds in letter -- this still precedes the carrier cut, which is what
+#: keeps 0 Hz-with-carrier-on from happening -- and the rest window opens 4.9 s after the cut
+#: instead of 1.0 s, so `datum` gets MORE settling time, not less.
+#:
+#: The risk it takes: stopping a 120 Hz rotor in 100 ms can set the robot swinging on its
+#: wire, and `datum` refuses a rest window over DATUM_MAX_SPREAD_DEG (5 deg). Watch the
+#: skipped-take count on the first chunk; if it climbs, this number is why.
+DOWN_MS = 100
 #: Coils-off tail. This is the rest window `alignment_rate.datum` takes its zero from, so it
 #: has to outlast REST_TO_S there.
 OFF_MS = 15000
@@ -153,9 +173,20 @@ def hold_ms(f_hz):
     return SETTLE_MS, HOLD_MS
 
 
+#: Force ONE segment-2 rate at every target, Hz/s. None = the two-tier rule above.
+#:
+#: Exists for the rate-swap control (`control/theory.md` 25.14). The two-tier rule changes
+#: rate at exactly 60 Hz, which is exactly where the pre-cut cone collapses 8.4 -> 1.9 deg on
+#: the design-A campaign -- so rate and frequency are confounded there. 50 Hz run at the
+#: high-f rate and 60 Hz at the low-f rate separate them. Set from `tilt_run --seg2-rate`.
+SEG2_RATE_OVERRIDE = None
+
+
 def seg2_rate(f_hz):
     """Segment-2 climb rate for a target frequency, Hz/s. See `HIGH_F_HZ`."""
 
+    if SEG2_RATE_OVERRIDE is not None:
+        return float(SEG2_RATE_OVERRIDE)
     return HIGH_SEG2_RATE_HZ_S if float(f_hz) >= HIGH_F_HZ else SEG2_RATE_HZ_S
 
 
@@ -260,7 +291,7 @@ HEADER = """\
   // down and turn off. The settle is discarded; the hold is the measured baseline.
   // `tilt_run.py` flashes this, runs it once per repeat, and owns the cooldown between.
   //
-  // Ramp {ramp:g} s from {f0:g} Hz, EASE k=2, which leaves {dwell:.1f} s below the ~{fpull:g} Hz
+  // Ramp {ramp:g} s from {f0:g} Hz, EASE k=2, segment 2 at {rate:g} Hz/s. Leaves {dwell:.1f} s below the ~{fpull:g} Hz
   // pull-in crossing -- capture at t=0 is the tight constraint, not following the curve
   // (`control/theory.md` 18.3 measures 40-60x margin on the slope everywhere).
   //
@@ -285,7 +316,7 @@ def render(f_hz):
     head = HEADER.format(f=f, hold=hold_ms(f)[1] / 1000, settle=hold_ms(f)[0] / 1000,
                          chans=DROP_CHANNELS, drop=DROP_PCT,
                          dropped=DROP_MS / 1000, ramp=ramp_ms(f) / 1000, f0=RAMP_FROM_HZ,
-                         dwell=dwell_s(f), fpull=F_PULL_IN_HZ, drive=drive_s(f))
+                         dwell=dwell_s(f), fpull=F_PULL_IN_HZ, drive=drive_s(f), rate=seg2_rate(f))
     body = {"resolution_ms": RESOLUTION_MS, "initial_freq": 0.0,
             "initial_duty": INITIAL_DUTY, "direction": DIRECTION, "schedule": schedule(f)}
     lines = [f'  "{k}": {json.dumps(v)},' for k, v in list(body.items())[:-1]]
@@ -350,6 +381,12 @@ def _self_check():
         assert (_st + _ho) / 1000.0 > _ar.PRE_S + 1.0, (_f, _st, _ho, _ar.PRE_S)
     assert hold_ms(100)[1] == HIGH_HOLD_MS and hold_ms(40)[1] == HOLD_MS
     assert seg2_rate(100) < seg2_rate(40)
+    # the rate-swap override wins at every target, and clearing it restores the rule
+    global SEG2_RATE_OVERRIDE
+    SEG2_RATE_OVERRIDE = 2.8
+    assert seg2_rate(50) == seg2_rate(60) == 2.8 and "2.8 Hz/s" in render(50)
+    SEG2_RATE_OVERRIDE = None
+    assert seg2_rate(50) == SEG2_RATE_HZ_S
 
     # rule 1: the block opens by resetting every channel to 100
     assert s[1] == {"method": "activateChannels", "mask": 15, "value": 100.0}, s[1]
@@ -373,9 +410,15 @@ def _self_check():
             assert rest, f"label {x['value']} tags nothing -- it will never be printed"
     assert s[-2]["value"] == "TILT_OFF" and s[-1]["method"] == "addWaitTask", s[-2:]
 
-    # the rest window must outlast what the analysis reads from it
+    # the rest window must outlast what the analysis reads from it. Measured from the DOWN_
+    # label, so the down-ramp counts toward it -- which matters now that DOWN_MS is 100 ms
+    # and OFF_MS alone is the looser of the two bounds.
     from controller.control import alignment_rate as ar
-    assert OFF_MS / 1000.0 > ar.REST_TO_S, (OFF_MS, ar.REST_TO_S)
+    assert (DOWN_MS + OFF_MS) / 1000.0 > ar.REST_TO_S, (DOWN_MS, OFF_MS, ar.REST_TO_S)
+    # the settled window must no longer be CLAMPED by the DOWN_ label. This is the whole
+    # reason DROP_MS went to 15 s: at 5000 `alignment_rate` silently truncated its own
+    # 4-6 s settled window to 4-5 s (alignment_rate.py:2677, theory.md 25.5).
+    assert DROP_MS / 1000.0 >= ar.POST_TO_S, (DROP_MS, ar.POST_TO_S)
 
     # it parses, comments and all, as the firmware's ArduinoJson would
     txt = render(20)

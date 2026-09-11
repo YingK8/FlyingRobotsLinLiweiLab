@@ -6,7 +6,12 @@
     uv run python controller/control/settle_report.py <root> --hz 40     # one frequency
 
 The measurement lives in `alignment_rate.py --settle` and the argument for it in
-`control/theory.md` 25. Nothing here measures anything: it draws what that module returns and
+`control/theory.md` 25.
+
+CONING, NOT PRECESSION. The wobble drawn here sits at 1.00 x the drive frequency, which is
+synchronous coning -- a body-fixed asymmetry carried round by the rotor. 11.3's free
+precession is a different mode at a roughly constant 1.2 Hz, and 24.10's 2-4 Hz line is a
+third, mechanical, tracking neither. Three frequencies, three modes; see theory.md 25.10. Nothing here measures anything: it draws what that module returns and
 writes `settle_report.html` beside the figures, self-contained (every image is inlined) so the
 file can be moved or sent on its own.
 
@@ -40,11 +45,13 @@ from controller.control import alignment_rate as ar
 
 ROOT = Path(__file__).resolve().parents[2]
 
-INK, MUTED, GRID = "#1c1c1c", "#6b6b6b", "#e3e3e3"
-C_TRACE, C_MARK, C_BAND, C_KILL = "#2f6fd0", "#1a8f6a", "#e0721a", "#b4304a"
-C_DISC, C_AXIS = "#2f6fd0", "#b4304a"
+# One palette, defined in `alignment_rate` and imported here, so a figure written by this
+# module and one written by `--settle` cannot drift apart in colour.
+INK, MUTED, GRID = ar.INK, ar.MUTED, ar.GRID
+C_TRACE, C_MARK, C_BAND, C_KILL = ar.C_TILT, ar.C_MARK, ar.C_FIT, ar.C_KILL
+C_DISC, C_AXIS = ar.C_TILT, ar.C_KILL
 
-#: Revolutions of the cone drawn in the precession overlay. Enough to close the loop and see
+#: Revolutions of the cone drawn in the coning overlay. Enough to close the loop and see
 #: whether it closes; more just overdraws it.
 OVERLAY_REVS = 2.0
 
@@ -148,7 +155,7 @@ def fig_step_response(rows, freq_hz, path):
     return path
 
 
-# ---------------------------------------------------------------- the precession overlay
+# ---------------------------------------------------------------- the coning overlay
 
 
 def _derotate(axis, avg, target):
@@ -156,7 +163,7 @@ def _derotate(axis, avg, target):
 
     WHY THIS IS NEEDED, AND WHAT IT FIXES
     -------------------------------------
-    "Precession about the average axis" means motion relative to an average axis that is
+    "Coning about the average axis" means motion relative to an average axis that is
     itself moving. In the window just after the cut the average axis is swinging through 47
     deg in a few hundred milliseconds, so a single window-mean is not a resting axis and a
     cone drawn about it is mostly the swing -- which is what an earlier version of this
@@ -164,7 +171,7 @@ def _derotate(axis, avg, target):
 
     Rodrigues, applied per frame, takes the swing out and leaves the residual: rotate each
     sample by whatever rotation carries ITS OWN running average axis onto a common direction.
-    What is left is the cone and nothing else, which is the same residual `precession` and
+    What is left is the cone and nothing else, which is the same residual `coning` and
     `spiral` work with -- so the three figures now show one quantity three ways instead of
     two quantities.
     """
@@ -182,7 +189,7 @@ def _derotate(axis, avg, target):
     return v * np.cos(th) + kv * np.sin(th) + k * kdv * (1 - np.cos(th))
 
 
-def fig_precession_overlay(rows, freq_hz, path):
+def fig_coning_overlay(rows, freq_hz, path):
     """How the disc itself moves: its plane drawn at successive phases of the cone.
 
     The measured axis is the disc's normal, so the disc is the circle perpendicular to it.
@@ -271,7 +278,7 @@ def fig_precession_overlay(rows, freq_hz, path):
     return path
 
 
-def fig_precession_settle(rows, freq_hz, path):
+def fig_coning_settle(rows, freq_hz, path):
     """The cone's own settling time: a PULSE, marked the way the step response was.
 
     The axis metric times a step. This times a pulse -- the envelope sits at its driven level,
@@ -285,14 +292,14 @@ def fig_precession_settle(rows, freq_hz, path):
 
     import matplotlib.pyplot as plt
 
-    rep = _pick(rows, key="prec_settle_s")
-    if rep is None or rep["prec_final_deg"] == "":
+    rep = _pick(rows, key="cone_settle_s")
+    if rep is None or rep["cone_final_deg"] == "":
         return None
     t, env, v = rep["_t"], rep["_env"], rep["_valid"]
     m = v & (t >= -ar.PRE_S) & (t <= rep["_stop"])
     pre = float(np.median(env[v & (t >= -ar.PRE_S) & (t < 0)]))
-    peak, tpk = float(rep["prec_peak_deg"]), float(rep["prec_t_peak_s"])
-    fin = float(rep["prec_final_deg"])
+    peak, tpk = float(rep["cone_peak_deg"]), float(rep["cone_t_peak_s"])
+    fin = float(rep["cone_final_deg"])
     band = ar.SETTLE_BAND * (peak - fin)
 
     fig, ax = plt.subplots(figsize=(11.5, 6.0), facecolor="white")
@@ -305,8 +312,8 @@ def fig_precession_settle(rows, freq_hz, path):
     ax.axvline(0.0, color=C_KILL, lw=1.8, zorder=3)
     ax.plot([tpk], [peak], "o", color=C_KILL, ms=8, zorder=6)
 
-    if rep["prec_tau_s"] != "":
-        tau, asym = float(rep["prec_tau_s"]), float(rep["prec_asym_deg"])
+    if rep["cone_tau_s"] != "":
+        tau, asym = float(rep["cone_tau_s"]), float(rep["cone_asym_deg"])
         xf = np.linspace(tpk, rep["_stop"], 300)
         ax.plot(xf, asym + (peak - asym) * np.exp(-(xf - tpk) / tau), color=C_KILL,
                 lw=1.6, ls=":", zorder=5)
@@ -328,7 +335,7 @@ def fig_precession_settle(rows, freq_hz, path):
     ax.annotate(f"±10% of the excursion   ±{band:.2f}°", (x1, fin + band), xytext=(-6, 5),
                 textcoords="offset points", color=C_BAND, fontsize=9.5, ha="right")
 
-    ts = rep["prec_settle_s"]
+    ts = rep["cone_settle_s"]
     if ts != "":
         ts = float(ts)
         ax.plot([ts], [float(np.interp(ts, t[m], env[m]))], "o", color=C_MARK, ms=9, zorder=7)
@@ -337,7 +344,7 @@ def fig_precession_settle(rows, freq_hz, path):
         ax.annotate(f"cone settling time   {ts:.2f} s", (ts, pre), xytext=(10, -26),
                     textcoords="offset points", color=C_MARK, fontsize=10.5,
                     fontweight="bold")
-    _style(ax, f"{freq_hz:.0f} Hz, {rep['take']} — the precession cone: excited by the cut, "
+    _style(ax, f"{freq_hz:.0f} Hz, {rep['take']} — the coning: excited by the cut, "
                f"then damped", "time from the cut (s)", "RMS cone half-angle (deg)")
     fig.tight_layout()
     fig.savefig(path, dpi=150, facecolor="white")
@@ -414,7 +421,7 @@ def fig_envelope_heatmap(rows, path):
     cb = fig.colorbar(im, ax=ax, pad=0.015)
     cb.set_label("RMS cone half-angle (deg)", color=MUTED, fontsize=9.5)
     cb.ax.tick_params(colors=MUTED, labelsize=8.5)
-    _style(ax, "precession about the average axis — median over repeats, every frequency",
+    _style(ax, "synchronous coning about the average axis — median over repeats, every frequency",
            "time from the cut (s)", "drive frequency (Hz)")
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white")
@@ -463,16 +470,16 @@ def fig_metrics(rows, per_freq, campaign_csv, path):
     _style(axs[2], f"AXIS settling — last exit from ±{100 * ar.SETTLE_BAND:.0f}%",
            "drive frequency (Hz)", "median ± MAD (s)")
 
-    axs[3].errorbar(f, [r["prec_settle_med_s"] for r in per_freq],
-                    yerr=[r["prec_settle_mad_s"] for r in per_freq],
-                    fmt="o-", color=C_KILL, ms=4, lw=1.3, capsize=3, label="cone settling")
-    axs[3].errorbar(f, [r["prec_tau_med_s"] for r in per_freq],
-                    yerr=[r["prec_tau_mad_s"] for r in per_freq],
-                    fmt="s--", color=MUTED, ms=3.5, lw=1.1, capsize=3, label="cone decay τ")
+    axs[3].errorbar(f, [r["cone_settle_med_s"] for r in per_freq],
+                    yerr=[r["cone_settle_mad_s"] for r in per_freq],
+                    fmt="o-", color=C_KILL, ms=4, lw=1.3, capsize=3, label="coning settling")
+    axs[3].errorbar(f, [r["cone_tau_med_s"] for r in per_freq],
+                    yerr=[r["cone_tau_mad_s"] for r in per_freq],
+                    fmt="s--", color=MUTED, ms=3.5, lw=1.1, capsize=3, label="coning decay τ")
     axs[3].plot(f, [r["settle_10pct_med_s"] for r in per_freq], "o:", color=C_MARK,
                 ms=3.5, lw=1.0, alpha=0.75, label="axis settling")
     axs[3].legend(frameon=False, fontsize=8, labelcolor=MUTED)
-    _style(axs[3], "CONE settling and its decay constant",
+    _style(axs[3], "CONING settling and its decay constant",
            "drive frequency (Hz)", "median ± MAD (s)")
     fig.tight_layout()
     fig.savefig(path, dpi=140, facecolor="white")
@@ -508,14 +515,14 @@ def build(root, out_dir=None, which=None, only_hz=None):
     figs = [
         ("step", fig_step_response(at_f, fhz, out / "settle_step_response.png"),
          "Settling, marked", _cap_step(at_f, fhz)),
-        ("overlay", fig_precession_overlay(at_f, fhz, out / "settle_precession_overlay.png"),
-         "How the disc precesses about the average axis", _cap_overlay()),
-        ("precset", fig_precession_settle(at_f, fhz, out / "settle_precession_time.png"),
-         "How long the cone takes to stop ringing", _cap_precset(per_freq)),
+        ("overlay", fig_coning_overlay(at_f, fhz, out / "settle_coning_overlay.png"),
+         "How the disc cones about the average axis", _cap_overlay()),
+        ("precset", fig_coning_settle(at_f, fhz, out / "settle_coning_time.png"),
+         "How long the coning takes to stop ringing", _cap_coneset(per_freq)),
         ("spiral", fig_spiral(at_f, fhz, out / "settle_spiral.png"),
-         "The cone spiralling in", _cap_spiral()),
+         "The coning spiralling in", _cap_spiral()),
         ("heat", fig_envelope_heatmap(rows, out / "settle_envelope_heatmap.png"),
-         "Precession across the sweep", _cap_heat()),
+         "Coning across the sweep", _cap_heat()),
         ("metrics", fig_metrics(rows, per_freq, out / "campaign.csv",
                                 out / "settle_metrics.png"),
          "Three timing numbers, one transient", _cap_metrics()),
@@ -555,7 +562,7 @@ def _cap_overlay():
         "field. The robot swings about 45° in azimuth to a new equilibrium — with A and C "
         "gone at 0° and 180°, the asymmetry left by B and D at 90/270 sits 45° away — and its "
         "radial tilt drops slightly, so it ends a little more upright.<br><br>"
-        "It also <b>excites the cone, but only transiently</b>: the half-angle jumps on 101 "
+        "It also <b>excites the coning, but only transiently</b>: the half-angle jumps on 101 "
         "of 107 repeats, from a median 2.6° before the cut to a 6.8° peak within 0.1–0.4 s, "
         "and then damps back to a settled 1.8° — at or below where it started. The right-hand "
         "panel below is drawn at that peak, so it shows the worst moment rather than the new "
@@ -590,16 +597,16 @@ def _cap_spiral():
     )
 
 
-def _cap_precset(per_freq):
-    both = [r for r in per_freq if np.isfinite(float(r["prec_settle_med_s"]))
+def _cap_coneset(per_freq):
+    both = [r for r in per_freq if np.isfinite(float(r["cone_settle_med_s"]))
             and np.isfinite(float(r["settle_10pct_med_s"]))]
     longer = sum(1 for r in both
-                 if float(r["prec_settle_med_s"]) > float(r["settle_10pct_med_s"]))
+                 if float(r["cone_settle_med_s"]) > float(r["settle_10pct_med_s"]))
     return (
-        "The cone is a <b>pulse</b>, not a step: it sits at its driven level, jumps when the "
+        "The coning is a <b>pulse</b>, not a step: it sits at its driven level, jumps when the "
         "coils are cut, and decays. So the quantity playing the role of the swing is the "
         "excursion — peak minus final — and the band is ±10% of that about the final level.<br><br>"
-        f"<b>The cone takes longer to stop ringing than the axis takes to arrive</b>, at "
+        f"<b>The coning takes longer to stop ringing than the axis takes to arrive</b>, at "
         f"{longer} of the {len(both)} frequencies where both are measurable: 2.4–3.2 s against "
         "0.7–2.4 s. The dotted curve is a fitted exponential, and it is drawn because the band "
         "often refuses where the fit does not — the 5&nbsp;s window ends while the envelope is "
@@ -612,7 +619,7 @@ def _cap_precset(per_freq):
 
 def _cap_heat():
     return (
-        "Median RMS cone half-angle over repeats, against time and drive. The bright band "
+        "Median RMS coning half-angle over repeats, against time and drive. The bright band "
         "just right of t<sub>c</sub> is the excitation; it fades within a second or two at "
         "every frequency. Read horizontally for how long a given drive rings, vertically for "
         "which drives ring hardest — 30–50 Hz, where the cone reaches 4.4° against 1.2° at "
@@ -629,11 +636,22 @@ def _cap_metrics():
         "it stops ringing once it gets there. The dotted line on the middle panel is the "
         "0.25 s smoother — a rise time near it is mostly filter, which is why the fast ones "
         "are refused outright rather than reported (24.7).<br><br>"
-        "The fourth panel adds the cone's own clock. <b>It settles later than the axis at "
-        "every frequency where both are measurable</b>, and its decay constant is flat at "
-        "roughly 1.2&nbsp;s across 30–90&nbsp;Hz — the axis takes longer to arrive as the "
-        "drive rises, but the cone damps at about the same rate regardless, which is what a "
-        "dissipation-limited mode should do."
+        "The fourth panel adds the coning's own clock. <b>It settles later than the axis at "
+        "every frequency where both are measurable.</b><br><br>"
+        "<b>The two trends in that panel are not equally real, and the difference was "
+        "tested.</b> The axis settling more slowly at higher drive survives a change of "
+        "smoothing kernel, survives being re-measured against a fixed absolute band instead "
+        "of ±10% (where it gets <i>stronger</i>), and holds over nine well-populated "
+        "frequencies. The coning appearing to settle faster at higher drive does not: it "
+        "flattens under a fixed band, it rests on four frequencies once the refusals are "
+        "excluded, and it is contradicted by the decay constant τ — which touches no "
+        "threshold at all and is <b>flat</b> at 1.16–1.38 s across 30–90 Hz. If the coning "
+        "damped faster at higher drive, τ would fall. It does not.<br><br>"
+        "The mechanism is ordinary: the cut throws the cone wider at higher drive, the band "
+        "is 10% of that excursion, and the residual wobble does not scale with it — so a "
+        "wider absolute window is reached sooner without anything damping faster. "
+        "<b>Use τ, not the settling time, for how fast the coning damps.</b> Full test in "
+        "<code>control/theory.md</code> 25.12."
     )
 
 
@@ -665,7 +683,7 @@ def _html(figs, per_freq, rows, skipped, fhz):
             ("rise_1090_med_s", "rise (s)", "{:.2f}"),
             ("swing_med_deg", "swing (deg)", "{:.2f}"),
             ("d_azim_med_deg", "Δazimuth (deg)", "{:.1f}"),
-            ("prec_post_med_deg", "precession (deg)", "{:.2f}"),
+            ("cone_post_med_deg", "coning (deg)", "{:.2f}"),
             ("cone_over_drive", "cone / drive", "{:.2f}")]
     th = "".join(f"<th>{html.escape(lab)}</th>" for _c, lab, _f in cols)
     trs = []
@@ -747,8 +765,19 @@ than the smoother is refused rather than reported as the filter's own width.</li
 <li><b>The cone sitting at 1.00&times; the drive does not prove the rotor spins at the drive.</b>
 The field itself rotates at that rate and can shake the robot whatever the rotor is doing. What
 it establishes is where the line is, which is all the filter needs to know.</li>
-<li><b>The precession decay is not fitted.</b> The envelope is plotted and tabulated; turning
-it into a damping coefficient is the obvious next measurement and is not done.</li>
+<li><b>The coning settling time carries the band's frequency dependence.</b> It is 10% of an
+excursion that itself grows with drive, so it drifts downward with frequency for reasons that
+are not the robot (25.12). The decay constant τ is band-free and flat; quote that instead.</li>
+<li><b>This is coning, not precession, and the two are different modes.</b> The wobble
+measured here sits at 1.00&times; the drive frequency at every frequency from 20 to
+100&nbsp;Hz, which is the signature of a body-fixed asymmetry carried round by the rotor.
+&sect;11.3's free precession is a separate mode at a roughly constant ~1.2&nbsp;Hz, and the
+2&ndash;4&nbsp;Hz line removed from these traces is a third thing again &mdash; mechanical,
+tracking neither. This campaign has isolated the first and not the other two.</li>
+<li><b>The coning decay constant is not converted to a damping coefficient.</b> It is fitted
+and it is flat across the sweep, which is what a dissipation-limited mode should do &mdash;
+but &tau; is the decay of an RMS envelope and &sect;11.3's <i>c<sub>t</sub></i> multiplies a
+rate in a complex tilt variable. The factor between them is not derived.</li>
 <li><b>40&nbsp;Hz mixes two hold times</b> and shows as two populations — two traces at 49&deg;
 of swing against twelve at 11.5&deg;. The median is quoted over both and should not be.</li>
 </ul>
@@ -791,18 +820,7 @@ def _b64(path):
     return base64.b64encode(Path(path).read_bytes()).decode()
 
 
-def _style(ax, title, xl, yl):
-    if title:
-        ax.set_title(title, fontsize=11.5, color=INK, loc="left")
-    ax.set_xlabel(xl, fontsize=9.5, color=MUTED)
-    ax.set_ylabel(yl, fontsize=9.5, color=MUTED)
-    ax.grid(True, color=GRID, lw=0.7)
-    ax.set_axisbelow(True)
-    for sp in ("top", "right"):
-        ax.spines[sp].set_visible(False)
-    for sp in ("left", "bottom"):
-        ax.spines[sp].set_color(GRID)
-    ax.tick_params(colors=MUTED, labelsize=8.5)
+_style = ar._style          # identical body; one definition, in the module that owns it
 
 
 # ---------------------------------------------------------------- self-check

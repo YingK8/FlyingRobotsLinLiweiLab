@@ -288,7 +288,7 @@ AZIMUTH_MIN_RADIAL_DEG = 1.0
 
 
 def render_with_angles(take_dir, log_path=None, out_path=None, stride=4, fps=30.0,
-                       rig_path=None, max_frames=None, spin_hz=None):
+                       rig_path=None, max_frames=None, spin_hz=None, window_s=None):
     """Segmentation overlay over a live trace of the radial and azimuthal angles.
 
     The two camera views with their masks and fitted ellipses sit above a pair of angle
@@ -362,7 +362,11 @@ def render_with_angles(take_dir, log_path=None, out_path=None, stride=4, fps=30.
     # Trim to the transient. Over a whole take the unwrapped azimuth winds through the
     # coning precession -- one turn per revolution of the rotor, so ~20 turns a second at
     # 20 Hz and -20000 deg over an 18 s take. True, and useless on a plot.
-    keep = (t_rel >= WINDOW_S[0]) & (t_rel <= WINDOW_S[1])
+    # ``window_s`` overrides WINDOW_S for one render. Design B holds 15 s after the cut and
+    # its rotor can stop 6-15 s in -- outside the default (-2, 6) s, which is exactly the part
+    # an overlay was wanted for. The panel and the filmed frames use the same window.
+    win = tuple(window_s) if window_s is not None else WINDOW_S
+    keep = (t_rel >= win[0]) & (t_rel <= win[1])
     if keep.sum() > 20:
         t_rel, radial, l1, l2 = t_rel[keep], radial[keep], l1[keep], l2[keep]
 
@@ -411,7 +415,7 @@ def render_with_angles(take_dir, log_path=None, out_path=None, stride=4, fps=30.
                 break
             now_full = ((stamps[i][0] if stamps is not None and i < len(stamps) else t[0])
                         - tk)
-            if now_full < WINDOW_S[0] or now_full > WINDOW_S[1]:
+            if now_full < win[0] or now_full > win[1]:
                 i += 1
                 continue                                  # only film the window we plot
             if i % stride == 0:

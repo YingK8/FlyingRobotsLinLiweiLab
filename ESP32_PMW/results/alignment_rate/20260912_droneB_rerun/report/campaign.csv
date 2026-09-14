@@ -1,0 +1,3 @@
+freq_hz,n_repeats,rot_median_deg,rot_mad_deg,n_modal,modal_frac,modal_mean_deg,modal_sd_deg,n_outlier,rot_mean_deg,rot_var_deg2,rot_sd_deg,rot_sem_deg,rate_relu_med,rate_relu_mad,relu_lag_ms,rate_fit_med,rate_fit_mad,rate_mean_deg_s,rate_var,rate_sd_deg_s,n_rate,rotation_deg,sem_deg,sigma,t10_s,t90_s,rate_jump_deg_s,period_s,zeta,n_precondition_fail
+20.0,10,43.464,26.484,3,0.3,46.895,5.942,1,51.254,1689.7658,41.107,12.999,1485.289,617.564,43.5,72.872,63.452,745.013,142391.72,377.348,3,49.462,12.5943,3.9,0.0,0.63,134.736,nan,1.151,0
+50.0,9,34.263,8.527,8,0.889,33.804,5.488,1,41.329,535.9591,23.151,7.717,976.203,283.252,37.3,236.316,25.382,292.587,11457.968,107.042,8,40.245,2.6911,15.0,0.0,3.42,223.729,nan,1.306,0

@@ -115,8 +115,12 @@ class FlightWriter:
         self._released = False   # set by the encoder thread once it finalises
         # Header up front, rows as they land: see the class docstring.
         self._csv = open(self.dir / "frames.csv", "w", buffering=1)
+        # `written` is 0 for a frame the queue dropped: its row is kept (the capture time is
+        # real) but the mp4 has no frame for it. Without the flag, pairing mp4 frame i with
+        # row i put every later frame at an earlier row's time -- 91 of 125 design-B takes,
+        # seconds of error by the cut (2026-09-13). `read_index` drops the unwritten rows.
         self._csv.write("index,t_capture,skew_s,"
-                        + ",".join(f"t_{t.lower()}" for t in self.tags) + "\n")
+                        + ",".join(f"t_{t.lower()}" for t in self.tags) + ",written\n")
         self._work = queue.Queue(maxsize=QUEUE_DEPTH)
         self._thread = threading.Thread(target=self._run, name="encode", daemon=True)
         self._thread.start()
@@ -160,16 +164,18 @@ class FlightWriter:
                                             (w, h), False) for tag in self.tags]
             if not all(x.isOpened() for x in self.writers):
                 raise OSError(f"no {FOURCC} writer on this build")
+        written = 1
         try:
             self._work.put_nowait(list(zip(self.writers, frames)))
         except queue.Full:
             self.dropped += 1
+            written = 0
         if self._t_first is None:
             self._t_first = t
         self._t_last = t
         st = stamps or (t,) * len(frames)
         self._csv.write(f"{self.n},{t:.6f},{skew:.6f},"
-                        + ",".join(f"{x:.6f}" for x in st) + "\n")
+                        + ",".join(f"{x:.6f}" for x in st) + f",{written}\n")
         self.n += 1
 
     def measured_fps(self):
@@ -334,9 +340,14 @@ def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=120.0,
 def read_index(rec_dir):
     """``(stamps, skews)`` from ``frames.csv``, or ``(None, None)`` when it is missing.
 
-    ``stamps`` is one row per frame and one column per camera. Without it the videos can
-    still be replayed, but every pair has to be assumed simultaneous, which is the
-    assumption `pose/theory.md` section 17 exists to remove.
+    ``stamps`` is one row per frame IN THE MP4 and one column per camera, so row i is
+    video frame i. Without it the videos can still be replayed, but every pair has to be
+    assumed simultaneous, which is the assumption `pose/theory.md` section 17 exists to
+    remove.
+
+    Takes written before the `written` column (2026-09-13) keep a row for every DROPPED
+    frame too, and cannot be filtered here: for them row i is not frame i once anything
+    was dropped (`meta.json` `dropped` > 0), and their frame times need repairing.
     """
 
     path = Path(rec_dir) / "frames.csv"
@@ -344,6 +355,8 @@ def read_index(rec_dir):
         return None, None
     # comment="#" also reads the older takes, which prefixed a "# skew_n, 1082" line.
     df = pd.read_csv(path, comment="#")
+    if "written" in df.columns:
+        df = df[df["written"] == 1]
     if df.empty:
         return None, None
     per_cam = [c for c in df.columns if c.startswith("t_") and c != "t_capture"]
@@ -399,8 +412,19 @@ def _self_check(tmp=None):
         assert v.exists(), v
         assert b"moov" in v.read_bytes(), f"{v} has no moov atom -- unplayable"
     stamps, skews = read_index(out)
-    assert stamps is not None and stamps.shape == (90, 2), None if stamps is None else stamps.shape
-    assert len(skews) == 90, len(skews)
+    kept = 90 - fw.dropped
+    assert stamps is not None and stamps.shape == (kept, 2), None if stamps is None else stamps.shape
+    assert len(skews) == kept, len(skews)
+    rows = (out / "frames.csv").read_text().splitlines()
+    assert rows[0].endswith(",written") and len(rows) == 91, (rows[0], len(rows))
+    assert sum(int(r.rsplit(",", 1)[1]) for r in rows[1:]) == kept
+    # the reader keeps written rows only, whatever the queue happened to do above
+    fake = root / "fake"
+    fake.mkdir()
+    (fake / "frames.csv").write_text("index,t_capture,skew_s,t_a,t_b,written\n"
+                                     "0,0.0,0,0.0,0.0,1\n1,0.1,0,0.1,0.1,0\n2,0.2,0,0.2,0.2,1\n")
+    fs, _ = read_index(fake)
+    assert fs.shape == (2, 2) and list(fs[:, 0]) == [0.0, 0.2], fs
     meta = json.loads((out / "meta.json").read_text())
     assert meta["fps"] == 30.0 and meta["fps_measured"] > 0, meta
     caps, _ = open_recording(out)

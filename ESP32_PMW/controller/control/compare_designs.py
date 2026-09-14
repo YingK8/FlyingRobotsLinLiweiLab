@@ -6,6 +6,7 @@
     uv run python controller/control/compare_designs.py panels REPORT_1 REPORT_B
     uv run python controller/control/compare_designs.py traces ROOT_1 ROOT_B
     uv run python controller/control/compare_designs.py summary TRIALS_1 TRIALS_B SETTLING_1 SETTLING_B
+    uv run python controller/control/compare_designs.py cone SETTLING_1 SETTLING_B
 
 `rates` answers "do the two robots align at different rates?" from every solved repeat:
 `campaign_trials.csv`, which `alignment_rate.py --campaign` writes beside `campaign.csv`.
@@ -41,7 +42,7 @@ from pathlib import Path
 
 #: Categorical slots 1 and 2 of the reference palette (dataviz `references/palette.md`),
 #: checked with its validator on this surface. Fixed order: design 1 is always slot 1.
-COLORS = ("#2a78d6", "#eb6834")
+COLORS = ("#2a78d6", "#eb6834", "#1baf7a")
 SURFACE = "#fcfcfb"
 INK, INK_2, GRID = "#1a1a19", "#5f5e57", "#e6e5e0"
 
@@ -242,8 +243,9 @@ def rate_stats(a, b, n_boot=4000, seed=0, min_n=3):
         my = np.median(rng.choice(y, (n_boot, len(y))), axis=1)
         lo, hi = np.percentile(my / mx, [2.5, 97.5])
         rows.append({"freq_hz": f, "n_1": len(x), "n_B": len(y),
-                     "median_1_deg_s": round(float(np.median(x)), 1),
-                     "median_B_deg_s": round(float(np.median(y)), 1),
+                     # 3 decimals, not 1: the same table serves cone decays of ~0.1 s
+                     "median_1_deg_s": round(float(np.median(x)), 3),
+                     "median_B_deg_s": round(float(np.median(y)), 3),
                      "ratio_B_over_1": round(float(np.median(y) / np.median(x)), 3),
                      "ratio_ci_lo": round(float(lo), 3), "ratio_ci_hi": round(float(hi), 3),
                      "p_mannwhitney": float(mannwhitneyu(x, y, alternative="two-sided").pvalue)})
@@ -485,17 +487,23 @@ def trace_stats(rows):
     return grid, out
 
 
-def traces_figure(grid, s1, sB, out_png, labels=LABELS):
-    """Two rows of small multiples: average axis (top), cone half-angle (bottom)."""
+def traces_figure(grid, s1, sB, out_png, labels=LABELS, sC=None):
+    """Two rows of small multiples: average axis (top), cone half-angle (bottom).
+
+    With ``sC`` a third design is overlaid and the columns are every drive ANY design has
+    (operator, 2026-09-14: "up to 120 Hz"); a design without that drive is simply absent there.
+    """
 
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
 
-    freqs = sorted(set(s1) & set(sB))
+    designs = (s1, sB) if sC is None else (s1, sB, sC)
+    pick = set.intersection if sC is None else set.union
+    freqs = sorted(pick(*(set(s) for s in designs)))
     if not freqs:
-        raise SystemExit("no drive frequency has traces for both designs")
+        raise SystemExit("no drive frequency has traces for every design")
     plt.rcParams.update({"font.size": 9.5, "axes.edgecolor": GRID, "axes.labelcolor": INK_2,
                          "xtick.color": INK_2, "ytick.color": INK_2, "text.color": INK})
     fig, axes = plt.subplots(2, len(freqs), figsize=(3.6 * len(freqs) + 1.2, 7.4),
@@ -511,7 +519,9 @@ def traces_figure(grid, s1, sB, out_png, labels=LABELS):
             for side in ("top", "right"):
                 ax.spines[side].set_visible(False)
             ax.axvline(0.0, color=INK_2, linewidth=1.0, zorder=1)
-            for stats, color, label in zip((s1, sB), COLORS, labels):
+            for stats, color, label in zip(designs, COLORS, labels):
+                if f not in stats:
+                    continue
                 med = stats[f][key][0]
                 # EVERY repeat, thin, under the median. A band hid that design B's 50 Hz
                 # repeats split into two groups -- 3 of 8 swing 8-10 deg at the cut, 5 are already
@@ -524,9 +534,10 @@ def traces_figure(grid, s1, sB, out_png, labels=LABELS):
                 ax.plot(grid, med, color=color, linewidth=1.8, zorder=3,
                         label=f"{label}: bold = median, thin = each repeat")
             if i == 0:
-                ax.set_title(f"{f:g} Hz   n {s1[f]['n']} / {sB[f]['n']}   "
-                             f"stopped {s1[f]['n_stopped']} / {sB[f]['n_stopped']}", loc="left",
-                             fontsize=10.5, color=INK, pad=6)
+                n = " / ".join(str(s[f]["n"]) if f in s else "-" for s in designs)
+                stop = " / ".join(str(s[f]["n_stopped"]) if f in s else "-" for s in designs)
+                ax.set_title(f"{f:g} Hz   n {n}   stopped {stop}",
+                             loc="left", fontsize=10.5, color=INK, pad=6)
             if j == 0:
                 ax.set_ylabel(ylab)
             if i == 1:
@@ -536,16 +547,20 @@ def traces_figure(grid, s1, sB, out_png, labels=LABELS):
     # of every other frequency.
     for i, (key, _) in enumerate(rows_spec):
         # 99th percentile of every repeat, so one wild repeat cannot flatten the rest
-        allv = np.concatenate([st[f]["reps_" + key].ravel() for st in (s1, sB) for f in freqs])
+        allv = np.concatenate([st[f]["reps_" + key].ravel() for st in designs for f in freqs
+                               if f in st])
         top = float(np.nanpercentile(allv, 99))
         axes[i][0].set_ylim(0.0, 1.08 * top)
     handles, lbls = axes[0][0].get_legend_handles_labels()
-    fig.legend(handles, lbls, loc="upper right", ncol=2, frameon=False, fontsize=9.5,
+    fig.legend(handles, lbls, loc="upper right", ncol=len(designs), frameon=False, fontsize=9.5,
                bbox_to_anchor=(0.995, 0.995))
-    fig.suptitle("Average axis and cone half-angle after the cut: design 1 vs design B",
+    abc = sC is not None
+    fig.suptitle("Average axis and cone half-angle after the cut: "
+                 + ("design A vs design B vs design C" if abc else "design 1 vs design B"),
                  x=0.008, ha="left", y=0.985, fontsize=13, color=INK)
     fig.text(0.008, 0.008,
-             "n = repeats, design 1 / design B; stopped = repeats whose rotor stopped before the "
+             f"n = repeats, {'A / B / C' if abc else 'design 1 / design B'}; stopped = repeats "
+             "whose rotor stopped before the "
              "hold ended -- each is cut where it stopped, since past that the disc is still "
              "blades and no axis is measured. Vertical line = the cut (coils A and C off). "
              "y clipped at the 99th percentile of all repeats. "
@@ -553,55 +568,67 @@ def traces_figure(grid, s1, sB, out_png, labels=LABELS):
              "removed (alignment_rate.average_axis).\nThe cone is what the campaign calls "
              "coning: it turns at exactly the drive frequency, so it is synchronous coning, not "
              "free precession (theory.md 25.10). Each repeat runs to its own spin-down: 5 s after the "
-             "cut on design 1 (5 s hold), 15 s on design B (15 s hold).", fontsize=8.5, color=INK_2, ha="left", va="bottom")
+             "cut on design 1 (5 s hold), 15 s on design B (15 s hold)."
+             + (" Design A = design 1; design C also holds 15 s. " + ABC_RAMP if abc else ""),
+             fontsize=8.5, color=INK_2, ha="left", va="bottom")
     fig.tight_layout(rect=(0, 0.06, 1, 0.95))
     fig.savefig(out_png, dpi=150, facecolor=SURFACE)
     plt.close(fig)
 
 
-def build_traces(root_1, root_b, out_dir=None, labels=LABELS):
-    """Solve nothing: pool the settle traces both campaigns already compute, and draw them."""
+def build_traces(root_1, root_b, root_c=None, out_dir=None, labels=LABELS):
+    """Solve nothing: pool the settle traces the campaigns already compute, and draw them.
+
+    With ``root_c`` it is the A/B/C figure + csv (`traces_A_vs_B_vs_C`) in `OUT_DIR_ABC`.
+    """
 
     from controller.control import alignment_rate as ar
 
-    out = Path(out_dir or OUT_DIR)
+    abc = root_c is not None
+    out = Path(out_dir or (OUT_DIR_ABC if abc else OUT_DIR))
     out.mkdir(parents=True, exist_ok=True)
+    stem, labels = ("traces_A_vs_B_vs_C", LABELS_ABC) if abc else ("traces_1_vs_B", labels)
     grid, s1 = trace_stats(ar.settle_rows(root_1)[0])
-    _, sB = trace_stats(ar.settle_rows(root_b)[0])
-    with open(out / "traces_1_vs_B.csv", "w", newline="") as fh:
+    stats = [s1] + [trace_stats(ar.settle_rows(r)[0])[1] for r in (root_b, root_c) if r]
+    with open(out / f"{stem}.csv", "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["design", "freq_hz", "n", "t_s", "delta_med", "delta_q25", "delta_q75",
                     "env_med", "env_q25", "env_q75"])
-        for label, st in zip(labels, (s1, sB)):
+        for label, st in zip(labels, stats):
             for f, d in sorted(st.items()):
                 for k, t in enumerate(grid):
                     w.writerow([label, f, d["n"], round(float(t), 3)]
                                + [round(float(v), 4) for v in d["delta"][:, k]]
                                + [round(float(v), 4) for v in d["env"][:, k]])
-    traces_figure(grid, s1, sB, out / "traces_1_vs_B.png", labels)
-    print(f"-> {out / 'traces_1_vs_B.png'}\n-> {out / 'traces_1_vs_B.csv'}")
-    for f in sorted(set(s1) & set(sB)):
-        print(f"  {f:4.0f} Hz  n {s1[f]['n']:2d} / {sB[f]['n']:2d}")
-    return s1, sB
+    traces_figure(grid, stats[0], stats[1], out / f"{stem}.png", labels,
+                  sC=stats[2] if abc else None)
+    print(f"-> {out / stem}.png\n-> {out / stem}.csv")
+    for f in sorted(set.union(*(set(s) for s in stats))):
+        counts = " / ".join(f"{s[f]['n']:2d}" if f in s else " -" for s in stats)
+        print(f"  {f:4.0f} Hz  n {counts}")
+    return stats
 
 
-def load_settle(path, max_stop_s=6.0):
-    """``({freq: [settle_10pct_s, ...]}, {freq: (measured, analysed)})`` from a `settling.csv`.
+def load_settle(path, max_stop_s=6.0, column="settle_10pct_s", max_hz=math.inf):
+    """``({freq: [value, ...]}, {freq: (measured, analysed)})`` for one `settling.csv` column.
 
-    A repeat counts as measured when `settling` produced a time (the column is blank when it
-    refused -- never re-entering the 10% band inside the window). A design-B repeat whose rotor
-    stopped before ``max_stop_s`` (`spin_stop_s`, `alignment_rate.POST_TO_S`) is dropped
-    outright: past the stop the axis is not measured, so neither is its settling.
+    ``column`` defaults to the 10% settling time. A repeat counts as measured when the column is
+    finite (blank when `settling` refused -- never re-entering the 10% band inside the window,
+    or no cone decay fitted). A design-B repeat whose rotor stopped before ``max_stop_s``
+    (`spin_stop_s`, `alignment_rate.POST_TO_S`) is dropped outright: past the stop the axis is
+    not measured, so neither is anything read from it. Drives above ``max_hz`` are left out.
     """
 
     vals, counts = {}, {}
     for r in csv.DictReader(open(path)):
         f = _num(r["freq_hz"])
+        if f > max_hz:
+            continue
         stop = _num(r.get("spin_stop_s"))
         if math.isfinite(stop) and stop < max_stop_s:
             continue
         m, n = counts.get(f, (0, 0))
-        v = _num(r.get("settle_10pct_s"))
+        v = _num(r.get(column))
         if math.isfinite(v):
             vals.setdefault(f, []).append(v)
             m += 1
@@ -624,11 +651,18 @@ def _counts_from_trials(path):
 MIN_FOR_MEDIAN = 3
 
 
-def summary_figure(rates, settles, stats, counts, out_png, labels=LABELS):
-    """Alignment rate (top) and settling time (bottom) against drive frequency, both designs.
+SUMMARY_SPEC = (("Alignment rate after the cut", "deg/s"),
+                ("Settling time: last entry into a 10% band about the final axis", "s"))
+
+
+def summary_figure(rows, stats, counts, out_png, labels=LABELS, spec=SUMMARY_SPEC,
+                   title="Design 1 vs design B: how fast the axis realigns, and when it settles",
+                   note=None):
+    """Per-repeat metrics against drive frequency, both designs: one row per ``spec`` entry,
+    ``rows[i]`` = (design 1 {freq: [values]}, design B). Default: alignment rate and settling.
 
     Each frequency shows the two designs side by side: dots = repeats, a bar = the median, a
-    whisker = the middle 50%. A thin line joins the medians, broken where a design has no data.
+    whisker = the middle 50%. A thin line joins every median, unbroken across missing frequencies.
     Under each cluster, measured / analysed. An asterisk marks a frequency where the designs
     differ (two-sided Mann-Whitney, Bonferroni over the frequencies tested on that row).
     """
@@ -640,12 +674,15 @@ def summary_figure(rates, settles, stats, counts, out_png, labels=LABELS):
 
     plt.rcParams.update({"font.size": 10, "axes.edgecolor": GRID, "axes.labelcolor": INK_2,
                          "xtick.color": INK_2, "ytick.color": INK_2, "text.color": INK})
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9.2), sharex=True, facecolor=SURFACE)
-    spec = (("Alignment rate after the cut", "deg/s"),
-            ("Settling time: last entry into a 10% band about the final axis", "s"))
-    dx = (-1.9, 1.9)
-    all_f = sorted({f for row in (rates, settles) for d in row for f in d})
-    for ax, (title, unit), data, st, cnt in zip(axes, spec, (rates, settles), stats, counts):
+    n_rows = len(spec)
+    # Three designs share each 10 Hz slot: at 12 in their m/n counts run into each other.
+    width = 12 if len(rows[0]) == 2 else 17
+    fig, axes = plt.subplots(n_rows, 1, figsize=(width, 4.6 * n_rows if n_rows > 1 else 6.2),
+                             sharex=True, facecolor=SURFACE, squeeze=False)
+    axes = axes[:, 0]
+    dx = (-1.9, 1.9) if len(rows[0]) == 2 else (-2.8, 0.0, 2.8)
+    all_f = sorted({f for row in rows for d in row for f in d})
+    for ax, (row_title, unit), data, st, cnt in zip(axes, spec, rows, stats, counts):
         ax.set_facecolor(SURFACE)
         ax.grid(True, axis="y", color=GRID, linewidth=0.8, linestyle="-")
         ax.set_axisbelow(True)
@@ -669,8 +706,10 @@ def summary_figure(rates, settles, stats, counts, out_png, labels=LABELS):
                         solid_capstyle="round", zorder=4)
                 meds.append(med)
                 med_f.append(f)
-            gx, gy = _gapped([f + dx[k] for f in med_f], meds)
-            ax.plot(gx, gy, color=color, linewidth=1.0, alpha=0.7, zorder=1,
+            # Joined through every median, gaps included (operator's request, 2026-09-13): the
+            # dots and the m/n counts already show where a design has too few repeats.
+            ax.plot([f + dx[k] for f in med_f], meds, color=color, linewidth=1.0, alpha=0.7,
+                    zorder=1,
                     label=f"{label}: dots = repeats, bar = median, whisker = middle 50%")
             for f in all_f:
                 if f in cnt[k]:
@@ -683,18 +722,19 @@ def summary_figure(rates, settles, stats, counts, out_png, labels=LABELS):
             if r["differs"]:
                 ax.annotate(f"*\np={r['p_bonferroni']:.2g}", (r["freq_hz"], top * 1.02),
                             ha="center", va="bottom", fontsize=8.5, color=INK)
-        ax.set_ylim(0.0, top * 1.16)
-        ax.set_title(title, loc="left", fontsize=11.5, color=INK, pad=8)
+        # A strip below zero for the m/n counts: at y = 0 they sat on the dots of any metric
+        # that reaches zero (cone decays of ~0.1 s, the instant design-B 10 Hz settle).
+        ax.set_ylim(-0.07 * top, top * 1.16)
+        ax.set_title(row_title, loc="left", fontsize=11.5, color=INK, pad=8)
         ax.set_ylabel(unit)
-    axes[1].set_xlabel("drive frequency (Hz)")
-    axes[1].set_xticks(all_f)
+    axes[-1].set_xlabel("drive frequency (Hz)")
+    axes[-1].set_xticks(all_f)
     handles, lbls = axes[0].get_legend_handles_labels()
     fig.legend(handles, lbls, loc="upper left", ncol=2, frameon=False, fontsize=9.5,
                bbox_to_anchor=(0.01, 0.955))
-    fig.suptitle("Design 1 vs design B: how fast the axis realigns, and when it settles",
-                 x=0.012, ha="left", y=0.99, fontsize=13.5, color=INK)
+    fig.suptitle(title, x=0.012, ha="left", y=0.99, fontsize=13.5, color=INK)
     import textwrap
-    note = ("Numbers under each cluster: measured / analysed repeats (rate: modal repeats with a "
+    note = note or ("Numbers under each cluster: measured / analysed repeats (rate: modal repeats with a "
             "detectable jump; settling: repeats that re-entered the band). Median bar and line "
             f"need >= {MIN_FOR_MEDIAN} measured repeats. * = designs differ: two-sided "
             "Mann-Whitney, Bonferroni per row, >= 3 repeats a side. Settling windows differ: "
@@ -725,7 +765,7 @@ def build_summary(trials_1, trials_b, settling_1, settling_b, out_dir=None, labe
             w = csv.DictWriter(fh, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
-    summary_figure(rates, settles, (st_rate, st_settle), counts,
+    summary_figure((rates, settles), (st_rate, st_settle), counts,
                    out / "rate_and_settling_1_vs_B.png", labels)
     print(f"-> {out / 'rate_and_settling_1_vs_B.png'}")
     for name, st in (("rate", st_rate), ("settling", st_settle)):
@@ -735,6 +775,121 @@ def build_summary(trials_1, trials_b, settling_1, settling_b, out_dir=None, labe
                   f"B/1 {r['ratio_B_over_1']:.2f}  p_bonf {r['p_bonferroni']:.3g}"
                   f"{'  DIFFERS' if r['differs'] else ''}")
     return st_rate, st_settle
+
+
+#: Above this drive the once-per-rev coning line is aliased at the 640x400 / ~208 fps capture
+#: mode (Nyquist, theory.md 25.14), so a fitted cone decay there measures nothing. The cone
+#: panels in `panels` stop at the same place.
+CONE_MAX_HZ = 104.0
+
+
+def build_cone(settling_1, settling_b, settling_c=None, out_dir=None, labels=LABELS):
+    """Decay time constant of the cone ('precession') half-angle vs drive, two or three designs.
+
+    Per repeat `cone_tau_s` from each `settling.csv` -- the values behind `settling_by_freq`'s
+    `cone_tau_med_s` -- with the settling row's rotor-stop exclusion, below `CONE_MAX_HZ`.
+    With `settling_c` it is the A/B/C figure + csv in `OUT_DIR_ABC`; the statistics stay A vs B.
+    """
+
+    out = Path(out_dir or (OUT_DIR if settling_c is None else OUT_DIR_ABC))
+    out.mkdir(parents=True, exist_ok=True)
+    (t1, c1), (tb, cb) = (load_settle(p, column="cone_tau_s", max_hz=CONE_MAX_HZ)
+                          for p in (settling_1, settling_b))
+    if settling_c is not None:
+        return _build_cone_abc(t1, c1, tb, cb, settling_c, out)
+    st = rate_stats(t1, tb)
+    with open(out / "cone_tau_stats.csv", "w", newline="") as fh:
+        if st:
+            w = csv.DictWriter(fh, fieldnames=["metric"] + list(st[0]))
+            w.writeheader()
+            w.writerows({"metric": "cone_tau_s", **r} for r in st)
+    note = ("Dots: one repeat's fitted decay time constant of the RMS cone half-angle after the "
+            "cut (cone_tau_s in settling.csv, the values behind cone_tau_med_s). Numbers under "
+            "each cluster: repeats with a fitted decay / analysed. Median bar and line need >= "
+            f"{MIN_FOR_MEDIAN} repeats. Drives above {CONE_MAX_HZ:.0f} Hz are left out: the "
+            "coning line is aliased at this capture mode (theory.md 25.14). Design-B repeats whose "
+            "rotor stopped inside the window are excluded (24.13). * = designs differ: two-sided "
+            "Mann-Whitney, Bonferroni, >= 3 repeats a side.")
+    png = out / "cone_tau_1_vs_B.png"
+    summary_figure(((t1, tb),), (st,), ((c1, cb),), png, labels,
+                   spec=(("Cone ('precession') half-angle: decay time constant after the cut",
+                          "s"),),
+                   title="Design 1 vs design B: how fast the coning dies away", note=note)
+    print(f"-> {png}")
+    for r in st:
+        print(f"  cone tau {r['freq_hz']:5.0f} Hz  n {r['n_1']:2d}/{r['n_B']:2d}  "
+              f"median {r['median_1_deg_s']:6.3f} / {r['median_B_deg_s']:6.3f} s  "
+              f"B/1 {r['ratio_B_over_1']:.2f}  p_bonf {r['p_bonferroni']:.3g}"
+              f"{'  DIFFERS' if r['differs'] else ''}")
+    return st
+
+
+#: Design A is the campaign the two-design figures call "design 1" (`20260909_205843`).
+LABELS_ABC = ("design A", "design B (half outer ring)", "design C")
+OUT_DIR_ABC = OUT_DIR.parent / "compare_A_B_C"
+#: Every A/B/C figure carries this. The stars come from `rate_stats`, which is pairwise, so only
+#: A vs B is tested; C is left untested because its ramp differs (tilt_run --seg2-rate 10).
+ABC_RAMP = ("NOT like-for-like: design C's ramp climbed to the drive at 10 Hz/s, A and B at "
+            "3.5 Hz/s (2.8 from 60 Hz).")
+ABC_CAVEAT = "* = A and B differ (two-sided Mann-Whitney, Bonferroni); C is not tested. " + ABC_RAMP
+
+
+def _abc_outputs(values, counts, st, out, stem, spec, title, note):
+    """`<stem>.png` and, beside it, `<stem>.csv`: one row per design x drive holding what the
+    figure draws -- measured / analysed, median, middle 50%, and every repeat's value."""
+
+    import numpy as np
+
+    summary_figure((values,), (st,), (counts,), out / f"{stem}.png", LABELS_ABC,
+                   spec=(spec,), title=title, note=note)
+    with open(out / f"{stem}.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["design", "freq_hz", "n_measured", "n_analysed", "median", "q25", "q75",
+                    "values"])
+        for design, d, cnt in zip("ABC", values, counts):
+            for f in sorted(set(d) | set(cnt)):
+                v = np.asarray(d.get(f, ()), float)
+                q = (np.percentile(v, [50, 25, 75]) if len(v) >= MIN_FOR_MEDIAN
+                     else (math.nan,) * 3)
+                m, n = cnt.get(f, (len(v), len(v)))
+                w.writerow([design, f"{f:g}", m, n, *(f"{x:.4g}" for x in q),
+                            ";".join(f"{x:.4g}" for x in v)])
+    print(f"-> {out / stem}.png + .csv")
+
+
+def _build_cone_abc(t1, c1, tb, cb, settling_c, out):
+    """`build_cone` with a third design (see `ABC_CAVEAT` for what is and is not tested)."""
+
+    tc, cc = load_settle(settling_c, column="cone_tau_s", max_hz=CONE_MAX_HZ)
+    st = rate_stats(t1, tb)
+    note = ("Dots: one repeat's fitted decay time constant of the RMS cone half-angle after the "
+            "cut (cone_tau_s in settling.csv). Numbers under each cluster: repeats with a fitted "
+            f"decay / analysed. Median bar and line need >= {MIN_FOR_MEDIAN} repeats. Drives "
+            f"above {CONE_MAX_HZ:.0f} Hz are left out (aliased, theory.md 25.14). Repeats whose "
+            "rotor stopped inside the window are excluded (24.13). " + ABC_CAVEAT)
+    # Stem is the operator's rename of the first output (was cone_tau_A_vs_B_vs_C).
+    _abc_outputs((t1, tb, tc), (c1, cb, cc), st, out, "cone_time_constant_A_vs_B_vs_C",
+                 ("Cone ('precession') half-angle: decay time constant after the cut", "s"),
+                 "Design A vs B vs C: how fast the coning dies away", note)
+    return st
+
+
+def build_rate_abc(trials_a, trials_b, trials_c, out_dir=None):
+    """Alignment rate after the cut vs drive for designs A, B and C, from each
+    `campaign_trials.csv` (the per-repeat rows `alignment_rate.py --campaign` writes)."""
+
+    out = Path(out_dir or OUT_DIR_ABC)
+    out.mkdir(parents=True, exist_ok=True)
+    paths = (trials_a, trials_b, trials_c)
+    rates = tuple(load_trials(p) for p in paths)
+    st = rate_stats(rates[0], rates[1])
+    note = ("Dots: one modal repeat's alignment rate on the rising edge (campaign_trials.csv). "
+            "Numbers under each cluster: modal repeats with a detectable jump / analysed. Median "
+            f"bar and line need >= {MIN_FOR_MEDIAN} repeats. " + ABC_CAVEAT)
+    _abc_outputs(rates, tuple(_counts_from_trials(p) for p in paths), st, out,
+                 "alignment_rate_A_vs_B_vs_C", ("Alignment rate after the cut", "deg/s"),
+                 "Design A vs B vs C: how fast the axis realigns", note)
+    return st
 
 
 def _self_check():
@@ -844,23 +999,45 @@ def _self_check():
     with tempfile.TemporaryDirectory() as d:
         traces_figure(grid, s1, sB, Path(d) / "t.png")
         assert (Path(d) / "t.png").stat().st_size > 10_000
+        # a drive only one design has still gets its column in the A/B/C figure
+        sC = {f: v for f, v in sB.items() if f != min(sB)}
+        traces_figure(grid, s1, sB, Path(d) / "t3.png", LABELS_ABC, sC=sC)
+        assert (Path(d) / "t3.png").stat().st_size > 10_000
 
     # settling: refused repeats are counted but not plotted; a rotor stop inside the window
     # drops the repeat altogether; and the summary figure renders from both files
     with tempfile.TemporaryDirectory() as d:
         sp = Path(d) / "s.csv"
-        sp.write_text("freq_hz,settle_10pct_s,spin_stop_s\n"
-                      "20,1.0,\n20,1.2,\n20,,\n20,0.9,4.0\n20,1.1,9.0\n")
+        sp.write_text("freq_hz,settle_10pct_s,spin_stop_s,cone_tau_s\n"
+                      "20,1.0,,0.5\n20,1.2,,0.6\n20,,,0.7\n20,0.9,4.0,0.4\n20,1.1,9.0,\n"
+                      "110,1.0,,0.9\n")
         v_, c_ = load_settle(sp)
         assert sorted(v_[20.0]) == [1.0, 1.1, 1.2] and c_[20.0] == (3, 4), (v_, c_)
+        # another column, same stop rule; an aliased drive is dropped, not plotted
+        tau_, ctau_ = load_settle(sp, column="cone_tau_s", max_hz=CONE_MAX_HZ)
+        assert sorted(tau_) == [20.0] and sorted(tau_[20.0]) == [0.5, 0.6, 0.7], tau_
+        assert ctau_ == {20.0: (3, 4)}, ctau_
+        build_cone(sp, sp, out_dir=d)
+        assert (Path(d) / "cone_tau_1_vs_B.png").stat().st_size > 10_000
+        build_cone(sp, sp, sp, out_dir=d)
+        assert (Path(d) / "cone_time_constant_A_vs_B_vs_C.png").stat().st_size > 10_000
+        abc = list(csv.DictReader(open(Path(d) / "cone_time_constant_A_vs_B_vs_C.csv")))
+        assert [r["design"] for r in abc] == ["A", "B", "C"], abc
+        assert abc[2]["values"] == "0.5;0.6;0.7" and abc[2]["median"] == "0.6", abc[2]
+        assert (abc[2]["n_measured"], abc[2]["n_analysed"]) == ("3", "4"), abc[2]
         tp = Path(d) / "t.csv"
         tp.write_text("freq_hz,repeat,take,rate_relu_deg_s,amp_deg,modal\n"
                       + "".join(f"20,{k},t{k},{900 + 10 * k},40,True\n" for k in range(5)))
         build_summary(tp, tp, sp, sp, out_dir=d)
         assert (Path(d) / "rate_and_settling_1_vs_B.png").stat().st_size > 10_000
+        build_rate_abc(tp, tp, tp, out_dir=d)
+        assert (Path(d) / "alignment_rate_A_vs_B_vs_C.png").stat().st_size > 10_000
+        abc = list(csv.DictReader(open(Path(d) / "alignment_rate_A_vs_B_vs_C.csv")))
+        assert [r["design"] for r in abc] == ["A", "B", "C"], abc
+        assert len(abc[0]["values"].split(";")) == 5 and abc[0]["median"] == "920", abc[0]
 
     print("compare_designs: self-check passed (load, merge, NaN handling, figures, "
-          "rate statistics, traces, settling summary)")
+          "rate statistics, traces, settling summary, cone decay)")
 
 
 if __name__ == "__main__":
@@ -872,16 +1049,34 @@ if __name__ == "__main__":
             raise SystemExit("summary TRIALS_1 TRIALS_B SETTLING_1 SETTLING_B")
         build_summary(*sys.argv[2:6])
         sys.exit()
+    if sys.argv[1] == "abc":
+        # Files, not campaign roots: design A's campaign_trials.csv lives in
+        # compare_1_vs_B/design1_campaign/, not in its own report/.
+        if len(sys.argv) not in (8, 10) or (len(sys.argv) == 10 and sys.argv[8] != "--out"):
+            raise SystemExit("abc TRIALS_A TRIALS_B TRIALS_C SETTLING_A SETTLING_B SETTLING_C "
+                             "[--out DIR]")
+        out_abc = sys.argv[9] if len(sys.argv) == 10 else None
+        build_rate_abc(*sys.argv[2:5], out_dir=out_abc)
+        build_cone(*sys.argv[5:8], out_dir=out_abc)
+        sys.exit()
+    if sys.argv[1] == "cone":
+        if len(sys.argv) not in (4, 5, 7) or (len(sys.argv) == 7 and sys.argv[5] != "--out"):
+            raise SystemExit("cone SETTLING_A SETTLING_B [SETTLING_C [--out DIR]]")
+        build_cone(*sys.argv[2:5], out_dir=sys.argv[6] if len(sys.argv) == 7 else None)
+        sys.exit()
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", choices=("rates", "panels", "traces"))
     ap.add_argument("design_1", help="rates: campaign_trials.csv; panels: a report dir")
     ap.add_argument("design_b")
+    ap.add_argument("design_c", nargs="?", help="traces only: a third campaign root (A/B/C)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
+    if a.design_c and a.mode != "traces":
+        raise SystemExit("a third design is only supported by `traces` (and `abc` / `cone`)")
     if a.mode == "rates":
         build_rates(a.design_1, a.design_b, out_dir=a.out)
     elif a.mode == "traces":
-        build_traces(a.design_1, a.design_b, out_dir=a.out)
+        build_traces(a.design_1, a.design_b, a.design_c, out_dir=a.out)
     else:
         build(a.design_1, a.design_b, out_dir=a.out or OUT_DIR)

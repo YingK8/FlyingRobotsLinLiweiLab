@@ -143,7 +143,68 @@ shutter**. Both properties matter downstream and neither is incidental:
   what disqualifies colour-based clutter rejection, and the whole of
   [§15](../pose/theory.md#152-why-chroma-cannot-rescue-it) follows from it.
 
-## 1.6 Correspondence with the implementation
+## 1.6 A timestamp row with no frame: encoder drops in the flight recorder
+
+`FlightWriter` encodes on its own thread behind a bounded queue (`QUEUE_DEPTH = 64`). A
+frame that arrives while the queue is full is **dropped from the mp4 and counted**, so
+that a slow encoder can never stall a flight. Until 2026-09-13 its `frames.csv` row was
+written anyway. This is a different counter from §1.1's `n_dropped`: that one is a pose
+consumer skipping frames it never saw; this one is frames that were captured, timed, and
+then never written.
+
+`disc_axis` reads the video and `record.read_index` and pairs **mp4 frame $i$ with row
+$i$**. Let $D(i)$ be the number of rows dropped before the $i$-th written frame. Its true
+time is $t_{i+D(i)}$ but it is given $t_i$, an error of
+
+$$\varepsilon(i) = t_{i+D(i)} - t_i \approx \frac{D(i)}{f},$$
+
+which grows through the take and never recovers. At $f \approx 210$ Hz a take that loses
+1761 frames before its coil cut (~40 s in) has its cut drawn up to 8 s late.
+
+**Proof it is this and nothing else.** On take `2026-09-13_101717`: `frames.csv` 12734 rows,
+each mp4 10973 frames, `meta.json` `dropped` 1761, and $12734 - 10973 = 1761$ exactly. A
+drop-free take reads 13177 / 13177 / 13177. The mp4 cannot help: `ffprobe` gives 10973
+packets exactly $1/210$ s apart, no gap. `cv2.VideoWriter` writes a constant-rate container,
+so the file keeps the order of the frames and none of their times.
+
+**What it looked like.** On 91 of design B's 125 takes (`results/alignment_rate/`): the
+axis swing drawn *before* $t = 0$, the scheduled spin-down drawn ~1 s *after* the cut,
+takes whose `axis.csv` ends seconds before `TILT_OFF`. It was read as physics for a whole
+session -- "non-responders", a bistable hold attitude, CW spin-up -- and 14 takes were
+excluded on it, until the operator, who watched every run, said they were all fine. The
+negative results that came out of it are retracted in the campaign README (2026-09-13).
+
+**What causes the drops is only partly known.** Not the medium: 70 s of a still scene
+dropped nothing to the FAT32 stick and nothing to the internal disk (both ~209 fps). Not
+only concurrent analysis either: a re-record with nothing else running still dropped 43
+to 5585 frames a take, heaviest at 120 Hz. The working explanation is encoder cost on the
+spinning, blurred disc, made worse by anything else competing for the machine.
+
+**The fix** (`record.py`): each row carries `written` (1 queued, 0 dropped) and
+`read_index` returns written rows only, so row $i$ is frame $i$ for every consumer
+(`disc_axis`, `live_viz`, `sync`; `pose/spin.py` reads the file itself and filters too).
+Drops still cost frames, but no longer cost time.
+
+**Repairing takes recorded before the flag.** Which rows were dropped is gone, but a take
+is often drop-free at one end. Pairing from the *end* -- frame $i$ to row
+$N_{\text{rows}} - N_{\text{mp4}} + i$ -- is exact from the last drop onward; the original
+forward pairing is exact up to the first. Each is tested against the one event every run
+has: the axis swings when coils A and C are cut. Drop-free takes place the swing onset
+0.02-0.08 s after the `KILL` label (the response lag, per frequency); a pairing is accepted
+when the onset lands within 0.04 s of its frequency's drop-free median
+(`ai/alignment/align_pairing_test.py`):
+
+| verdict | takes | timing after the cut |
+|---|---|---|
+| drop-free | 43 | exact |
+| backward pairing lands the swing | 31 | exact: `retime_takes.py` rewrites `t` from the end, originals kept as `*.forward_t.csv` |
+| forward pairing lands the swing | 20 | exact at the cut, approximate after (drops fell later) |
+| neither | 39 | drops on both sides of the cut: re-recorded with the flag (38), or excluded (120 Hz) |
+
+`retime.json` in each take records the verdict and `post_cut_exact`, so a settling time or a
+cone decay can be taken only where the seconds after the cut are exact.
+
+## 1.7 Correspondence with the implementation
 
 | Model element | Code |
 |---|---|
@@ -158,3 +219,7 @@ shutter**. Both properties matter downstream and neither is incidental:
 | Skew measurement (§1.4) | `sources.py` `StereoCamera.read`, `skew_stats` |
 | Mean pair timestamp (§1.4) | `StereoCamera.read` |
 | One camera or two, branch-free (§1.1) | `elp.open_group`, `elp.as_frames` |
+| Encoder drop, row kept and flagged (§1.6) | `record.py` `FlightWriter.add` (`written`), `QUEUE_DEPTH` |
+| Row $i$ = mp4 frame $i$ (§1.6) | `record.read_index`; `pose/spin.py` `watch` filters the same flag |
+| Forward vs backward pairing test (§1.6) | `ai/alignment/align_pairing_test.py` |
+| Retiming a pre-flag take (§1.6) | `ai/alignment/retime_takes.py` → `retime.json`, `*.forward_t.csv` |

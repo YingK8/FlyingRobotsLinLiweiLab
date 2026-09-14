@@ -160,11 +160,18 @@ def build(out_zip, designs=("1", "b")):
                     w.writerows(rows)
                     zf.writestr(f"takes/design_{design}/{name}", buf.getvalue())
                     tr, se = trials.get(take.name, {}), settle.get(take.name, {})
+                    # What a blank cell means depends on the take: design 1's per-camera fits
+                    # and frames.csv are not on disk at all (its video was archived into
+                    # results/flights/Archive.zip and the take folders stripped), while a blank
+                    # in a design-B file means that output had no solution for that frame.
+                    per_view = (take / "tilt_A.csv").exists()
+                    video = (take / "A" / "A.mp4").exists()
                     manifest.append({
                         "file": f"takes/design_{design}/{name}", "design": design,
                         "freq_hz": float(r["freq_hz"]), "repeat": int(r["repeat"]),
                         "take": take.name, "video_dir": str(take), "log": r["log"],
                         "t_kill_host_s": f"{t_kill:.4f}" if t_kill is not None else "",
+                        "per_view_columns": int(per_view), "video_present": int(video),
                         "rotor_stop_s": f"{stop:.2f}" if math.isfinite(stop) else "",
                         "n_frames": len(rows),
                         "rate_relu_deg_s": tr.get("rate_relu_deg_s", ""),
@@ -199,6 +206,10 @@ def build(out_zip, designs=("1", "b")):
 
 def _readme(manifest):
     n = {d: sum(1 for m in manifest if m["design"] == d) for d in ("1", "b")}
+    pv = {d: sum(1 for m in manifest if m["design"] == d and m["per_view_columns"])
+          for d in ("1", "b")}
+    vid = {d: sum(1 for m in manifest if m["design"] == d and m["video_present"])
+           for d in ("1", "b")}
     return f"""# Alignment-rate campaigns: processed CSVs
 
 Design 1 (`results/alignment_rate/20260909_205843`, {n['1']} takes) and design B, the half outer
@@ -224,7 +235,23 @@ One file per good take; `<repeat>` is the campaign index's own repeat number. On
 | radius_mm | disc radius from the unforeshortened major axis, mm |
 | a_* / b_* | camera A / B ellipse fit: theta_deg (axis-ratio tilt), area_px, cx cy (centre, px), d1 d2 (axis lengths, px), ang_deg |
 
-A blank cell means that output had no solution for that frame.
+A blank cell means that output had no solution for that frame -- EXCEPT where the source file
+does not exist for that take at all; `manifest.csv` says which.
+
+## What exists per design
+
+| | design 1 | design B |
+|---|---|---|
+| takes here | {n['1']} | {n['b']} |
+| fused axis + minor axis (`nx..`, `minor_*`, `x_mm..`) | all | all |
+| per-camera fits (`a_*`, `b_*`) | {pv['1']} of {n['1']} | {pv['b']} of {n['b']} |
+| video beside the take | {vid['1']} of {n['1']} | {vid['b']} of {n['b']} |
+
+Design 1's takes were stripped after solving: their `A/A.mp4`, `B/B.mp4` and `frames.csv` live
+in `results/flights/Archive.zip`, and `tilt_A.csv` / `tilt_B.csv` were never kept, so its files
+carry no per-camera columns. Re-solving those takes from the archive would produce them.
+Design B's video is on the USB stick (`/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/`), which
+`manifest.csv` records per take in `video_dir`.
 
 ## manifest.csv
 
@@ -232,6 +259,8 @@ One row per take file: design, freq_hz, repeat, take stamp, where its video and 
 the cut time on the host clock, when the rotor stopped (blank = never within the take), and
 the take's own results -- rate_relu_deg_s, swing_amp_deg and modal_repeat from the rate
 analysis; settle_swing_deg, settle_10pct_s and settle_note from the settling analysis.
+`per_view_columns` and `video_present` say whether that take's per-camera fits and video are
+on disk, so a blank column can be told from a missing source.
 
 ## summary/
 

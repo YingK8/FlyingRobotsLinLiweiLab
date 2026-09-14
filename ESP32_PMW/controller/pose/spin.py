@@ -204,7 +204,11 @@ def from_recording(rec_dir, tag="A", limit=None, stride=1):
         cols = rows[0].split(",")
         if f"t_{tag.lower()}" in cols:
             k = cols.index(f"t_{tag.lower()}")
-            stamps = [float(r.split(",")[k]) for r in rows[1:]]
+            # Rows the encoder dropped have no mp4 frame; keep only written ones so row i
+            # is frame i (see record.read_index). Takes without the column keep every row.
+            kw = cols.index("written") if "written" in cols else None
+            stamps = [float(r.split(",")[k]) for r in rows[1:]
+                      if kw is None or r.split(",")[kw] == "1"]
 
     w = SpinWitness()
     i = 0

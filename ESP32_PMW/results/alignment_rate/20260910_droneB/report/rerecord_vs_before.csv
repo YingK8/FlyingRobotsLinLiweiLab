@@ -1,0 +1,13 @@
+freq_hz,repeat,take,drawn,ramp_log_ratio,verdict
+80,12,2026-09-13_101717,True,-0.13,no coherent spin
+80,13,2026-09-13_101852,True,0.45,CCW (normal)
+80,14,2026-09-13_102027,False,-0.36,CW
+80,15,2026-09-13_102706,True,0.41,CCW (normal)
+80,16,2026-09-13_103555,False,-0.09,no coherent spin
+80,17,2026-09-13_104421,True,-0.13,no coherent spin
+90,6,2026-09-13_105703,True,0.44,CCW (normal)
+90,7,2026-09-13_111034,False,0.15,CCW (normal)
+90,8,2026-09-13_112422,True,0.52,CCW (normal)
+100,6,2026-09-13_114447,True,0.02,no coherent spin
+100,7,2026-09-13_114816,True,-0.13,no coherent spin
+100,8,2026-09-13_115312,True,0.0,no coherent spin

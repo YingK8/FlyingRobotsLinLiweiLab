@@ -8,4 +8,5 @@ freq_hz,repeat,outcome,flight,log,heat_c,telemetry_samples
 20.0,7,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_234240,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_234240_droneB/sweep.log,0.634,69
 20.0,8,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_234357,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_234357_droneB/sweep.log,0.551,69
 20.0,9,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_234514,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_234514_droneB/sweep.log,0.618,69
-20.0,10,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_234631,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_234631_droneB/sweep.log,0.658,69
+20.0,10,excluded:mistimed_drops,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-10_234631,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260910_234631_droneB/sweep.log,0.658,69
+20.0,11,ok,/Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143151,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_143151_droneB/sweep.log,0.356,69

@@ -1,0 +1,55 @@
+=== 2026-09-13 10:15:55 --campaign
+pre-cut tilt band: -7.3-32.3 deg (median 12.5, robust sigma 6.6)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:1604: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  fig.tight_layout()
+
+ freq   n |   median     MAD |  modal     mean     sd |  rate fit     MAD     jump     HINGE     mad  lag ms
+   20  10 |    22.32   31.35 |  2/10     22.32   4.95 |     86.29   82.92   527.33    459.71  428.81    83.4
+   50   8 |    30.66    6.82 |  6/8      33.09   5.68 |    236.32   19.13   251.17    976.20  299.22    38.0
+
+-> results/alignment_rate/20260912_droneB_rerun/report
+=== 2026-09-13 10:15:57 --settle
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+    f   n settled  t_settle     rise    swing  d_azim |   pre  peak  final   c_set  c_tau n_ctau
+   20   7   1/7       3.928      nan     6.21    54.4 |  4.49  6.45   4.58     nan  0.535   5/7  
+   50   8   2/8       1.101      nan     9.63    32.0 |  0.87  7.25   1.18   2.504  0.918   6/8  
+
+5 take(s) not measured:
+     20 Hz  2026-09-12_182210  no usable kill
+     20 Hz  2026-09-12_182708  no usable kill
+     20 Hz  2026-09-12_183200  no usable kill
+     50 Hz  2026-09-12_183824  no usable kill
+     50 Hz  2026-09-12_184409  no usable kill
+
+wrote results/alignment_rate/20260912_droneB_rerun/report/settling.csv, settling_by_freq.csv, axis_vs_time_*.png, settle_vs_frequency.png
+=== 2026-09-14 04:34:03 --campaign after retiming + re-record
+pre-cut tilt band: -3.1-36.0 deg (median 16.4, robust sigma 6.5)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:1604: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  fig.tight_layout()
+
+ freq   n |   median     MAD |  modal     mean     sd |  rate fit     MAD     jump     HINGE     mad  lag ms
+   20  10 |    43.46   26.48 |  3/10     46.90   5.94 |     72.87   63.45   512.12   1485.29  617.56    43.5
+   50   9 |    34.26    8.53 |  8/9      33.80   5.49 |    236.32   25.38   265.03    976.20  283.25    37.3
+
+-> results/alignment_rate/20260912_droneB_rerun/report
+=== 2026-09-14 04:34:06 --settle after retiming + re-record
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+    f   n settled  t_settle     rise    swing  d_azim |   pre  peak  final   c_set  c_tau n_ctau
+   20   8   3/8       1.903    0.827     6.34    77.5 |  4.49  6.75   4.82   3.806  0.535   7/8  
+   50  10   4/10      1.110      nan     9.90    33.5 |  0.81  7.38   1.39   2.317  0.937   9/10 
+
+2 take(s) not measured:
+     20 Hz  2026-09-12_182210  no usable kill
+     20 Hz  2026-09-12_183200  no usable kill
+
+wrote results/alignment_rate/20260912_droneB_rerun/report/settling.csv, settling_by_freq.csv, axis_vs_time_*.png, settle_vs_frequency.png

@@ -109,6 +109,27 @@ MAX_COOL_S = 600.0
 #: Floor on the wait BETWEEN frequencies. The next chunk flashes, reboots and re-opens the
 #: cameras, so this is on top of ~20 s of dead time either way.
 MIN_CHUNK_COOL_S = 180.0
+#: `--wait-s`: one fixed pause between trials AND between chunks, replacing every scaled wait
+#: above. None = those waits. The operator set 120 s on 2026-09-12 and dropped the coil-reading
+#: gate with it; it reads no temperature, so it is only as safe as someone watching the coils.
+FIXED_WAIT_S = None
+#: Heat multiplier for the cooling arithmetic: the stamp and `cool_for` charge this times the
+#: I^2 integral. On 2026-09-11 the coils measured 100 C against 63 C modelled -- a rise of
+#: 78 C against 41, ~2x. `heat_c` in the index stays the raw integral.
+HEAT_SCALE = 2.0
+#: `cool_for` waits until the next take ENDS below this. 60 C (a guessed margin for the 2x
+#: itself) cost ~11 h for 27 takes at 80-120 Hz; the operator chose the 70 C ceiling on
+#: 2026-09-12, which with the 2x is still the conservative side of the measured under-read.
+COOL_TO_C = 70.0
+#: `--stop-after-h`: wall-clock end of the session (`time.time()`), or None. The operator caps
+#: sessions at 2 h; a take that cannot finish, cooling included, is left for the next session.
+STOP_AT = None
+
+
+def _out_of_time(needed_s):
+    """True if `needed_s` more seconds of cooling and drive would end past `STOP_AT`."""
+
+    return STOP_AT is not None and time.time() + needed_s > STOP_AT
 
 #: Above this frequency the campaign takes fewer repeats: the points are hot and slow, and
 #: `control/theory.md` 24.5 argues five is the minimum that can see the non-modal response
@@ -193,13 +214,16 @@ def _drive_sum(amps, duty):
 
 
 def cool_for(temp_c, next_point_c):
-    """Seconds to wait so the next point still lands under the ceiling. Newton cooling."""
+    """Seconds to wait so the next point, charged `HEAT_SCALE`x, lands under `COOL_TO_C`.
+
+    Newton cooling on `coil_thermal.TAU_COOL_S`.
+    """
 
     import math
 
     from ai.thermal import coil_thermal
 
-    need = coil_thermal.T_CEILING_C - next_point_c
+    need = COOL_TO_C - HEAT_SCALE * next_point_c
     if temp_c <= need:
         return MIN_COOL_S
     amb = coil_thermal.T_AMBIENT_C
@@ -540,7 +564,7 @@ def run_chunk(freq, repeats=5, port=None, out_dir=None, dry_run=False, cool=True
         if n > 0:
             coil_thermal.STAMP.parent.mkdir(parents=True, exist_ok=True)
             coil_thermal.STAMP.write_text(
-                f"{t_before + c:.1f}  {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                f"{t_before + HEAT_SCALE * c:.1f}  {time.strftime('%Y-%m-%d %H:%M:%S')}")
         rows.append({"freq_hz": freq, "repeat": rep, "outcome": outcome,
                      "flight": str(flight), "log": str(log),
                      "heat_c": round(c, 3), "telemetry_samples": n})
@@ -563,8 +587,14 @@ def run_chunk(freq, repeats=5, port=None, out_dir=None, dry_run=False, cool=True
             continue                              # same repeat number, fresh take
 
         if rep < last and not _gated(freq, gate):      # a gated take waits at its gate
-            wait = (cool_for(coil_thermal.temp_now(), p["heat_per_repeat_c"]) if cool
+            wait = (FIXED_WAIT_S if FIXED_WAIT_S is not None
+                    else cool_for(coil_thermal.temp_now(), p["heat_per_repeat_c"]) if cool
                     else wait_s(p["heat_per_repeat_c"]))
+            # +60 s: take overhead beyond drive -- camera open, board reset, park.
+            if _out_of_time(wait + p["drive_s"] + 60.0):
+                print(f"  --stop-after-h: {wait:.0f} s of cooling plus repeat {rep + 1} would "
+                      f"end past the session -- stopping, board parked")
+                break
             print(f"  {'cooling' if cool else 'pausing (heat gate OFF)'} "
                   f"{wait:.0f} s before repeat {rep + 1}")
             try:
@@ -643,6 +673,19 @@ def sweep(freqs=None, repeats=5, port=None, out_dir=None, cool=True, force_hot=F
                 # on boot until `flash` parks it. Seconds of drive, but not on hot coils.
                 if _gated(f, gate):
                     gate_on_reading(gate[1], f"before flashing {f:g} Hz: ")
+                elif cool and FIXED_WAIT_S is None:
+                    # `run_chunk` cools only BETWEEN its repeats, so a chunk's first take --
+                    # and a resumed campaign's first take -- would start on whatever heat
+                    # the last one left. Cool for it here, before the flash energises.
+                    from ai.thermal import coil_thermal
+                    wait = cool_for(coil_thermal.temp_now(), plan(f, 1)["heat_per_repeat_c"])
+                    if _out_of_time(wait + plan(f, 1)["drive_s"] + 60.0):
+                        print(f"\n  --stop-after-h: {wait:.0f} s of cooling plus the first "
+                              f"{f:g} Hz take would end past the session -- stopping")
+                        break
+                    print(f"\n  cooling {wait:.0f} s before the first {f:g} Hz take "
+                          f"(model ~{coil_thermal.temp_now():.0f} C)")
+                    wait_or_prompt(wait, f"before flashing {f:g} Hz: ")
                 flash(f)
                 # The schedule that ran, beside the takes it produced. `tilt.json` on SPIFFS
                 # is overwritten by the next frequency, so without this copy the only record
@@ -665,8 +708,11 @@ def sweep(freqs=None, repeats=5, port=None, out_dir=None, cool=True, force_hot=F
         # started ~20 s later with every one of those degrees still in the coils. Twice the
         # per-repeat wait, because a chunk is worth many repeats of heat.
         nxt = freqs[freqs.index(f) + 1] if f != freqs[-1] else None
-        if nxt is not None and rows and not kw.get("dry_run") and not _gated(nxt, gate):
-            wait = wait_s(plan(f, 1)["heat_per_repeat_c"], mult=2.0, floor=MIN_CHUNK_COOL_S)
+        # With `cool` the next chunk cools itself before its flash, so no second wait here.
+        if (nxt is not None and rows and not kw.get("dry_run") and not _gated(nxt, gate)
+                and (FIXED_WAIT_S is not None or not cool)):
+            wait = (FIXED_WAIT_S if FIXED_WAIT_S is not None else
+                    wait_s(plan(f, 1)["heat_per_repeat_c"], mult=2.0, floor=MIN_CHUNK_COOL_S))
             print(f"\n  between chunks: {wait:.0f} s before the next frequency")
             try:
                 wait_or_prompt(wait, f"after the {f:g} Hz chunk: ")
@@ -747,10 +793,21 @@ def _self_check():
         c3, n3 = heat_c(log, 40.0)
         assert n3 == 0 and abs(c3 - coil_thermal.HEAT_C_PER_S * 40.0) < 1e-9, (c3, n3)
 
-    # cooling. 65 C with a 5 C point needs NO wait -- it lands exactly on the 70 C ceiling,
-    # which is what `need = ceiling - next_point` means and was worth getting wrong once.
+    # cooling. A point charged HEAT_SCALE x 5 C that lands exactly on COOL_TO_C needs NO wait,
+    # which is what `need = target - next_point` means and was worth getting wrong once.
     assert cool_for(25.0, 5.0) == MIN_COOL_S
-    assert cool_for(65.0, 5.0) == MIN_COOL_S
+    assert cool_for(COOL_TO_C - HEAT_SCALE * 5.0, 5.0) == MIN_COOL_S
+    # ...and the scale is live: charged only 1x, that temperature would have needed no wait
+    assert cool_for(COOL_TO_C - 5.0, 5.0) > MIN_COOL_S
+
+    # the session cap: off by default, and it refuses only what would END past the deadline
+    global STOP_AT
+    assert not _out_of_time(1e9)
+    STOP_AT = time.time() + 100.0
+    try:
+        assert _out_of_time(200.0) and not _out_of_time(10.0)
+    finally:
+        STOP_AT = None
     assert cool_for(69.0, 10.0) > 300.0
     # a more expensive next point demands more cooling from the same temperature
     assert cool_for(69.0, 20.0) > cool_for(69.0, 10.0)
@@ -823,8 +880,15 @@ if __name__ == "__main__":
                     help="at or above this drive, no take starts without a coil reading")
     ap.add_argument("--gate-below-c", type=float, default=45.0,
                     help="the reading that opens the gate must be below this (default 45)")
+    ap.add_argument("--wait-s", type=float, default=None,
+                    help="fixed seconds between trials and chunks, replacing the scaled waits")
+    ap.add_argument("--stop-after-h", type=float, default=None,
+                    help="end the session after this many hours; a take that would finish "
+                         "later, cooling included, is not started")
     a = ap.parse_args()
     tilt_schedule.SEG2_RATE_OVERRIDE = a.seg2_rate
+    FIXED_WAIT_S = a.wait_s
+    STOP_AT = None if a.stop_after_h is None else time.time() + 3600.0 * a.stop_after_h
     gate = (a.gate_above_hz, a.gate_below_c) if a.gate_above_hz is not None else None
     # Module-level rebind: `repeats_for` reads the global, and threading one more argument
     # through `sweep` and `run_chunk` to reach it would be plumbing for a knob nobody turns.

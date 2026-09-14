@@ -40,3 +40,118 @@
      70 Hz  2026-09-11_012552  no usable kill
 
 wrote results/alignment_rate/20260910_droneB/report/settling.csv, settling_by_freq.csv, axis_vs_time_*.png, settle_vs_frequency.png
+=== 2026-09-13 09:55:41 --settle after the 80-120 Hz takes were solved ===
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+    f   n settled  t_settle     rise    swing  d_azim |   pre  peak  final   c_set  c_tau n_ctau
+   10  10   1/10      0.000      nan     3.75    19.4 |  4.99  7.93   6.07     nan  0.118   7/10 
+   20  10   3/10      3.580    0.876     5.71    10.4 |  4.79  6.63   4.47   3.279  0.299   8/10 
+   30   9   6/9       1.134    0.257     6.82    20.6 |  1.74  4.91   2.04   2.404  0.636   7/9  
+   40   9   4/9       0.760      nan     7.87    29.0 |  0.97  5.64   1.40   2.299  0.756   7/9  
+   50   8   2/8       0.932    0.636     1.35    -0.6 |  1.23  3.73   1.18   2.704  0.898   6/8  
+   60   3   2/3       1.114      nan     9.02    -0.6 |  0.75  7.30   1.29   3.599  1.164   2/3  
+   70   7   4/7       0.933    0.326    10.50    49.3 |  0.74  6.58   0.90   2.471  1.067   5/7  
+   80  10   4/10      1.318      nan     0.90     5.1 |  0.89  6.42   1.23   2.853  1.268   6/10 
+   90   5   1/5       1.122      nan     7.50   -22.8 |  2.66  9.43   2.18   2.731  1.114   3/5  
+  100   5   3/5       1.829    0.304    10.50    -0.7 |  0.80  5.83   1.09   2.008  0.693   3/5  
+  110   5   2/5       3.728    0.547     9.86    29.1 |  0.89  6.08   2.24   3.760  0.513   5/5  
+
+19 take(s) not measured:
+     30 Hz  2026-09-10_235725  no usable kill
+     40 Hz  2026-09-11_000947  no usable kill
+     50 Hz  2026-09-11_003426  no usable kill
+     50 Hz  2026-09-11_003941  no usable kill
+     60 Hz  2026-09-11_004400  no usable kill
+     60 Hz  2026-09-11_004555  no usable kill
+     60 Hz  2026-09-11_005226  no usable kill
+     60 Hz  2026-09-11_005431  no usable kill
+     60 Hz  2026-09-11_005825  no usable kill
+     60 Hz  2026-09-11_010023  no usable kill
+     60 Hz  2026-09-11_010225  no usable kill
+     70 Hz  2026-09-11_010925  no usable kill
+     70 Hz  2026-09-11_011451  no usable kill
+     70 Hz  2026-09-11_012552  no usable kill
+    120 Hz  2026-09-13_050210  aliased: solved at 232.3 Hz
+    120 Hz  2026-09-13_051734  aliased: solved at 232.2 Hz
+    120 Hz  2026-09-13_053559  aliased: solved at 229.3 Hz
+    120 Hz  2026-09-13_055548  aliased: solved at 231.5 Hz
+    120 Hz  2026-09-13_061434  aliased: solved at 229.1 Hz
+
+wrote results/alignment_rate/20260910_droneB/report/settling.csv, settling_by_freq.csv, axis_vs_time_*.png, settle_vs_frequency.png
+=== 2026-09-14 04:34:11 --settle after retiming + re-record
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:2722: RuntimeWarning: All-NaN slice encountered
+  ratio = np.nanmin(np.vstack(per_cam), axis=0) if len(per_cam) > 1 else per_cam[0]
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:3115: RuntimeWarning: All-NaN slice encountered
+  med = np.nanmedian(np.vstack(stack), axis=0)
+    f   n settled  t_settle     rise    swing  d_azim |   pre  peak  final   c_set  c_tau n_ctau
+   10   9   0/9         nan      nan     3.75    24.6 |  4.88  8.17   6.21     nan  0.118   7/9  
+   20  10   4/10      3.047    0.876     5.81    56.0 |  4.79  6.38   4.48   3.279  0.293   9/10 
+   30   9   6/9       0.817    0.467     7.10    25.1 |  1.72  5.12   2.04     nan  0.636   9/9  
+   40  10   6/10      0.609      nan     8.41    29.6 |  0.98  5.87   1.48   2.302  0.740  10/10 
+   50  10   8/10      0.917    0.453     9.61    26.7 |  0.68  6.50   1.18   2.551  0.958  10/10 
+   60   9   7/9       1.106    0.717    10.28    32.1 |  0.80  8.30   1.29   3.183  1.114   9/9  
+   70  10   8/10      1.075    0.320    10.99    43.4 |  0.72  9.16   1.25   2.802  1.323  10/10 
+   80  14  14/14      1.117    0.499    11.69    42.3 |  0.73  9.97   1.40   3.010  1.268  14/14 
+   90   5   3/5       1.672    0.290    11.68   -22.8 |  0.80  9.97   2.36   2.971  1.442   3/5  
+  100   5   5/5       1.830    0.291    10.50    36.6 |  0.88  7.44   2.14   1.950  0.756   5/5  
+  110   6   3/6       3.329    0.733     9.84    29.4 |  0.86  6.07   1.96   3.760  0.513   5/6  
+
+14 take(s) not measured:
+     10 Hz  2026-09-13_143022  no usable kill
+     30 Hz  2026-09-10_235725  no usable kill
+     60 Hz  2026-09-11_004400  no usable kill
+     80 Hz  2026-09-13_154357  no usable kill
+     80 Hz  2026-09-13_161710  no usable kill
+    120 Hz  2026-09-13_050210  aliased: solved at 232.3 Hz
+    120 Hz  2026-09-13_051734  aliased: solved at 232.2 Hz
+    120 Hz  2026-09-13_053559  aliased: solved at 229.1 Hz
+    120 Hz  2026-09-13_061434  aliased: solved at 228.7 Hz
+    120 Hz  2026-09-14_025137  aliased: solved at 230.1 Hz
+    120 Hz  2026-09-14_025621  aliased: solved at 232.6 Hz
+    120 Hz  2026-09-14_031800  aliased: solved at 231.4 Hz
+    120 Hz  2026-09-14_033648  aliased: solved at 233.8 Hz
+    120 Hz  2026-09-14_035533  aliased: solved at 227.8 Hz
+
+wrote results/alignment_rate/20260910_droneB/report/settling.csv, settling_by_freq.csv, axis_vs_time_*.png, settle_vs_frequency.png

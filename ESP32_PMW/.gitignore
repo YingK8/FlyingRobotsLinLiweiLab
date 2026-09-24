@@ -15,18 +15,4 @@ ai/thermal/.last_energised
 .DS_Store
 __pycache__/
 *.egg-info/
-
-# The scratchpad: bench harnesses and offline design tooling. TRACKED as of 2026-09-24.
-#
-# It used to be ignored, and that cost us twice in one day: `ai/alignment_rate.py` was never
-# committed, so a fresh clone could RECORD but not ANALYSE, and the rim sweep driver existed
-# on one machine only. The caches and the per-machine state stay out by the rules above --
-# `__pycache__/`, `.DS_Store` and `ai/thermal/.last_energised` are each ignored explicitly,
-# so removing this line exposes code and scripts and nothing else.
-#
-# `coil_thermal` lives here too, and the flight path REFUSES TO ARM without it -- see
-# CLAUDE.md "Safety".
-
-# Flight recordings: 628 MB of mp4 and counting, one dir per take. Kept on disk, out of
-# git. `results/README.md` says what a run dir holds.
 results/flights/

@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import re
 import sys
 import threading
 from datetime import datetime
@@ -66,19 +67,30 @@ def _skew(src):
     return src.skew_stats() if hasattr(src, "skew_stats") else {}
 
 
-def new_flight(root=DEFAULT_DIR, tags="AB"):
-    """A dated folder for one take, with a directory per camera. ``root/YYYY-mm-dd_HHMMSS``.
+def take_suffix(note):
+    """``_<design><hz>`` parsed from a campaign note ("half ring 90Hz x10 ..."), else ''.
+
+    The operator reads the design and frequency off the folder name in Finder, so the
+    campaign name goes into the directory itself, not only into meta.json (2026-09-21)."""
+
+    m = re.search(r"\b(half|whole|no)\s*ring\s*(\d+)\s*Hz", str(note or ""), re.I)
+    return f"_{m.group(1).lower()}{m.group(2)}" if m else ""
+
+
+def new_flight(root=DEFAULT_DIR, tags="AB", suffix=""):
+    """A dated folder for one take, with a directory per camera.
+    ``root/YYYY-mm-dd_HHMMSS[<suffix>]`` -- the suffix is `take_suffix` of the note.
 
     One take is one flight, and takes are not comparable: a different trim, a different
     board, a different day.
     """
 
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    out = Path(root) / stamp
+    out = Path(root) / f"{stamp}{suffix}"
     for k in range(1, 100):                 # two takes inside one second must not merge
         if not out.exists():
             break
-        out = Path(root) / f"{stamp}_{k}"
+        out = Path(root) / f"{stamp}_{k}{suffix}"
     for tag in tags:
         (out / tag).mkdir(parents=True, exist_ok=True)
     return out
@@ -107,7 +119,7 @@ class FlightWriter:
     """
 
     def __init__(self, out_dir=DEFAULT_DIR, tags="AB", fps=120.0, meta=None):
-        self.dir = new_flight(out_dir, tags)
+        self.dir = new_flight(out_dir, tags, take_suffix((meta or {}).get("note")))
         self.tags, self.fps, self.meta = tags, float(fps), dict(meta or {})
         self.n, self.dropped, self.errors = 0, 0, 0
         self._t_first = self._t_last = None      # for fps_measured, see close()

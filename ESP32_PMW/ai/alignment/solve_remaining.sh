@@ -29,6 +29,25 @@ while pgrep -f disc_axis > /dev/null; do
   sleep 60
 done
 
+MAX_JOBS=${MAX_JOBS:-1}
+
+# Count live solves from an EXPLICIT PID LIST, kept by this shell.
+#
+# Two earlier attempts at this throttle both silently failed to engage:
+#   `pgrep -fc 'ai/alignment/process_block.py'` -- the name is truncated in the process table,
+#      so it matched nothing and returned an empty string, making `[ "" -ge 2 ]` false;
+#   `jobs -p` -- zsh does not track jobs in a non-interactive script unless MONITOR is set.
+# Both launched every solve at once. Five at once put load at 21 on 8 cores and drove swap to
+# 9.5 of 10.2 GB; three killed by hand, and two takes were left with unusable partial CSVs.
+# A list of PIDs this shell started has no such ambiguity, and is the whole point of a throttle.
+pids=()
+alive() {   # rewrite pids[] with the ones still running; return the count
+  local out=()
+  for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && out+=("$p"); done
+  pids=("${out[@]}")
+  echo "${#pids[@]}"
+}
+
 failed=()
 for take in "${TAKES[@]}"; do
   out="results/rim/$take"
@@ -36,12 +55,12 @@ for take in "${TAKES[@]}"; do
     echo "[skip] $take already solved"
     continue
   fi
-  echo "[solve] $take"
+  while [ "$(alive)" -ge "$MAX_JOBS" ]; do sleep 15; done
+  echo "[solve] $take  (~23 min)"
   $PY ai/alignment/process_block.py "results/flights/$take" > "/tmp/solve_${take}.log" 2>&1 &
-  # Two at a time.
-  while [ "$(pgrep -fc 'ai/alignment/process_block.py')" -ge 2 ]; do sleep 20; done
+  pids+=($!)
 done
-wait
+while [ "$(alive)" -gt 0 ]; do sleep 15; done
 
 echo "=== results ==="
 for take in "${TAKES[@]}"; do

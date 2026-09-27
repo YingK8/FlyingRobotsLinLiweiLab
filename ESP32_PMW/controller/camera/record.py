@@ -57,13 +57,24 @@ DEFAULT_DIR = HERE.parents[1] / "results" / "flights"
 FOURCC = "avc1"  # H.264 in an .mp4. See the module docstring for why lossy is
 # acceptable in this file and nowhere near calibration.
 QUEUE_DEPTH = 64
+#: Measured ceiling per mode, fps (`modes.py`'s planning sweep). `cap_fps=None` and "max" both
+#: ask for this, so a caller never has to know the number; an unlisted mode asks
+#: `CAP_FPS_MAX_REQUEST` and lets the driver clamp, and `cap_fps=0` requests nothing.
+#:
+#: 640x400 holds the DRIVER CLAMP, not the 271.3 the sensor-only sweep measured: over
+#: `open_source`, AVFoundation clamps a higher request to 210.0 (measured 2026-09-27), so
+#: asking 271.3 and asking 210.0 do the same thing and only the latter reads back honestly.
+#:
+#: 640x400 is the only mode that both clears 200 fps and keeps the rotor in frame: 320x240's
+#: 421.7 is a CROP the rotor overflows (see `record`'s docstring).
+CAP_FPS_DRIVER_CLAMP = 210.0
 CAP_FPS_CEILING = {
     (1280, 800): 121.4,
     (1280, 720): 121.2,
     (1024, 768): 120.3,
     (800, 600): 98.8,
     (640, 480): 209.9,
-    (640, 400): 271.3,
+    (640, 400): CAP_FPS_DRIVER_CLAMP,
     (320, 240): 421.7,
     (160, 120): 285.4,
 }
@@ -106,12 +117,26 @@ def _warn_playback_rate(take):
 
 
 def _writer_fps(requested, declared, granted):
-    """The rate to declare on the mp4, from the request, the old default, and the grant."""
+    """The rate to declare on the mp4, from the request, the old default, and the grant.
+
+    These must agree or the file plays at the wrong speed. Writing a take captured at 194 fps
+    at the old ``declared`` 120 would play it 1.6x too fast, and writing one the driver
+    granted 210 at the 271 that was asked for would play it 29% slow -- so the GRANTED rate
+    wins whenever there is a plausible one. ``requested is None`` means no rate was asked for
+    -- ``cap_fps=0`` is now the only way to get there -- and the caller's declared rate stands,
+    which is the behaviour of every take recorded before 2026-09-24.
+
+    The MAX of the grants, not the min. Measured 2026-09-27 at 640x400: asking 271.3 returns
+    ``[210, 30]`` -- camera A reports the 210 it was set to, camera B reports a stale 30.0
+    default -- while the pair demonstrably delivers 207.8 fps. Taking the min there writes the
+    mp4 at 30 fps, seven times too slow, which is the exact failure this function exists to
+    prevent; taking the max gives 210, and the achieved rate is checked separately.
+    """
 
     good = [float(g) for g in granted if g and float(g) > 1.0]
     if requested is None:
         return float(declared)
-    return min(good) if good else float(requested)
+    return max(good) if good else float(requested)
 
 
 # ---- one folder per flight ----------------------------------------------------------
@@ -626,20 +651,25 @@ def _self_check(tmp=None):
     # too fast; and an unrequested rate must leave the caller's declared value untouched.
     assert _writer_fps(None, 120.0, []) == 120.0
     assert _writer_fps(None, 120.0, [271.0]) == 120.0
-    assert _writer_fps(240.0, 120.0, [271.3, 271.0]) == 271.0
+    assert _writer_fps(240.0, 120.0, [271.3, 271.0]) == 271.3
     assert _writer_fps(240.0, 120.0, []) == 240.0
+    # A stale per-camera default must not become the declared rate. Measured 2026-09-27:
+    # asking 271.3 at 640x400 returns [210, 30] while the pair delivers 207.8 fps, so the
+    # MAX is right and a min() here would write the mp4 at 30 fps, 7x too slow.
+    assert _writer_fps(271.3, 120.0, [210.0, 30.0]) == 210.0
+    assert _writer_fps(271.3, 120.0, [30.0, 210.0]) == 210.0
     assert (
         _writer_fps(240.0, 120.0, [0.0, 0.0]) == 240.0
     )  # implausible grant is no grant
     # Unset and 'max' both ask for the mode's measured ceiling, and it is PER MODE: 271.3 is
     # right at 640x400, while 1280x800 tops out at 121.4 and asking 271 there is meaningless.
-    assert _cap_request(None, 640, 400) == 271.3
-    assert _cap_request("max", 640, 400) == 271.3
+    assert _cap_request(None, 640, 400) == CAP_FPS_DRIVER_CLAMP
+    assert _cap_request("max", 640, 400) == CAP_FPS_DRIVER_CLAMP
     assert _cap_request(None, 1280, 800) == 121.4
     assert _cap_request(None, 111, 222) == CAP_FPS_MAX_REQUEST
     assert _cap_request(240, 640, 400) == 240.0
-    assert _cap_request(0, 640, 400) is None  # the escape hatch
-    assert _writer_fps(_cap_request(None, 640, 400), 120.0, [271.3]) == 271.3
+    assert _cap_request(0, 640, 400) is None                 # the escape hatch
+    assert _writer_fps(_cap_request(None, 640, 400), 120.0, [210.0]) == 210.0
     caps, _ = open_recording(out)
     for c in caps:
         assert c.isOpened(), "written mp4 will not reopen"

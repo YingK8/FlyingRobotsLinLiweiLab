@@ -46,7 +46,13 @@ HOLD_HI_MS, HOLD_LO_MS, POST_MS, RESET_MS, OFF_MS = 3000, 5000, 15000, 1000, 215
 N_PER_BLOCK, PAUSE_S, MARGIN_S = 5, 600, 25
 RAMP_FIX_EPOCH = datetime(2026, 9, 24, 4, 20).timestamp()
 CAP_MODE, CAP_FPS, PREVIEW = "640x400", "max", False
-CAP_TAG = "capmax-np"
+#: Empty on purpose: the note must match the takes ALREADY on disk (90-110 Hz, 2026-09-24) or
+#: `block_done` reports them missing and the sweep re-records five good blocks. The capture
+#: rate is documented in `results/rim/frame_rates.txt` instead of in the note, so a rate change
+#: no longer silently invalidates every finished block.
+CAP_TAG = ""
+#: Where the per-take frame-rate record is written. See `write_frame_rates`.
+FRAME_RATES = ROOT / "results" / "rim" / "frame_rates.txt"
 
 sys.path.insert(0, str(ROOT))
 from controller.control import tilt_schedule as _ts  # noqa: E402
@@ -64,14 +70,113 @@ def period_s(f):
 
 
 def block_note(f, n, blk):
-    """A take's note. ONE definition -- `block_done` matches on exactly this string.
+    """A take's note. ONE definition -- `block_done` matches on exactly this string."""
 
-    Built in one place because a note written in two places drifts, and that drift is
-    silent: the matcher then either never matches, or matches a take from a different
-    protocol. `CAP_TAG` is what distinguishes this series from the pre-capture-rate runs.
+    tag = f" {CAP_TAG}" if CAP_TAG else ""
+    return f"whole ring {f:g}Hz x{n} without cardan post15{tag} blk{blk}"
+
+
+def _fmt(value, width=0):
+    """A rate for the table, or ``-`` when the take predates it being recorded."""
+
+    return f"{float(value):.1f}" if value else "-"
+
+
+def write_frame_rates():
+    """Regenerate `results/rim/frame_rates.txt`: the frame rate every take actually got.
+
+    WHY A FILE AND NOT JUST meta.json. The rate is the one number in this protocol that cannot
+    be recovered from a take's name or note, and it varies: the 2026-09-24 blocks were recorded
+    at the sensor's own default (~185-192 fps) and everything after `cap_fps` reached the driver
+    asks for the clamp (~194 measured). Nothing downstream records which is which, and the
+    analysis gate `spin_check` gets easier as the rate rises, so "which blocks were fast" is a
+    question a later reader will have and cannot answer from the directory listing.
+
+    `reduced` is the honest number: `fps_measured`, not what the driver granted and not what the
+    mp4 declares. The declared rate is what the file PLAYS at; the measured rate is what was
+    CAPTURED, and only the second one describes the data.
     """
 
-    return f"whole ring {f:g}Hz x{n} without cardan post15 {CAP_TAG} blk{blk}"
+    rows = []
+    for d in sorted((ROOT / "results" / "flights").glob("*_whole*")):
+        meta = d / "meta.json"
+        if not meta.exists() or not (d / "frames.csv").exists():
+            continue
+        try:
+            m = json.loads(meta.read_text())
+        except Exception:
+            continue
+        note = str(m.get("note") or "")
+        if "whole ring" not in note:
+            continue
+        freq = note.split("whole ring", 1)[1].strip().split("Hz", 1)[0].strip()
+        blk = note.rsplit("blk", 1)[-1].strip() if "blk" in note else "-"
+        granted = m.get("cap_fps_granted") or []
+        rows.append({
+            "take": d.name,
+            "hz": freq,
+            "blk": blk,
+            "frames": sum(1 for _ in open(d / "frames.csv")) - 1,
+            "measured_fps": m.get("fps_measured"),
+            "declared_fps": m.get("fps"),
+            "requested_fps": m.get("cap_fps_requested"),
+            "granted_fps": "/".join(f"{float(g):g}" for g in granted) if granted else "-",
+            "dropped": m.get("dropped"),
+        })
+    if not rows:
+        return None
+    # Mark which takes the analysis should USE. Same source of truth as `block_done`, so a take
+    # this file calls `use` is exactly the one a re-run would skip -- the superseded ones
+    # (wrong ramp, or a partial take from an interrupted run) sit on disk and must not be
+    # silently averaged with the good ones.
+    chosen = {(f, b): block_done(f, N_PER_BLOCK, b)
+              for f in (90, 100, 110, 120, 130, 140, 150) for b in (1, 2)}
+    for r in rows:
+        try:
+            r["status"] = "use" if chosen.get((float(r["hz"]), int(r["blk"]))) == r["take"] \
+                else "superseded"
+        except (TypeError, ValueError):
+            r["status"] = "superseded"
+    FRAME_RATES.parent.mkdir(parents=True, exist_ok=True)
+    w = max(len(r["take"]) for r in rows)
+    with open(FRAME_RATES, "w") as fh:
+        fh.write(
+            "Frame rates, rim J(f) experiment (whole ring), 640x400\n"
+            "===================================================\n\n"
+            "`measured` is the capture rate actually achieved: the number to quote, and the one\n"
+            "that sets the practical limit for resolving the spin line (measured/2 Hz).\n"
+            "`declared` is what the mp4 plays at; `dropped` is frames the encoder queue lost.\n"
+            "Only rows marked `use` belong in the analysis; `superseded` takes are kept on disk\n"
+            "from interrupted runs or the pre-2026-09-24 single-segment ramp.\n\n"
+            "Rates are recorded PER TAKE rather than fixed across the series, because a higher\n"
+            "request did not deliver a higher rate: the pipeline is encoder-bound, not\n"
+            "sensor-bound. The 2026-09-24 blocks were filmed with no rate requested, so the\n"
+            "sensor kept its own default; from `cap_fps` onward the driver is asked for its\n"
+            "clamp. See the notes below.\n\n"
+            f"{'take'.ljust(w)}  {'hz':>4} {'blk':>3} {'frames':>7} {'measured':>9} "
+            f"{'declared':>9} {'asked':>8} {'granted':>9} {'dropped':>7}  status\n"
+        )
+        for r in sorted(rows, key=lambda r: (float(r["hz"]), r["blk"], r["take"])):
+            asked = f"{r['requested_fps']:.1f}" if r["requested_fps"] else "-"
+            fh.write(
+                f"{r['take'].ljust(w)}  {r['hz']:>4} {r['blk']:>3} {r['frames']:>7} "
+                f"{_fmt(r['measured_fps']):>9} {_fmt(r['declared_fps']):>9} "
+                f"{asked:>8} {r['granted_fps']:>9} {str(r['dropped']):>7}  {r['status']}\n"
+            )
+        fh.write(
+            "\nnotes\n-----\n"
+            "* `measured` is the rate to quote. It fell to ~194 fps with the encoder running\n"
+            "  against ~209 fps for the bare source, so the pipeline is encoder-bound, not\n"
+            "  sensor-bound: asking for more does not deliver more.\n"
+            "* 271.3 fps is the SENSOR-only figure from `modes.py`. Over `open_source` the\n"
+            "  AVFoundation driver clamps a higher request to 210.0 (measured 2026-09-27), and\n"
+            "  `record.CAP_FPS_CEILING` now asks for 210 so `granted` reads back honestly.\n"
+            "* `declared` above `measured` means the mp4 plays slightly fast. The analysis is\n"
+            "  unaffected: every time is taken from `frames.csv`, which stamps real capture\n"
+            "  times, not from frame indices divided by the declared rate.\n"
+        )
+    print(f"  frame rates -> {FRAME_RATES.relative_to(ROOT)} ({len(rows)} takes)", flush=True)
+    return FRAME_RATES
 
 
 def sh(cmd, capture=False):
@@ -248,6 +353,9 @@ def one_block(f, n, blk):
         print("  !! no take directory found", flush=True)
         return False
     n_frames = sum(1 for _ in open(take / "frames.csv")) - 1
+    # Write the frame-rate record after every block, not at the end: a sweep that is stopped
+    # part way must still document what it recorded, and that is the whole point of the file.
+    write_frame_rates()
     want = int(total * 150)
     print(f"  take={take.name}  frames={n_frames}", flush=True)
     if n_frames < want:

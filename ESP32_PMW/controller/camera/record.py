@@ -668,7 +668,7 @@ def _self_check(tmp=None):
     assert _cap_request(None, 1280, 800) == 121.4
     assert _cap_request(None, 111, 222) == CAP_FPS_MAX_REQUEST
     assert _cap_request(240, 640, 400) == 240.0
-    assert _cap_request(0, 640, 400) is None                 # the escape hatch
+    assert _cap_request(0, 640, 400) is None  # the escape hatch
     assert _writer_fps(_cap_request(None, 640, 400), 120.0, [210.0]) == 210.0
     caps, _ = open_recording(out)
     for c in caps:

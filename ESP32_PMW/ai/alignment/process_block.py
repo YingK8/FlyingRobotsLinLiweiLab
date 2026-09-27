@@ -97,7 +97,9 @@ def solve(take):
     out.mkdir(parents=True, exist_ok=True)
     r = subprocess.run(
         [sys.executable, "controller/pose/disc_axis.py", str(take), "--out", str(out)],
-        cwd=str(ROOT), capture_output=True, text=True,
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
     )
     tail = (r.stdout or "").strip().splitlines()[-3:]
     for line in tail:
@@ -124,7 +126,9 @@ def validate(take, out):
     lines.append(f"    solved {len(rows)}/{n_frames} frames ({cov:.0%})")
     if cov < MIN_COVERAGE:
         ok = False
-        lines.append(f"    !! coverage under {MIN_COVERAGE:.0%} -- the tracker lost the disc")
+        lines.append(
+            f"    !! coverage under {MIN_COVERAGE:.0%} -- the tracker lost the disc"
+        )
 
     # The capture rate, from `meta.json`, because it is the one number the take's name and
     # directory cannot tell you and the analysis cares about (it sets the practical limit for
@@ -137,7 +141,9 @@ def validate(take, out):
         declared = m.get("fps")
         lines.append(
             f"    capture {got:.1f} fps delivered (asked {asked or '-'}, "
-            f"declared {declared:g})" if got else "    capture: no fps_measured recorded"
+            f"declared {declared:g})"
+            if got
+            else "    capture: no fps_measured recorded"
         )
         if got and (TARGET_FPS - got) / TARGET_FPS > FPS_WARN_FRAC:
             lines.append(
@@ -157,7 +163,9 @@ def validate(take, out):
         dropped = int(m.get("dropped") or 0)
         if dropped:
             frac = dropped / max(dropped + int(m.get("n_frames") or 0), 1)
-            lines.append(f"    dropped {dropped} frames ({frac:.2%}) -- rows kept, timing OK")
+            lines.append(
+                f"    dropped {dropped} frames ({frac:.2%}) -- rows kept, timing OK"
+            )
             if frac > MAX_DROP_FRAC:
                 ok = False
                 lines.append(
@@ -177,11 +185,15 @@ def validate(take, out):
     agree = np.array([float(r["agree_deg"]) for r in rows])
     agree = agree[np.isfinite(agree)]
     med = float(np.median(agree)) if len(agree) else float("nan")
-    lines.append(f"    view A vs B: median {med:.1f} deg, p90 {np.percentile(agree, 90):.1f}")
+    lines.append(
+        f"    view A vs B: median {med:.1f} deg, p90 {np.percentile(agree, 90):.1f}"
+    )
     if not (med <= MAX_AGREE_MED_DEG):
         ok = False
-        lines.append(f"    !! views disagree by more than {MAX_AGREE_MED_DEG} deg -- "
-                     f"the segmenter is fitting different shapes")
+        lines.append(
+            f"    !! views disagree by more than {MAX_AGREE_MED_DEG} deg -- "
+            f"the segmenter is fitting different shapes"
+        )
 
     # Tilt span, from the axis against its own median direction: a datum-free way to ask
     # "did the rotor actually lean", which is what the experiment measures.
@@ -208,7 +220,9 @@ def validate(take, out):
     # for is telling a reader that a flip happened and where to look.
     flips = int((np.sum(u[:-1] * u[1:], axis=1) < 0).sum())
     frac = flips / max(len(u) - 1, 1)
-    lines.append(f"    sign flips {flips} ({frac:.3%}) -- bookkeeping, folded out above")
+    lines.append(
+        f"    sign flips {flips} ({frac:.3%}) -- bookkeeping, folded out above"
+    )
 
     for name in ("axis_minor.csv", "tilt_A.csv", "tilt_B.csv"):
         if not (out / name).exists():

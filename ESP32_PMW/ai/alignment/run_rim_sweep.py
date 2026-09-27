@@ -115,29 +115,39 @@ def write_frame_rates():
         freq = note.split("whole ring", 1)[1].strip().split("Hz", 1)[0].strip()
         blk = note.rsplit("blk", 1)[-1].strip() if "blk" in note else "-"
         granted = m.get("cap_fps_granted") or []
-        rows.append({
-            "take": d.name,
-            "hz": freq,
-            "blk": blk,
-            "frames": sum(1 for _ in open(d / "frames.csv")) - 1,
-            "measured_fps": m.get("fps_measured"),
-            "declared_fps": m.get("fps"),
-            "requested_fps": m.get("cap_fps_requested"),
-            "granted_fps": "/".join(f"{float(g):g}" for g in granted) if granted else "-",
-            "dropped": m.get("dropped"),
-        })
+        rows.append(
+            {
+                "take": d.name,
+                "hz": freq,
+                "blk": blk,
+                "frames": sum(1 for _ in open(d / "frames.csv")) - 1,
+                "measured_fps": m.get("fps_measured"),
+                "declared_fps": m.get("fps"),
+                "requested_fps": m.get("cap_fps_requested"),
+                "granted_fps": (
+                    "/".join(f"{float(g):g}" for g in granted) if granted else "-"
+                ),
+                "dropped": m.get("dropped"),
+            }
+        )
     if not rows:
         return None
     # Mark which takes the analysis should USE. Same source of truth as `block_done`, so a take
     # this file calls `use` is exactly the one a re-run would skip -- the superseded ones
     # (wrong ramp, or a partial take from an interrupted run) sit on disk and must not be
     # silently averaged with the good ones.
-    chosen = {(f, b): block_done(f, N_PER_BLOCK, b)
-              for f in (90, 100, 110, 120, 130, 140, 150) for b in (1, 2)}
+    chosen = {
+        (f, b): block_done(f, N_PER_BLOCK, b)
+        for f in (90, 100, 110, 120, 130, 140, 150)
+        for b in (1, 2)
+    }
     for r in rows:
         try:
-            r["status"] = "use" if chosen.get((float(r["hz"]), int(r["blk"]))) == r["take"] \
+            r["status"] = (
+                "use"
+                if chosen.get((float(r["hz"]), int(r["blk"]))) == r["take"]
                 else "superseded"
+            )
         except (TypeError, ValueError):
             r["status"] = "superseded"
     FRAME_RATES.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +188,10 @@ def write_frame_rates():
             "  unaffected: every time is taken from `frames.csv`, which stamps real capture\n"
             "  times, not from frame indices divided by the declared rate.\n"
         )
-    print(f"  frame rates -> {FRAME_RATES.relative_to(ROOT)} ({len(rows)} takes)", flush=True)
+    print(
+        f"  frame rates -> {FRAME_RATES.relative_to(ROOT)} ({len(rows)} takes)",
+        flush=True,
+    )
     return FRAME_RATES
 
 
@@ -385,12 +398,17 @@ def process_take(take):
     record-then-process ordering exists to avoid.
     """
 
-    print(f"\n  ----- processing {Path(take).name} (solve -> validate -> upload) -----",
-          flush=True)
+    print(
+        f"\n  ----- processing {Path(take).name} (solve -> validate -> upload) -----",
+        flush=True,
+    )
     r = sh(["uv", "run", "python", "ai/alignment/process_block.py", str(take)])
     if r.returncode:
-        print("  !! processing reported a problem; the take stays on disk and was not "
-              "uploaded if validation failed", flush=True)
+        print(
+            "  !! processing reported a problem; the take stays on disk and was not "
+            "uploaded if validation failed",
+            flush=True,
+        )
     return r.returncode == 0
 
 
@@ -421,8 +439,11 @@ def main(argv=None):
     # The solve is longer than the default pause, so --process needs a longer one. Bump it
     # rather than let the solve overlap the next recording.
     if a.process and a.pause < PROCESS_PAUSE_S:
-        print(f"  --process: raising the pause {a.pause:.0f} s -> {PROCESS_PAUSE_S:.0f} s so the "
-              f"solve fits inside it", flush=True)
+        print(
+            f"  --process: raising the pause {a.pause:.0f} s -> {PROCESS_PAUSE_S:.0f} s so the "
+            f"solve fits inside it",
+            flush=True,
+        )
         a.pause = PROCESS_PAUSE_S
 
     signal.signal(signal.SIGINT, signal.default_int_handler)

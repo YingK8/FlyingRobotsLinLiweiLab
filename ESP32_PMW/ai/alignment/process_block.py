@@ -80,6 +80,14 @@ MAX_FLIP_FRAC = 0.02
 #: away good data over a number that does not change the physics.
 TARGET_FPS = 210.0
 FPS_WARN_FRAC = 0.05
+#: Frames the encoder queue may lose before the take is called damaged. `frames.csv` keeps a
+#: row for a dropped frame with `written=0`, and `record.read_index` filters those out, so the
+#: TIMING survives and the analysis stays correct -- what is lost is coverage. 2026-09-27
+#: exposed the gap: `2026-09-27_115535_whole120` dropped 234 of 90085 (0.26%) and nothing in
+#: this file mentioned it, so the only record was the column in `frame_rates.txt`. A tenth of a
+#: percent is harmless; a few percent means the take has holes in it wherever the encoder fell
+#: behind, which is exactly where a step might have been missed.
+MAX_DROP_FRAC = 0.02
 
 
 def solve(take):
@@ -144,6 +152,19 @@ def validate(take, out):
                 f"so it plays {float(declared) / got:.2f}x. Timing is unaffected: every "
                 f"timestamp comes from frames.csv, not from frame indices."
             )
+        # Frames the encoder queue lost. `read_index` drops their rows, so timing survives and
+        # only coverage is affected -- see MAX_DROP_FRAC.
+        dropped = int(m.get("dropped") or 0)
+        if dropped:
+            frac = dropped / max(dropped + int(m.get("n_frames") or 0), 1)
+            lines.append(f"    dropped {dropped} frames ({frac:.2%}) -- rows kept, timing OK")
+            if frac > MAX_DROP_FRAC:
+                ok = False
+                lines.append(
+                    f"    !! {frac:.1%} of frames were dropped, over the {MAX_DROP_FRAC:.0%} "
+                    f"limit -- the take has holes wherever the encoder fell behind, which is "
+                    f"where a step could have been missed"
+                )
 
     n = np.array([[float(r["nx"]), float(r["ny"]), float(r["nz"])] for r in rows])
     if not np.isfinite(n).all():

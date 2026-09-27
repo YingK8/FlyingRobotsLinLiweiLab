@@ -24,7 +24,7 @@ arguments the loader used to take, so the call site is just
 `seq.loadFromJsonFile("/experiment.json")`. All are optional:
 
 | key | default | meaning |
-|---|---|---|
+| --- | --- | --- |
 | `resolution_ms` | `25` | compile step resolution (ms) |
 | `initial_freq` | `0.0` | starting global drive frequency (Hz); `0` = DC/stationary until the schedule ramps it up |
 | `initial_duty` | `[50,50,50,50]` | starting commutation duty per channel (A,B,C,D) |
@@ -46,7 +46,7 @@ are logged as a warning at load time but don't abort the rest of the file.
 `method` is one of:
 
 | method | fields used | effect |
-|---|---|---|
+| --- | --- | --- |
 | `addDutyCycleTask` | `channels`, `value` | instantly set the channel's commutation duty (0-100%) |
 | `addPhaseTask` | `channels`, `value` | instantly set the channel's phase (degrees) |
 | `addCarrierDutyCycleTask` | `channels`, `value` | instantly set the channel's carrier duty (0-100%) |
@@ -58,7 +58,7 @@ are logged as a warning at load time but don't abort the rest of the file.
 | `addCarrierEaseRampTask` | `from`, `to`, `duration_ms`, `shape` | S-curve ramp of carrier duty, all channels identically |
 | `addCarrierExponentialRampTask` | `from`, `to`, `duration_ms`, `shape` | exponential ramp of carrier duty, all channels identically |
 | `addPhaseRampTask` | `channels`, `from`, `to`, `duration_ms`, `shape` | S-curve ramp of one channel's phase, others unchanged (`shape` optional) |
-| `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention |
+| `setDirection` | `value` (0=CW, non-zero=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention. `value` defaults to `0`, so omitting it means **CW** — note this is the opposite of the top-level `direction` key, which defaults to CCW |
 | `activateChannels` | `mask` (0-15 bitmask), `value` (ON carrier duty %) | instantly set carrier duty to `value` for masked channels, `0` for the rest |
 | `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation; no hardware effect, does not advance the queue |
 
@@ -83,6 +83,10 @@ There is **no loop/repeat primitive** — an experiment that needs repeats
 (e.g. a coupling sweep across several current levels) must be unrolled into
 the flat array by whatever generates the JSON (see
 `ai/experiments/gen_coupling_experiment.py`), keeping the on-device queue linear.
+
+The schedules actually shipped on the device, and a longer prose walkthrough of
+every method and its effects, are catalogued in
+[`spiffs_data/README.md`](../../spiffs_data/README.md).
 
 ## Example
 

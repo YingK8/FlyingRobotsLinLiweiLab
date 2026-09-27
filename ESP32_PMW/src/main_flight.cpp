@@ -9,9 +9,13 @@
 
 static const float SPINUP_THROTTLE = 100.0f;
 static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
-
+// Tilt authority: az-facing coils drop MIX_GAIN*mag. Fit from ../writeup/single_results.csv.
 static const float MIX_GAIN = 0.6f;
 
+// The PHASES_CW/CCW labels are inverted on this rig: the CW table is what produces CCW
+// rotation here. Named rather than inlined because `coilProbe` and `seq.compile` both take
+// this same reference, so they cannot disagree. `controller/control/tilt_schedule.py` carries
+// the same note on its `DIRECTION = "CW"`.
 #define SPIN_PHASES PHASES_CW
 
 static PwmController ctl(PWM_PINS, SPIN_PHASES, INITIAL_DUTY, NUM_CHANNELS);

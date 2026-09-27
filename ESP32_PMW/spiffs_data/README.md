@@ -18,10 +18,19 @@ pio run -e <env> --target upload     # builds + flashes the firmware
 ## Files
 
 - `takeoff_upside_down.json` — CW 1→190 Hz ramp. Loaded by `[env:takeoff_upside_down]`.
+- `tilt.json` — **generated, not hand-written.** One point of a sweep, written by
+  `controller/control/tilt_schedule.py --freq <f> --write` for `[env:tilt]`, and by
+  `ai/make_tilt.py --hz <f> --n <n> <design>` for the rim experiment. Both are
+  overwritten per frequency, so the copy in git is only the last one written and is
+  almost always stale — regenerate it rather than trusting it. The runner copies each
+  flashed schedule beside its takes (`results/alignment_rate/*/NNNhz/tilt.json`), and that
+  copy is the record of what actually ran.
 
-The other payloads (`tilt`, `ceiling_sweep`, `takeoff`, `carrier_ramp`,
-`comp_test`, `coupling_*`, `dc_calibration`) were removed in `5866dd5` along
-with the firmwares that loaded them. Recover from git history if a sweep needs
-rerunning.
+The other payloads (`ceiling_sweep`, `takeoff`, `carrier_ramp`, `comp_test`,
+`coupling_*`, `dc_calibration`) are absent. Their firmwares were restored from `main`
+on 2026-09-27 (`[env:takeoff]`, `[env:ceiling]`, `[env:carrier_ramp]`, `[env:current_pid]`),
+so those envs currently build but have no schedule to load — recover the payload from
+git history before running one. `tilt`, `takeoff_upside_down` and the calibration envs
+are the ones with payloads present.
 
 Schedule format: [`lib/JsonPwmSequencer/README.md`](../lib/JsonPwmSequencer/README.md).

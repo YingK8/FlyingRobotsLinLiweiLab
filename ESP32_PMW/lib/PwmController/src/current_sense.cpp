@@ -23,6 +23,11 @@ void CurrentSense::seed() {
   }
 }
 
+void CurrentSense::recalibrateZero() {
+  for (int i = 0; i < N; i++)
+    _adcZeroMv[i] = _csMv[i];
+}
+
 void CurrentSense::update(float dtMs) {
   float alpha = 1.0f - expf(-dtMs / _tauFilterMs);
   for (int i = 0; i < N; i++) {

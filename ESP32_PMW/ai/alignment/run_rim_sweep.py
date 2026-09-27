@@ -44,6 +44,9 @@ PORT = "/dev/cu.SLAB_USBtoUART"
 RATE_HI, RATE_LO, RATE_SPLIT_HZ = 2.8, 3.5, 60.0
 HOLD_HI_MS, HOLD_LO_MS, POST_MS, RESET_MS, OFF_MS = 3000, 5000, 15000, 1000, 21500
 N_PER_BLOCK, PAUSE_S, MARGIN_S = 5, 600, 25
+#: Pause to use when `--process` is on. The solve measured 23 min on a 435 s take (170% CPU,
+#: 89007 frames, stride 1), so 600 s cannot hold it -- and the ordering only works if it does.
+PROCESS_PAUSE_S = 2100.0
 RAMP_FIX_EPOCH = datetime(2026, 9, 24, 4, 20).timestamp()
 CAP_MODE, CAP_FPS, PREVIEW = "640x400", "max", False
 #: Empty on purpose: the note must match the takes ALREADY on disk (90-110 Hz, 2026-09-24) or
@@ -315,6 +318,11 @@ def one_block(f, n, blk):
     log = Path(f"/tmp/rim_{int(f)}_b{blk}_rec.log")
     cmd = [
         str(PY),
+        # -u is not cosmetic: Python buffers stdout when it is a FILE, and record.py only prints
+        # at open and close, so the log stayed EMPTY for the whole 7-minute block on 2026-09-27
+        # and a healthy run looked dead. Unbuffered, the log shows the take directory as soon as
+        # the cameras are open.
+        "-u",
         "controller/camera/record.py",
         "--mode",
         CAP_MODE,
@@ -367,6 +375,25 @@ def one_block(f, n, blk):
     return True
 
 
+def process_take(take):
+    """Solve, validate and upload one take, inside the pause that follows its block.
+
+    The solve runs at ~170% CPU for ~23 minutes on a 435 s take, which is LONGER than the 600 s
+    default pause. So `--process` only fits if the pause is also raised; `main` does that
+    automatically, because a pause that overruns is a solve running alongside the next
+    recording, competing with it for the USB bus and the CPU. That is the one thing the
+    record-then-process ordering exists to avoid.
+    """
+
+    print(f"\n  ----- processing {Path(take).name} (solve -> validate -> upload) -----",
+          flush=True)
+    r = sh(["uv", "run", "python", "ai/alignment/process_block.py", str(take)])
+    if r.returncode:
+        print("  !! processing reported a problem; the take stays on disk and was not "
+              "uploaded if validation failed", flush=True)
+    return r.returncode == 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("freqs", nargs="+", type=float)
@@ -374,7 +401,29 @@ def main(argv=None):
     ap.add_argument(
         "--pause", type=float, default=PAUSE_S, help="seconds between blocks"
     )
+    ap.add_argument(
+        "--process",
+        action="store_true",
+        help="after each block, run process_block.py: solve to CSV, validate, upload to USB. "
+        "Runs INSIDE the pause, never during a recording -- the cameras and the drive share a "
+        "USB bus, so a solve or a copy alongside a take shows up as dropped frames.",
+    )
+    ap.add_argument(
+        "--only-block",
+        type=int,
+        default=None,
+        choices=(1, 2),
+        help="record only this block of each frequency, then stop, with no pauses. For "
+        "running one block at a time and checking the take before spending time on the next.",
+    )
     a = ap.parse_args(argv)
+
+    # The solve is longer than the default pause, so --process needs a longer one. Bump it
+    # rather than let the solve overlap the next recording.
+    if a.process and a.pause < PROCESS_PAUSE_S:
+        print(f"  --process: raising the pause {a.pause:.0f} s -> {PROCESS_PAUSE_S:.0f} s so the "
+              f"solve fits inside it", flush=True)
+        a.pause = PROCESS_PAUSE_S
 
     signal.signal(signal.SIGINT, signal.default_int_handler)
 
@@ -387,6 +436,8 @@ def main(argv=None):
                 flush=True,
             )
             for blk in (1, 2):
+                if a.only_block is not None and blk != a.only_block:
+                    continue
                 already = block_done(f, a.n, blk)
                 if already:
                     print(
@@ -397,9 +448,19 @@ def main(argv=None):
                     continue
                 ok = one_block(f, a.n, blk)
                 (done if ok else failed).append((f, blk))
+                if a.process and ok:
+                    take = newest_take(f)
+                    if take is not None:
+                        process_take(take)
+                    else:
+                        print("  !! no take found to process", flush=True)
+                if a.only_block is not None:
+                    continue
                 if blk == 1 and f != a.freqs[-1]:
                     print(f"  cooling {a.pause:.0f} s before block 2", flush=True)
                     time.sleep(a.pause)
+            if a.only_block is not None:
+                continue
             if f != a.freqs[-1]:
                 print(
                     f"  cooling {a.pause:.0f} s before the next frequency", flush=True

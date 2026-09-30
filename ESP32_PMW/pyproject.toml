@@ -11,9 +11,25 @@ dependencies = [
     "picosdk>=1.1",
     "pyserial>=3.5",
     "opencv-contrib-python>=4.10",  # cv2.aruco (ChArUco) lives in contrib
+    "pillow>=10.0",                 # calib/calibrate.py writes the board PDF
     "ipykernel>=6.29",              # model/visual_servo.ipynb
+    "ipywidgets>=8.1",              # camera/elp_capture.ipynb: capture button + live preview
+    # controller/pose/validation: offscreen rendering of the robot mesh at known
+    # poses, to validate the pose estimator against ground truth.
+    "trimesh>=4.0",
+    "pyrender>=0.1.45",
+    "pyglet<2",                     # pyrender 0.1.45 predates the pyglet 2 API break
+    # controller/viz/live_viz.py: the live 3-D flight view. Browser-based, so it
+    # needs no GL context of its own -- unlike pyrender above.
+    "viser>=1.1.0",
 ]
 
-# No Python package to build — this project is just scripts under tools/.
-[tool.uv]
-package = false
+# `controller` is a real package, so every module says where its imports come from
+# (`from controller.pose import stereo`) instead of prepending sys.path by hand. uv installs
+# it editable, which is what keeps `python controller/control/z_track.py` working too.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["controller"]

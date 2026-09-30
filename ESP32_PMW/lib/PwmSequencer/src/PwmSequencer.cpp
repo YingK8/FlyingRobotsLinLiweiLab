@@ -45,6 +45,14 @@ PwmSequencer::PwmSequencer(PwmController *phaseCtrl) {
 
 void PwmSequencer::reserve(size_t size) { _queue.reserve(size); }
 
+// IDLE-only. `main_flight` refuses `seq=clear` outside IDLE because clearing mid-SPINUP
+// empties the running queue, which makes `isDone()` true and jumps straight to FLIGHT with
+// the coils still energised (see the `seq=` note in CLAUDE.md).
+void PwmSequencer::clear() {
+  _queue.clear();
+  resetStreamingState();
+}
+
 void PwmSequencer::addSequenceTask(SequenceTask task) {
   _queue.push_back(task);
 }

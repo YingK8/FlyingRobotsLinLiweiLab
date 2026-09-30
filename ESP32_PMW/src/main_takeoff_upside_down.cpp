@@ -12,7 +12,9 @@ void setup() {
   ctl.begin(); // DC (stationary); the schedule sets the running frequency
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   ctl.enableCurrentSense(ADC_PINS, SENS);
-  ctl.enableCurrentBalance();
+  // ctl.enableCurrentBalance();  // OFF: CS is blind to the disk (tilt_ccw_nodisk), the
+  // imbalance is static magnetic coupling that feedforward trims already fix (1.97 ->
+  // 1.046), and the loop confounds the az sweep. Re-enable only with evidence.
   seq.loadFromJsonFile("/takeoff_upside_down.json");
   seq.start();
 }
@@ -20,16 +22,6 @@ void setup() {
 void loop() {
   seq.run();
   ctl.run();
-
-  // LED steady-on while spinning up; print frequency at each schedule step
-  digitalWrite(LED_PIN, seq.isDone() ? LOW : HIGH);
-  static size_t lastStep = (size_t)-1;
-  size_t step = seq.currentIndex();
-  if (step != lastStep) {
-    lastStep = step;
-    Serial.printf("[step %u] %s freq=%.1f\n", (unsigned)step,
-                  seq.labelForStep(step), ctl.getFrequency());
-  }
 
   driveTelemetry(ctl);
 }

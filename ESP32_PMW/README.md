@@ -23,6 +23,7 @@ firmware you want to run.
 | Environment | Source file | Schedule | Balance | Purpose |
 | --- | --- | --- | --- | --- |
 | `flight` *(default)* | `main_flight.cpp` | none — live serial commands | PI | PC-commanded takeoff → hover → directional accel (`SerialComm`) |
+| `servo` | `main_servo.cpp` | none — live serial commands | PI | dumb serial shim; the host owns the loop, see `controller/visual_servo` |
 | `takeoff` | `main_takeoff.cpp` | `takeoff.json` | **off** (commented out) | EASE 1→200 Hz / 40 s at 100% carrier |
 | `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | `takeoff_upside_down.json` | PI | inverted-rig takeoff ramp, 100% carrier |
 | `tilt` | `main_tilt.cpp` | `tilt.json` | PI | EASE 1→150 Hz, then steps channels A+D down 90%→10% in 10% steps |
@@ -34,6 +35,11 @@ firmware you want to run.
 | `dc` | `calibration/main_dc.cpp` | `dc_calibration.json` | passthrough | pins parked HIGH for a DC current-sense calibration capture |
 | `current_pid` | `main_current_pid.cpp` | none — built in code | own PI | balance-loop tuning rig; gains adjustable at runtime |
 | `serialcomm_demo` | `examples/main_serialcomm_demo.cpp` | none | n/a | `lib/SerialComm` echo demo, not a flight experiment |
+
+All thirteen envs build. Only `tilt`, `takeoff_upside_down` and the calibration rigs
+have their JSON payload present in `spiffs_data/`; `takeoff`, `hover_zigzag`,
+`ceiling`, `carrier_ramp` and `current_pid` need theirs recovered from git history
+first — see [`spiffs_data/README.md`](spiffs_data/README.md).
 
 "PI" = the current-balance loop (folded into `PwmController`, opt-in via
 `enableCurrentBalance()`) rebalances the four channels beneath the schedule's
@@ -53,18 +59,26 @@ pio device monitor -e tilt   # 115200 baud
 
 Or chain both:
 ```bash
-pio run -e tilt --target upload && pio device monitor -e tilt
+pio run -e flight --target upload && pio device monitor -e flight
 ```
 
-Host-side tooling — the schedule generators, the flash-and-capture runners, and the
-log plotters — lives in `ai/`, which `.gitignore` keeps out of the repo on purpose.
-It only exists in working copies of the experiment branches.
+The host-side Python is in two places: the vision → control pipeline that flies
+the robot is in [`controller/`](controller/README.md), and the sweeps, sysID,
+validation and plotting are in [`ai/`](ai/README.md) (run with
+`uv run python ai/<script>.py`). `ai/` was gitignored until 2026-09-27, which meant
+a fresh clone could record but not analyse; it is tracked now, and so are the small
+result CSVs under `results/`.
 
 ---
 
 ## Channel Map
 
 Authoritative source: [`src/constants.h`](src/constants.h).
+
+Do not do arithmetic on a pin constant, renumber the A/B/C/D blocks, or assume the
+PWM and carrier pins are adjacent — they are wired that way on the board and
+nowhere else. GPIO 14 is `RESET_BUTTON_PIN`, not a coil pin.
+
 
 | Index | Name | PWM pin | Carrier pin | Current-sense ADC | CCW phase |
 | --- | --- | --- | --- | --- | --- |
@@ -376,5 +390,12 @@ Upload the data files to SPIFFS with: `pio run -e tilt --target uploadfs`
 ## Further Reading
 
 - Full API docs: [`DOCS.md`](DOCS.md)
+- Firmware libraries: [`lib/PwmController/`](lib/PwmController/README.md),
+  [`lib/PwmSequencer/`](lib/PwmSequencer/README.md),
+  [`lib/JsonPwmSequencer/`](lib/JsonPwmSequencer/README.md),
+  [`lib/SerialComm/`](lib/SerialComm/README.md)
+- The vision → control pipeline that drives this firmware:
+  [`controller/README.md`](controller/README.md)
 - Schedule payloads: [`spiffs_data/README.md`](spiffs_data/README.md)
-- Library details: [`lib/PwmController/README.md`](lib/PwmController/README.md), [`lib/PwmSequencer/README.md`](lib/PwmSequencer/README.md), [`lib/JsonPwmSequencer/README.md`](lib/JsonPwmSequencer/README.md), [`lib/SerialComm/README.md`](lib/SerialComm/README.md)
+- Captured experiment data: [`data/README.md`](data/README.md)
+- Board / power stage: [`docs/PCB_Design_Documentation.md`](docs/PCB_Design_Documentation.md)

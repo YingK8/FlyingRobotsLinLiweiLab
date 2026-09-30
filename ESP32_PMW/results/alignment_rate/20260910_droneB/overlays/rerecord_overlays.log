@@ -1,0 +1,26 @@
+=== 2026-09-13 12:12:43 overlays for 12 re-recorded takes, window (-2, 15.5) s
+2026-09-13_101717: 817 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r12_101717_no_coherent_spin_overlay.mp4
+[1/12] 080hz_r12_101717_no_coherent_spin_overlay.mp4  21s  22.3 MB
+2026-09-13_101852: 894 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r13_101852_CCW_overlay.mp4
+[2/12] 080hz_r13_101852_CCW_overlay.mp4  23s  20.1 MB
+2026-09-13_102027: 536 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r14_102027_CW_overlay.mp4
+[3/12] 080hz_r14_102027_CW_overlay.mp4  14s  14.5 MB
+2026-09-13_102706: 884 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r15_102706_CCW_overlay.mp4
+[4/12] 080hz_r15_102706_CCW_overlay.mp4  23s  20.9 MB
+2026-09-13_103555: 887 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r16_103555_no_coherent_spin_overlay.mp4
+[5/12] 080hz_r16_103555_no_coherent_spin_overlay.mp4  21s  22.2 MB
+2026-09-13_104421: 709 frames -> results/alignment_rate/20260910_droneB/overlays/080hz_r17_104421_no_coherent_spin_overlay.mp4
+[6/12] 080hz_r17_104421_no_coherent_spin_overlay.mp4  17s  19.3 MB
+2026-09-13_105703: 812 frames -> results/alignment_rate/20260910_droneB/overlays/090hz_r6_105703_CCW_overlay.mp4
+[7/12] 090hz_r6_105703_CCW_overlay.mp4  20s  23.1 MB
+2026-09-13_111034: 909 frames -> results/alignment_rate/20260910_droneB/overlays/090hz_r7_111034_CCW_overlay.mp4
+[8/12] 090hz_r7_111034_CCW_overlay.mp4  22s  22.2 MB
+2026-09-13_112422: 914 frames -> results/alignment_rate/20260910_droneB/overlays/090hz_r8_112422_CCW_overlay.mp4
+[9/12] 090hz_r8_112422_CCW_overlay.mp4  24s  22.6 MB
+2026-09-13_114447: 908 frames -> results/alignment_rate/20260910_droneB/overlays/100hz_r6_114447_no_coherent_spin_overlay.mp4
+[10/12] 100hz_r6_114447_no_coherent_spin_overlay.mp4  25s  23.8 MB
+2026-09-13_114816: 918 frames -> results/alignment_rate/20260910_droneB/overlays/100hz_r7_114816_no_coherent_spin_overlay.mp4
+[11/12] 100hz_r7_114816_no_coherent_spin_overlay.mp4  24s  23.9 MB
+2026-09-13_115312: 769 frames -> results/alignment_rate/20260910_droneB/overlays/100hz_r8_115312_no_coherent_spin_overlay.mp4
+[12/12] 100hz_r8_115312_no_coherent_spin_overlay.mp4  21s  23.2 MB
+done

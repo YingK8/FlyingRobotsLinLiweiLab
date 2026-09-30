@@ -1,0 +1,2566 @@
+function MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm()
+% =========================================================
+% Multi-Coil Beamforming GUI (compatible with older UI env)
+% - Left controls: vertical SLIDER scroll (drag to scroll)
+% - Panels: matlab.ui.container.Panel(); Parent = ...
+% - Field visualization: computed on ONE plane z=edZ (for plotting)
+%   * Magnetic field magnitude visualization via colored scatter (RMS |B|)
+%   * Optional: color the reconstructed surface by RMS |B|
+% - Gradient-force calculator: user-set robot position and spin axis; computes
+%   cycle-averaged magnetic-gradient force <F_grad> = [Fx,Fy,Fz].
+%   The local phase lag phi is solved from the same field/drag balance used by trajectory.
+% - Trajectory: ON-THE-FLY u,v ellipse basis at each step (no cached plane field)
+% - Spin axis update: uses averaged transverse torque derived from B(t)=u cos + v sin
+% - Robot inertia: recomputed from CAD body + two cylindrical magnets via parallel-axis theorem
+%   (default assumes body x-axis is the physical spin axis; see newRobotPhysicalParams())
+% - Dipole moment: recomputed from two N52 magnets using mdip = 2*(Br/mu0)*Vmag
+% - Phase lag: phi is solved dynamically from rotational drag balance;
+%   its phase reference is geometric and measured from the field phase
+%   at which B points along the
+%   intersection line of the robot plane and the field-rotation plane.
+% - Lift accel magnitude: (f_drive/f_hover)^2 * g along current spin axis s
+%   where f_hover is GUI-adjustable (default 110 Hz)
+% - Orientation arrows along trajectory (checkbox + controls)
+% - IMPORTANT: display normal n_surf and physical rotation axis n_rot are distinct.
+%   n_surf may be flipped for display/surface continuity only.
+%   n_rot = normalize(u_cos x v_sin) carries the true field rotation sense
+%   and is NEVER flipped upward or toward the robot spin axis.
+% - NEW: dt recommendation based on small-angle condition per step
+%        Δθ_step ≈ ||tau_perp|| dt / (Ispin*wspin)  << 1
+%        and dt <= eta*T_field.
+% - NEW: flying robot initial spin axis (nx0, ny0, nz0) is user-settable.
+% - Dynamic phase lag from steady spin-drag balance:
+%       tau_drag = k_drag*f_drive^2
+%       sin(phi) = 2*tau_drag / [mdip*(a+b)]
+%   where a,b are the exact local field-ellipse semiaxes from svd([u_cos v_sin]).
+%   If sin(phi)>1, synchronous phase locking is impossible and the trajectory
+%   is terminated immediately (NO clipping of phi to 90 deg).
+% =========================================================
+
+%% ---------------- UI Layout ----------------
+fig = uifigure('Name','Multi-Coil Beamforming Visualizer', ...
+    'Position',[80 80 1500 860]);
+
+gl = uigridlayout(fig,[1 2]);
+gl.ColumnWidth = {620,'1x'};
+
+%% =========================================================
+%  LEFT: host panel + viewport + slider
+% =========================================================
+leftHost = matlab.ui.container.Panel();
+leftHost.Parent = gl;
+leftHost.Title = 'Controls';
+leftHost.Layout.Row = 1;
+leftHost.Layout.Column = 1;
+
+leftWrap = uigridlayout(leftHost,[1 2]);
+leftWrap.ColumnWidth = {'1x', 18};
+leftWrap.RowHeight = {'1x'};
+leftWrap.Padding = [6 6 6 6];
+leftWrap.ColumnSpacing = 6;
+
+% IMPORTANT: `vp` is the viewport PANEL handle. Do not reuse the name `vp`
+% for numerical variables inside nested callbacks, because MATLAB nested
+% functions can share the parent workspace and overwrite this handle.
+vp = matlab.ui.container.Panel();
+vp.Parent = leftWrap;
+vp.Title = '';
+vp.BorderType = 'none';
+vp.Layout.Row = 1;
+vp.Layout.Column = 1;
+
+sld = uislider(leftWrap);
+sld.Orientation = 'vertical';
+sld.Layout.Row = 1;
+sld.Layout.Column = 2;
+sld.MajorTicks = [];
+sld.MinorTicks = [];
+sld.Value = 0;
+
+content = matlab.ui.container.Panel();
+content.Parent = vp;
+content.Title = '';
+content.BorderType = 'none';
+
+% content height
+CONTENT_H = 2155;
+
+lgl = uigridlayout(content,[14 1]);
+lgl.ColumnWidth = {'1x'};
+% Row 5 is a compact geometry quick-set panel.
+lgl.RowHeight = {220,30,30,30,132,280,30,30,30,500,560,30,30,'1x'};
+lgl.Padding = [6 6 6 6];
+lgl.RowSpacing = 6;
+
+fig.SizeChangedFcn = @onResize;
+sld.ValueChangingFcn = @onScrollChanging;
+sld.ValueChangedFcn  = @onScrollChanged;
+
+%% ---- Coil table ----
+colNames = {'x(m)','y(m)','z(m)','nx','ny','nz','R(m)','Turns','I(A)','Phase(deg)'};
+
+% IMPORTANT: experimental wiring/rotation convention uses the 90-deg and
+% 270-deg channel groups swapped relative to the earlier draft.  Keep this
+% ordering so the default rotating field has the experimentally correct
+% counterclockwise rotation sense.
+% Recommended passive-hover test defaults used in this version:
+%   Cross-shaped 4-channel array; each channel contains a 2x2 coil group.
+%   Physical coil diameter = 0.021 m, therefore model radius R = 0.0105 m.
+%   Right group coordinates are the measured/entered experimental positions:
+%     x = 26.5 or 47.5 mm, y = +/-10.5 mm.
+%   Top/left/bottom groups are generated by 90/180/270 deg rotational symmetry.
+%   Channel phases: right=0 deg, top=270 deg, left=180 deg, bottom=90 deg.
+%   x0=2 mm, y0=0, z0=20.084 mm; s0=local directed n_rot
+%   f_drive=f_hover=110 Hz; T=5 s; dt=1 ms
+%   beta=0.20 1/s with translational damping enabled
+%   k_drag=3e-10 N*m/Hz^2; all 16 coil amplitudes=1.25 A
+defaultCoils = [
+%    x(m)       y(m)       z     nx ny nz   R(m)   Turns I(A) Phase(deg)
+% Right channel: phase 0 deg
+     0.02650    0.01050    0     0 0 1   0.0105 650  1.25    0
+     0.02650   -0.01050    0     0 0 1   0.0105 650  1.25    0
+     0.04750    0.01050    0     0 0 1   0.0105 650  1.25    0
+     0.04750   -0.01050    0     0 0 1   0.0105 650  1.25    0
+% Top channel: +90 deg rotation of right group, phase 270 deg
+    -0.01050    0.02650    0     0 0 1   0.0105 650  1.25    270
+     0.01050    0.02650    0     0 0 1   0.0105 650  1.25    270
+    -0.01050    0.04750    0     0 0 1   0.0105 650  1.25    270
+     0.01050    0.04750    0     0 0 1   0.0105 650  1.25    270
+% Left channel: 180 deg rotation of right group, phase 180 deg
+    -0.02650   -0.01050    0     0 0 1   0.0105 650  1.25    180
+    -0.02650    0.01050    0     0 0 1   0.0105 650  1.25    180
+    -0.04750   -0.01050    0     0 0 1   0.0105 650  1.25    180
+    -0.04750    0.01050    0     0 0 1   0.0105 650  1.25    180
+% Bottom channel: -90 deg rotation of right group, phase 90 deg
+     0.01050   -0.02650    0     0 0 1   0.0105 650  1.25    90
+    -0.01050   -0.02650    0     0 0 1   0.0105 650  1.25    90
+     0.01050   -0.04750    0     0 0 1   0.0105 650  1.25    90
+    -0.01050   -0.04750    0     0 0 1   0.0105 650  1.25    90
+];
+
+tbl = uitable(lgl,...
+    'Data',defaultCoils,...
+    'ColumnName',colNames,...
+    'ColumnEditable',true(1,numel(colNames)),...
+    'RowName',[]);
+tbl.Layout.Row = 1;
+tbl.Layout.Column = 1;
+tbl.CellEditCallback = @onCoilTableEdited;
+
+btnAdd = uibutton(lgl,'Text','Add Coil','ButtonPushedFcn',@onAdd);
+btnAdd.Layout.Row = 2;
+
+btnDel = uibutton(lgl,'Text','Delete Selected','ButtonPushedFcn',@onDelete);
+btnDel.Layout.Row = 3;
+
+btnNorm = uibutton(lgl,'Text','Normalize Normals','ButtonPushedFcn',@onNorm);
+btnNorm.Layout.Row = 4;
+
+%% ---- Geometry quick set ----
+% One-click rebuild of all 16 coils.  The internal 2x2 pitch defaults to the
+% physical coil diameter (21 mm).  Positive tilt rotates each channel normal
+% radially outward from +z.  The whole 2x2 channel is tilted as one
+% rigid plane about its local tangential axis through the channel center.
+% Thus the four coil centers remain coplanar and acquire the corresponding z offsets.
+quickPanel = matlab.ui.container.Panel();
+quickPanel.Parent = lgl;
+quickPanel.Title = 'Geometry Quick Set';
+quickPanel.Layout.Row = 5;
+
+qg = uigridlayout(quickPanel,[4 4]);
+qg.RowHeight = {26,26,30,22};
+qg.ColumnWidth = {95,110,95,'1x'};
+qg.Padding = [6 4 6 4];
+qg.RowSpacing = 3;
+qg.ColumnSpacing = 8;
+
+mkLbl(qg,'Center d (m)',1,1); edQuickD = mkNum(qg,0.037,1,2);
+edQuickD.Limits = [0 inf]; edQuickD.ValueDisplayFormat = '%.4f';
+mkLbl(qg,'Tilt out (deg)',1,3); edQuickTilt = mkNum(qg,0.0,1,4);
+edQuickTilt.Limits = [-89.9 89.9]; edQuickTilt.ValueDisplayFormat = '%.2f';
+
+mkLbl(qg,'Current (A)',2,1); edQuickI = mkNum(qg,1.25,2,2);
+edQuickI.Limits = [0 inf]; edQuickI.ValueDisplayFormat = '%.3f';
+mkLbl(qg,'2x2 pitch (m)',2,3); edQuickPitch = mkNum(qg,0.021,2,4);
+edQuickPitch.Limits = [1e-6 inf]; edQuickPitch.ValueDisplayFormat = '%.4f';
+
+btnQuickCross = uibutton(qg,'Text','Apply Cross','FontWeight','bold', ...
+    'ButtonPushedFcn',@onApplyQuickCross);
+btnQuickCross.Layout.Row = 3; btnQuickCross.Layout.Column = [1 2];
+
+btnQuickCorners = uibutton(qg,'Text','Apply 4 Corners','FontWeight','bold', ...
+    'ButtonPushedFcn',@onApplyQuickCorners);
+btnQuickCorners.Layout.Row = 3; btnQuickCorners.Layout.Column = [3 4];
+
+quickNote = uilabel(qg, ...
+    'Text','d sets channel centers. Tilt rigidly rotates each 2x2 channel plane about its tangential axis; channel center stays at z=0.', ...
+    'FontAngle','italic');
+quickNote.Layout.Row = 4; quickNote.Layout.Column = [1 4];
+
+%% ---- Sampling / parameters ----
+pnl = matlab.ui.container.Panel();
+pnl.Parent = lgl;
+pnl.Title = 'Sampling & Params';
+pnl.Layout.Row = 6;
+
+pgl = uigridlayout(pnl,[7 4]); % 7 rows
+pgl.RowHeight = repmat({28},1,7);
+pgl.ColumnWidth = {90,105,95,'1x'};
+pgl.Padding = [6 6 6 6];
+pgl.RowSpacing = 6;
+pgl.ColumnSpacing = 8;
+
+uilabel(pgl,'Text','x min'); edXmin = uieditfield(pgl,'numeric','Value',-0.03);
+uilabel(pgl,'Text','x max'); edXmax = uieditfield(pgl,'numeric','Value', 0.03);
+uilabel(pgl,'Text','y min'); edYmin = uieditfield(pgl,'numeric','Value',-0.03);
+uilabel(pgl,'Text','y max'); edYmax = uieditfield(pgl,'numeric','Value', 0.03);
+uilabel(pgl,'Text','z');     edZ    = uieditfield(pgl,'numeric','Value',0.020084);
+edZ.ValueDisplayFormat = '%.6f';
+uilabel(pgl,'Text','Grid N');edN    = uieditfield(pgl,'numeric','Value',50,'RoundFractionalValues','on');
+
+uilabel(pgl,'Text','freq (Hz)');  edF  = uieditfield(pgl,'numeric','Value',110);
+uilabel(pgl,'Text','Nt');         edNt = uieditfield(pgl,'numeric','Value',120,'RoundFractionalValues','on');
+uilabel(pgl,'Text','Ellipse L');  edL  = uieditfield(pgl,'numeric','Value',0.006);
+uilabel(pgl,'Text','Surf α');     edA  = uieditfield(pgl,'numeric','Value',0.35);
+
+cbEllipse = uicheckbox(pgl,'Text','Ellipses','Value',true);
+cbNormal  = uicheckbox(pgl,'Text','Display n_surf','Value',true);
+cbSurf    = uicheckbox(pgl,'Text','Surface','Value',true);
+cbEllipse.Layout.Row = 6; cbEllipse.Layout.Column = 1;
+cbNormal.Layout.Row  = 6; cbNormal.Layout.Column  = 2;
+cbSurf.Layout.Row    = 6; cbSurf.Layout.Column    = 3;
+
+cbMagPts = uicheckbox(pgl,'Text','Color by |B|','Value',true);
+cbMagPts.Layout.Row = 7; cbMagPts.Layout.Column = 1;
+
+cbMagSurf = uicheckbox(pgl,'Text','Surf color=|B|','Value',true);
+cbMagSurf.Layout.Row = 7; cbMagSurf.Layout.Column = 2;
+
+% Optional display of the physical coil locations.  Each coil is drawn as a
+% dashed cylindrical outline using the table position, normal and radius.
+% Physical coil thickness for visualization = 0.022 m (2.2 cm); display-only and not used by the magnetic-field model.
+cbShowCoils = uicheckbox(pgl,'Text','Show coils','Value',false, ...
+    'ValueChangedFcn',@onToggleCoils);
+cbShowCoils.Layout.Row = 7; cbShowCoils.Layout.Column = [3 4];
+
+%% ---- Field buttons ----
+btnField = uibutton(lgl,'Text','Compute & Plot Field','FontWeight','bold','ButtonPushedFcn',@onRunField);
+btnField.Layout.Row = 7;
+
+btnClearAxes = uibutton(lgl,'Text','Clear Axes','ButtonPushedFcn',@onClearAxes);
+btnClearAxes.Layout.Row = 8;
+
+btnExport = uibutton(lgl,'Text','Export PNG','ButtonPushedFcn',@onExport);
+btnExport.Layout.Row = 9;
+
+%% ---- Gradient-force calculator ----
+gradPanel = matlab.ui.container.Panel();
+gradPanel.Parent = lgl;
+gradPanel.Title = 'Cycle-averaged magnetic-gradient force at robot state';
+gradPanel.Layout.Row = 10;
+
+gp = uigridlayout(gradPanel,[15 4]);
+gp.RowHeight = repmat({28},1,15);
+gp.ColumnWidth = {80,115,100,'1x'};
+gp.Padding = [6 6 6 6];
+gp.RowSpacing = 4;
+gp.ColumnSpacing = 8;
+
+% Position of robot center [m]
+mkLbl(gp,'x (m)',1,1); edGradX = mkNum(gp,0.002,1,2);
+mkLbl(gp,'y (m)',1,3); edGradY = mkNum(gp,0.0,1,4);
+mkLbl(gp,'z (m)',2,1); edGradZ = mkNum(gp,0.020084,2,2);
+mkLbl(gp,'FD h (m)',2,3); edGradH = mkNum(gp,1.0e-4,2,4);
+edGradH.Limits = [1e-7 1e-2];
+
+edGradX.ValueDisplayFormat = '%.6f';
+edGradY.ValueDisplayFormat = '%.6f';
+edGradZ.ValueDisplayFormat = '%.6f';
+edGradH.ValueDisplayFormat = '%.2e';
+
+% Robot spin axis s.  This is the orientation variable used by the current
+% flying-robot model; it is normalized internally before calculation.
+mkLbl(gp,'sx',3,1); edGradSx = mkNum(gp,-0.000555574937058,3,2);
+mkLbl(gp,'sy',3,3); edGradSy = mkNum(gp,-8.30798446132e-18,3,4);
+mkLbl(gp,'sz',4,1); edGradSz = mkNum(gp,0.999999845668,4,2);
+
+% Phase-lag parameters.  phi is NOT entered manually: it is obtained from
+% local field ellipse a,b and tau_drag = k_drag*f_drive^2.
+mkLbl(gp,'f_drive',4,3); edGradFdrive = mkNum(gp,110,4,4);
+edGradFdrive.Limits = [1e-6 inf];
+mkLbl(gp,'k_drag',5,1); edGradKdrag = mkNum(gp,3.0e-10,5,2);
+edGradKdrag.Limits = [0 inf];
+
+btnGradCalc = uibutton(gp,'Text','Compute <F_{grad}>', ...
+    'FontWeight','bold','ButtonPushedFcn',@onComputeGradientForce);
+btnGradCalc.Layout.Row = 5;
+btnGradCalc.Layout.Column = [3 4];
+
+% Read-only outputs.  Forces are displayed in micro-newtons for convenience.
+mkLbl(gp,'phi (deg)',6,1);
+edGradPhi = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradPhi.Layout.Row = 6; edGradPhi.Layout.Column = 2;
+mkLbl(gp,'a+b (mT)',6,3);
+edGradAB = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradAB.Layout.Row = 6; edGradAB.Layout.Column = 4;
+
+mkLbl(gp,'Fx (uN)',7,1);
+edGradFx = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradFx.Layout.Row = 7; edGradFx.Layout.Column = 2;
+mkLbl(gp,'Fy (uN)',7,3);
+edGradFy = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradFy.Layout.Row = 7; edGradFy.Layout.Column = 4;
+
+mkLbl(gp,'Fz (uN)',8,1);
+edGradFz = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradFz.Layout.Row = 8; edGradFz.Layout.Column = 2;
+mkLbl(gp,'|F| (uN)',8,3);
+edGradFmag = uieditfield(gp,'text','Value','N/A','Editable','off');
+edGradFmag.Layout.Row = 8; edGradFmag.Layout.Column = 4;
+
+gradNote = uilabel(gp, ...
+    'Text','Spatial derivative holds the instantaneous magnetic moment fixed; phi is solved only at the entered robot state.', ...
+    'FontAngle','italic');
+gradNote.Layout.Row = 9;
+gradNote.Layout.Column = [1 4];
+
+% ---- Gradient-force direction along a user-defined line segment ----
+% The robot spin axis s is held fixed to [sx,sy,sz] above along the line.
+% At EACH sampled position, the local field, n_rot, ellipse a,b, and phi are
+% recomputed.  The finite-difference spatial derivative at that point still
+% holds the corresponding instantaneous magnetic moment fixed.
+mkLbl(gp,'P1 x (m)',10,1); edGradP1x = mkNum(gp,-0.010,10,2);
+mkLbl(gp,'P1 y (m)',10,3); edGradP1y = mkNum(gp, 0.000,10,4);
+
+mkLbl(gp,'P1 z (m)',11,1); edGradP1z = mkNum(gp,0.020084,11,2);
+mkLbl(gp,'N line pts',11,3); edGradLineN = mkNum(gp,15,11,4);
+edGradLineN.Limits = [2 200];
+edGradLineN.RoundFractionalValues = 'on';
+
+mkLbl(gp,'P2 x (m)',12,1); edGradP2x = mkNum(gp, 0.010,12,2);
+mkLbl(gp,'P2 y (m)',12,3); edGradP2y = mkNum(gp, 0.000,12,4);
+
+mkLbl(gp,'P2 z (m)',13,1); edGradP2z = mkNum(gp,0.020084,13,2);
+mkLbl(gp,'Arrow L (m)',13,3); edGradLineArrowL = mkNum(gp,0.004,13,4);
+edGradLineArrowL.Limits = [1e-5 0.1];
+
+btnGradLinePlot = uibutton(gp,'Text','Plot force directions on line', ...
+    'FontWeight','bold','ButtonPushedFcn',@onPlotGradientForceLine);
+btnGradLinePlot.Layout.Row = 14;
+btnGradLinePlot.Layout.Column = [1 2];
+
+btnGradLineClear = uibutton(gp,'Text','Clear force-line plot', ...
+    'ButtonPushedFcn',@onClearGradientForceLine);
+btnGradLineClear.Layout.Row = 14;
+btnGradLineClear.Layout.Column = [3 4];
+
+gradLineNote = uilabel(gp, ...
+    'Text','Line arrows are normalized: equal arrow length shows force direction only; local phi is recomputed at every line point.', ...
+    'FontAngle','italic');
+gradLineNote.Layout.Row = 15;
+gradLineNote.Layout.Column = [1 4];
+
+%% ---- Trajectory panel ----
+propPanel = matlab.ui.container.Panel();
+propPanel.Parent = lgl;
+propPanel.Title = 'Trajectory (spin axis dynamics via averaged torque; lift=(f_drive/f_hover)^2*g)';
+propPanel.Layout.Row = 11;
+
+% Increase rows to accommodate initial nx0,ny0,nz0 and f_hover cleanly
+pp = uigridlayout(propPanel,[16 4]);
+pp.RowHeight = repmat({28},1,16);
+pp.ColumnWidth = {70,120,120,'1x'};
+pp.Padding = [6 6 6 6];
+pp.RowSpacing = 6;
+pp.ColumnSpacing = 10;
+
+% Row 1-2: position -- recommended passive-hover test point
+mkLbl(pp,'x0',1,1);  edx0 = mkNum(pp,0.002,1,2);
+mkLbl(pp,'y0',1,3);  edy0 = mkNum(pp,0.0,1,4);
+mkLbl(pp,'z0',2,1);  edz0 = mkNum(pp,0.020084,2,2);
+edx0.ValueDisplayFormat = '%.6f';
+edy0.ValueDisplayFormat = '%.6f';
+edz0.ValueDisplayFormat = '%.6f';
+
+% Row 3-4: velocity
+mkLbl(pp,'vx0',3,1); edvx = mkNum(pp,0.0,3,2);
+mkLbl(pp,'vy0',3,3); edvy = mkNum(pp,0.0,3,4);
+mkLbl(pp,'vz0',4,1); edvz = mkNum(pp,0.0,4,2);
+
+% Row 4 (continued) + Row 5: initial spin axis (flying robot)
+% Default s0 is the local directed n_rot at the recommended initial point.
+mkLbl(pp,'nx0',4,3); ednx0 = mkNum(pp,-0.000555574937058,4,4);
+mkLbl(pp,'ny0',5,1); edny0 = mkNum(pp,-8.30798446132e-18,5,2);
+mkLbl(pp,'nz0',5,3); ednz0 = mkNum(pp,0.999999845668,5,4);
+ednx0.ValueDisplayFormat = '%.6f';
+edny0.ValueDisplayFormat = '%.6f';
+ednz0.ValueDisplayFormat = '%.6f';
+
+% Row 6: T, dt
+mkLbl(pp,'T (s)',6,1);   edT  = mkNum(pp,5.0,6,2);   edT.Limits = [0.01 inf];
+mkLbl(pp,'dt (s)',6,3);  eddt = mkNum(pp,0.001,6,4); eddt.Limits = [1e-6 1];
+
+% Row 7: translational damping + rotational drag coefficient
+mkLbl(pp,'beta',7,1);
+edBeta = mkNum(pp,0.20,7,2);
+edBeta.Limits = [0 inf];
+
+% Rotational drag model measured experimentally:
+%   tau_drag = k_drag * f_drive^2
+% Units: N*m/Hz^2
+mkLbl(pp,'k_drag',7,3);
+edKdrag = mkNum(pp,3.0e-10,7,4);
+edKdrag.Limits = [0 inf];
+
+% Row 8: damping checkbox + f_drive
+cbDamp = uicheckbox(pp,'Text','Use damping','Value',true);
+cbDamp.Layout.Row = 8;
+cbDamp.Layout.Column = [1 2];
+
+mkLbl(pp,'f_drive',8,3);
+edFdrive = mkNum(pp,110,8,4);
+edFdrive.Limits = [1e-6 inf];
+
+% Row 9: hover frequency (lift = weight)
+mkLbl(pp,'f_hover',9,1);
+edFhover = mkNum(pp,110,9,2);
+edFhover.Limits = [1e-6 inf];
+
+hoverNote = uilabel(pp,'Text','Hz at lift = weight','FontAngle','italic');
+hoverNote.Layout.Row = 9;
+hoverNote.Layout.Column = [3 4];
+
+% Row 10: optional cycle-averaged magnetic-gradient force in translation.
+% The same local synchronous phase phi used by the orientation model is used
+% for <F_grad>.  Spatial derivatives are evaluated by centered finite
+% differences while holding the instantaneous magnetic moment fixed.
+cbUseGrad = uicheckbox(pp,'Text','Use grad force','Value',false);
+cbUseGrad.Layout.Row = 10;
+cbUseGrad.Layout.Column = [1 2];
+
+mkLbl(pp,'Grad h (m)',10,3);
+edTrajGradH = mkNum(pp,1.0e-4,10,4);
+edTrajGradH.Limits = [1e-8 0.01];
+edTrajGradH.ValueDisplayFormat = '%.3e';
+
+% Row 11: trajectory vector display
+cbShowOri = uicheckbox(pp,'Text','Show robot axis s','Value',true);
+cbShowOri.Layout.Row = 11;
+cbShowOri.Layout.Column = [1 2];
+
+cbShowNrot = uicheckbox(pp,'Text','Show field axis n_rot','Value',true);
+cbShowNrot.Layout.Row = 11;
+cbShowNrot.Layout.Column = [3 4];
+
+% Row 12: arrow parameters
+mkLbl(pp,'N arrows',12,1);
+edNarrow = mkNum(pp,10,12,2); edNarrow.Limits = [1 500]; edNarrow.RoundFractionalValues = 'on';
+
+mkLbl(pp,'Arrow scale',12,3);
+% Fraction of the current plotted 3D span used as the TRUE arrow length.
+% Example: 0.06 means each orientation arrow is 6% of the current plot span.
+edArrowScale = mkNum(pp,0.06,12,4); edArrowScale.Limits = [0.001 1];
+
+% Row 13: averaged expected orientation rates (deg/s)
+% Use TEXT edit fields rather than numeric fields so an invalid/no-solution
+% trajectory can display 'N/A'. MATLAB numeric edit fields reject NaN.
+mkLbl(pp,'Align avg',13,1);
+edAlignRate = uieditfield(pp,'text','Value','0.000');
+edAlignRate.Editable = 'off';
+edAlignRate.Layout.Row = 13;
+edAlignRate.Layout.Column = 2;
+
+mkLbl(pp,'Prec avg',13,3);
+edPrecRate = uieditfield(pp,'text','Value','0.000');
+edPrecRate.Editable = 'off';
+edPrecRate.Layout.Row = 13;
+edPrecRate.Layout.Column = 4;
+
+% Row 14-15: buttons
+btnTrajCompute = uibutton(pp,'Text','Compute Trajectory','FontWeight','bold','ButtonPushedFcn',@onComputeTrajectory);
+btnTrajCompute.Layout.Row = 14; btnTrajCompute.Layout.Column = [1 2];
+
+btnTrajPlot = uibutton(pp,'Text','Plot Trajectory','ButtonPushedFcn',@onPlotTrajectory);
+btnTrajPlot.Layout.Row = 14; btnTrajPlot.Layout.Column = [3 4];
+
+btnTrajClear = uibutton(pp,'Text','Clear Trajectory','ButtonPushedFcn',@onClearTrajectory);
+btnTrajClear.Layout.Row = 15; btnTrajClear.Layout.Column = [1 2];
+
+btnRemoveTrajPlots = uibutton(pp,'Text','Remove Plotted Trajectories', ...
+    'ButtonPushedFcn',@onRemoveTrajectoryPlots);
+btnRemoveTrajPlots.Layout.Row = 15;
+btnRemoveTrajPlots.Layout.Column = [3 4];
+
+% Row 16: note
+note = uilabel(pp, ...
+    'Text','Rates in deg/s: Align + = toward n_rot; Prec sign = right-hand about n_rot.', ...
+    'FontAngle','italic');
+note.Layout.Row = 16; note.Layout.Column = [1 4];
+
+%% ---- Status ----
+status = uilabel(lgl,'Text','Ready.');
+status.Layout.Row = 12;
+
+%% =========================================================
+%  RIGHT: plot panel
+% =========================================================
+right = matlab.ui.container.Panel();
+right.Parent = gl;
+right.Title = 'Visualization';
+right.Layout.Row = 1;
+right.Layout.Column = 2;
+
+rgl = uigridlayout(right,[1 1]);
+rgl.RowHeight = {'1x'};
+rgl.ColumnWidth = {'1x'};
+
+ax = uiaxes(rgl);
+ax.Layout.Row = 1;
+ax.Layout.Column = 1;
+
+view(ax,3); grid(ax,'on'); axis(ax,'equal');
+xlabel(ax,'X (m)'); ylabel(ax,'Y (m)'); zlabel(ax,'Z (m)');
+ax.FontSize = 13; ax.LineWidth = 1.2;
+
+%% ---------------- Cached field + trajectory ----------------
+field_ready = false;
+pts_cache = [];
+n_cache = [];
+
+traj_ready = false;
+traj_cache = [];
+traj_s_cache = [];
+traj_nrot_cache = [];
+traj_start = [];
+traj_end = [];
+
+onResize();
+
+%% ================= Callbacks =================
+    function onAdd(~,~)
+        tbl.Data(end+1,:) = [0 0 0 0 0 1 0.015 50 1 0];
+        refreshCoilOutline();
+    end
+
+    function onDelete(~,~)
+        if isempty(tbl.Selection); return; end
+        tbl.Data(unique(tbl.Selection(:,1)),:) = [];
+        refreshCoilOutline();
+    end
+
+    function onNorm(~,~)
+        n = tbl.Data(:,4:6);
+        n = n ./ max(vecnorm(n,2,2),1e-12);
+        tbl.Data(:,4:6) = n;
+        refreshCoilOutline();
+    end
+
+    function onApplyQuickCross(~,~)
+        applyQuickGeometry('cross');
+    end
+
+    function onApplyQuickCorners(~,~)
+        applyQuickGeometry('corners');
+    end
+
+    function applyQuickGeometry(mode)
+        d = edQuickD.Value;
+        tiltDeg = edQuickTilt.Value;
+        Iamp = edQuickI.Value;
+        pitch = edQuickPitch.Value;
+
+        if ~all(isfinite([d tiltDeg Iamp pitch])) || d <= 0 || pitch <= 0 || Iamp < 0
+            status.Text = 'Geometry Quick Set ERROR: d,pitch must be >0 and current >=0.';
+            return;
+        end
+
+        try
+            tbl.Data = buildQuickCoilGeometry(mode,d,tiltDeg,Iamp,pitch);
+        catch ME
+            status.Text = ['Geometry Quick Set ERROR: ' ME.message];
+            return;
+        end
+
+        refreshCoilOutline();
+        field_ready = false;
+        traj_ready = false;
+
+        if strcmpi(mode,'cross')
+            geomName = 'Cross';
+        else
+            geomName = '4 Corners';
+        end
+        status.Text = sprintf('%s applied: d=%.2f mm, outward tilt=%.2f deg, I=%.3f A, pitch=%.2f mm.', ...
+            geomName,1e3*d,tiltDeg,Iamp,1e3*pitch);
+    end
+
+    function onCoilTableEdited(~,~)
+        refreshCoilOutline();
+    end
+
+    function onToggleCoils(~,~)
+        refreshCoilOutline();
+        if cbShowCoils.Value
+            status.Text = 'Coil outlines shown (dashed cylinders; display only).';
+        else
+            status.Text = 'Coil outlines hidden.';
+        end
+    end
+
+    function refreshCoilOutline()
+        hOld = findall(ax,'Tag','CoilOutline');
+        if ~isempty(hOld)
+            delete(hOld);
+        end
+        if cbShowCoils.Value
+            drawDashedCoilCylinders(ax, tbl.Data);
+        end
+    end
+
+    function onClearAxes(~,~)
+        cla(ax);
+        traj_ready = false;
+        traj_cache = [];
+        traj_s_cache = [];
+        traj_nrot_cache = [];
+        edAlignRate.Value = '0.000';
+        edPrecRate.Value = '0.000';
+        status.Text = 'Axes cleared (trajectory cache cleared too).';
+    end
+
+    function onClearTrajectory(~,~)
+        traj_ready = false;
+        traj_cache = [];
+        traj_s_cache = [];
+        traj_nrot_cache = [];
+        edAlignRate.Value = '0.000';
+        edPrecRate.Value = '0.000';
+        status.Text = 'Trajectory cache cleared.';
+    end
+
+    function onRemoveTrajectoryPlots(~,~)
+        % Remove only trajectory-related graphics from the axes.
+        % The field/surface visualization and trajectory cache are preserved,
+        % so the latest computed trajectory can be plotted again if desired.
+        hTraj = findall(ax,'Tag','TrajectoryPlot');
+        if isempty(hTraj)
+            status.Text = 'No plotted trajectories to remove.';
+        else
+            delete(hTraj);
+            status.Text = sprintf('Removed %d trajectory plot object(s).', numel(hTraj));
+        end
+    end
+
+    function onRunField(~,~)
+        status.Text = 'Computing field on plane...'; drawnow;
+
+        x = linspace(edXmin.Value,edXmax.Value,edN.Value);
+        y = linspace(edYmin.Value,edYmax.Value,edN.Value);
+        [X,Y] = meshgrid(x,y);
+        Z = edZ.Value*ones(size(X));
+        pts = [X(:),Y(:),Z(:)];
+        Np = size(pts,1);
+
+        f = edF.Value;
+        t = linspace(0,1/f,edNt.Value);
+        w = 2*pi*f;
+
+        u_list=zeros(Np,3); v_list=u_list;
+        a_list=zeros(Np,1); b_list=a_list;
+        Brms_list=zeros(Np,1);
+
+        coils_local = readCoils(tbl.Data);
+                % ===== Center point output: (x=0, y=0, z=edZ.Value) =====
+        center_pt = [0, 0, edZ.Value];
+        Bts_center = zeros(numel(t),3);
+
+        for kk = 1:numel(t)
+            Ik = coils_local.Iamp .* cos(w*t(kk) + coils_local.phase);
+            Bc = [0 0 0];
+            for c = 1:coils_local.M
+                Bc = Bc + B_from_coil_stub(center_pt, ...
+                    coils_local.pos(c,:), coils_local.nhat(c,:), ...
+                    coils_local.R(c), coils_local.Nturn(c), Ik(c));
+            end
+            Bts_center(kk,:) = Bc;
+        end
+
+        % field magnitude at center
+        Bmag_center = sqrt(sum(Bts_center.^2,2));
+        Brms_center = sqrt(mean(Bmag_center.^2));
+        Bmax_center = max(Bmag_center);
+
+        % DISPLAY plane normal at center. PCA eigenvector signs are arbitrary,
+        % so n_surf_center may be flipped upward for visual consistency.
+        Cc = Bts_center - mean(Bts_center,1);
+        [Vc,Dc] = eig(Cc.'*Cc);
+        [~,idc] = sort(diag(Dc),'descend');
+        Vc = Vc(:,idc);
+
+        u_center = Vc(:,1).';
+        v_center = Vc(:,2).';
+        n_surf_center = cross(u_center, v_center);
+        n_surf_center = n_surf_center / max(norm(n_surf_center),1e-12);
+
+        if n_surf_center(3) < 0
+            n_surf_center = -n_surf_center;
+        end
+
+        % PHYSICAL directed rotation axis at center.
+        % B(theta)=u_cos*cos(theta)+v_sin*sin(theta), therefore
+        % B x dB/dtheta = u_cos x v_sin.
+        [u_cos_center, v_sin_center] = harmonicUVAtPoint(center_pt, coils_local);
+        n_rot_center = directedRotationAxis(u_cos_center, v_sin_center);
+
+        % output to command window
+        fprintf('\n=== Center point field output ===\n');
+        fprintf('Point = (0, 0, %.6f) m\n', edZ.Value);
+        fprintf('RMS |B| = %.6e T\n', Brms_center);
+        fprintf('Max |B| = %.6e T\n', Bmax_center);
+        fprintf('Display normal n_surf = [%.6f, %.6f, %.6f]\n', ...
+            n_surf_center(1), n_surf_center(2), n_surf_center(3));
+        fprintf('Directed rotation axis n_rot = [%.6f, %.6f, %.6f]\n', ...
+            n_rot_center(1), n_rot_center(2), n_rot_center(3));
+
+        for j=1:Np
+            Bts=zeros(numel(t),3);
+            for kk=1:numel(t)
+                Ik = coils_local.Iamp .* cos(w*t(kk)+coils_local.phase);
+                B=[0 0 0];
+                for c=1:coils_local.M
+                    B = B + B_from_coil_stub(pts(j,:),...
+                        coils_local.pos(c,:),coils_local.nhat(c,:),...
+                        coils_local.R(c),coils_local.Nturn(c),Ik(c));
+                end
+                Bts(kk,:)=B;
+            end
+
+            Bmag = sqrt(sum(Bts.^2,2));
+            Brms_list(j) = sqrt(mean(Bmag.^2));
+
+            C=Bts-mean(Bts,1);
+            [V,D]=eig(C.'*C); [~,id]=sort(diag(D),'descend'); V=V(:,id);
+            u=V(:,1).'; v=V(:,2).';
+
+            pu=C*u.'; pv=C*v.';
+            a=0.5*(max(pu)-min(pu)); b=0.5*(max(pv)-min(pv));
+
+            u_list(j,:)=u; v_list(j,:)=v;
+            a_list(j)=a; b_list(j)=b;
+        end
+
+        % DISPLAY-ONLY normal. PCA/eigenvector signs are arbitrary, so
+        % n_surf may be flipped upward for a continuous reconstructed surface.
+        % This normal is NEVER used by orientation dynamics.
+        n_surf_list = normalizeRows(cross(u_list,v_list,2));
+        flip = n_surf_list(:,3) < 0;
+        n_surf_list(flip,:) = -n_surf_list(flip,:);
+
+        % Reconstruct a display surface only when the local normal field can
+        % be represented as z = f(x,y).  On symmetry planes such as z=0,
+        % n_z can be near zero everywhere, in which case that representation
+        % is singular.  The field/ellipses/normals are still perfectly valid,
+        % so surface reconstruction is skipped rather than throwing an error.
+        [Xs,Ys,Zs]=surfaceFromNormals(pts,n_surf_list);
+        surface_available = ~isempty(Xs) && ~isempty(Ys) && ~isempty(Zs);
+
+        Br_surf = [];
+        if cbMagSurf.Value && surface_available
+            Fbr = scatteredInterpolant(pts(:,1), pts(:,2), Brms_list, 'natural', 'nearest');
+            Br_surf = Fbr(Xs, Ys);
+        end
+
+        cla(ax); hold(ax,'on');
+
+        % Grid points are shown only together with the field ellipses.
+        % If "Ellipses" is unchecked, hide the sampling grid points as well
+        % so the visualization stays clean.
+        showGridPoints = cbEllipse.Value;
+        showColoredGridPoints = showGridPoints && cbMagPts.Value;
+
+        if showGridPoints
+            if cbMagPts.Value
+                sc = scatter3(ax, pts(:,1), pts(:,2), pts(:,3), 12, Brms_list, 'filled');
+                sc.MarkerFaceAlpha = 0.95;
+                colormap(ax,'turbo');
+                cb = colorbar(ax);
+                cb.Label.String = 'RMS |B| (mT)';
+            else
+                plot3(ax,pts(:,1),pts(:,2),pts(:,3),'k.','MarkerSize',12);
+            end
+        end
+
+        th=linspace(0,2*pi,120);
+        L=edL.Value;
+
+        if cbEllipse.Value
+            for j=1:Np
+                rratio = b_list(j)/max(a_list(j),1e-12);
+                E = pts(j,:) + cos(th(:))*(L*u_list(j,:)) + sin(th(:))*(L*rratio*v_list(j,:));
+                plot3(ax,E(:,1),E(:,2),E(:,3),'-');
+            end
+        end
+
+        if cbNormal.Value
+            quiver3(ax,pts(:,1),pts(:,2),pts(:,3),...
+                n_surf_list(:,1),n_surf_list(:,2),n_surf_list(:,3),0.01,'LineWidth',1.2);
+        end
+
+        if cbSurf.Value && surface_available
+            if cbMagSurf.Value && ~isempty(Br_surf)
+                hs=surf(ax,Xs,Ys,Zs,Br_surf*1000.0,'EdgeColor','none','FaceAlpha',edA.Value);
+                if ~showColoredGridPoints
+                    colormap(ax,'turbo'); colorbar(ax);
+                end
+            else
+                hs=surf(ax,Xs,Ys,Zs,'EdgeColor','none','FaceAlpha',edA.Value);
+            end
+            uistack(hs,'bottom');
+        end
+
+        if cbShowCoils.Value
+            drawDashedCoilCylinders(ax, tbl.Data);
+        end
+
+        axis(ax,'equal'); view(ax,3);
+        hold(ax,'off');
+
+        pts_cache = pts;
+        n_cache = n_surf_list;  % display-only normals
+        field_ready = true;
+
+        if cbSurf.Value && ~surface_available
+            status.Text = sprintf(['Field plane done. Points=%d. Surface skipped: ', ...
+                'normal field is not representable as z=f(x,y) on this plane.'], Np);
+        else
+            status.Text = sprintf('Field plane done. Points=%d', Np);
+        end
+    end
+
+    function onComputeGradientForce(~,~)
+        % Compute the cycle-averaged magnetic-gradient force at one robot
+        % state.  The robot magnetic moment is NOT re-solved at displaced
+        % finite-difference points.  This is essential because
+        %
+        %   F_grad = grad(m . B)
+        %
+        % takes the spatial derivative at fixed instantaneous dipole
+        % orientation.  The local synchronous state (s, phi and phase
+        % reference) is determined only at the entered center point.
+
+        r0 = [edGradX.Value, edGradY.Value, edGradZ.Value];
+        s0 = [edGradSx.Value, edGradSy.Value, edGradSz.Value];
+        h = edGradH.Value;
+        fdrive = edGradFdrive.Value;
+        k_drag = edGradKdrag.Value;
+
+        if ~all(isfinite(r0)) || ~all(isfinite(s0)) || norm(s0) < 1e-10
+            setGradientOutputsNA();
+            status.Text = 'Gradient force ERROR: position/spin axis is invalid.';
+            return;
+        end
+        s0 = s0 / norm(s0);
+
+        if ~isfinite(h) || h <= 0
+            setGradientOutputsNA();
+            status.Text = 'Gradient force ERROR: FD h must be finite and > 0.';
+            return;
+        end
+        if ~isfinite(fdrive) || fdrive <= 0 || ~isfinite(k_drag) || k_drag < 0
+            setGradientOutputsNA();
+            status.Text = 'Gradient force ERROR: f_drive must be >0 and k_drag must be >=0.';
+            return;
+        end
+
+        coils_local = readCoils(tbl.Data);
+        [~, ~, mdip, ~] = newRobotPhysicalParams();
+
+        % Local first-harmonic field at the entered robot position.
+        [u0, v0] = harmonicUVAtPoint(r0, coils_local);
+        nrot0 = directedRotationAxis(u0, v0);
+        if ~all(isfinite(nrot0))
+            setGradientOutputsNA();
+            status.Text = 'Gradient force ERROR: local rotating-field axis is degenerate.';
+            return;
+        end
+
+        % Local synchronous phase lag from the same drag-balance model used
+        % by trajectory.  phi is therefore determined from the local field,
+        % rather than entered manually.
+        tau_drag = k_drag * fdrive^2;
+        [phi, aB, bB, phase_ratio, phase_ok, phase_msg] = ...
+            phaseLagFromDragBalance(u0, v0, mdip, tau_drag);
+
+        if ~phase_ok
+            setGradientOutputsNA();
+            status.Text = sprintf('Gradient force unavailable: %s  required sin(phi)=%.4f.', ...
+                phase_msg, phase_ratio);
+            return;
+        end
+
+        % Construct the magnetic-moment harmonics at the CENTER state using
+        % the same geometric phase convention as the averaged torque model.
+        [m_cos, m_sin, moment_ok, moment_msg] = ...
+            magneticMomentHarmonicsForGradient(s0, u0, v0, nrot0, mdip, phi);
+
+        if ~moment_ok
+            setGradientOutputsNA();
+            status.Text = ['Gradient force ERROR: ' moment_msg];
+            return;
+        end
+
+        % Centered finite differences of the FIELD harmonics only.
+        % m_cos and m_sin remain fixed while the field is differentiated.
+        Fgrad = zeros(1,3);
+        du_all = zeros(3,3);
+        dv_all = zeros(3,3);
+        for ii = 1:3
+            rp = r0; rm = r0;
+            rp(ii) = rp(ii) + h;
+            rm(ii) = rm(ii) - h;
+
+            [u_plus, v_plus] = harmonicUVAtPoint(rp, coils_local);
+            [u_minus, v_minus] = harmonicUVAtPoint(rm, coils_local);
+
+            du = (u_plus - u_minus) / (2*h);   % [T/m]
+            dv = (v_plus - v_minus) / (2*h);   % [T/m]
+            du_all(ii,:) = du;
+            dv_all(ii,:) = dv;
+
+            % <F_i> = 1/2 [m_cos . du/dx_i + m_sin . dv/dx_i]
+            Fgrad(ii) = 0.5 * (dot(m_cos,du) + dot(m_sin,dv));
+        end
+
+        % GUI output in micro-newtons.
+        edGradPhi.Value = sprintf('%.3f', phi*180/pi);
+        edGradAB.Value = sprintf('%.6f', 1e3*(aB+bB));
+        edGradFx.Value = sprintf('%.6f', 1e6*Fgrad(1));
+        edGradFy.Value = sprintf('%.6f', 1e6*Fgrad(2));
+        edGradFz.Value = sprintf('%.6f', 1e6*Fgrad(3));
+        edGradFmag.Value = sprintf('%.6f', 1e6*norm(Fgrad));
+
+        fprintf('\n=== Cycle-averaged magnetic-gradient force ===\n');
+        fprintf('r = [%.9e, %.9e, %.9e] m\n', r0(1),r0(2),r0(3));
+        fprintf('s = [%.9f, %.9f, %.9f]\n', s0(1),s0(2),s0(3));
+        fprintf('n_rot = [%.9f, %.9f, %.9f]\n', nrot0(1),nrot0(2),nrot0(3));
+        fprintf('f_drive = %.6f Hz, k_drag = %.9e N*m/Hz^2\n', fdrive,k_drag);
+        fprintf('a+b = %.9e T, phi = %.6f deg, required sin(phi)=%.9f\n', ...
+            aB+bB, phi*180/pi, phase_ratio);
+        fprintf('finite-difference h = %.9e m\n', h);
+        fprintf('<F_grad> = [%.9e, %.9e, %.9e] N\n', Fgrad(1),Fgrad(2),Fgrad(3));
+        fprintf('          = [%.6f, %.6f, %.6f] uN\n', ...
+            1e6*Fgrad(1),1e6*Fgrad(2),1e6*Fgrad(3));
+        fprintf('|<F_grad>| = %.6f uN\n', 1e6*norm(Fgrad));
+
+        status.Text = sprintf(['Gradient force done: phi=%.2f deg, ', ...
+            'F=[%.2f, %.2f, %.2f] uN.'], ...
+            phi*180/pi, 1e6*Fgrad(1), 1e6*Fgrad(2), 1e6*Fgrad(3));
+    end
+
+    function setGradientOutputsNA()
+        edGradPhi.Value = 'N/A';
+        edGradAB.Value = 'N/A';
+        edGradFx.Value = 'N/A';
+        edGradFy.Value = 'N/A';
+        edGradFz.Value = 'N/A';
+        edGradFmag.Value = 'N/A';
+    end
+
+    function onPlotGradientForceLine(~,~)
+        % Plot the direction of the cycle-averaged magnetic-gradient force
+        % along a user-defined 3-D line segment.
+        %
+        % IMPORTANT:
+        %   - The entered robot spin axis s is held FIXED along the line.
+        %   - At each line point, local u,v,n_rot,a,b and phi are recomputed.
+        %   - For the finite-difference derivative at that point, the local
+        %     instantaneous magnetic moment harmonics are held fixed.
+        %   - Arrows are normalized to the same displayed length, so they show
+        %     FORCE DIRECTION rather than force magnitude.
+
+        p1 = [edGradP1x.Value, edGradP1y.Value, edGradP1z.Value];
+        p2 = [edGradP2x.Value, edGradP2y.Value, edGradP2z.Value];
+        s0 = [edGradSx.Value, edGradSy.Value, edGradSz.Value];
+        h = edGradH.Value;
+        fdrive = edGradFdrive.Value;
+        k_drag = edGradKdrag.Value;
+        Nline = max(2, round(edGradLineN.Value));
+        arrowL = edGradLineArrowL.Value;
+
+        if ~all(isfinite([p1 p2])) || norm(p2-p1) < 1e-12
+            status.Text = 'Gradient line ERROR: endpoints must be finite and distinct.';
+            return;
+        end
+        if ~all(isfinite(s0)) || norm(s0) < 1e-10
+            status.Text = 'Gradient line ERROR: robot spin axis s is invalid.';
+            return;
+        end
+        s0 = s0 / norm(s0);
+
+        if ~isfinite(h) || h <= 0 || ~isfinite(arrowL) || arrowL <= 0
+            status.Text = 'Gradient line ERROR: FD h and Arrow L must be > 0.';
+            return;
+        end
+        if ~isfinite(fdrive) || fdrive <= 0 || ~isfinite(k_drag) || k_drag < 0
+            status.Text = 'Gradient line ERROR: f_drive must be >0 and k_drag must be >=0.';
+            return;
+        end
+
+        coils_local = readCoils(tbl.Data);
+        [~, ~, mdip, ~] = newRobotPhysicalParams();
+
+        q = linspace(0,1,Nline).';
+        P = p1 + q.*(p2-p1);
+
+        Fline = nan(Nline,3);
+        phiLine = nan(Nline,1);
+        valid = false(Nline,1);
+
+        for jj = 1:Nline
+            [Fj, phij, okj, ~] = cycleAveragedGradientForceAtState( ...
+                P(jj,:), s0, h, fdrive, k_drag, coils_local, mdip);
+
+            if okj && all(isfinite(Fj)) && norm(Fj) > 1e-18
+                Fline(jj,:) = Fj;
+                phiLine(jj) = phij;
+                valid(jj) = true;
+            end
+        end
+
+        % Replace only the previous force-line visualization.
+        hOld = findall(ax,'Tag','GradientForceLinePlot');
+        if ~isempty(hOld)
+            delete(hOld);
+        end
+
+        hold(ax,'on');
+
+        plot3(ax,P(:,1),P(:,2),P(:,3),'-', ...
+            'LineWidth',1.5,'Tag','GradientForceLinePlot', ...
+            'DisplayName','gradient-force sample line');
+
+        if any(valid)
+            Pv = P(valid,:);
+            Fv = Fline(valid,:);
+            Fnorm = vecnorm(Fv,2,2);
+            D = Fv ./ max(Fnorm,1e-18);
+
+            quiver3(ax, Pv(:,1),Pv(:,2),Pv(:,3), ...
+                arrowL*D(:,1), arrowL*D(:,2), arrowL*D(:,3), ...
+                0, 'LineWidth',1.5, ...
+                'Tag','GradientForceLinePlot', ...
+                'DisplayName','<F_{grad}> direction');
+        end
+
+        if any(~valid)
+            Pi = P(~valid,:);
+            plot3(ax,Pi(:,1),Pi(:,2),Pi(:,3),'x', ...
+                'MarkerSize',7,'LineWidth',1.2, ...
+                'Tag','GradientForceLinePlot', ...
+                'DisplayName','invalid/no synchronous solution');
+        end
+
+        axis(ax,'equal');
+        view(ax,3);
+        hold(ax,'off');
+
+        fprintf('\n=== Gradient-force direction along line ===\n');
+        fprintf('P1 = [%.9e, %.9e, %.9e] m\n', p1(1),p1(2),p1(3));
+        fprintf('P2 = [%.9e, %.9e, %.9e] m\n', p2(1),p2(2),p2(3));
+        fprintf('Fixed robot s = [%.9f, %.9f, %.9f]\n', s0(1),s0(2),s0(3));
+        fprintf('N points = %d, valid = %d, arrow length = %.6e m\n', ...
+            Nline, nnz(valid), arrowL);
+
+        if any(valid)
+            Fmag_uN = 1e6*vecnorm(Fline(valid,:),2,2);
+            fprintf('|<F_grad>| over valid points: min=%.6f uN, max=%.6f uN\n', ...
+                min(Fmag_uN), max(Fmag_uN));
+            fprintf('phi over valid points: min=%.3f deg, max=%.3f deg\n', ...
+                min(phiLine(valid))*180/pi, max(phiLine(valid))*180/pi);
+        end
+
+        status.Text = sprintf(['Gradient-force line plotted: %d/%d valid points. ', ...
+            'Arrows are normalized directions.'], nnz(valid), Nline);
+    end
+
+    function onClearGradientForceLine(~,~)
+        hOld = findall(ax,'Tag','GradientForceLinePlot');
+        if isempty(hOld)
+            status.Text = 'No gradient-force line plot to clear.';
+        else
+            delete(hOld);
+            status.Text = sprintf('Cleared %d gradient-force line plot object(s).', numel(hOld));
+        end
+    end
+
+    function onComputeTrajectory(~,~)
+        status.Text = 'Computing trajectory (u,v + spin-axis update)...'; drawnow;
+
+        g = 9.81;
+        zhat = [0 0 1];
+
+        coils_local = readCoils(tbl.Data);
+
+        r = [edx0.Value, edy0.Value, edz0.Value];
+        v = [edvx.Value, edvy.Value, edvz.Value];
+
+        Tsim  = edT.Value;
+        dt = eddt.Value;
+        Nsteps = max(2, round(Tsim/dt));
+
+        useDamp = cbDamp.Value;
+        beta = edBeta.Value;
+
+        useGrad = cbUseGrad.Value;
+        gradH = edTrajGradH.Value;
+        if useGrad && (~isfinite(gradH) || gradH <= 0)
+            status.Text = 'ERROR: Grad h must be finite and > 0 when gradient force is enabled.';
+            return;
+        end
+
+        fdrive = edFdrive.Value;
+        fhover = edFhover.Value;
+        if ~isfinite(fhover) || fhover <= 0
+            fhover = 110;  % safe fallback; GUI default is also 110 Hz
+        end
+        aL = (fdrive/fhover)^2 * g;
+
+        f_rot = edF.Value;
+
+        % ---------------- Spin-axis dynamics params ----------------
+        % Recompute from the new robot geometry/material values so the
+        % formulas remain visible and easy to audit/change later.
+        [Ispin, I_total_SI, mdip, robotCOM_m, m_mass] = newRobotPhysicalParams();
+
+        k_drag = edKdrag.Value;
+        if ~isfinite(k_drag) || k_drag < 0
+            status.Text = 'ERROR: k_drag must be finite and >= 0.';
+            return;
+        end
+
+        if ~isfinite(fdrive) || fdrive <= 0
+            status.Text = 'ERROR: f_drive must be finite and > 0.';
+            return;
+        end
+
+        % Rotational air-drag torque at the modeled synchronous spin rate.
+        % f_drive is used because the current model also sets
+        % wspin = 2*pi*f_drive and lift from f_drive/f_hover.
+        tau_drag = k_drag * fdrive^2;   % [N*m]
+
+        % Print the values used by this trajectory run for easy checking.
+        fprintf('\n=== New flying robot parameters used in trajectory ===\n');
+        fprintf('COM = [%.6e, %.6e, %.6e] m\n', robotCOM_m(1), robotCOM_m(2), robotCOM_m(3));
+        fprintf('I_total [kg*m^2] =\n');
+        disp(I_total_SI);
+        fprintf('Ispin = %.9e kg*m^2\n', Ispin);
+        fprintf('mdip(total, 2 magnets) = %.9e A*m^2\n', mdip);
+        fprintf('m_mass = %.9e kg\n', m_mass);
+        fprintf('f_hover = %.3f Hz, f_drive = %.3f Hz\n', fhover, fdrive);
+        fprintf('Use gradient force = %d; Grad h = %.6e m\n', useGrad, gradH);
+        fprintf('k_drag = %.9e N*m/Hz^2\n', k_drag);
+        fprintf('tau_drag = k_drag*f_drive^2 = %.9e N*m\n', tau_drag);
+        fprintf(['phi is solved instantaneously from sin(phi)=2*tau_drag/' ...
+                 '[mdip*(a+b)].\n']);
+
+        wspin = 2*pi*fdrive;
+        if ~isfinite(wspin) || wspin <= 0
+            wspin = 2*pi*fhover;
+        end
+
+        % -------- dt recommendation parameters --------
+        deltaThetaMax = 0.01;  % [rad]
+        eta = 0.05;            % dt <= eta*T_field
+        Tfield = 1/max(f_rot,1e-12);
+        L0 = Ispin * wspin;
+        dtRecGlobal = inf;
+        dThetaMaxObs = 0;
+
+        % -------- initialize s from USER INPUT (nx0, ny0, nz0) --------
+        s = [ednx0.Value, edny0.Value, ednz0.Value];
+        if ~all(isfinite(s)) || norm(s) < 1e-9
+            s = [0 0 1];
+        else
+            s = s / norm(s);
+        end
+
+        % No PCA/sign-adjusted normal is used in orientation dynamics.
+        % The physical directed axis n_rot is recomputed from the exact
+        % first-harmonic field coefficients at every trajectory step.
+        traj = zeros(Nsteps,3);
+        s_hist = zeros(Nsteps,3);
+        nrot_hist = zeros(Nsteps,3);
+
+        % Instantaneous expected angular rates from the DECOMPOSED averaged
+        % magnetic torque.  These quantify orientation dynamics itself and
+        % do not include apparent alpha changes caused by spatial variation
+        % of n_rot as the robot translates.
+        align_rate_hist = nan(Nsteps,1);  % [rad/s], + means toward n_rot
+        prec_rate_hist  = nan(Nsteps,1);  % [rad/s], signed about n_rot
+
+        % Dynamic phase-lag diagnostics.
+        phi_hist = nan(Nsteps,1);         % [rad]
+        phase_ratio_hist = nan(Nsteps,1); % required sin(phi)
+        aplusb_hist = nan(Nsteps,1);      % [T], local ellipse a+b
+
+        % Optional cycle-averaged magnetic-gradient force used in translation.
+        % Stored for diagnostics only when cbUseGrad is enabled.
+        Fgrad_hist = nan(Nsteps,3);        % [N]
+
+        valid_steps = 0;
+        terminated_early = false;
+        termination_reason = '';
+        termination_ratio = NaN;
+        termination_aplusb = NaN;
+        termination_step = NaN;
+        termination_pos = [NaN NaN NaN];
+
+        for k = 1:Nsteps
+            % Exact local first-harmonic field:
+            %   B(theta) = u_cos*cos(theta) + v_sin*sin(theta)
+            [u_cos, v_sin] = harmonicUVAtPoint(r, coils_local);
+
+            % TRUE directed field-rotation axis. No upward flip, no acute-angle
+            % continuity rule, and no sign alignment to s are allowed here.
+            n_rot_now = directedRotationAxis(u_cos, v_sin);
+
+            % -------------------------------------------------------------
+            % Instantaneous synchronous phase lag from drag-torque balance.
+            %
+            % For B(theta)=u_cos*cos(theta)+v_sin*sin(theta), the exact
+            % ellipse semiaxes a>=b are the singular values of the 3x2
+            % matrix [u_cos(:), v_sin(:)].
+            %
+            %   sin(phi) = 2*tau_drag / [mdip*(a+b)]
+            %
+            % IMPORTANT: if the required sin(phi)>1, there is no real
+            % synchronous phase-locked solution.  Stop immediately; do not
+            % clip phi to pi/2 and do not continue the trajectory.
+            % -------------------------------------------------------------
+            [phi, aB, bB, phase_ratio, phase_ok, phase_msg] = ...
+                phaseLagFromDragBalance(u_cos, v_sin, mdip, tau_drag);
+
+            if ~phase_ok
+                terminated_early = true;
+                termination_reason = phase_msg;
+                termination_ratio = phase_ratio;
+                termination_aplusb = aB + bB;
+                termination_step = k;
+                termination_pos = r;
+                break;
+            end
+
+            phi_hist(k) = phi;
+            phase_ratio_hist(k) = phase_ratio;
+            aplusb_hist(k) = aB + bB;
+
+            % Geometric phase-reference torque uses the PHYSICAL directed axis
+            % at the current (pre-integration) position and the instantaneous phi.
+            tau_avg = tauAvgFromUV_newPhaseRef(s, u_cos, v_sin, n_rot_now, mdip, phi);
+            tau_perp_vec = tau_avg - dot(tau_avg,s)*s;
+            tau_perp = norm(tau_perp_vec);
+
+            % -------------------------------------------------------------
+            % Expected alignment / precession angular velocities
+            %
+            % Let alpha be the angle between s and n_rot.  Define
+            %
+            % e_align = [n_rot - (n_rot.s)s] / sin(alpha)
+            %         : direction that reduces alpha
+            %
+            % e_prec  = (n_rot x s) / sin(alpha)
+            %         : azimuthal precession direction
+            %
+            % For L0 = Ispin*wspin:
+            %
+            % omega_align = tau_align / L0
+            %
+            % Omega_prec  = tau_prec / [L0*sin(alpha)]
+            %
+            % The extra sin(alpha) in Omega_prec is essential because
+            % ds/dt from precession about n_rot is
+            % Omega_prec*(n_rot x s), whose magnitude is
+            % |Omega_prec|*sin(alpha).
+            % -------------------------------------------------------------
+            if all(isfinite(n_rot_now))
+                cosAlpha = dot(s,n_rot_now);
+                cosAlpha = min(1,max(-1,cosAlpha));
+
+                n_perp = n_rot_now - cosAlpha*s;
+                sinAlpha = norm(n_perp);
+
+                if isfinite(sinAlpha) && sinAlpha > 1e-8
+                    e_align = n_perp / sinAlpha;
+                    e_prec  = cross(n_rot_now,s) / sinAlpha;
+
+                    tau_align = dot(tau_avg,e_align);
+                    tau_prec  = dot(tau_avg,e_prec);
+
+                    % Positive align rate means s is driven TOWARD n_rot.
+                    % For fixed n_rot: alpha_dot = -omega_align.
+                    align_rate_hist(k) = tau_align / max(L0,1e-18);
+
+                    % Signed azimuthal precession rate around n_rot.
+                    prec_rate_hist(k) = tau_prec / max(L0*sinAlpha,1e-18);
+                else
+                    % Exact parallel/antiparallel state: the azimuthal
+                    % coordinate is singular and the transverse torque model
+                    % returns zero.  Display the torque-predicted rate as zero.
+                    align_rate_hist(k) = 0;
+                    prec_rate_hist(k) = 0;
+                end
+            else
+                align_rate_hist(k) = 0;
+                prec_rate_hist(k) = 0;
+            end
+
+            dThetaEst = (tau_perp * dt) / max(L0,1e-18);
+            dThetaMaxObs = max(dThetaMaxObs, dThetaEst);
+
+            dtRec1 = (deltaThetaMax * max(L0,1e-18)) / max(tau_perp,1e-18);
+            dtRec2 = eta * Tfield;
+            dtRecStep = min(dtRec1, dtRec2);
+            dtRecGlobal = min(dtRecGlobal, dtRecStep);
+
+            % update spin axis (purely transverse, consistent with "drag removes axial")
+            s = updateSpinAxisFromUV_withTau(s, tau_avg, Ispin, wspin, dt);
+
+            % -------------------------------------------------------------
+            % Optional cycle-averaged magnetic-gradient force.
+            %
+            % Translation in the existing model already uses the UPDATED spin
+            % axis s in the lift term aL*s.  To keep the translational force
+            % model internally consistent, <F_grad> below is evaluated using
+            % that same updated s, at the current pre-translation position r.
+            %
+            % The local field harmonics and phi are those already obtained at r.
+            % During the finite-difference spatial derivative, m(theta) is held
+            % fixed; only u(r) and v(r) are differentiated.
+            % -------------------------------------------------------------
+            Fgrad_now = [0 0 0];
+            if useGrad
+                [Fgrad_now, grad_ok, grad_msg] = ...
+                    cycleAveragedGradientForceFromLocalState( ...
+                        r, s, gradH, u_cos, v_sin, n_rot_now, phi, ...
+                        coils_local, mdip);
+
+                if ~grad_ok
+                    terminated_early = true;
+                    termination_reason = ['Gradient-force evaluation failed: ' grad_msg];
+                    termination_ratio = phase_ratio;
+                    termination_aplusb = aB + bB;
+                    termination_step = k;
+                    termination_pos = r;
+                    break;
+                end
+                Fgrad_hist(k,:) = Fgrad_now;
+            end
+
+            % translational dynamics
+            %   m_mass * r_ddot = F_lift*s - m_mass*g*zhat + <F_grad>
+            % with F_lift/m_mass represented by aL.
+            a_net = aL * s - g * zhat;
+            if useGrad
+                a_net = a_net + Fgrad_now / m_mass;
+            end
+            if useDamp && beta > 0
+                a_net = a_net - beta * v;
+            end
+
+            v = v + dt * a_net;
+            r = r + dt * v;
+
+            traj(k,:) = r;
+            s_hist(k,:) = s;
+
+            % Cache n_rot at the SAME position r that is stored/plotted above.
+            % This avoids a one-time-step visual offset between s and n_rot.
+            [u_cos_plot, v_sin_plot] = harmonicUVAtPoint(r, coils_local);
+            nrot_hist(k,:) = directedRotationAxis(u_cos_plot, v_sin_plot);
+
+            valid_steps = k;
+        end
+
+        % Remove uncomputed preallocated rows after an early termination.
+        if valid_steps > 0
+            traj = traj(1:valid_steps,:);
+            s_hist = s_hist(1:valid_steps,:);
+            nrot_hist = nrot_hist(1:valid_steps,:);
+            align_rate_hist = align_rate_hist(1:valid_steps);
+            prec_rate_hist = prec_rate_hist(1:valid_steps);
+            phi_hist = phi_hist(1:valid_steps);
+            phase_ratio_hist = phase_ratio_hist(1:valid_steps);
+            aplusb_hist = aplusb_hist(1:valid_steps);
+            Fgrad_hist = Fgrad_hist(1:valid_steps,:);
+        else
+            % If phase locking is already impossible at the initial point,
+            % retain only the initial state so the termination location can
+            % still be plotted without fabricating a trajectory step.
+            traj = r;
+            s_hist = s;
+            nrot_hist = n_rot_now;
+            align_rate_hist = [];
+            prec_rate_hist = [];
+            phi_hist = [];
+            phase_ratio_hist = [];
+            aplusb_hist = [];
+            Fgrad_hist = [];
+        end
+
+        traj_cache = traj;
+        traj_s_cache = s_hist;
+        traj_nrot_cache = nrot_hist;
+        traj_start = traj(1,:);
+        traj_end = traj(end,:);
+        traj_ready = true;
+
+        % dt is constant, so arithmetic mean over completed steps is the
+        % time average. If no valid step exists, keep the INTERNAL result as
+        % NaN; the GUI text field displays that state as 'N/A'.
+        if isempty(align_rate_hist)
+            avgAlign_rad_s = NaN;
+            avgPrec_rad_s = NaN;
+        else
+            avgAlign_rad_s = mean(align_rate_hist(isfinite(align_rate_hist)));
+            avgPrec_rad_s  = mean(prec_rate_hist(isfinite(prec_rate_hist)));
+        end
+
+        avgAlign_deg_s = avgAlign_rad_s * 180/pi;
+        avgPrec_deg_s  = avgPrec_rad_s  * 180/pi;
+
+        % Show N/A if phase locking failed before any valid trajectory step.
+        if isfinite(avgAlign_deg_s)
+            edAlignRate.Value = sprintf('%.3f', avgAlign_deg_s);
+        else
+            edAlignRate.Value = 'N/A';
+        end
+
+        if isfinite(avgPrec_deg_s)
+            edPrecRate.Value = sprintf('%.3f', avgPrec_deg_s);
+        else
+            edPrecRate.Value = 'N/A';
+        end
+
+        fprintf('\n=== Dynamic phase-lag diagnostics ===\n');
+        if ~isempty(phi_hist)
+            fprintf('phi mean = %.3f deg\n', mean(phi_hist)*180/pi);
+            fprintf('phi range = [%.3f, %.3f] deg\n', ...
+                min(phi_hist)*180/pi, max(phi_hist)*180/pi);
+            fprintf('required sin(phi) range = [%.6f, %.6f]\n', ...
+                min(phase_ratio_hist), max(phase_ratio_hist));
+            fprintf('local (a+b) range = [%.6e, %.6e] T\n', ...
+                min(aplusb_hist), max(aplusb_hist));
+        else
+            fprintf('No valid synchronous trajectory step was completed.\n');
+        end
+
+        if useGrad
+            fprintf('\n=== Magnetic-gradient force diagnostics over trajectory ===\n');
+            if ~isempty(Fgrad_hist)
+                goodF = all(isfinite(Fgrad_hist),2);
+                if any(goodF)
+                    Fgood = Fgrad_hist(goodF,:);
+                    Fmag_uN = 1e6*vecnorm(Fgood,2,2);
+                    fprintf('Fx range = [%.6f, %.6f] uN\n', ...
+                        min(Fgood(:,1))*1e6, max(Fgood(:,1))*1e6);
+                    fprintf('Fy range = [%.6f, %.6f] uN\n', ...
+                        min(Fgood(:,2))*1e6, max(Fgood(:,2))*1e6);
+                    fprintf('Fz range = [%.6f, %.6f] uN\n', ...
+                        min(Fgood(:,3))*1e6, max(Fgood(:,3))*1e6);
+                    fprintf('|Fgrad| range = [%.6f, %.6f] uN\n', ...
+                        min(Fmag_uN), max(Fmag_uN));
+                else
+                    fprintf('No finite gradient-force sample was recorded.\n');
+                end
+            else
+                fprintf('No gradient-force sample was recorded.\n');
+            end
+        end
+
+        if terminated_early
+            fprintf('*** TRAJECTORY TERMINATED EARLY ***\n');
+            fprintf('step = %d, t ~= %.6f s\n', termination_step, (termination_step-1)*dt);
+            fprintf('position = [%.6e, %.6e, %.6e] m\n', ...
+                termination_pos(1), termination_pos(2), termination_pos(3));
+            fprintf('reason: %s\n', termination_reason);
+            fprintf('required sin(phi) = %.9f\n', termination_ratio);
+            fprintf('local a+b = %.9e T\n', termination_aplusb);
+        end
+
+        fprintf('\n=== Expected orientation rates over trajectory ===\n');
+        fprintf('Average alignment rate = %.6f rad/s = %.3f deg/s\n', ...
+            avgAlign_rad_s, avgAlign_deg_s);
+        fprintf('  (+ means toward n_rot; for fixed n_rot, alpha_dot = -omega_align)\n');
+        fprintf('Average precession rate = %.6f rad/s = %.3f deg/s\n', ...
+            avgPrec_rad_s, avgPrec_deg_s);
+        fprintf('  (signed azimuthal angular velocity about n_rot)\n');
+
+        % show dt guidance / phase-lock termination in status
+        dThetaDeg = dThetaMaxObs * 180/pi;
+
+        if terminated_early
+            if isfinite(termination_ratio)
+                status.Text = sprintf(['STOPPED at step %d/%d (t≈%.4g s): %s ' ...
+                    'Required sin(phi)=%.4f. Valid steps=%d.'], ...
+                    termination_step, Nsteps, (termination_step-1)*dt, ...
+                    termination_reason, termination_ratio, valid_steps);
+            else
+                status.Text = sprintf(['STOPPED at step %d/%d (t≈%.4g s): %s ' ...
+                    'Valid steps=%d.'], ...
+                    termination_step, Nsteps, (termination_step-1)*dt, ...
+                    termination_reason, valid_steps);
+            end
+        elseif ~isfinite(dtRecGlobal) || dtRecGlobal <= 0
+            status.Text = sprintf('Trajectory done. Steps=%d. dt guidance unavailable (tau too small / numerical issue).', valid_steps);
+        else
+            if dt > dtRecGlobal
+                status.Text = sprintf(['WARNING: Trajectory done. Steps=%d. ' ...
+                    'dt=%.3g s too large. Recommend dt<=%.3g s. ' ...
+                    'Max Δθ_step≈%.3g deg (target<=%.3g deg); and dt<=%.3g*Tfield.'], ...
+                    valid_steps, dt, dtRecGlobal, dThetaDeg, deltaThetaMax*180/pi, eta);
+            else
+                status.Text = sprintf(['Trajectory done. Steps=%d. ' ...
+                    'dt=%.3g s OK. Recommend dt<=%.3g s. ' ...
+                    'Max Δθ_step≈%.3g deg (target<=%.3g deg).'], ...
+                    valid_steps, dt, dtRecGlobal, dThetaDeg, deltaThetaMax*180/pi);
+            end
+        end
+
+        if useGrad
+            status.Text = sprintf('%s  Gradient force ON.', status.Text);
+        else
+            status.Text = sprintf('%s  Gradient force OFF.', status.Text);
+        end
+
+        if ~isempty(phi_hist)
+            status.Text = sprintf('%s  phi avg=%.1f deg; range=[%.1f, %.1f]. Align=%.2f; Prec=%.2f deg/s.', ...
+                status.Text, mean(phi_hist)*180/pi, min(phi_hist)*180/pi, ...
+                max(phi_hist)*180/pi, avgAlign_deg_s, avgPrec_deg_s);
+        else
+            status.Text = sprintf('%s  Align/Prec unavailable.', status.Text);
+        end
+    end
+
+    function onPlotTrajectory(~,~)
+        if ~traj_ready || isempty(traj_cache)
+            status.Text = 'Compute Trajectory first.';
+            return;
+        end
+
+        hold(ax,'on');
+
+        plot3(ax, traj_cache(:,1), traj_cache(:,2), traj_cache(:,3), ...
+            'LineWidth', 2, 'Tag','TrajectoryPlot');
+        plot3(ax, traj_start(1), traj_start(2), traj_start(3), 'o', ...
+            'MarkerSize', 8, 'LineWidth', 1.5, 'Tag','TrajectoryPlot');
+        plot3(ax, traj_end(1), traj_end(2), traj_end(3), 's', ...
+            'MarkerSize', 8, 'LineWidth', 1.5, 'Tag','TrajectoryPlot');
+
+        showS = cbShowOri.Value && ~isempty(traj_s_cache) && ...
+                size(traj_s_cache,1) == size(traj_cache,1);
+        showNrot = cbShowNrot.Value && ~isempty(traj_nrot_cache) && ...
+                   size(traj_nrot_cache,1) == size(traj_cache,1);
+
+        if showS || showNrot
+            Nshow = max(1, round(edNarrow.Value));
+            Nshow = min(Nshow, size(traj_cache,1));
+            idx = unique(round(linspace(1, size(traj_cache,1), Nshow)));
+
+            P = traj_cache(idx,:);
+
+            % Use CURRENT PLOT SPAN so arrows stay visible for short trajectories.
+            xl = xlim(ax);
+            yl = ylim(ax);
+            zl = zlim(ax);
+            plotSpan = max([diff(xl), diff(yl), diff(zl)]);
+
+            if ~isfinite(plotSpan) || plotSpan <= 0
+                plotSpan = max(max(traj_cache,[],1) - min(traj_cache,[],1));
+                if ~isfinite(plotSpan) || plotSpan <= 0
+                    plotSpan = 1.0;
+                end
+            end
+
+            L = max(1e-6, edArrowScale.Value * plotSpan);
+
+            if showS
+                S = traj_s_cache(idx,:);
+                quiver3(ax, P(:,1),P(:,2),P(:,3), ...
+                           L*S(:,1), L*S(:,2), L*S(:,3), ...
+                           0, 'LineWidth', 1.5, ...
+                           'Tag','TrajectoryPlot', ...
+                           'DisplayName','robot axis s');
+            end
+
+            if showNrot
+                Nrot = traj_nrot_cache(idx,:);
+                quiver3(ax, P(:,1),P(:,2),P(:,3), ...
+                           L*Nrot(:,1), L*Nrot(:,2), L*Nrot(:,3), ...
+                           0, 'LineWidth', 1.5, 'LineStyle','--', ...
+                           'Tag','TrajectoryPlot', ...
+                           'DisplayName','field axis n_rot');
+            end
+        end
+
+        % Re-draw coil outlines in case the axes were cleared after the field plot.
+        if cbShowCoils.Value
+            hOld = findall(ax,'Tag','CoilOutline');
+            if ~isempty(hOld)
+                delete(hOld);
+            end
+            drawDashedCoilCylinders(ax, tbl.Data);
+        end
+
+        hold(ax,'off');
+        status.Text = 'Trajectory plotted (robot s / directed field n_rot arrows if enabled).';
+    end
+
+    function onExport(~,~)
+        [f,p]=uiputfile('*.png');
+        if isequal(f,0); return; end
+        try
+            exportgraphics(ax,fullfile(p,f),'Resolution',300);
+        catch
+            saveas(fig, fullfile(p,f));
+        end
+        status.Text=['Saved: ' fullfile(p,f)];
+    end
+
+%% ================= Scroll mechanics =================
+    function onResize(~,~)
+        drawnow limitrate;
+        vpPos = vp.Position;
+        vw = max(1, vpPos(3));
+        vh = max(1, vpPos(4));
+
+        scrollMax = max(0, CONTENT_H - vh);
+
+        if scrollMax <= 0
+            sld.Enable = 'off';
+            sld.Limits = [0 1];
+            sld.Value = 0;
+        else
+            sld.Enable = 'on';
+            sld.Limits = [0 scrollMax];
+            sld.Value = min(max(sld.Value,0), scrollMax);
+        end
+
+        content.Position = [0, -sld.Value, vw, CONTENT_H];
+    end
+
+    function onScrollChanging(~,evt)
+        sld.Value = evt.Value;
+        applyScroll();
+    end
+
+    function onScrollChanged(~,~)
+        applyScroll();
+    end
+
+    function applyScroll()
+        vpPos = vp.Position;
+        vw = max(1, vpPos(3));
+        content.Position = [0, -sld.Value, vw, CONTENT_H];
+        drawnow limitrate;
+    end
+
+end
+
+%% ================= Helpers =================
+function [Ispin, I_total_SI, mdip, com_total_m, m_total_kg] = newRobotPhysicalParams()
+% Physical parameters for the NEW flying robot.
+%
+% CAD body (WITHOUT the two new magnets):
+%   mass = 0.06 g
+%   COM  = [2.82, 0, 0] mm
+%   inertia about its own COM = diag([3.35, 1.86, 1.86]) g*mm^2
+%
+% Two magnets:
+%   center positions = [-0.345, 0, +0.35] mm and [-0.345, 0, -0.35] mm
+%   each mass = 11.7832 mg
+%   radius = thickness = 0.79375 mm
+%
+% IMPORTANT assumptions:
+%   1) The cylindrical magnet axis is the CAD z-axis.
+%   2) The robot's physical spin axis is the CAD/body x-axis.
+%   3) The two N52 magnets are magnetized in the SAME direction, so their
+%      dipole moments add in this single-dipole torque model.
+
+% ---------- Geometry / mass in CAD units (g, mm) ----------
+m_body_g = 0.06;
+com_body_mm = [2.82, 0, 0];
+I_body_com_gmm2 = diag([3.35, 1.86, 1.86]);
+
+m_mag_g = 11.7832e-3;         % 11.7832 mg = 0.0117832 g
+r_mag_mm = 0.79375;
+h_mag_mm = 0.79375;
+
+mag_pos_mm = [ ...
+    -0.345, 0, +0.35;
+    -0.345, 0, -0.35];
+
+Nmag = size(mag_pos_mm,1);
+
+% ---------- New total COM ----------
+m_total_g = m_body_g + Nmag*m_mag_g;
+m_total_kg = m_total_g * 1e-3;
+com_total_mm = (m_body_g*com_body_mm + ...
+                m_mag_g*sum(mag_pos_mm,1)) / m_total_g;
+
+% ---------- Each cylindrical magnet's inertia about its own COM ----------
+% Cylinder axis assumed along z:
+%   Ixx = Iyy = (1/12)*m*(3*r^2 + h^2)
+%   Izz = (1/2)*m*r^2
+I_mag_radial_gmm2 = (1/12)*m_mag_g*(3*r_mag_mm^2 + h_mag_mm^2);
+I_mag_axial_gmm2  = (1/2)*m_mag_g*r_mag_mm^2;
+I_mag_com_gmm2 = diag([I_mag_radial_gmm2, ...
+                       I_mag_radial_gmm2, ...
+                       I_mag_axial_gmm2]);
+
+% ---------- Parallel-axis theorem ----------
+% I_new = I_COM + m*(||d||^2*eye(3) - d*d')
+shiftTensor = @(Icom,m,d) Icom + ...
+    m*((dot(d,d))*eye(3) - d(:)*d(:).');
+
+d_body_mm = com_body_mm - com_total_mm;
+I_total_gmm2 = shiftTensor(I_body_com_gmm2, m_body_g, d_body_mm);
+
+for ii = 1:Nmag
+    d_mag_mm = mag_pos_mm(ii,:) - com_total_mm;
+    I_total_gmm2 = I_total_gmm2 + ...
+        shiftTensor(I_mag_com_gmm2, m_mag_g, d_mag_mm);
+end
+
+% Convert g*mm^2 -> kg*m^2:
+% 1 g*mm^2 = 1e-3 kg * (1e-3 m)^2 = 1e-9 kg*m^2
+I_total_SI = I_total_gmm2 * 1e-9;
+com_total_m = com_total_mm * 1e-3;
+
+% Current spin-axis model uses a scalar moment of inertia.
+% The physical spin axis is assumed to be the body x-axis.
+Ispin = I_total_SI(1,1);
+
+% ---------- N52 magnetic dipole moment ----------
+% Approximation: M ~= Br/mu0, mdip_single = M*V = (Br/mu0)*V.
+% N52 nominal remanence used here: Br = 1.45 T.
+mu0 = 4*pi*1e-7;             % H/m
+Br_N52 = 1.45;               % T
+r_mag_m = r_mag_mm * 1e-3;
+h_mag_m = h_mag_mm * 1e-3;
+Vmag_m3 = pi * r_mag_m^2 * h_mag_m;
+
+mdip_single = (Br_N52/mu0) * Vmag_m3;
+mdip = Nmag * mdip_single;   % two magnets, same magnetization direction
+end
+
+function data = buildQuickCoilGeometry(mode,d,tiltDeg,Iamp,pitch)
+% Build one of the two symmetric 4-channel presets used by this GUI.
+%
+% d semantics:
+%   cross   : centers = (+d,0),(0,+d),(-d,0),(0,-d)
+%   corners : centers = (+d,+d),(-d,+d),(-d,-d),(+d,-d)
+%
+% Each channel is a 2x2 group with pitch 'pitch'.  Coil radius is kept at
+% the physical value 10.5 mm (diameter 21 mm), turns=650.  Positive tilt
+% means the channel normal is tilted radially OUTWARD from +z.  The
+% entire 2x2 coil-center pattern is rotated rigidly about the local tangential
+% axis through the channel center, so all four coil centers stay on one plane.
+% The channel center itself remains at z=0.
+
+coilR = 0.0105;
+turns = 650;
+halfPitch = pitch/2;
+a = deg2rad(tiltDeg);
+
+switch lower(mode)
+    case 'cross'
+        centers = [ d  0;  0  d; -d  0;  0 -d];
+        phases  = [0; 270; 180; 90];
+        % For cross channels the 2x2 square is rotated with the channel,
+        % reproducing the current measured right/top/left/bottom geometry.
+        localMode = 'radial';
+
+    case 'corners'
+        centers = [ d  d; -d  d; -d -d;  d -d];
+        phases  = [0; 270; 180; 90];
+        % Reproduce the older corner preset: every 2x2 group stays aligned
+        % with global x/y rather than rotating by 45 deg with its center.
+        localMode = 'global';
+
+    otherwise
+        error('Unknown geometry mode: %s',mode);
+end
+
+data = zeros(16,10);
+row = 0;
+for g = 1:4
+    cxy = centers(g,:);
+    er = cxy / max(norm(cxy),1e-12);      % outward radial direction
+    et = [-er(2), er(1)];                 % in-plane tangential direction
+    % Rigid-plane tilt.  Start with a horizontal channel (normal +z) and
+    % rotate the ENTIRE channel about its local tangential axis et.  With the
+    % right-hand convention below, positive a gives
+    %       nhat = sin(a)*er + cos(a)*ez,
+    % exactly matching the intended outward normal tilt.
+    axisTilt = [et(1), et(2), 0];
+    axisTilt = axisTilt / max(norm(axisTilt),1e-12);
+    ca = cos(a); sa = sin(a);
+    K = [0 -axisTilt(3) axisTilt(2); ...
+         axisTilt(3) 0 -axisTilt(1); ...
+        -axisTilt(2) axisTilt(1) 0];
+    Rtilt = ca*eye(3) + (1-ca)*(axisTilt(:)*axisTilt(:).') + sa*K;
+
+    nhat = (Rtilt*[0;0;1]).';
+    nhat = nhat / max(norm(nhat),1e-12);
+
+    if strcmp(localMode,'radial')
+        eA0 = [er(1), er(2), 0];
+        eB0 = [et(1), et(2), 0];
+    else
+        eA0 = [1 0 0];
+        eB0 = [0 1 0];
+    end
+
+    % Rotate the in-plane basis with the SAME rigid-body rotation, rather
+    % than leaving all four coil centers at z=0.
+    eA = (Rtilt*eA0(:)).';
+    eB = (Rtilt*eB0(:)).';
+    c3 = [cxy(1), cxy(2), 0];
+
+    % Fixed ordering: (-,-),(-,+),(+,-),(+,+) in the chosen local basis.
+    signs = [-1 -1; -1 1; 1 -1; 1 1];
+    for q = 1:4
+        row = row + 1;
+        p3 = c3 + halfPitch*(signs(q,1)*eA + signs(q,2)*eB);
+        data(row,:) = [p3, nhat, coilR, turns, Iamp, phases(g)];
+    end
+end
+end
+
+function drawDashedCoilCylinders(ax, data)
+% Display-only dashed cylindrical outlines for the coils in the GUI table.
+% Geometry used for the field model remains the ideal circular-loop/dipole
+% representation already used elsewhere in this program.
+%
+% Cylinder axis  : coil normal [nx ny nz]
+% Cylinder radius: table R
+% Cylinder height: physical coil thickness = 0.022 m (2.2 cm), display only
+
+if isempty(data)
+    return;
+end
+
+coils = readCoils(data);
+theta = linspace(0,2*pi,96);
+axialAngles = [0, pi/2, pi, 3*pi/2];
+
+wasHold = ishold(ax);
+hold(ax,'on');
+
+for c = 1:coils.M
+    p0 = coils.pos(c,:);
+    n = coils.nhat(c,:);
+    R = coils.R(c);
+
+    if ~all(isfinite([p0 n R])) || norm(n) < 1e-12 || R <= 0
+        continue;
+    end
+    n = n / norm(n);
+
+    % Build a robust orthonormal basis e1/e2 in the coil plane.
+    if abs(dot(n,[0 0 1])) < 0.9
+        ref = [0 0 1];
+    else
+        ref = [1 0 0];
+    end
+    e1 = cross(n,ref);
+    e1 = e1 / max(norm(e1),1e-12);
+    e2 = cross(n,e1);
+    e2 = e2 / max(norm(e2),1e-12);
+
+    coilThickness = 0.022;   % [m] physical coil thickness, visualization only
+    halfH = 0.5 * coilThickness;
+
+    % Two dashed circular rims.
+    for sgn = [-1 1]
+        center = p0 + sgn*halfH*n;
+        C = center + ...
+            (R*cos(theta(:)))*e1 + ...
+            (R*sin(theta(:)))*e2;
+        plot3(ax,C(:,1),C(:,2),C(:,3),'--', ...
+            'LineWidth',1.0,'Tag','CoilOutline', ...
+            'HandleVisibility','off');
+    end
+
+    % Four dashed generators make the circular rims read as a cylinder.
+    for ang = axialAngles
+        radial = R*(cos(ang)*e1 + sin(ang)*e2);
+        p1 = p0 - halfH*n + radial;
+        p2 = p0 + halfH*n + radial;
+        plot3(ax,[p1(1) p2(1)],[p1(2) p2(2)],[p1(3) p2(3)],'--', ...
+            'LineWidth',1.0,'Tag','CoilOutline', ...
+            'HandleVisibility','off');
+    end
+end
+
+if ~wasHold
+    hold(ax,'off');
+end
+end
+
+function coils=readCoils(data)
+coils.M=size(data,1);
+coils.pos=data(:,1:3);
+coils.nhat=normalizeRows(data(:,4:6));
+coils.R=data(:,7);
+coils.Nturn=data(:,8);
+coils.Iamp=data(:,9);
+coils.phase=deg2rad(data(:,10));
+end
+
+function X=normalizeRows(X)
+X=X./max(vecnorm(X,2,2),1e-12);
+end
+
+function B=B_from_coil_stub(r,cpos,nhat,R,N,I)
+mu0=4*pi*1e-7;
+m=I*N*pi*R^2*nhat;
+dr=r-cpos; d=norm(dr)+1e-9;
+B=(mu0/(4*pi))*((3*dot(m,dr)*dr)/d^5 - m/d^3);
+end
+
+
+function [u_cos, v_sin] = harmonicUVAtPoint(r, coils)
+% Exact first-harmonic coefficients:
+%
+%   B(theta) = u_cos*cos(theta) + v_sin*sin(theta)
+%
+% for coil currents I_c*cos(theta + phase_c).
+% No PCA/eigenvector sign ambiguity is involved.
+
+u_cos = [0 0 0];
+v_sin = [0 0 0];
+
+for c = 1:coils.M
+    b1 = B_from_coil_stub(r, coils.pos(c,:), coils.nhat(c,:), ...
+                          coils.R(c), coils.Nturn(c), 1.0);
+
+    u_cos = u_cos + b1 * (coils.Iamp(c) * cos(coils.phase(c)));
+    v_sin = v_sin + b1 * (-coils.Iamp(c) * sin(coils.phase(c)));
+end
+end
+
+function n_rot = directedRotationAxis(u_cos, v_sin)
+% Physical directed rotation axis of the local rotating magnetic field.
+%
+% For B(theta)=u*cos(theta)+v*sin(theta):
+%
+%   dB/dtheta = -u*sin(theta)+v*cos(theta)
+%   B x dB/dtheta = u x v
+%
+% Hence the sign of u x v is the actual rotation sense.
+% NEVER flip n_rot toward +z, n_prev, or the robot spin axis s.
+
+n_raw = cross(u_cos, v_sin);
+nn = norm(n_raw);
+
+if ~isfinite(nn) || nn < 1e-15
+    n_rot = [NaN NaN NaN];
+else
+    n_rot = n_raw / nn;
+end
+end
+
+
+
+function [phi, a, b, ratio, ok, msg] = phaseLagFromDragBalance(u, v, mdip, tau_drag)
+% Solve the instantaneous synchronous phase lag from:
+%
+%   sin(phi) = 2*tau_drag / [mdip*(a+b)]
+%
+% for B(theta)=u*cos(theta)+v*sin(theta).
+%
+% The exact ellipse semiaxis amplitudes a>=b are the singular values of
+% the 3x2 linear map A=[u(:), v(:)].  This is exact; no time sampling is used.
+%
+% If ratio>1, no real synchronous phase-locked solution exists.  This helper
+% deliberately returns ok=false instead of clipping ratio to 1.
+
+phi = NaN;
+a = NaN;
+b = NaN;
+ratio = NaN;
+ok = false;
+msg = '';
+
+u = u(:);
+v = v(:);
+
+if ~all(isfinite(u)) || ~all(isfinite(v))
+    msg = 'Non-finite local harmonic field coefficients.';
+    return;
+end
+
+sv = svd([u, v], 'econ');
+if isempty(sv)
+    msg = 'Local rotating field is degenerate.';
+    return;
+end
+
+a = sv(1);
+if numel(sv) >= 2
+    b = sv(2);
+else
+    b = 0;
+end
+
+den = mdip * (a + b);  % [A*m^2*T] = [N*m]
+
+if ~isfinite(den) || den <= 1e-18
+    msg = 'Local magnetic field is too weak/degenerate to define phase locking.';
+    return;
+end
+
+if ~isfinite(tau_drag) || tau_drag < 0
+    msg = 'Invalid rotational drag torque.';
+    return;
+end
+
+ratio = 2*tau_drag / den;
+
+if ~isfinite(ratio)
+    msg = 'Required sin(phi) is non-finite.';
+    return;
+end
+
+if ratio > 1
+    msg = 'Required sin(phi)>1: synchronous phase locking is impossible.';
+    return;
+end
+
+if ratio < 0
+    msg = 'Required sin(phi)<0: invalid drag-balance state.';
+    return;
+end
+
+phi = asin(ratio);  % principal synchronous branch: 0 <= phi <= pi/2
+ok = true;
+end
+
+function [Fgrad, ok, msg] = cycleAveragedGradientForceFromLocalState(r0, s0, h, u0, v0, nrot0, phi, coils_local, mdip)
+% Compute cycle-averaged magnetic-gradient force at one robot state while
+% REUSING the local harmonic field and phase lag already computed by the
+% trajectory loop.
+%
+% The instantaneous magnetic-moment harmonics are constructed at r0 from
+% (s0,u0,v0,nrot0,phi).  During the centered finite-difference derivative,
+% those moment harmonics are held fixed, as required by
+%
+%   F_grad = grad(m dot B)
+%
+% for a fixed instantaneous dipole orientation.
+
+Fgrad = [NaN NaN NaN];
+ok = false;
+msg = '';
+
+if ~all(isfinite(r0)) || ~all(isfinite(s0)) || norm(s0) < 1e-10
+    msg = 'invalid position or robot spin axis.';
+    return;
+end
+if ~isfinite(h) || h <= 0
+    msg = 'invalid finite-difference step.';
+    return;
+end
+if ~all(isfinite(u0)) || ~all(isfinite(v0)) || ~all(isfinite(nrot0)) || ~isfinite(phi)
+    msg = 'invalid local field/phase state.';
+    return;
+end
+
+s0 = s0 / norm(s0);
+
+[m_cos, m_sin, moment_ok, moment_msg] = ...
+    magneticMomentHarmonicsForGradient(s0, u0, v0, nrot0, mdip, phi);
+if ~moment_ok
+    msg = moment_msg;
+    return;
+end
+
+Fgrad = zeros(1,3);
+for ii = 1:3
+    rp = r0;
+    rm = r0;
+    rp(ii) = rp(ii) + h;
+    rm(ii) = rm(ii) - h;
+
+    [up, vp] = harmonicUVAtPoint(rp, coils_local);
+    [um, vm] = harmonicUVAtPoint(rm, coils_local);
+
+    du = (up-um)/(2*h);
+    dv = (vp-vm)/(2*h);
+
+    Fgrad(ii) = 0.5*(dot(m_cos,du) + dot(m_sin,dv));
+end
+
+ok = all(isfinite(Fgrad));
+if ~ok
+    msg = 'non-finite gradient-force result.';
+end
+end
+
+function [Fgrad, phi, ok, msg] = cycleAveragedGradientForceAtState(r0, s0, h, fdrive, k_drag, coils_local, mdip)
+% Compute <F_grad> at one robot state for reuse by the line-segment plot.
+%
+% Local synchronous quantities (u,v,n_rot,a,b,phi and moment phase reference)
+% are solved at r0.  During the centered finite-difference spatial derivative,
+% the resulting m_cos and m_sin are held fixed.
+
+Fgrad = [NaN NaN NaN];
+phi = NaN;
+ok = false;
+msg = '';
+
+if ~all(isfinite(r0)) || ~all(isfinite(s0)) || norm(s0) < 1e-10
+    msg = 'invalid position or robot spin axis.';
+    return;
+end
+s0 = s0/norm(s0);
+
+if ~isfinite(h) || h <= 0
+    msg = 'invalid finite-difference step.';
+    return;
+end
+
+[u0, v0] = harmonicUVAtPoint(r0, coils_local);
+nrot0 = directedRotationAxis(u0, v0);
+if ~all(isfinite(nrot0))
+    msg = 'degenerate local rotating-field axis.';
+    return;
+end
+
+tau_drag = k_drag*fdrive^2;
+[phi, ~, ~, ~, phase_ok, phase_msg] = ...
+    phaseLagFromDragBalance(u0, v0, mdip, tau_drag);
+if ~phase_ok
+    msg = phase_msg;
+    return;
+end
+
+[m_cos, m_sin, moment_ok, moment_msg] = ...
+    magneticMomentHarmonicsForGradient(s0, u0, v0, nrot0, mdip, phi);
+if ~moment_ok
+    msg = moment_msg;
+    return;
+end
+
+Fgrad = zeros(1,3);
+for ii = 1:3
+    rp = r0;
+    rm = r0;
+    rp(ii) = rp(ii) + h;
+    rm(ii) = rm(ii) - h;
+
+    [up, vp] = harmonicUVAtPoint(rp, coils_local);
+    [um, vm] = harmonicUVAtPoint(rm, coils_local);
+
+    du = (up-um)/(2*h);
+    dv = (vp-vm)/(2*h);
+
+    Fgrad(ii) = 0.5*(dot(m_cos,du) + dot(m_sin,dv));
+end
+
+ok = all(isfinite(Fgrad));
+if ~ok
+    msg = 'non-finite gradient-force result.';
+end
+end
+
+function [m_cos, m_sin, ok, msg] = magneticMomentHarmonicsForGradient(s, u, v, n_ref, mdip, phi)
+% Return harmonic coefficients of the rotating magnetic moment at ONE robot
+% state for cycle-averaged gradient-force evaluation.
+%
+%   m(theta) = m_cos*cos(theta) + m_sin*sin(theta)
+%
+% The general non-aligned case uses exactly the same geometric phase
+% reference as tauAvgFromUV_newPhaseRef().  At exact/near alignment s || n,
+% the intersection line of the two rotation planes is undefined.  Torque
+% can simply return zero there, but gradient force still needs an in-plane
+% phase reference.  For that special limit we choose the local field's major
+% ellipse axis from SVD([u v]); this only fixes the otherwise arbitrary phase
+% origin and gives a continuous, deterministic synchronous moment model.
+
+m_cos = [NaN NaN NaN];
+m_sin = [NaN NaN NaN];
+ok = false;
+msg = '';
+
+s = s(:).';
+sn = norm(s);
+if ~all(isfinite(s)) || sn < 1e-12
+    msg = 'invalid robot spin axis s.';
+    return;
+end
+s = s/sn;
+
+u = u(:).';
+v = v(:).';
+if ~all(isfinite(u)) || ~all(isfinite(v))
+    msg = 'invalid local field harmonics.';
+    return;
+end
+
+n_raw = cross(u,v);
+nn = norm(n_raw);
+if ~isfinite(nn) || nn < 1e-15
+    msg = 'degenerate local rotating field.';
+    return;
+end
+n = n_raw/nn;
+
+if nargin >= 4 && ~isempty(n_ref)
+    n_ref = n_ref(:).';
+    if all(isfinite(n_ref)) && norm(n_ref) > 1e-12
+        n_ref = n_ref/norm(n_ref);
+        if dot(n,n_ref) < 0
+            n = -n;
+        end
+    end
+end
+
+% Generic geometry: intersection of robot plane and field-rotation plane.
+eI_raw = cross(n,s);
+sinAlpha = norm(eI_raw);
+
+if sinAlpha > 1e-8
+    eI = eI_raw/sinAlpha;
+    eR = cross(s,eI);
+    eR = eR/max(norm(eR),1e-12);
+    eF = cross(n,eI);
+    eF = eF/max(norm(eF),1e-12);
+
+    % B(lambda) lies along +eI.
+    uF = dot(u,eF);
+    vF = dot(v,eF);
+    if hypot(uF,vF) < 1e-15
+        msg = 'cannot determine geometric phase reference.';
+        return;
+    end
+    lambda = atan2(-uF, vF);
+    B_ref = u*cos(lambda) + v*sin(lambda);
+    if dot(B_ref,eI) < 0
+        lambda = lambda + pi;
+    end
+else
+    % Aligned limit: choose the major field-ellipse axis as deterministic
+    % in-plane phase reference.  A=[u v], and the first right singular vector
+    % gives [cos(lambda); sin(lambda)] for the major-axis phase.
+    A = [u(:), v(:)];
+    [~,S,V] = svd(A,'econ');
+    if isempty(S) || S(1,1) < 1e-15
+        msg = 'field ellipse is too small to define an aligned phase reference.';
+        return;
+    end
+    q = V(:,1);
+    q = q/max(norm(q),1e-12);
+    lambda = atan2(q(2),q(1));
+    B_ref = u*cos(lambda) + v*sin(lambda);
+    if norm(B_ref) < 1e-15
+        msg = 'invalid major-axis phase reference.';
+        return;
+    end
+    eI = B_ref/norm(B_ref);
+
+    % Use the robot spin-axis orientation for the moment's positive rotation.
+    eR = cross(s,eI);
+    if norm(eR) < 1e-12
+        msg = 'aligned phase basis is degenerate.';
+        return;
+    end
+    eR = eR/norm(eR);
+end
+
+% Same phase convention as the torque model:
+%   m(theta) = mdip[cos(theta-lambda-phi)eI
+%                  + sin(theta-lambda-phi)eR]
+delta = lambda + phi;
+m_cos = mdip * ( cos(delta)*eI - sin(delta)*eR );
+m_sin = mdip * ( sin(delta)*eI + cos(delta)*eR );
+
+ok = all(isfinite(m_cos)) && all(isfinite(m_sin));
+if ~ok
+    msg = 'non-finite magnetic-moment harmonics.';
+end
+end
+
+function tau_avg = tauAvgFromUV_newPhaseRef(s, u, v, n_ref, mdip, phi)
+% Cycle-averaged transverse torque using the GEOMETRIC phase-delay reference.
+%
+% Field harmonic representation:
+%
+%   B(theta) = u*cos(theta) + v*sin(theta),    theta = omega*t
+%
+% The phase delay phi is NOT referenced to the arbitrary cos(theta) coefficient
+% u.  Instead, it is referenced to the field phase lambda at which B points
+% along the intersection line of:
+%
+%   (1) the robot rotation plane, whose normal is s, and
+%   (2) the magnetic-field rotation plane, whose normal is n.
+%
+% This implements the phase convention used in the self-stability derivation.
+%
+% Geometry:
+%   eI = normalize(n x s)
+%       : intersection-line direction; perpendicular to the (s,n) plane.
+%
+%   eR = normalize(s x eI)
+%       : in the robot plane and in the (s,n) plane.  Positive eR points
+%         toward the projection of n and therefore is the aligning direction.
+%
+%   eF = normalize(n x eI)
+%       : second in-plane direction of the magnetic-field rotation plane.
+%
+% The reference phase lambda is chosen so that
+%
+%   B(lambda) || +eI.
+%
+% The robot magnetic moment is then
+%
+%   m(theta) = mdip * [ cos(theta-lambda-phi)*eI
+%                     + sin(theta-lambda-phi)*eR ].
+%
+% Thus phi > 0 means the magnetic moment lags this geometric reference.
+%
+% The exact cycle average is evaluated analytically from the first-harmonic
+% coefficients, using
+%
+%   <m x B> = 1/2 * (m_cos x u + m_sin x v).
+%
+% Finally, the component parallel to s is removed because the model assumes
+% air drag balances the spin-axis component and maintains constant spin rate.
+
+s = s(:).';
+s = s / max(norm(s),1e-12);
+
+u = u(:).';
+v = v(:).';
+
+% Exact directed field-plane normal from the two harmonic coefficients.
+% n_ref is the externally supplied PHYSICAL n_rot = normalize(u x v).
+% No upward/acute-angle/spin-axis sign convention is allowed here.
+n_raw = cross(u,v);
+nn = norm(n_raw);
+
+% Degenerate/non-rotating local field: no well-defined field plane.
+if ~isfinite(nn) || nn < 1e-15
+    tau_avg = [0 0 0];
+    return;
+end
+
+n = n_raw / nn;
+
+if nargin >= 4 && ~isempty(n_ref)
+    n_ref = n_ref(:).';
+    if all(isfinite(n_ref)) && norm(n_ref) > 1e-12
+        % n_ref is the PHYSICAL directed n_rot. Align only to this axis;
+        % never to +z, n_prev, or the robot spin axis s.
+        n_ref = n_ref / norm(n_ref);
+        if dot(n,n_ref) < 0
+            n = -n;
+        end
+    else
+        tau_avg = [0 0 0];
+        return;
+    end
+end
+
+% Intersection of robot plane and field-rotation plane.
+eI_raw = cross(n,s);
+sinAlpha = norm(eI_raw);
+
+% At exact alignment the two planes coincide and the intersection line is
+% not unique.  The self-stability torque perpendicular to s vanishes in
+% this limit, so return zero rather than introduce an arbitrary basis.
+if ~isfinite(sinAlpha) || sinAlpha < 1e-10
+    tau_avg = [0 0 0];
+    return;
+end
+
+eI = eI_raw / sinAlpha;
+
+% Robot-plane direction in the (s,n) plane.
+eR = cross(s,eI);
+eR = eR / max(norm(eR),1e-12);
+
+% Magnetic-field-plane direction orthogonal to the common intersection line.
+eF = cross(n,eI);
+eF = eF / max(norm(eF),1e-12);
+
+% ------------------------------------------------------------------
+% Solve the geometric reference phase lambda:
+%
+%   dot(B(lambda), eF) = 0
+%
+% so B(lambda) lies on the common intersection line.  The atan2 form below
+% solves U_F*cos(lambda) + V_F*sin(lambda) = 0.
+% The pi adjustment selects the solution B(lambda) || +eI.
+% ------------------------------------------------------------------
+uF = dot(u,eF);
+vF = dot(v,eF);
+
+if hypot(uF,vF) < 1e-15
+    % Pathological case: the local field has essentially no component along
+    % eF, so a unique rotating-field reference phase cannot be defined.
+    tau_avg = [0 0 0];
+    return;
+end
+
+lambda = atan2(-uF, vF);
+
+B_ref = u*cos(lambda) + v*sin(lambda);
+if dot(B_ref,eI) < 0
+    lambda = lambda + pi;
+end
+
+% ------------------------------------------------------------------
+% Magnetic-moment harmonic coefficients under the NEW phase convention.
+%
+% m(theta) = m_cos*cos(theta) + m_sin*sin(theta)
+% ------------------------------------------------------------------
+delta = lambda + phi;
+
+m_cos = mdip * ( cos(delta)*eI - sin(delta)*eR );
+m_sin = mdip * ( sin(delta)*eI + cos(delta)*eR );
+
+% Exact average over one cycle:
+% <cos^2>=<sin^2>=1/2 and <sin*cos>=0.
+tau_mag_avg = 0.5 * (cross(m_cos,u) + cross(m_sin,v));
+
+% Constant-spin-rate constraint: axial magnetic impulse is balanced by drag.
+tau_avg = tau_mag_avg - dot(tau_mag_avg,s)*s;
+end
+
+function s_new = updateSpinAxisFromUV_withTau(s, tau_avg, Ispin, wspin, dt)
+% Update s using transverse torque only (axial removed by drag in the model)
+
+s = s(:).'; s = s / max(norm(s),1e-12);
+
+L0 = Ispin * wspin;
+L  = L0 * s;
+
+tau_perp = tau_avg - dot(tau_avg,s)*s;
+
+L_new = L + tau_perp * dt;
+s_new = L_new / max(norm(L_new),1e-12);
+end
+
+function [X,Y,Z]=surfaceFromNormals(pts,n)
+% Reconstruct a display-only surface z=f(x,y) from a sampled normal field.
+%
+% This representation requires a non-negligible z component of the normal:
+%   dz/dx = -nx/nz, dz/dy = -ny/nz.
+% On planes such as z=0, symmetry can make nz≈0 everywhere. In that case a
+% z=f(x,y) surface is singular/vertical, so return empty arrays gracefully.
+%
+% Returning [] lets onRunField still plot the magnetic field, polarization
+% ellipses and normals without failing.
+
+X=[]; Y=[]; Z=[];
+
+if isempty(pts) || isempty(n) || size(pts,2)<3 || size(n,2)<3
+    return;
+end
+
+finite_rows = all(isfinite(pts),2) & all(isfinite(n),2);
+valid = finite_rows & abs(n(:,3)) > 0.15;
+
+% Need enough non-degenerate samples for scattered interpolation.
+if nnz(valid) < 6
+    return;
+end
+
+x=pts(valid,1);
+y=pts(valid,2);
+z0=pts(valid,3);
+nz=n(valid,3);
+fx=-n(valid,1)./nz;
+fy=-n(valid,2)./nz;
+
+if isempty(x) || isempty(y) || ...
+        ~all(isfinite(x)) || ~all(isfinite(y)) || ...
+        range(x) <= eps(max(1,max(abs(x)))) || ...
+        range(y) <= eps(max(1,max(abs(y))))
+    return;
+end
+
+xq=linspace(min(x),max(x),60);
+yq=linspace(min(y),max(y),60);
+[X,Y]=meshgrid(xq,yq);
+
+try
+    Fx=scatteredInterpolant(x,y,fx,'natural','nearest');
+    Fy=scatteredInterpolant(x,y,fy,'natural','nearest');
+    Gx=Fx(X,Y);
+    Gy=Fy(X,Y);
+catch
+    X=[]; Y=[]; Z=[];
+    return;
+end
+
+if any(~isfinite(Gx(:))) || any(~isfinite(Gy(:)))
+    X=[]; Y=[]; Z=[];
+    return;
+end
+
+ny=size(X,1); nx=size(X,2);
+idx=@(i,j)(j-1)*ny+i;
+rows=[]; cols=[]; vals=[]; b=[]; eq=0;
+hx=xq(2)-xq(1);
+hy=yq(2)-yq(1);
+
+for i=1:ny
+    for j=1:nx-1
+        eq=eq+1;
+        rows=[rows eq eq];
+        cols=[cols idx(i,j) idx(i,j+1)];
+        vals=[vals -1 1];
+        b(eq,1)=Gx(i,j)*hx;
+    end
+end
+
+for i=1:ny-1
+    for j=1:nx
+        eq=eq+1;
+        rows=[rows eq eq];
+        cols=[cols idx(i,j) idx(i+1,j)];
+        vals=[vals -1 1];
+        b(eq,1)=Gy(i,j)*hy;
+    end
+end
+
+% Anchor the arbitrary integration constant to the sampled plane height.
+eq=eq+1;
+rows=[rows eq];
+cols=[cols idx(round(ny/2),round(nx/2))];
+vals=[vals 1];
+b(eq,1)=mean(z0);
+
+try
+    A=sparse(rows,cols,vals,eq,nx*ny);
+    f=A\b;
+    F=reshape(f,[ny nx]);
+    Z=F+(mean(z0)-mean(F(:)));
+catch
+    X=[]; Y=[]; Z=[];
+    return;
+end
+end
+
+function h = mkLbl(parent, txt, r, c)
+h = uilabel(parent,'Text',txt,'HorizontalAlignment','right');
+h.Layout.Row = r; h.Layout.Column = c;
+end
+
+function h = mkNum(parent, val, r, c)
+h = uieditfield(parent,'numeric','Value',val);
+h.Layout.Row = r; h.Layout.Column = c;
+end

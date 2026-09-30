@@ -1,0 +1,42 @@
+Frame rates, rim J(f) experiment (whole ring), 640x400
+===================================================
+
+`measured` is the capture rate actually achieved: the number to quote, and the one
+that sets the practical limit for resolving the spin line (measured/2 Hz).
+`declared` is what the mp4 plays at; `dropped` is frames the encoder queue lost.
+Only rows marked `use` belong in the analysis; `superseded` takes are kept on disk
+from interrupted runs or the pre-2026-09-24 single-segment ramp.
+
+Rates are recorded PER TAKE rather than fixed across the series, because a higher
+request did not deliver a higher rate: the pipeline is encoder-bound, not
+sensor-bound. The 2026-09-24 blocks were filmed with no rate requested, so the
+sensor kept its own default; from `cap_fps` onward the driver is asked for its
+clamp. See the notes below.
+
+take                          hz blk  frames  measured  declared    asked   granted dropped  status
+2026-09-24_020003_whole90     90   -   15183     175.7     120.0        -         -       0  superseded
+2026-09-24_020715_whole90     90   -   33189     182.9     120.0        -         -       0  superseded
+2026-09-24_021116_whole90     90   -    8928     179.4     120.0        -         -       0  superseded
+2026-09-24_021945_whole90     90   1   74434     192.0     120.0        -         -       0  superseded
+2026-09-24_042238_whole90     90   1   77309     189.0     120.0        -         -       0  use
+2026-09-24_023630_whole90     90   2   73041     188.2     120.0        -         -       0  superseded
+2026-09-24_043944_whole90     90   2   75600     184.3     120.0        -         -       0  use
+2026-09-24_021225_whole100   100   -   44316     180.4     120.0        -         -       0  superseded
+2026-09-24_041150_whole100   100   1   63134     186.3     120.0        -         -       0  superseded
+2026-09-24_045651_whole100   100   1   79016     184.8     120.0        -         -       0  use
+2026-09-24_051416_whole100   100   2   80160     187.2     120.0        -         -       0  use
+2026-09-24_053143_whole110   110   1   81570     187.3     120.0        -         -       0  use
+2026-09-27_111911_whole110   110   2   89007     204.4     210.0    210.0   210/210       0  use
+2026-09-27_115535_whole120   120   1   90085     198.5     210.0    210.0   210/210     234  use
+
+notes
+-----
+* `measured` is the rate to quote. It fell to ~194 fps with the encoder running
+  against ~209 fps for the bare source, so the pipeline is encoder-bound, not
+  sensor-bound: asking for more does not deliver more.
+* 271.3 fps is the SENSOR-only figure from `modes.py`. Over `open_source` the
+  AVFoundation driver clamps a higher request to 210.0 (measured 2026-09-27), and
+  `record.CAP_FPS_CEILING` now asks for 210 so `granted` reads back honestly.
+* `declared` above `measured` means the mp4 plays slightly fast. The analysis is
+  unaffected: every time is taken from `frames.csv`, which stamps real capture
+  times, not from frame indices divided by the declared rate.

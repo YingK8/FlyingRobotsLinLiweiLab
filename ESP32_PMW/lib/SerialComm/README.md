@@ -4,10 +4,10 @@ Non-blocking, newline-framed serial send/receive for ESP32 sketches. Call
 `handleSerialComm()` once per `loop()` iteration; it never blocks and never
 depends on a whole line arriving inside one call.
 
-Generalizes the reader that `main_tilt.cpp` had built inline. Framing is
+Generalizes a reader that the experiment mains used to build inline. Framing is
 plain ASCII terminated by `\n`, `\r`, or `\r\n` -- no checksum, no binary
-framing -- matching the existing PC-side tools (`tools/run_experiment.py`,
-`tools/trigger_reset_log.py`) and their Python mirror (`tools/serial_comm.py`).
+framing -- matching the PC-side tools (`ai/experiments/run_experiment.py`,
+`ai/experiments/trigger_reset_log.py`).
 
 ## Usage
 

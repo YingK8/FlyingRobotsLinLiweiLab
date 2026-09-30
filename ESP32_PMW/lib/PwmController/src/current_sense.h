@@ -22,13 +22,19 @@ public:
   // floating baseline.
   void seed();
 
+  // Re-zero against the current reading (coils OFF), to track warm-up drift.
+  //
+  // Restored 2026-09-27 for `main_current_pid.cpp`, which is its only caller: the merge
+  // brought that firmware back from `main`, and `184b527` had removed this as dead API
+  // precisely BECAUSE the firmware had gone. The body is the original three lines and
+  // touches only `_csMv` / `_adcZeroMv`, both of which still exist, so nothing here is
+  // newly invented. Nothing else calls it, so no default path changes.
+  void recalibrateZero();
+
   // Updates filtered mV and i_meas[]. Pace separately from any fast control
   // loop: the ESP32 ADC needs real settling time between conversions.
   void update(float dtMs);
 
-  // Re-zero against the current reading (coils OFF) to track warm-up drift; stop
-  // once the run starts to freeze calibration.
-  void recalibrateZero();
 
   float i_meas[N];
 

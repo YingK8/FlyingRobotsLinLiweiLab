@@ -1,4 +1,5 @@
-"""Graph calibrated per-channel current from a tilt/ramp capture on one axis.
+"""
+Graph calibrated per-channel current from a tilt/ramp capture on one axis.
 
 Usage:  python3 plot_tilt_current.py [capture.csv]
         (default: tilt/20260621.csv)
@@ -6,6 +7,7 @@ Usage:  python3 plot_tilt_current.py [capture.csv]
 Uses the multipoint CS calibration (g, A/V) and per-channel drive-off baseline.
 Prints the opposite-pair balance the user is targeting: A vs D and B vs C.
 """
+
 import os
 import sys
 import numpy as np
@@ -22,8 +24,14 @@ csv = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "tilt", "20260621
 
 
 def env(y):
-    return (pd.Series(y).rolling(W, center=True, min_periods=1).max()
-            .rolling(W, center=True, min_periods=1).mean().values)
+    return (
+        pd.Series(y)
+        .rolling(W, center=True, min_periods=1)
+        .max()
+        .rolling(W, center=True, min_periods=1)
+        .mean()
+        .values
+    )
 
 
 df = pd.read_csv(csv, skiprows=[1])
@@ -55,7 +63,11 @@ print("\nmean current over last quarter (A):")
 for ch in CH:
     print(f"  {ch}: {mean[ch]:.2f}")
 print("\nopposite-pair balance:")
-print(f"  A vs D: {mean['Channel A']:.2f} / {mean['Channel D']:.2f}  "
-      f"(diff {mean['Channel A']-mean['Channel D']:+.2f} A)")
-print(f"  B vs C: {mean['Channel B']:.2f} / {mean['Channel C']:.2f}  "
-      f"(diff {mean['Channel B']-mean['Channel C']:+.2f} A)")
+print(
+    f"  A vs D: {mean['Channel A']:.2f} / {mean['Channel D']:.2f}  "
+    f"(diff {mean['Channel A']-mean['Channel D']:+.2f} A)"
+)
+print(
+    f"  B vs C: {mean['Channel B']:.2f} / {mean['Channel C']:.2f}  "
+    f"(diff {mean['Channel B']-mean['Channel C']:+.2f} A)"
+)

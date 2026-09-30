@@ -55,6 +55,7 @@ PwmController::PwmController(const gpio_num_t* pins, const float* phaseOffsetsDe
 
     _pins = new gpio_num_t[_numChannels];
     _phaseOffsetsPct = new float[_numChannels];
+    _basePhaseDeg = new float[_numChannels];
     _dutyCycles = new float[_numChannels];
     _params = new PhaseParams[_numChannels];
 
@@ -76,7 +77,8 @@ PwmController::PwmController(const gpio_num_t* pins, const float* phaseOffsetsDe
 
     for (int i = 0; i < _numChannels; i++) {
         _pins[i] = pins[i];
-        _phaseOffsetsPct[i] = constrain(phaseOffsetsDegrees[i], 0.0, 360.0) / 360.0;
+        _basePhaseDeg[i] = constrain(phaseOffsetsDegrees[i], 0.0, 360.0);
+        _phaseOffsetsPct[i] = _basePhaseDeg[i] / 360.0;
         _dutyCycles[i] = constrain(dutyCycles[i], 0.0, 100.0);
     }
 }
@@ -88,6 +90,7 @@ PwmController::~PwmController() {
     }
     delete[] _pins; 
     delete[] _phaseOffsetsPct; 
+    delete[] _basePhaseDeg; 
     delete[] _dutyCycles; 
     delete[] _params; 
     if (_carrierPinsArray) delete[] _carrierPinsArray;
@@ -153,6 +156,7 @@ void IRAM_ATTR PwmController::_timerCallback(void* arg) {
     int64_t lastSync;
     int64_t period;
     bool dc;
+    PhaseParams params[PWMC_MAX_CHANNELS];
 
     // When dispatch_method=ESP_TIMER_TASK, callback runs in task context, not ISR.
     // Use portENTER_CRITICAL (task) not portENTER_CRITICAL_ISR
@@ -161,6 +165,10 @@ void IRAM_ATTR PwmController::_timerCallback(void* arg) {
     period = self->_averagedPeriodUs;
     dc = self->_dcMode;
     portEXIT_CRITICAL(&self->_spinlock);
+
+    for (int i = 0; i < self->_numChannels && i < PWMC_MAX_CHANNELS; i++) {
+        params[i] = self->_params[i];      // outside the lock, on purpose -- see above
+    }
 
     // Client fallback: If waiting for first sync, use default period
     #if USE_SYNC && !SYNC_AS_SERVER
@@ -195,7 +203,8 @@ void IRAM_ATTR PwmController::_timerCallback(void* arg) {
     #if USE_SYNC && SYNC_AS_SERVER
         const int channelLimit = 1;
     #else
-        const int channelLimit = self->_numChannels;
+        const int channelLimit = (self->_numChannels < PWMC_MAX_CHANNELS)
+                             ? self->_numChannels : PWMC_MAX_CHANNELS;
     #endif
 
     for (int i = 0; i < channelLimit; i++) {
@@ -203,10 +212,10 @@ void IRAM_ATTR PwmController::_timerCallback(void* arg) {
         if (self->_pins[i] == GPIO_NUM_NC || self->_pins[i] > GPIO_NUM_39) continue;
         
         // Local copies for speed
-        uint32_t start = (uint32_t)self->_params[i].startUs;
-        uint32_t end = (uint32_t)self->_params[i].endUs;
-        
-        bool active = self->_params[i].wraps ? 
+        uint32_t start = (uint32_t)params[i].startUs;
+        uint32_t end = (uint32_t)params[i].endUs;
+
+        bool active = params[i].wraps ?
                       (timeInCycle >= start || timeInCycle < end) : 
                       (timeInCycle >= start && timeInCycle < end);
         
@@ -257,12 +266,6 @@ void IRAM_ATTR PwmController::_onSyncInterrupt() {
     #endif
 }
 
-void PwmController::enableSync(gpio_num_t syncPin) {
-    #if USE_SYNC
-        _syncPin = syncPin;
-    #endif
-}
-
 void PwmController::updatePhaseParams(int channel) {
     #if USE_SYNC && SYNC_AS_SERVER
         if (channel > 0) return;
@@ -298,26 +301,47 @@ void PwmController::setGlobalFrequency(float newHz) {
     // dividing by zero (1e6/newHz would). The carrier still sets current, so DC
     // with 0% carrier is a safe fully-stopped idle; this is begin()'s default.
     if (!(newHz >= 1e-6f)) {           // !(>=) also catches NaN
+        // A held static field has no current phase to correct. Zeroed here rather than
+        // via _recomputeTrim() so that _dcMode and _globalFreqHz keep being written
+        // inside the lock, exactly as before the trim existed.
+        for (int i = 0; i < _numChannels && i < PWMC_MAX_CHANNELS; i++)
+            _trimCacheDeg[i] = 0.0f;
         portENTER_CRITICAL(&_spinlock);
         _dcMode = true;
         _globalFreqHz = 0.0f;
         // _averagedPeriodUs keeps its last valid value (constructor seeds 20000us)
         // so the width/duty math and the ISR modulo stay well-defined; the ISR
         // freezes the phase while _dcMode is set, so no rotation occurs.
-        for (int i = 0; i < _numChannels; i++) updatePhaseParams(i);
+        for (int i = 0; i < _numChannels; i++) _applyPhase(i);
         portEXIT_CRITICAL(&_spinlock);
         return;
     }
+    const bool leavingDc = _dcMode;
     _dcMode = false;
 
     int64_t newPeriod = (int64_t)(1000000.0 / newHz);
     int64_t now = esp_timer_get_time();
     _globalFreqHz = newHz;
+    // theta_k depends on f, so the trim is re-derived here and nowhere else. Outside the
+    // spinlock deliberately: four atanf calls with interrupts off would eat a large part
+    // of the 25 us ISR tick.
+    _recomputeTrim();
 
     portENTER_CRITICAL(&_spinlock);
 
+    if (leavingDc) {
+        // Resuming from a held static field. The ISR pinned timeInCycle = 0 the whole
+        // time DC was set, so the pattern on the coils right now is the t=0 pattern --
+        // and _lastSyncTimeUs is stale from before the hold, meaning the correction
+        // below would resume at an arbitrary angle instead.
+        //
+        // Starting the cycle here makes rotation begin at exactly the angle that was
+        // being held. That continuity is the entire point of aligning first: the rotor
+        // has settled on this field, so the field must move away from it, not jump.
+        _lastSyncTimeUs = now;
+    }
     // === PHASE CONTINUITY CORRECTION ===
-    if (_averagedPeriodUs > 0) {
+    else if (_averagedPeriodUs > 0) {
         int64_t oldPos = (now - _lastSyncTimeUs) % _averagedPeriodUs;
         if (oldPos < 0) oldPos += _averagedPeriodUs;
 
@@ -331,7 +355,7 @@ void PwmController::setGlobalFrequency(float newHz) {
     for(int i=0; i<FREQ_FILTER_SIZE; i++) _periodBuffer[i] = newPeriod;
     
     // Update params immediately inside lock to prevent tearing
-    for(int i=0; i<_numChannels; i++) updatePhaseParams(i);
+    for(int i=0; i<_numChannels; i++) _applyPhase(i);
     
     portEXIT_CRITICAL(&_spinlock);
 }
@@ -350,30 +374,70 @@ void PwmController::setPhase(int channel, float degrees) {
         return; // Master ignores phase
     #endif
 
-    float pct = degrees / 360.0;
-    while(pct >= 1.0) pct -= 1.0;
-    while(pct < 0.0) pct += 1.0;
-    
+    if (channel < 0 || channel >= _numChannels) return;
+
     portENTER_CRITICAL(&_spinlock);
-    _phaseOffsetsPct[channel] = pct;
-    updatePhaseParams(channel);
+    // `degrees` is what the CURRENT is wanted at. _applyPhase subtracts the RLC trim
+    // beneath it, so a caller (PwmSequencer included) never has to know a trim exists.
+    _basePhaseDeg[channel] = degrees;
+    _applyPhase(channel);
     portEXIT_CRITICAL(&_spinlock);
+}
+
+void PwmController::setPhaseTrim(const float *f0Hz, const float *q) {
+    bool on = (f0Hz != nullptr && q != nullptr);
+    if (on) {
+        // All four must be positive. A half-filled table is the dangerous case: three
+        // trimmed channels and one raw is a bigger asymmetry than trimming none.
+        for (int i = 0; i < _numChannels; i++)
+            if (!(f0Hz[i] > 0.0f) || !(q[i] > 0.0f)) { on = false; break; }
+    }
+    if (on)
+        for (int i = 0; i < _numChannels && i < PWMC_MAX_CHANNELS; i++) {
+            _trimF0Hz[i] = f0Hz[i];
+            _trimQ[i] = q[i];
+        }
+    _trimOn = on;
+    _recomputeTrim();
+
+    portENTER_CRITICAL(&_spinlock);
+    for (int i = 0; i < _numChannels; i++) _applyPhase(i);
+    portEXIT_CRITICAL(&_spinlock);
+}
+
+float PwmController::phaseTrimDeg(int channel) const {
+    if (!_trimOn || channel < 0 || channel >= _numChannels) return 0.0f;
+    return _trimCacheDeg[channel];
+}
+
+void PwmController::_recomputeTrim() {
+    // theta_k(f) = atan(Q_k (f/f0_k - f0_k/f)). Held static in DC mode: there is no
+    // rotation, so there is no current phase to correct and the base pattern is what
+    // the align step settled the rotor on.
+    const float f = _globalFreqHz;
+    for (int i = 0; i < _numChannels && i < PWMC_MAX_CHANNELS; i++) {
+        if (!_trimOn || _dcMode || !(f >= 1e-6f)) { _trimCacheDeg[i] = 0.0f; continue; }
+        const float r = f / _trimF0Hz[i] - _trimF0Hz[i] / f;
+        _trimCacheDeg[i] = atanf(_trimQ[i] * r) * 180.0f / (float)M_PI;
+    }
+}
+
+void PwmController::_applyPhase(int channel) {
+    // Caller holds the spinlock. Uses only the cached trim -- see _trimCacheDeg.
+    _phaseOffsetsPct[channel] =
+        _wrapPct(_basePhaseDeg[channel] - _trimCacheDeg[channel]);
+    updatePhaseParams(channel);
+}
+
+float PwmController::_wrapPct(float degrees) {
+    float pct = fmodf(degrees, 360.0f) / 360.0f;
+    return (pct < 0.0f) ? pct + 1.0f : pct;
 }
 
 float PwmController::getFrequency() const {
     if (_dcMode) return 0.0f;
     return 1000000.0 / _averagedPeriodUs;
 }
-
-float PwmController::getPhase(int channel) const { 
-    #if USE_SYNC && SYNC_AS_SERVER
-        return 0.0;
-    #else
-        return _phaseOffsetsPct[channel] * 360.0;
-    #endif
-}
-
-float PwmController::getDutyCycle(int channel) const { return _dutyCycles[channel]; }
 
 float PwmController::getCarrierDutyCycle(int channel) const {
     if (!_carrierDutyCyclePct || channel < 0 || channel >= _numChannels) return 0.0f;
@@ -425,22 +489,8 @@ void PwmController::enableCurrentBalance(const BalanceConfig &cfg,
     _lastBalanceUs = micros();
 }
 
-void PwmController::setBalanceGains(float kp, float ki, float kd) {
-    if (_balance) _balance->setGains(kp, ki, kd);
-}
-
-void PwmController::setBalanceRamp(float pctPerMs) {
-    if (_balance) _balance->setRamp(pctPerMs);
-}
-
 const float *PwmController::measuredCurrents() const {
     return _sense ? _sense->i_meas : nullptr;
-}
-
-float PwmController::carrierCeiling(int channel) const {
-    if (channel < 0 || channel >= _numChannels) return 0.0f;
-    if (_balance && channel < 4) return _ceiling[channel];
-    return getCarrierDutyCycle(channel);
 }
 
 void PwmController::_serviceCurrentLoop() {
@@ -624,33 +674,6 @@ void PwmController::_writeCarrier(int channel, float dutyPercent) {
     ledc_set_duty(_carrierSpeedMode, (ledc_channel_t)channel, dutyValue);
     ledc_update_duty(_carrierSpeedMode, (ledc_channel_t)channel);
     _carrierLastDutyTicks[channel] = dutyValue;
-}
-
-void PwmController::shutdown(unsigned long rampMs) {
-    // Snapshot the current carrier duty of every channel so each ramps from
-    // wherever it is now (handles channels parked at 100%, which re-attach LEDC
-    // automatically on the first sub-100% write).
-    float startDuty[16];
-    int n = _numChannels < 16 ? _numChannels : 16;
-    for (int i = 0; i < n; i++)
-        startDuty[i] = _carrierDutyCyclePct ? _carrierDutyCyclePct[i] : 0.0f;
-
-    const int steps = 50;
-    unsigned long stepMs = rampMs / steps;
-    if (stepMs < 1) stepMs = 1;
-    for (int s = 1; s <= steps; s++) {
-        float frac = (float)s / (float)steps;          // 0 -> 1
-        for (int i = 0; i < n; i++)
-            setCarrierDutyCycle(i, startDuty[i] * (1.0f - frac));
-        delay(stepMs);
-    }
-
-    // Force fully off (LEDC output held LOW = bridge disabled), then freeze the
-    // phase GPIOs by stopping the periodic timer. Object/timer stay allocated.
-    for (int i = 0; i < n; i++)
-        setCarrierDutyCycle(i, 0.0f);
-    if (_periodicTimer)
-        esp_timer_stop(_periodicTimer);
 }
 
 bool PwmController::rampDownStep(float stepPct) {

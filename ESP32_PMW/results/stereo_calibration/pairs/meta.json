@@ -1,0 +1,43 @@
+{
+  "board": {
+    "board": "9x6_6mm",
+    "squares": [
+      9,
+      6
+    ],
+    "square_mm": 5.95,
+    "marker_mm": 4.45,
+    "dictionary": "DICT_4X4_100",
+    "n_corners": 40,
+    "size_mm": [
+      53.55,
+      35.7
+    ]
+  },
+  "camera_indices": [
+    0,
+    1
+  ],
+  "elp_ids": [
+    "0x11000032e49281",
+    "0x12000032e49281"
+  ],
+  "mode": [
+    640,
+    400
+  ],
+  "rotate180": true,
+  "n_pairs": 18,
+  "n_solo": [
+    77,
+    63
+  ],
+  "skew": {
+    "n": 85746,
+    "median_ms": 0.9072080720216036,
+    "p95_ms": 6.82012498145923,
+    "max_ms": 55.48545904457569,
+    "dropped": 24553
+  },
+  "created": "2026-09-10T02:42:58+00:00"
+}

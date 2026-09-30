@@ -1,0 +1,2 @@
+freq_hz,repeat,t_kill,theta_from,theta_to,amp_deg,t10,t90,rate_1090_deg_s,tau_s,tau_sigma_s,settled,baseline_sd_deg,agree_med_deg,note
+10.0,1,1058331.253,7.396588060864105,7.37480392657254,-0.02178413429156567,nan,nan,nan,nan,nan,False,2.2475746581342952,14.8,step -0.02 deg below the 2.0 deg floor -- no response

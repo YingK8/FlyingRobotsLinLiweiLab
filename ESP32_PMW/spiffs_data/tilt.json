@@ -11,7 +11,7 @@
   "schedule": [
     {
       "method": "label",
-      "value": "RUN_1_SPINUP_130HZ"
+      "value": "RUN_1_SPINUP_120HZ"
     },
     {
       "method": "activateChannels",
@@ -27,8 +27,8 @@
     {
       "method": "addEaseRampTask",
       "from": 5.0,
-      "to": 130.0,
-      "duration_ms": 44643
+      "to": 120.0,
+      "duration_ms": 41071
     },
     {
       "method": "label",
@@ -65,7 +65,7 @@
     },
     {
       "method": "addEaseRampTask",
-      "from": 130.0,
+      "from": 120.0,
       "to": 2.0,
       "duration_ms": 1000
     },
@@ -75,7 +75,7 @@
     },
     {
       "method": "label",
-      "value": "RUN_2_SPINUP_130HZ"
+      "value": "RUN_2_SPINUP_120HZ"
     },
     {
       "method": "activateChannels",
@@ -91,8 +91,8 @@
     {
       "method": "addEaseRampTask",
       "from": 5.0,
-      "to": 130.0,
-      "duration_ms": 44643
+      "to": 120.0,
+      "duration_ms": 41071
     },
     {
       "method": "label",
@@ -129,7 +129,7 @@
     },
     {
       "method": "addEaseRampTask",
-      "from": 130.0,
+      "from": 120.0,
       "to": 2.0,
       "duration_ms": 1000
     },
@@ -139,7 +139,7 @@
     },
     {
       "method": "label",
-      "value": "RUN_3_SPINUP_130HZ"
+      "value": "RUN_3_SPINUP_120HZ"
     },
     {
       "method": "activateChannels",
@@ -155,8 +155,8 @@
     {
       "method": "addEaseRampTask",
       "from": 5.0,
-      "to": 130.0,
-      "duration_ms": 44643
+      "to": 120.0,
+      "duration_ms": 41071
     },
     {
       "method": "label",
@@ -193,7 +193,7 @@
     },
     {
       "method": "addEaseRampTask",
-      "from": 130.0,
+      "from": 120.0,
       "to": 2.0,
       "duration_ms": 1000
     },
@@ -203,7 +203,7 @@
     },
     {
       "method": "label",
-      "value": "RUN_4_SPINUP_130HZ"
+      "value": "RUN_4_SPINUP_120HZ"
     },
     {
       "method": "activateChannels",
@@ -219,8 +219,8 @@
     {
       "method": "addEaseRampTask",
       "from": 5.0,
-      "to": 130.0,
-      "duration_ms": 44643
+      "to": 120.0,
+      "duration_ms": 41071
     },
     {
       "method": "label",
@@ -257,7 +257,7 @@
     },
     {
       "method": "addEaseRampTask",
-      "from": 130.0,
+      "from": 120.0,
       "to": 2.0,
       "duration_ms": 1000
     },
@@ -267,7 +267,7 @@
     },
     {
       "method": "label",
-      "value": "RUN_5_SPINUP_130HZ"
+      "value": "RUN_5_SPINUP_120HZ"
     },
     {
       "method": "activateChannels",
@@ -283,8 +283,8 @@
     {
       "method": "addEaseRampTask",
       "from": 5.0,
-      "to": 130.0,
-      "duration_ms": 44643
+      "to": 120.0,
+      "duration_ms": 41071
     },
     {
       "method": "label",
@@ -321,7 +321,7 @@
     },
     {
       "method": "addEaseRampTask",
-      "from": 130.0,
+      "from": 120.0,
       "to": 2.0,
       "duration_ms": 1000
     },

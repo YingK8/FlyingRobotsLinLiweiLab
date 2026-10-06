@@ -1327,6 +1327,60 @@ def from_camera(source="camera:0", width=1280, height=800, port=8080):
 #: short enough that an unplugged camera does not hang the notebook.
 MAX_READ_MISSES = 5
 
+def _why_no_pose(before, after):
+    """
+    Why the tracker went quiet: the estimator, the skew guard, or a stopped camera.
+
+        Three causes with one symptom -- `read` returning nothing -- and they want
+        different fixes, so the message has to separate them rather than assert one. It
+        does that by DIFFERENCING the counters across the silence: whichever one moved
+        while no pose came out is the one responsible. An earlier version guessed "the
+        pairs are being refused on skew" from the cameras still being alive, and was
+        wrong: both slots were 2-3 ms fresh and the real cause was the estimator solving
+        nothing, which that message could not have said.
+    """
+
+    age = after.get("age_ms", (-1.0, -1.0))
+    d_lost = after["n_lost"] - before["n_lost"]
+    d_skew = after["n_skew_dropped"] - before["n_skew_dropped"]
+    # Which gate ate them. `n_lost` says a frame produced nothing; these say where.
+    gates = " ".join(
+        f"{k.replace('n_rejected_', '').replace('n_rejected', 'discrepancy')} "
+        f"{after.get(k, 0) - before.get(k, 0)}"
+        for k in ("n_rejected", "n_rejected_fit", "n_rejected_mono")
+        if after.get(k, 0) - before.get(k, 0) > 0)
+    if not gates:
+        gates = ("no gate fired -- the views produced no candidates at all, so it is "
+                 "segmentation or the back-projection, not a gate")
+    d_grab = tuple(after["n_grabbed"][i] - before["n_grabbed"][i] for i in range(2))
+    stale = [i for i, a in enumerate(age) if a is not None and a > 500.0]
+    if stale:
+        why = (f"camera {' and '.join('AB'[i] for i in stale)} stopped delivering "
+               f"(its frame is {max(age):.0f} ms old)")
+    elif d_lost > 0 and d_lost >= d_skew:
+        why = (f"the cameras are fine and the ESTIMATOR is losing every frame "
+               f"({d_lost} lost during the silence) -- see the gate counts below for "
+               f"where. A running plate walking onto a robot that has stopped moving is "
+               f"one known cause, but it is NOT established here: correcting the plate's "
+               f"step for the pose rate did not change how long a preview survives")
+    elif d_skew > 0:
+        why = (f"both cameras are delivering but {d_skew} pairs were refused on skew "
+               f"during the silence -- the two have drifted further apart than the guard")
+    else:
+        why = ("neither the cameras, the skew guard nor the estimator moved during the "
+               "silence, which points at the pose worker itself")
+    return (f"{why}.\n"
+            f"  frames grabbed: A {after['n_grabbed'][0]} (+{d_grab[0]}) "
+            f"B {after['n_grabbed'][1]} (+{d_grab[1]})\n"
+            f"  newest frame age: A {age[0]:.0f} ms  B {age[1]:.0f} ms\n"
+            f"  during the silence: {d_lost} lost, {d_skew} refused on skew\n"
+            f"  gates during the silence: {gates}")
+
+
+#: How long one tracker read waits. Matches `MonoCamera.read`'s own 2 s, so both paths
+#: give up after the same ~10 s of silence.
+CAMERA_TIMEOUT_S = 2.0
+
 #: Frames of nothing-at-all before the viewer explains itself. A live run that shows an
 #: empty scene and says nothing is the worst failure mode here: the cameras are fine, the
 #: loop is running, and the only signal is an absence.
@@ -1360,23 +1414,46 @@ def _diagnose_silence(frames, backgrounds, tags):
 
 def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=400,
                   fps=210, port=8080, rotate180=True, backgrounds=None, zero="auto",
-                  flip=False, rotate=None, axes=("x", "y", "z"), label=None, record=None):
+                  flip=False, rotate=None, axes=("x", "y", "z"), label=None, record=None,
+                  est=None, tracker=False, pair_mode="interleave"):
     """Generator over the live stereo pipeline. Yields one `Tick` per frame.
 
     ``record`` writes the frames this loop is already reading to a flight folder,
     in `camera/record.py`'s own layout. It has to be here rather than in a second
     process: one USB camera has one owner, so a control run cannot be filmed by
     running `record` alongside it. Pass a directory, or True for the default.
+
+    ``est`` is a ready estimator to drive instead of the rim one (`disc_pose.live_estimator`
+    for the tilt-sweep robots); its `rig` is the one the viewer draws.
+
+    ``tracker`` moves capture AND pose into C++ (`pose/tracker.py`). The yields are
+    unchanged, deliberately -- `_PoseFeed`, the control loop's `fresh` gating, the viz
+    and the notebook cannot tell the difference. What changes is the rate: the Python
+    path pairs by *consuming* each camera's slot, so a pair costs the slower camera's
+    period, while the tracker's slot is never consumed and ``pair_mode="interleave"``
+    fires a pose on every frame from *either* camera. Measured 2.53 ms a pose against
+    4.30 -- see `pose/theory.md` 22.
     """
 
     from controller.camera import sources
     from controller.pose.filter import PoseFilter
 
-    rig, est = _stereo_estimator(rig_path)
+    rig, est = _stereo_estimator(rig_path) if est is None else (est.rig, est)
     cams = [x.strip() for x in specs.split(",")]
+    trk = None
+    if tracker:
+        from controller.pose import tracker as trkmod
+
+        # Cameras are named by the ids the rig was calibrated against, not by an index:
+        # see `tracker.camera_ids`. `specs` is therefore unused on this path.
+        trk = trkmod.Tracker(est, width=width, height=height, fps=fps,
+                             rotate180=rotate180, pair_mode=pair_mode)
+        print(f"pose source: tracker (C++ capture, pair_mode={pair_mode}, "
+              f"cameras {trk.ids})")
     try:
-        src = sources.open_stereo(cams, max_skew_s=None, width=width, height=height,
-                                  fps=fps, grayscale=True, rotate180=rotate180)
+        src = None if trk is not None else sources.open_stereo(
+            cams, max_skew_s=None, width=width, height=height,
+            fps=fps, grayscale=True, rotate180=rotate180)
     except OSError as e:
         # "could not open camera index 1" does not say whether the camera is unplugged,
         # held by another process, or simply enumerated somewhere else today.
@@ -1474,33 +1551,75 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=40
                   "rotate180": bool(rotate180)})
         print(f"recording -> {rec.dir}")
     lost, last_seen, misses, t_prev = 0, None, 0, None
+    if trk is not None:
+        # Started here rather than at construction: everything between the two can raise
+        # (no rig, no plates, a busy viser port), and the `finally` that stops the
+        # cameras only covers the loop below.
+        trk.start()
     try:
         while True:
-            item = src.read()
-            if item is None:
-                misses += 1
-                if misses < MAX_READ_MISSES:
-                    print(f"camera read timed out ({misses}/{MAX_READ_MISSES}), retrying",
-                          file=sys.stderr)
-                    continue
-                print(f"source stopped: {MAX_READ_MISSES} reads in a row timed out. The "
-                      f"camera was unplugged, or another process has it.", file=sys.stderr)
-                break
-            misses = 0
-            t_cap, frames = item
+            if trk is not None:
+                # The tracker has already solved: read the pose, then the frames the
+                # recorder and the viewer want. `read` returning None is the same
+                # condition `src.read()` times out on -- a camera that stopped, or (with
+                # a slot that is never consumed) one whose pairs all exceed the skew
+                # guard, which is how a frozen camera surfaces here. See tracker.py.
+                if viz.enabled:
+                    trk.set_thresh(viz.thresh)
+                trk.set_motion(filt.pos if filt.pos.initialised else None)
+                pose = trk.read(timeout=CAMERA_TIMEOUT_S)
+                got = trk.frames()
+                if pose is None or got is None:
+                    if misses == 0:
+                        before = trk.stats()   # to difference against, below
+                    misses += 1
+                    if misses < MAX_READ_MISSES:
+                        print(f"tracker produced no pose "
+                              f"({misses}/{MAX_READ_MISSES}), retrying", file=sys.stderr)
+                        continue
+                    print(f"source stopped: {MAX_READ_MISSES} reads in a row timed out.\n"
+                          f"  {_why_no_pose(before, trk.stats())}", file=sys.stderr)
+                    break
+                misses = 0
+                # The pose's own capture instant, not the frames' -- the frames are
+                # whatever is newest now, which at these rates can be one period ahead
+                # of the pair that was solved. The overlay is drawn on them; the pose,
+                # the log and the controller all use `pose.t`.
+                t_cap, stamps = pose.t, list(got[3])
+                frames = [got[1], got[2]]
+                state = filt.update(pose, t=t_cap)
+                # NOT `lost += pose is None`: on this path a lost frame never reaches
+                # here at all -- `read` returns None and the miss branch above `continue`s
+                # -- so that expression is always False and `lost` would sit at 0 while
+                # the estimator solved nothing. It cost a five-minute preview to notice.
+                # The estimator's own counter is the true one.
+                lost = trk.stats()["n_lost"]
+            else:
+                item = src.read()
+                if item is None:
+                    misses += 1
+                    if misses < MAX_READ_MISSES:
+                        print(f"camera read timed out ({misses}/{MAX_READ_MISSES}), retrying",
+                              file=sys.stderr)
+                        continue
+                    print(f"source stopped: {MAX_READ_MISSES} reads in a row timed out. The "
+                          f"camera was unplugged, or another process has it.", file=sys.stderr)
+                    break
+                misses = 0
+                t_cap, frames = item
+                stamps = getattr(src, "last_stamps", None)
+                # Same poll as the replay loop: the slider is only useful live if the
+                # estimator reads it, and this is the loop `run.ipynb` actually calls.
+                if viz.enabled:
+                    est.thresh = viz.thresh
+                pose = est.update(frames, t=t_cap, stamps=stamps or None,
+                                  motion=filt.pos if filt.pos.initialised else None)
+                state = filt.update(pose, t=t_cap)
+                lost += pose is None
             if rec is not None:
-                rec.add(t_cap, frames,
-                        stamps=getattr(src, "last_stamps", None),
-                        skew=getattr(src, "last_skew", 0.0) or 0.0)
-            # Same poll as the replay loop: the slider is only useful live if the
-            # estimator reads it, and this is the loop `run.ipynb` actually calls.
-            if viz.enabled:
-                est.thresh = viz.thresh
-            pose = est.update(frames, t=t_cap,
-                              stamps=getattr(src, "last_stamps", None) or None,
-                              motion=filt.pos if filt.pos.initialised else None)
-            state = filt.update(pose, t=t_cap)
-            lost += pose is None
+                rec.add(t_cap, frames, stamps=stamps,
+                        skew=(abs(stamps[0] - stamps[1]) if stamps and len(stamps) > 1
+                              else getattr(src, "last_skew", 0.0) or 0.0))
             # After update: `per_view` is where the segmentations live, and the
             # witness needs the raw frame plus that view's own ellipse.
             if t_prev is not None and t_cap > t_prev:
@@ -1549,11 +1668,15 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=40
             # Never let finalising the film take down the rest of the teardown --
             # the cameras and the viewer still have to be released.
             try:
-                rec.close(src.skew_stats() if hasattr(src, "skew_stats") else {})
+                rec.close(src.skew_stats() if hasattr(src, "skew_stats")
+                          else (trk.stats() if trk is not None else {}))
             except Exception as e:  # noqa: BLE001
                 print(f"recording not finalised: {e!r}", file=sys.stderr)
         viz.close()
-        src.close()
+        if src is not None:
+            src.close()
+        if trk is not None:
+            trk.stop()
 
 
 def from_stereo(*a, **kw):
@@ -1590,7 +1713,7 @@ def from_stereo(*a, **kw):
         tick.viz.push(tick.pose, frames=tick.frames, t=tick.t, lost=tick.lost)
 
 
-def _stereo_estimator(rig_path=None, backgrounds=None):
+def _stereo_estimator(rig_path=None, backgrounds=None, native=None):
     """``(rig, estimator)`` for the measured rig, or a clear refusal.
 
     ``backgrounds`` is one empty-rig plate per camera, or ``"running"`` for a
@@ -1639,10 +1762,20 @@ def _stereo_estimator(rig_path=None, backgrounds=None):
     if backgrounds == "running":
         from controller.pose import background as bgmod
         backgrounds = {c.name: bgmod.RunningPlate() for c in rig.cameras}
-    return rig, StereoPoseEstimator(rig, tilt_cal=TiltCalibration.load(),
-                                    centre_cal=CentreCalibration.load(),
-                                    radius_mm=RADIUS_BENCH_MM,
-                                    backgrounds=backgrounds)
+    # The compiled core when it is built (`uv sync --extra native`), the Python
+    # estimator otherwise; ``native=False`` forces the Python one. Said out loud for
+    # the same reason as the noise model above: which core is running should never
+    # have to be inferred from the frame rate. `pose/theory.md` 21.
+    from controller.pose import stereo_native
+    use_native = stereo_native.available() if native is None else bool(native)
+    if use_native and not stereo_native.available():
+        raise SystemExit("native=True but pmw_pose is not built; run `uv sync --extra native`")
+    cls = stereo_native.NativeStereoPoseEstimator if use_native else StereoPoseEstimator
+    print(f"pose core: {'native (pmw_pose)' if use_native else 'python'}")
+    return rig, cls(rig, tilt_cal=TiltCalibration.load(),
+                    centre_cal=CentreCalibration.load(),
+                    radius_mm=RADIUS_BENCH_MM,
+                    backgrounds=backgrounds)
 
 
 # How many consecutive accepted poses must agree before one is taken as the datum, and

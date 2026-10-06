@@ -34,6 +34,17 @@ public:
   void setGlobalFrequency(float newHz);              ///< All channels, Hz.
   void setDutyCycle(int channel, float dutyPercent); ///< 0-100%.
   void setPhase(int channel, float degrees);         ///< 0-360 deg.
+  /**
+   * @brief All channels' phases in one critical section (degrees, per channel).
+   *
+   * Same meaning as `setPhase` -- the phase the CURRENT is wanted at, with the RLC trim
+   * applied beneath -- but the four writes happen under a single `portENTER_CRITICAL`.
+   * The binary DRIVE frame carries four phases at 200 Hz, and four separate critical
+   * sections per command is 800 a second, each able to displace the 25 us commutation
+   * callback. Holding the lock across all four also means the callback can never observe
+   * a field half-way between two commands.
+   */
+  void setPhases(const float *degrees);
 
   /**
    * @brief Compensate each channel for the phase its series RLC adds to the CURRENT.

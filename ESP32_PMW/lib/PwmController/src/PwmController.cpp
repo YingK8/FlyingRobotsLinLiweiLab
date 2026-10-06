@@ -384,6 +384,30 @@ void PwmController::setPhase(int channel, float degrees) {
     portEXIT_CRITICAL(&_spinlock);
 }
 
+void PwmController::setPhases(const float *degrees) {
+    #if USE_SYNC && SYNC_AS_SERVER
+        return; // Master ignores phase
+    #endif
+
+    if (degrees == nullptr) return;
+
+    // ONE critical section for all four, not four. `setPhase` takes the spinlock and
+    // recomputes that channel's PhaseParams inside it; called per channel from a 200 Hz
+    // command that is 800 entries a second, against a commutation callback that fires
+    // every 25 us. Each entry disables interrupts while it does an integer divide and two
+    // multiplies, so the callback can be displaced four times per command instead of once.
+    //
+    // The lock still has to be held across all four writes rather than merely taken once
+    // per write: the four phases of a rotating field are one command, and a callback that
+    // lands between channel 1 and channel 2 drives a field that was never asked for.
+    portENTER_CRITICAL(&_spinlock);
+    for (int i = 0; i < _numChannels; i++) {
+        _basePhaseDeg[i] = degrees[i];
+        _applyPhase(i);
+    }
+    portEXIT_CRITICAL(&_spinlock);
+}
+
 void PwmController::setPhaseTrim(const float *f0Hz, const float *q) {
     bool on = (f0Hz != nullptr && q != nullptr);
     if (on) {

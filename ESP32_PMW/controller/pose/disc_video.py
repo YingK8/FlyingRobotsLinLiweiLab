@@ -345,7 +345,7 @@ def render_with_angles(take_dir, log_path=None, out_path=None, stride=4, fps=30.
     # Smoothing the two tangent-plane components on a whole number of revolutions nulls the
     # 1x cone (`ar.rev_window`), leaving the MEAN lean vector. Its angle is the direction the
     # robot leaned -- bounded, single-valued, and the quantity worth watching beside the
-    # radial step. `pose/theory.md` 20.7 argues the tangent plane is the right coordinate
+    # radial step. `pose/theory_alignment.md` 20.7 argues the tangent plane is the right coordinate
     # here for the same reason.
     e1 = np.cross(ref, [0.0, 0.0, 1.0])
     if np.linalg.norm(e1) < 1e-6:

@@ -128,7 +128,7 @@ HOLD_MS = 7000
 #: POST_FROM_S..POST_TO_S (4-6 s after the kill) but CLAMPS that window to the DOWN_ label
 #: -- `t_stop = min(tk + POST_TO_S, p["t_end"])` at alignment_rate.py:2677. At 5000 the label
 #: landed at kill+5 s, so every settled measurement the campaign has ever taken was truncated
-#: to 4-5 s, and `theory.md` 25.5 says so in as many words. 15 s un-clamps it.
+#: to 4-5 s, and `theory_alignment.md` 25.5 says so in as many words. 15 s un-clamps it.
 #:
 #: CONSEQUENCE FOR COMPARISONS: takes recorded before 2026-09-10 measured the truncated
 #: window and takes after it measure the full one. A design-A/design-B comparison of any
@@ -175,7 +175,7 @@ def hold_ms(f_hz):
 
 #: Force ONE segment-2 rate at every target, Hz/s. None = the two-tier rule above.
 #:
-#: Exists for the rate-swap control (`control/theory.md` 25.14). The two-tier rule changes
+#: Exists for the rate-swap control (`control/theory_alignment.md` 25.14). The two-tier rule changes
 #: rate at exactly 60 Hz, which is exactly where the pre-cut cone collapses 8.4 -> 1.9 deg on
 #: the design-A campaign -- so rate and frequency are confounded there. 50 Hz run at the
 #: high-f rate and 60 Hz at the low-f rate separate them. Set from `tilt_run --seg2-rate`.
@@ -417,7 +417,7 @@ def _self_check():
     assert (DOWN_MS + OFF_MS) / 1000.0 > ar.REST_TO_S, (DOWN_MS, OFF_MS, ar.REST_TO_S)
     # the settled window must no longer be CLAMPED by the DOWN_ label. This is the whole
     # reason DROP_MS went to 15 s: at 5000 `alignment_rate` silently truncated its own
-    # 4-6 s settled window to 4-5 s (alignment_rate.py:2677, theory.md 25.5).
+    # 4-6 s settled window to 4-5 s (alignment_rate.py:2677, theory_alignment.md 25.5).
     assert DROP_MS / 1000.0 >= ar.POST_TO_S, (DROP_MS, ar.POST_TO_S)
 
     # it parses, comments and all, as the firmware's ArduinoJson would

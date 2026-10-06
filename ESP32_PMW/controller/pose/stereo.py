@@ -58,7 +58,35 @@ REFINE_TOL = 1e-4
 # better than the baseline; 1e-2 is where `refine_rms_px` crosses it and the pose shift
 # jumps 0.25 -> 0.34 mm, which is 19.3's signature of stopping early rather than
 # converging. Available, not taken.
-REFINE_TOL_ANALYTIC = 1e-3
+#: Trust-region stopping tolerance for the analytic-Jacobian solve.
+#:
+#: **5e-4, not 19.12's 1e-3, and the difference is jitter.** 1e-3 was chosen to buy speed
+#: (6.9 -> 4.1 ms) on the argument that `refine_rms_px` and `union_coverage` improved and
+#: `discrepancy_mm` was unmoved -- all true, and none of them a measure of *smoothness*.
+#: The solve stops early, so where it stops varies frame to frame, and against the prior
+#: that real motion is continuous that variation is noise. Scored by the second difference
+#: of the trajectory on the bench take (`pose/theory.md` 16.29):
+#:
+#:      tol      pos d2 p50   ang d2 p50   discrepancy  coverage  est ms  parity
+#:      1e-3      0.2502 mm    0.4099 deg    1.46 mm     0.939     0.37    ok
+#:      5e-4      0.1851       0.1851        1.46        0.972     0.47    ok      <- here
+#:      3e-4      0.1775       0.1798        1.46        0.989     0.55    BREAKS
+#:      1e-4      0.0327       0.0488        1.46        1.000     1.01    BREAKS
+#:
+#: Every guard is flat or better at every row -- the same 246 frames, the same cross-view
+#: discrepancy, rising coverage -- so this is the solve converging further, not smoothing.
+#: A fit that had stopped listening to the image would have moved `discrepancy_mm`.
+#:
+#: **Why not 1e-4, which is 7.6x smoother.** Below 5e-4 the solve runs past the noise floor
+#: of its own Jacobian: `_rim_shape`'s two normal columns are forward-differenced at
+#: sqrt(eps) (21.3), so the trust region's accept/reject decisions start turning on
+#: rounding and the two cores take different numbers of steps. `native_parity` then fails
+#: -- p95 stays at 1e-4 mm but the worst frame reaches 0.18 mm and `nfev` differs by 8.
+#: That is the ill-conditioning 21.3 already named, surfacing. The port's own chapter calls
+#: the parity harness its main value, so it is not spent for jitter without the fix it
+#: points at: **exact derivatives for those two columns**, which would remove the noise on
+#: both sides and unlock 1e-4. Not done -- it changes the reference's descent direction.
+REFINE_TOL_ANALYTIC = 5e-4
 
 # Relative finite-difference step for the batched Jacobian, matching what
 # `least_squares(jac="2-point")` picks by default -- sqrt of machine epsilon. Measured
@@ -1859,6 +1887,13 @@ class StereoPoseEstimator:
                    "world": (centre, normal), "alive": alive},
         )
 
+        return self._gate_predicted(pose)
+
+
+    def _gate_predicted(self, pose):
+        """The predicted-error gate, last. Shared with `stereo_native`, which builds the
+        same `StereoPose` from the compiled core and must be gated identically."""
+
         # Predict, then decide. The prediction is attached either way: a gate
         # that silently drops frames is much harder to debug than one whose
         # reasoning is in the log next to the outcome.
@@ -1886,7 +1921,6 @@ class StereoPoseEstimator:
                     self.n_detected -= 1
                     return None
         return pose
-
 
 def _subset_stamps(stamps, indices):
     """The stamps of the views that survived, or None when there were none."""

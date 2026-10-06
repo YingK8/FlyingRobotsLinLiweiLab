@@ -1645,7 +1645,16 @@ def undistort_ellipse(ellipse, camera_matrix, dist_coeffs, n_samples=180):
 
     src = ellipse_points(ellipse, n_samples).reshape(-1, 1, 2)
     dst = cv2.undistortPoints(src, camera_matrix, dist_coeffs, P=camera_matrix)
-    return fit_ellipse_direct(dst.reshape(-1, 2))
+    # The refit is `conic.fit_conic_weighted` in double, not `cv2.fitEllipseDirect`. The
+    # OpenCV fit returns float32 and its internals moved between 4.x and 5.x, so on
+    # these 180 sub-pixel points the two builds disagree by one float32 ulp (1.5e-5 px)
+    # on 60% of ellipses -- and the joint solve, stopping at REFINE_TOL_ANALYTIC, turns
+    # that seed difference into 0.1-0.4 mm on ~5% of frames. A double fit is the same
+    # answer to 1e-10 px from either build. `theory.md` 21.3.
+    c = conic.fit_conic_weighted(dst.reshape(-1, 2))
+    if c is None:
+        raise ValueError("undistorted rim did not fit an ellipse")
+    return conic.normalise_ellipse(conic.ellipse_from_conic(c))
 
 
 # How strongly the ignored area is tinted. Faint on purpose: it has to be legible

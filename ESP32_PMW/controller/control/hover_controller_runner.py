@@ -478,6 +478,7 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                                            rot_deg=args.attitude_rot_deg)
         cmd_tilt = (0.0, 0.0)
         id_phase = -1             # which dither azimuth is commanded
+        id_active = False         # the dither owns az=/mag= this tick
         lost_land_s = getattr(args, "lost_land_s", LOST_LAND_S)
         n_seen = 0
         while True:
@@ -554,22 +555,60 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
 
             # IDENTIFICATION DITHER. Steps the commanded weak direction through a set of
             # azimuths so `attitude.fit_rotation` has a known input to regress the tilt
-            # response against. It runs on the same clock as the trim and REPLACES its
-            # azimuth, so the two never fight over `az=`.
+            # response against. While it runs it OWNS `az=` and `mag=`: it replaces the
+            # trim's azimuth and suppresses the closed loop's lateral sends below, so no
+            # two writers ever fight over the actuator.
             #
             # This is the only excitation available: the thrust sensor reads nothing while
             # the robot is seated (the pad cancels lateral acceleration), so the dither has
             # to happen inside an airborne window that is currently 1-2 s long. If it is too
             # short, `fit_rotation` refuses rather than fitting noise -- which is the
             # designed outcome, not a failure of the run.
-            # Gated on FREQUENCY, not on the trim having fired: identification has to be
-            # runnable with no trim at all, and an earlier version that keyed off
-            # `trim_sent` silently did nothing whenever `trim_mag` was 0.
-            if args.id_azimuths and link.freq and link.freq >= args.trim_at_hz:
+            #
+            # THREE THINGS THIS USED TO GET WRONG, and why the 0.006-0.054 deg response
+            # `fit_rotation` refused was not a weak response but NO response:
+            #
+            #  1. It sent `az=` and never `mag=`. `applyMixer` computes
+            #     `drop = MIX_GAIN * magSet * max(0, cos(az - COIL_AZ))`, and `magSet` is 0
+            #     unless something sends it -- `trim_mag` and `auto_mag_max` both default to
+            #     0, and `viz.mag_max` starts 0. So the drop was exactly zero and all four
+            #     coils sat at `collective` whatever azimuth was commanded. The dither
+            #     rotated a direction with no magnitude. `id_mag` is that magnitude.
+            #  2. It was gated on `link.freq`, the FIELD rate, which says nothing about
+            #     whether the robot left the pad. `ThrustVector` returns None below
+            #     AIRBORNE_MM because a seated robot's lateral acceleration is cancelled by
+            #     the pad reaction, so the samples being regressed were taken through a
+            #     sensor that was reporting its own refusal. Gated on `tv.valid` now: the
+            #     sensor itself says when its reading means anything.
+            #  3. The commanded azimuth never reached the CSV. `mag_cmd`/`az_cmd` were
+            #     assigned only under `if armed:`, and an identification run is disarmed, so
+            #     the `az` column was blank for the whole flight and
+            #     `fit_rotation_from_csv` dropped every row on `np.isfinite(az)`. It is set
+            #     here, where the command is actually issued.
+            #
+            # See theory.md 25. Nothing about the estimator changed; it was never given an
+            # input to estimate from.
+            id_active = bool(args.id_azimuths) and args.id_mag > 0.0 and tv.valid
+            if id_active:
                 k = int((now - t_start) / args.id_dwell_s) % len(args.id_azimuths)
                 if k != id_phase:
                     id_phase = k
                     link.send(f"az={args.id_azimuths[k]:.0f}")
+                    link.send(f"mag={args.id_mag:.3f}")
+                    # The closed loop's deadbands compare against what IT last sent. The
+                    # dither has just moved the actuator out from under them, so clear
+                    # them: otherwise the loop resumes believing a stale value stands and
+                    # withholds the send that would correct it.
+                    prev_az = prev_mag = None
+                # What the coils were actually told, for the CSV and hence for
+                # `fit_rotation_from_csv`'s segmentation.
+                az_cmd = f"{args.id_azimuths[id_phase]:.0f}"
+                mag_cmd = f"{args.id_mag:.3f}"
+            elif id_phase >= 0:
+                # Airborne window closed. Hand the actuator back and stop steering.
+                id_phase = -1
+                link.send("mag=0.000")
+                prev_az = prev_mag = None
 
             # Arm on the RAMP, not just on FLIGHT. Measured 2026-09-01: across five runs the
             # lateral loop never armed once, because arming waited for the firmware to
@@ -800,14 +839,19 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                 due = now - t_resend >= RESEND_S
                 if due:
                     t_resend = now
-                if (prev_az is None or due
-                        or abs((az - prev_az + 180.0) % 360.0 - 180.0) > AZ_DEADBAND_DEG):
-                    link.send(f"az={az:.0f}")
-                    prev_az = az
-                if prev_mag is None or due or abs(mag - prev_mag) > MAG_DEADBAND:
-                    link.send(f"mag={mag:.3f}")
-                    prev_mag = mag
-                mag_cmd, az_cmd = f"{mag:.3f}", f"{az:.0f}"
+                # The dither owns `az=`/`mag=` while it runs. Without this the loop
+                # overwrites the excitation every tick past the deadband -- and with
+                # `auto_mag_max` at its default 0 it overwrites it with `mag=0.000`,
+                # cancelling the identification input on the tick after it was sent.
+                if not id_active:
+                    if (prev_az is None or due
+                            or abs((az - prev_az + 180.0) % 360.0 - 180.0) > AZ_DEADBAND_DEG):
+                        link.send(f"az={az:.0f}")
+                        prev_az = az
+                    if prev_mag is None or due or abs(mag - prev_mag) > MAG_DEADBAND:
+                        link.send(f"mag={mag:.3f}")
+                        prev_mag = mag
+                    mag_cmd, az_cmd = f"{mag:.3f}", f"{az:.0f}"
                 if args.enable_freq_cmd:
                     if (prev_freq is None or due
                             or abs(f_field - prev_freq) > FREQ_DEADBAND_HZ):
@@ -925,6 +969,13 @@ class RunConfig:
     # estimator's 0.25 s window or every sample straddles two commands.
     id_azimuths: tuple = ()
     id_dwell_s: float = 0.4
+    #: Excitation magnitude for the dither. 0 disables it, as `trim_mag` does -- and 0 is
+    #: what it effectively was before 2026-09-08, because the dither sent no `mag=` at all
+    #: and `applyMixer`'s drop is proportional to `magSet`. 0.30 matches `mixer_sign.MAG`:
+    #: through `MIX_GAIN = 0.6` it is an 18% duty drop on the lead coil, and the seated
+    #: sweep measures a 20% drop moving the rotor axis 3-5 deg -- roughly 6x the 0.49 deg
+    #: floor `fit_rotation` refuses below. theory.md 25.
+    id_mag: float = 0.30
     # Lateral authority when auto-armed. STAYS 0 until the az sweep is run: `applyMixer`
     # steers by COIL_AZ, which main_flight.cpp labels a seed guess, and a wrong azimuth
     # map pushes lateral the wrong way -- the same class of bug as the inverted

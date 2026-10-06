@@ -10,6 +10,12 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "esp32-pmw-native",
+    "esp32-pmw-tools",
+]
+
 [[package]]
 name = "appnope"
 version = "0.1.4"
@@ -377,6 +383,11 @@ wheels = [
 ]
 
 [[package]]
+name = "esp32-pmw-native"
+version = "0.1.0"
+source = { editable = "controller/native" }
+
+[[package]]
 name = "esp32-pmw-tools"
 version = "0.1.0"
 source = { editable = "." }
@@ -397,8 +408,14 @@ dependencies = [
     { name = "viser" },
 ]
 
+[package.optional-dependencies]
+native = [
+    { name = "esp32-pmw-native" },
+]
+
 [package.metadata]
 requires-dist = [
+    { name = "esp32-pmw-native", marker = "extra == 'native'", editable = "controller/native" },
     { name = "ipykernel", specifier = ">=6.29" },
     { name = "ipywidgets", specifier = ">=8.1" },
     { name = "matplotlib", specifier = ">=3.8" },
@@ -414,6 +431,7 @@ requires-dist = [
     { name = "trimesh", specifier = ">=4.0" },
     { name = "viser", specifier = ">=1.1.0" },
 ]
+provides-extras = ["native"]
 
 [[package]]
 name = "executing"

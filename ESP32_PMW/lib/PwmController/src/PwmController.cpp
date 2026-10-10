@@ -403,6 +403,9 @@ void PwmController::enableCurrentSense(const gpio_num_t *adcPins,
                                          const float *sensPerVolt,
                                          float overcurrentTripA) {
     if (!adcPins || !sensPerVolt) return;
+    for (int i = 0; i < CurrentSense::N; i++) {
+        if (adcPins[i] == GPIO_NUM_NC) return;
+    }
     if (!_sense) _sense = new CurrentSense(adcPins, sensPerVolt);
     _sense->seed(); // coils must be OFF here (forceAllGatesLow + carriers at 0)
     _overcurrentTripA = overcurrentTripA;

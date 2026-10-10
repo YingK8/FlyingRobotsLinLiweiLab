@@ -44,6 +44,23 @@ const int PWM_FREQ = 20000;       // carrier (Hz); VNH5019 PWM pin, build with G
 // resistor. See reset_button.h.
 const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_14;
 
+#if SWIM_SETUP
+const gpio_num_t A_PWM_PIN = GPIO_NUM_14;
+const gpio_num_t B_PWM_PIN = GPIO_NUM_32;
+const gpio_num_t C_PWM_PIN = GPIO_NUM_33;
+const gpio_num_t D_PWM_PIN = GPIO_NUM_27;
+
+const gpio_num_t A_CARRIER_PIN = GPIO_NUM_26; // A0
+const gpio_num_t B_CARRIER_PIN = GPIO_NUM_25; // A1
+const gpio_num_t C_CARRIER_PIN = GPIO_NUM_4; // A5
+const gpio_num_t D_CARRIER_PIN = GPIO_NUM_13; 
+
+const gpio_num_t A_ADC_PIN = GPIO_NUM_NC;
+const gpio_num_t B_ADC_PIN = GPIO_NUM_NC; 
+const gpio_num_t C_ADC_PIN = GPIO_NUM_NC; 
+const gpio_num_t D_ADC_PIN = GPIO_NUM_NC; 
+
+#else
 const gpio_num_t A_PWM_PIN = GPIO_NUM_32;
 const gpio_num_t B_PWM_PIN = GPIO_NUM_25;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_18;

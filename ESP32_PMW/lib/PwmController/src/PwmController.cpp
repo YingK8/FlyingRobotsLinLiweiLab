@@ -411,11 +411,9 @@ void PwmController::enableCurrentSense(const gpio_num_t *adcPins,
                                          const float *sensPerVolt,
                                          float overcurrentTripA) {
     if (!adcPins || !sensPerVolt) return;
-    // No CS wiring on this rig (constants.h maps the ADC pins to GPIO_NUM_NC):
-    // stay off rather than filter analogRead(-1) zeros into a fake 0 A that the
-    // balance loop would then "correct" toward.
-    for (int i = 0; i < _numChannels && i < 4; i++)
+    for (int i = 0; i < CurrentSense::N; i++) {
         if (adcPins[i] == GPIO_NUM_NC) return;
+    }
     if (!_sense) _sense = new CurrentSense(adcPins, sensPerVolt);
     _sense->seed(); // coils must be OFF here (forceAllGatesLow + carriers at 0)
     _overcurrentTripA = overcurrentTripA;

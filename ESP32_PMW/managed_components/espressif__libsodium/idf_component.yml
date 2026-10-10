@@ -1,9 +1,0 @@
-dependencies:
-  idf: '>=4.2'
-description: libsodium port to ESP
-repository: git://github.com/espressif/idf-extra-components.git
-repository_info:
-  commit_sha: 1bc817a533f3e89ca7d96418ab2055e7a6b52f77
-  path: libsodium
-url: https://github.com/espressif/idf-extra-components/tree/master/libsodium
-version: 1.0.20~4

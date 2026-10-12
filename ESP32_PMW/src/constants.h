@@ -15,17 +15,13 @@ const int NUM_CHANNELS = 4;
 // rig builds with GATE_ACTIVE_LOW=0. Inputs take 0-100 kHz (datasheet fPWM).
 const int PWM_FREQ = 5000;        // carrier (Hz)
 
-// Not GPIO14: that is A_PWM_PIN in this map. GPIO_NUM_NC disables the button.
-const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_13;
+// GPIO_NUM_NC disables the reset button.
+const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_NC;
 const gpio_num_t A_PWM_PIN = GPIO_NUM_14;
 const gpio_num_t B_PWM_PIN = GPIO_NUM_32;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_33;
 const gpio_num_t D_PWM_PIN = GPIO_NUM_27;
 
-// Adafruit ESP32 Feather V2 labels: A0, A1, MISO, A5. NOT the A2/A3/A4 pins --
-// those are GPIO 34/39/36, which are input-only on the ESP32 and cannot drive
-// EN at all (see isOutputCapable below). Boot-strap pins 5/12/15 are avoided
-// too: a boot-time high on EN would energize a coil before setup() runs.
 const gpio_num_t A_CARRIER_PIN = GPIO_NUM_26;
 const gpio_num_t B_CARRIER_PIN = GPIO_NUM_25; 
 const gpio_num_t C_CARRIER_PIN = GPIO_NUM_21; 
@@ -39,28 +35,8 @@ const gpio_num_t D_ADC_PIN = GPIO_NUM_NC;
 #else
 const int PWM_FREQ = 20000;       // carrier (Hz); VNH5019 PWM pin, build with GATE_ACTIVE_LOW=1
 
-// Momentary reset button: wired to drive this pin to 3V3 when pressed (active
-// HIGH). GPIO14 has an internal pulldown, so it idles LOW with no external
-// resistor. See reset_button.h.
 const gpio_num_t RESET_BUTTON_PIN = GPIO_NUM_14;
 
-#if SWIM_SETUP
-const gpio_num_t A_PWM_PIN = GPIO_NUM_14;
-const gpio_num_t B_PWM_PIN = GPIO_NUM_32;
-const gpio_num_t C_PWM_PIN = GPIO_NUM_33;
-const gpio_num_t D_PWM_PIN = GPIO_NUM_27;
-
-const gpio_num_t A_CARRIER_PIN = GPIO_NUM_26; // A0
-const gpio_num_t B_CARRIER_PIN = GPIO_NUM_25; // A1
-const gpio_num_t C_CARRIER_PIN = GPIO_NUM_4; // A5
-const gpio_num_t D_CARRIER_PIN = GPIO_NUM_13; 
-
-const gpio_num_t A_ADC_PIN = GPIO_NUM_NC;
-const gpio_num_t B_ADC_PIN = GPIO_NUM_NC; 
-const gpio_num_t C_ADC_PIN = GPIO_NUM_NC; 
-const gpio_num_t D_ADC_PIN = GPIO_NUM_NC; 
-
-#else
 const gpio_num_t A_PWM_PIN = GPIO_NUM_32;
 const gpio_num_t B_PWM_PIN = GPIO_NUM_25;
 const gpio_num_t C_PWM_PIN = GPIO_NUM_18;

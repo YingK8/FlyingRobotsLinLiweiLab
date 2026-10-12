@@ -162,8 +162,7 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
       curFreq = to;
       called = true;
       pushedTask = true;
-    } else if (method == "addCarrierRampTask") {
-      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
+    } else if (method == "addCarrierRampTask") {      addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
                   TaskMode::POLYNOMIAL, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;

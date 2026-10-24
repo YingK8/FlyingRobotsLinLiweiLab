@@ -11,9 +11,11 @@ the energised seconds into the coil thermal model. See CLAUDE.md "Safety".
 from __future__ import annotations
 
 import re
+import json
 import sys
 import time
 from typing import NamedTuple
+from pathlib import Path
 
 import serial
 from serial.tools import list_ports
@@ -111,7 +113,7 @@ def parse_telemetry(line: str) -> Telemetry:
 
 
 class SerialComm:
-    MAX_LINE_LEN = 128  # overflow guard against garbage
+    MAX_LINE_LEN = 512  # RX event/telemetry lines; does not change the firmware command limit
 
     #: Host link speed. MUST match `src/constants.h`'s `SERIAL_BAUD` and
     #: `platformio.ini`'s `monitor_speed` -- there is no handshake and no ack, so a
@@ -121,14 +123,26 @@ class SerialComm:
     #: `theory.md` 19.13.
     BAUD = 921600
 
-    def __init__(self, port=None, baud=BAUD):
-        self.ser = serial.Serial()
-        self.ser.port = find_port(port)
-        self.ser.baudrate = baud
-        self.ser.timeout = 0  # non-blocking reads
-        self.ser.dtr = False  # keep IO0 high -> app boot, not bootloader/reset
-        self.ser.rts = False
-        self.ser.open()
+    def __init__(self, port=None, baud=BAUD, raw_log_path=None):
+        # Open exclusively BEFORE the port, so an old experiment cannot be overwritten.
+        # Tee at the sole reader: even a line returned during send() is preserved.
+        self._raw_log = None
+        if raw_log_path is not None:
+            path = Path(raw_log_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._raw_log = path.open("x", encoding="utf-8", buffering=1)
+        try:
+            self.ser = serial.Serial()
+            self.ser.port = find_port(port)
+            self.ser.baudrate = baud
+            self.ser.timeout = 0  # non-blocking reads
+            self.ser.dtr = False  # keep IO0 high -> app boot, not bootloader/reset
+            self.ser.rts = False
+            self.ser.open()
+        except BaseException:
+            if self._raw_log is not None:
+                self._raw_log.close()
+            raise
         self._rxbuf = ""
         self._drive_since = None
         self._drive_s = 0.0
@@ -137,6 +151,7 @@ class SerialComm:
         """EN-pulse reset via RTS."""
 
         self.ser.reset_input_buffer()
+        self._rxbuf = ""
         self.ser.rts = True
         time.sleep(pulse_s)
         self.ser.rts = False
@@ -169,6 +184,9 @@ class SerialComm:
             # as a live line -- and one telemetry line is CRLF-terminated, so this is
             # the common case, not the edge one.
             if line:
+                if getattr(self, "_raw_log", None) is not None:
+                    self._raw_log.write(json.dumps({"host_receive_s": time.monotonic(),
+                                                   "line": line}) + "\n")
                 return line
         if len(self._rxbuf) > self.MAX_LINE_LEN:
             self._rxbuf = ""    # overflow guard: garbage, not a line we lost
@@ -219,7 +237,15 @@ class SerialComm:
 
     def close(self):
         secs = self.energised_s()
-        self.ser.close()
+        try:
+            self.ser.close()
+        finally:
+            try:
+                if getattr(self, "_raw_log", None) is not None:
+                    self._raw_log.close()
+            except OSError as exc:
+                # Evidence write failures must not skip the existing thermal stamp.
+                print(f"[serial log] close failed: {exc}; raw log may be incomplete", file=sys.stderr)
         if secs > 0.5:
             try:
                 from ai.thermal import coil_thermal

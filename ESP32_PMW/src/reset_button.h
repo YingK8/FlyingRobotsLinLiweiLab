@@ -10,7 +10,8 @@
 //   press while active  -> BLOCK: every gate forced low, LED off, firmware halts
 //   press while blocked -> ESP.restart(): clean gates-low boot, LED back on,
 //                          experiment restarts (see driveBoot())
-// Shared via drive_common.h. The LED (GPIO2, onboard) is ON while active.
+// Shared via drive_common.h. The LED (GPIO2, onboard) is normally ON while active;
+// flight reserves it for START (dark in IDLE). The blocking button always turns it off.
 
 // Wait for one debounced press (HIGH held RESET_DEBOUNCE_MS) then release.
 inline void waitForPress() {

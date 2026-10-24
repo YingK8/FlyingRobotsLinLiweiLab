@@ -14,6 +14,8 @@ This is the only place a ramp is defined. Do not add a second path.
 
 from __future__ import annotations
 
+import math
+
 from controller.control import constants as C
 
 # Re-exported so a caller writing a profile does not have to import two modules to name a
@@ -96,11 +98,45 @@ def seq_lines(segs) -> list[str]:
             + ["seq=go"])
 
 
+def frequency_at(segs, t_s: float) -> float:
+    """Ideal planned frequency, not a measurement of firmware execution.
+
+    Mirrors PwmSequencer::applyCurve; kept here so offline experiment reports use
+    the same profile definition as the drive path. Outside the profile is undefined.
+    Firmware scheduling/rounding delays must be measured separately.
+    """
+    check(segs)
+    if not math.isfinite(t_s) or not 0 <= t_s <= duration_s(segs):
+        raise ValueError("time must be within the planned ramp")
+    elapsed = 0.0
+    for f0, f1, seconds, mode, k in segs:
+        if t_s <= elapsed + seconds:
+            u = max(0.0, min(1.0, (t_s - elapsed) / seconds))
+            if u in (0.0, 1.0):
+                shape = u
+            elif mode == EASE:
+                k = max(1.0, k) if not math.isnan(k) else 2.0
+                a, b = u ** k, (1 - u) ** k
+                shape = a / (a + b)
+            elif mode == EXP:
+                k = 2.0 if math.isnan(k) else k
+                shape = u if abs(k) < 1e-6 else math.expm1(k * u) / math.expm1(k)
+            else:
+                k = 1.0 if math.isnan(k) or k <= 0 else k
+                shape = u ** k
+            return float(f0 + (f1 - f0) * shape)
+        elapsed += seconds
+    return float(segs[-1][1])
+
+
 def demo() -> None:
     assert seq_lines(DEFAULT) == [
         "seq=clear", "seq=ramp:2:210:30000:1:2", "seq=go"], seq_lines(DEFAULT)
     assert label(DEFAULT) == "2->210Hz/30s/EASE/k2", label(DEFAULT)
     assert duration_s(DEFAULT) == C.RAMP_S
+    assert frequency_at(((0., 100., 1., POLY, 2.),), .5) == 25.
+    assert frequency_at(((0., 100., 1., EASE, 2.),), .25) == 10.
+    assert abs(frequency_at(((0., 100., 1., EXP, 2.),), .5) - 100 / (math.e + 1)) < 1e-10
 
     # theory.md 18.2: EASE peaks at k*df/T. 2*(210-2)/30 = 13.87 Hz/s, mid-ramp.
     assert abs(peak_rate(DEFAULT)[0] - 13.867) < 1e-3, peak_rate(DEFAULT)

@@ -298,7 +298,7 @@ class CommandLink:
     """Serial link to main_flight.cpp, or a printing stand-in for dry_run."""
 
     def __init__(self, port: str | None, dry_run: bool, log_path: str,
-                 takeoff_cmd: list | None = None):
+                 takeoff_cmd: list | None = None, raw_log_path=None, sync_start=False):
         # The sequencer profile: seq=clear / seq=ramp:... / seq=go. `PwmSequencer` takes
         # arbitrary ramp tasks, so a profile is data the host sends, not a shape compiled
         # into firmware behind a reflash -- and since 2026-08-31 it is the ONLY way to
@@ -311,6 +311,12 @@ class CommandLink:
         # afterwards means knowing to look, watching it means noticing.
         self.on_line = None
         self.dry = dry_run
+        self.sync_start = sync_start
+        self.sync_ready = False
+        self.sync_sent = False
+        self.capture_first = self.capture_last = None
+        if sync_start and (dry_run or raw_log_path is None):
+            raise ValueError("sync_start requires a real link and an exclusive raw log")
         # Line buffered: the serial port cannot be opened twice, so this log is the
         # only way to watch the link live. Block buffering makes `tail -f` lag by
         # thousands of telemetry lines, which is the same as not having it.
@@ -324,9 +330,28 @@ class CommandLink:
             # commands nothing -- which would make the rehearsal rehearse silence.
             self.state = FLIGHT
         else:
-            self.comm = SerialComm(port=port)
-            self.comm.reset_device()  # reboot firmware to IDLE
-            time.sleep(1.5)  # wait out the boot banner
+            self.comm = None
+            try:
+                self.comm = SerialComm(port=port, raw_log_path=raw_log_path)
+                self.comm.reset_device()  # reboot firmware to IDLE
+                time.sleep(1.5)  # wait out the boot banner
+                self.drain()
+                if sync_start and not self.sync_ready:
+                    raise ValueError("flight firmware did not report SYNC_READY v=1; no ramp sent")
+            except BaseException:
+                self.close()
+                raise
+
+    def note_capture(self, source_time):
+        """Called after a recorded camera tick; no pose/datum assumptions here."""
+        if self.capture_first is None:
+            self.capture_first = source_time
+        self.capture_last = source_time
+
+    def sync_can_start(self):
+        return not self.sync_start or (
+            self.sync_ready and not self.sync_sent and self.capture_first is not None
+            and self.capture_last - self.capture_first >= .25)
 
     def send_takeoff(self) -> None:
         """Send every line of the ramp profile, in order.
@@ -335,6 +360,10 @@ class CommandLink:
         chose. `test_panel` asserts the whole profile goes out on one tick for that reason.
         """
 
+        if not self.sync_can_start():
+            raise ValueError("START requires ready firmware and at least 0.25 s of recorded pre-roll; use a new run after START")
+        if self.sync_start:
+            self.sync_sent = True  # one attempt per recording, including rejected/lost commands
         for c in self.takeoff_cmd:
             self.send(c)
 
@@ -345,7 +374,23 @@ class CommandLink:
         if self.on_line:
             self.on_line(cmd, sent=True)
         if self.comm:
-            self.comm.handle_serial_comm(cmd)
+            line = self.comm.handle_serial_comm(cmd)
+            if line is not None:
+                self._receive(line)
+
+    def _receive(self, line):
+        self.log.write(f"[{time.monotonic():.3f}] <- {line}\n")
+        if line == "SYNC_READY v=1":
+            self.sync_ready = True
+        if self.on_line:
+            self.on_line(line)
+        t = parse_telemetry(line)
+        if t.state is not None:
+            self.state = t.state
+        if t.freq is not None:
+            self.freq = t.freq
+        if len(t.amps) == 4:
+            self.currents = t.amps
 
     def drain(self) -> None:
         """Log pending telemetry, keeping the last freq=, state= and I[A]: seen."""
@@ -355,16 +400,7 @@ class CommandLink:
         # A non-match leaves the last good value standing: lines arrive truncated
         # and interleaved, and a dropped field is not a reading of zero.
         while (line := self.comm.handle_serial_comm()) is not None:
-            self.log.write(f"[{time.monotonic():.3f}] <- {line}\n")
-            if self.on_line:
-                self.on_line(line)
-            t = parse_telemetry(line)
-            if t.state is not None:
-                self.state = t.state
-            if t.freq is not None:
-                self.freq = t.freq
-            if len(t.amps) == 4:
-                self.currents = t.amps
+            self._receive(line)
 
     def arm(self) -> None:
         """Reboot the firmware to IDLE and send the ramp profile again.
@@ -375,6 +411,11 @@ class CommandLink:
         from any state, OFF included.
         """
 
+        if self.sync_start:
+            # Construction already reset to IDLE. A second reset would break the
+            # single ESP clock in this recording and create an ambiguous START.
+            self.send_takeoff()
+            return
         if self.comm:
             self.comm.reset_device()
             time.sleep(1.5)          # wait out the boot banner, as at construction
@@ -520,6 +561,8 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
             # PRIME_FIXES in 75 ms and ramp on a single frame.
             fresh = n_tick != n_seen
             n_seen = n_tick
+            if fresh and tick.frames is not None:
+                link.note_capture(tick.t)
             if feed.done and not fresh:
                 break                 # replayed or stubbed source ran out
             link.drain()
@@ -670,7 +713,7 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                 # Consecutive, not cumulative: one fix followed by a dropout means the
                 # estimator has not settled, and the ramp is 40 s of coils either way.
                 fixes = fixes + 1 if tick.xyz_mm is not None else 0
-                if fixes >= PRIME_FIXES:
+                if fixes >= PRIME_FIXES and link.sync_can_start():
                     # The constructor already reset the board, so it is IDLE: no arm(),
                     # which would spend 1.5 s rebooting a board that just booted.
                     print(f"datum holding ({PRIME_FIXES} consecutive fixes) -- ramping")
@@ -1002,6 +1045,8 @@ class RunConfig:
     waypoints: str = None  # z waypoints; None reverts z to the LQR
     viz: bool = False  # live 3-D view; stub only -- source='camera' always builds one
     record: object = None  # film the run: a flight dir, or True for results/flights/
+    telemetry_path: str | None = None  # exclusive JSONL tee from the existing serial reader
+    sync_start: bool = False  # flight firmware v1 + recording + one START per run
     viz_port: int = 8080
 
     def __post_init__(self):
@@ -1014,6 +1059,9 @@ def fly(cfg=None, **kw):
     """Run the hover controller. ``fly(dry_run=True)`` is the stub-source dress rehearsal."""
 
     cfg = cfg or RunConfig(**kw)
+    if cfg.sync_start and (cfg.dry_run or cfg.source != "camera" or not cfg.record
+                           or not cfg.telemetry_path):
+        raise ValueError("sync_start requires source='camera', record, telemetry_path, and real flight firmware")
     os.makedirs(cfg.csv_dir, exist_ok=True)
     _thermal_gate(cfg)
 
@@ -1067,7 +1115,8 @@ def fly(cfg=None, **kw):
     # still clobbers, which is the caller's choice.
     log_path = cfg.log or os.path.join(cfg.csv_dir, stamp + ".log")
     link = CommandLink(cfg.port, cfg.dry_run, log_path,
-                       takeoff_cmd=ramp.seq_lines(cfg.segments))
+                       takeoff_cmd=ramp.seq_lines(cfg.segments),
+                       raw_log_path=cfg.telemetry_path, sync_start=cfg.sync_start)
     # The viewer the camera path built is reachable through the first tick; for the
     # stub path it is own_viz. On the camera path `stereo_frames` builds its viewer
     # inside the generator, so there is no reference here -- `controller_loop` wires it

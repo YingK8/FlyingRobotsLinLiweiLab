@@ -4590,3 +4590,34 @@ applies it, but **no control law commands per-coil phase**, deliberately: `theor
 about *compensating* the RLC, 18.18's 29 % asymmetry is an amplitude effect, and a control
 law around an actuator nobody has characterised is a guessed trim with more code. Chapter
 25's stage S is what would characterise it.
+
+## Recorded flight START
+
+The `flight` firmware reserves GPIO2's LED for an optical START: dark after setup,
+bright on the sole accepted `seq=go`, dark again on stop/landing completion. Other
+firmware keeps its existing boot/step indications. GPIO14 blocking still forces
+all gates low and the LED off. No GPIO map or alternative energising command is added.
+
+Inside `seq=go`, after compiling the existing ramp, `esp_timer_get_time()` brackets
+`digitalWrite(LED_PIN, HIGH)`, then `seq.start()` plus the first `applyMixer()`.
+Only after these calls does firmware print `SYNC_START v=1 led0=... led1=...
+drive0=... drive1=...`. These are software application brackets; the LED's optical
+delay, PWM latch/ISR timing, inter-channel skew and coil current response are not
+measured by them. Current `millis()` telemetry shares the same ESP timer, with
+millisecond quantisation and a 32-bit wrap; the offline association refuses wrap.
+
+Python `RunConfig.sync_start=True` requires recorded cameras and `telemetry_path`.
+The existing `SerialComm` reader tees complete RX lines to exclusive JSONL, including
+responses returned while sending. The runner checks `SYNC_READY v=1`, waits for at
+least 0.25 s of submitted camera source-time span, and permits one START attempt per
+recording. Encoder completion and optical visibility are checked offline, not
+inferred from this pre-roll gate. Manual takeoff uses the already-reset IDLE device;
+a second reset/start needs a new run. The thermal gate and shutdown path remain the
+existing runner's responsibility. Native `pmw_fly` and tilt are not adapted here.
+
+`LLM sync-start` requires one optical rise in each video and one device START in the
+raw log. It uses the GPIO-call midpoint as the device reference, preserves both call
+intervals and the log hash, and never substitutes host-send time. This estimates a
+single offset, not drift or a measured timing accuracy. See `LLM/START_SYNC.md` for
+capture and bench acceptance. Full per-update device-applied schedules and true
+current magnitude/phase remain separate work.

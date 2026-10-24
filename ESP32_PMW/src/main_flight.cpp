@@ -140,8 +140,19 @@ static bool cmdSeq(const String &arg) {
     if (seqN == 0) { Serial.println("!seq empty"); return false; }
     seq.compile(25, seqF0, INITIAL_DUTY, SPIN_PHASES);
     collective = SPINUP_THROTTLE;
+    // See controller/control/theory.md, "Recorded flight START". These are
+    // software call brackets, not measured optical/PWM/current onset times.
+    const int64_t led0 = esp_timer_get_time();
+    digitalWrite(LED_PIN, HIGH);
+    const int64_t led1 = esp_timer_get_time();
+    const int64_t drive0 = esp_timer_get_time();
     seq.start();
+    applyMixer(); // first carrier application, before any blocking serial output
+    const int64_t drive1 = esp_timer_get_time();
     state = SPINUP;
+    Serial.printf("SYNC_START v=1 led0=%lld led1=%lld drive0=%lld drive1=%lld\n",
+                  (long long)led0, (long long)led1,
+                  (long long)drive0, (long long)drive1);
     Serial.printf("seq go: %d segment(s) from %.2f Hz\n", seqN, seqF0);
     return true;
   }
@@ -237,7 +248,8 @@ static void dispatch(String cmd) {
   else if (key == "hover") { magSet = 0.0f;                                    ok = true; }
   else if (key == "land")  { if (state == SPINUP || state == FLIGHT) state = LANDING;
                              ok = true; }
-  else if (key == "stop")  { allCoilsOff(); state = OFF;                       ok = true; }
+  else if (key == "stop")  { allCoilsOff(); digitalWrite(LED_PIN, LOW);
+                            state = OFF; ok = true; }
   else if (key == "freq")   ok = cmdFreq(arg);
   else if (key == "seq")    ok = cmdSeq(arg);
   else if (key == "probe")  ok = cmdProbe(arg);
@@ -256,7 +268,7 @@ static void dispatch(String cmd) {
 }
 
 void setup() {
-  driveBoot();
+  driveBoot(false); // LED dark until the accepted seq=go, other environments unchanged
   ctl.begin(); // DC; the ramp sets the running frequency
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   ctl.enableCurrentSense(ADC_PINS, SENS, /*tripA*/ 0.0f);
@@ -266,6 +278,7 @@ void setup() {
   ctl.setPhaseTrim(COIL_F0_HZ, COIL_Q);
   Serial.printf("[flight] phase trim %s\n",
                 ctl.phaseTrimActive() ? "ARMED from drive_common.h" : "off (uncalibrated)");
+  Serial.println("SYNC_READY v=1");
 }
 
 // One DRIVE frame -> the coils. Reuses the state `duty=` already drives rather than
@@ -330,7 +343,10 @@ void loop() {
       static unsigned long lastStep = 0;
       if (millis() - lastStep >= 20) {
         lastStep = millis();
-        if (ctl.rampDownStep(2.0f)) { state = OFF; Serial.println("state=4 (OFF)"); }
+        if (ctl.rampDownStep(2.0f)) {
+          digitalWrite(LED_PIN, LOW);
+          state = OFF; Serial.println("state=4 (OFF)");
+        }
       }
       break;
     }

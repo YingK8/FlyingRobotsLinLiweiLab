@@ -34,10 +34,10 @@ static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
 static const float COIL_F0_HZ[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 static const float COIL_Q[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-// Boot: serial + force every gate LOW before any driver exists, LED on. Call
+// Boot: serial + force every gate LOW before any driver exists, optional LED on. Call
 // first in setup(), before ctl.begin(), so the coils can't glitch on and the
 // ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
-inline void driveBoot() {
+inline void driveBoot(bool activeLed = true) {
   // Before begin(), or it has no effect. The default RX FIFO is 256 bytes, and one
   // blocking 120-byte `driveTelemetry` printf at 921600 takes ~1.3 ms, during which ~120
   // more bytes arrive -- so a 200 Hz command stream plus one telemetry line already sits
@@ -50,7 +50,7 @@ inline void driveBoot() {
   forceAllGatesLow();
   initResetButton();
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH); // active indicator; goes LOW when blocked
+  digitalWrite(LED_PIN, activeLed ? HIGH : LOW); // flight reserves the rising edge for START
 
   if (!SPIFFS.begin(/*formatOnFail*/ false))
     Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");

@@ -298,7 +298,8 @@ class CommandLink:
     """Serial link to main_flight.cpp, or a printing stand-in for dry_run."""
 
     def __init__(self, port: str | None, dry_run: bool, log_path: str,
-                 takeoff_cmd: list | None = None, raw_log_path=None, sync_start=False):
+                 takeoff_cmd: list | None = None, raw_log_path=None, sync_start=False,
+                 require_ready=False):
         # The sequencer profile: seq=clear / seq=ramp:... / seq=go. `PwmSequencer` takes
         # arbitrary ramp tasks, so a profile is data the host sends, not a shape compiled
         # into firmware behind a reflash -- and since 2026-08-31 it is the ONLY way to
@@ -334,10 +335,25 @@ class CommandLink:
             try:
                 self.comm = SerialComm(port=port, raw_log_path=raw_log_path)
                 self.comm.reset_device()  # reboot firmware to IDLE
-                time.sleep(1.5)  # wait out the boot banner
-                self.drain()
-                if sync_start and not self.sync_ready:
-                    raise ValueError("flight firmware did not report SYNC_READY v=1; no ramp sent")
+                if sync_start or require_ready:
+                    # Boot includes a 1 s delay, ADC init and SPIFFS mount. A single
+                    # read after 1.5 s cannot distinguish a slow boot from no RX.
+                    # See theory.md, Recorded flight START / startup diagnosis.
+                    deadline = time.monotonic() + 5.0
+                    while True:
+                        self.drain()
+                        if self.sync_ready or time.monotonic() >= deadline:
+                            break
+                        time.sleep(.05)
+                    if not self.sync_ready:
+                        received = self.comm.rx_bytes
+                        detail = ('no serial bytes received' if received == 0 else
+                                  f'{received} serial bytes received but no complete READY line')
+                        raise ValueError('flight firmware did not report SYNC_READY v=1 within 5 s; '
+                                         f'{detail}; no ramp sent. Raw log: {raw_log_path}')
+                else:
+                    time.sleep(1.5)  # legacy non-sync startup
+                    self.drain()
             except BaseException:
                 self.close()
                 raise

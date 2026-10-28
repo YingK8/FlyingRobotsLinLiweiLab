@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -72,6 +72,8 @@ class CharucoSpec:
     name: str = ""
 
     def __post_init__(self):
+        if not all(math.isfinite(v) and v > 0 for v in (self.square_mm, self.marker_mm)):
+            raise ValueError("square and marker lengths must be finite and positive")
         if self.marker_mm >= self.square_mm:
             raise ValueError(f"marker {self.marker_mm} >= square {self.square_mm} mm")
 
@@ -710,14 +712,24 @@ def main(argv=None):
         default=None,
         help="the print's measured pitch, off the sheet's ruler bar",
     )
+    p.add_argument(
+        "--marker-mm", type=float, default=None,
+        help="marker outer edge in mm; overrides proportional scaling from --square-mm",
+    )
     p.add_argument("--no-flip", action="store_true", help="cameras are not inverted")
+    p.add_argument("--backend", default="auto", choices=["auto", "dshow", "msmf", "avfoundation", "v4l2"])
     p.add_argument("--rig", type=Path, default=RIG_PATH)
     p.add_argument("--out", type=Path, default=OUT_DIR)  # npz and figures
     a = p.parse_args(argv)
 
     spec = BOARDS[a.board] if a.board else make_spec()
-    if a.square_mm:  # a scaled print scales the markers with it
-        spec = spec.with_square_mm(a.square_mm)
+    try:
+        if a.square_mm is not None:  # absent an override, scale the whole print
+            spec = spec.with_square_mm(a.square_mm)
+        if a.marker_mm is not None:
+            spec = replace(spec, marker_mm=a.marker_mm)
+    except ValueError as exc:
+        p.error(str(exc))
     print(
         f"board {spec.name}: {spec.square_mm} mm squares, {spec.marker_mm} mm markers"
     )
@@ -731,6 +743,7 @@ def main(argv=None):
             rotate180=not a.no_flip,
             append=a.append,
             override=a.override,
+            backend=a.backend,
         )
 
     cal = run_calibration(spec, a.bag)

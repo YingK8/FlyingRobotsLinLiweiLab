@@ -255,7 +255,7 @@ def _overlay(spec, frames, looks, checks, footer):
 
 def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NATIVE_H,
             rotate180=True, max_skew_s=0.002, append=False, auto=True, rate_hz=10.0,
-            exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False):
+            exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False, backend=None):
     """Live preview that shoots by itself. SPACE pauses and resumes, q quits.
 
     The shutter tries a shot ``rate_hz`` times a second and saves the pair only if it clears
@@ -287,17 +287,17 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
         return out_dir
     # None means 'the ELPs, as of now' -- resolved here rather than by the caller,
     # because a caller that resolved it earlier is holding a stale list.
-    idx = (identify.elp_indices() if indices is None
+    idx = (identify.elp_indices(backend=backend) if indices is None
            else [indices] if isinstance(indices, int) else list(indices))
     tags = "AB"[:len(idx)]
     for tag in tags:
         (out_dir / tag).mkdir(parents=True, exist_ok=True)
 
     src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height,
-                               grayscale=True, rotate180=rotate180) if len(idx) == 1 else
+                               grayscale=True, rotate180=rotate180, backend=backend) if len(idx) == 1 else
            sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s,
                                width=width, height=height, grayscale=True,
-                               rotate180=rotate180))
+                               rotate180=rotate180, backend=backend))
 
     for cam, i in zip(getattr(src, "sources", [src]), idx):
         got = cam.actual

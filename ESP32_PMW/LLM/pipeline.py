@@ -90,6 +90,9 @@ def _plots(run, pose, plan, current, takeoff, window, source):
     axes[2].set_ylabel("Frequency (Hz)")
     axes[3].set_ylabel("Planned duty (%)")
     axes[4].set_ylabel("Planned phase (deg)")
+    if plan is not None and plan[[f"duty_{ch}_pct" for ch in "ABCD"]].isna().all().all():
+        for ax in axes[3:5]:
+            ax.text(.02, .5, "Channel settings unrecorded; firmware defaults, not measured current", transform=ax.transAxes)
     if current is not None and "t_s" in current:
         for ch in "ABCD":
             axes[5].plot(current.t_s, current[f"current_{ch}_A"], ".-", label=ch)

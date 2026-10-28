@@ -179,11 +179,12 @@ class MonoCamera(Capture):
         rotate180=False,
         backend=None,
     ):
-        if backend is None:
-            backend = default_backend()
+        backend = resolve_backend(backend)
         self._cap = cv2.VideoCapture(index, backend)
         if not self._cap.isOpened():
-            raise OSError(f"could not open camera index {index}")
+            self._cap.release()
+            raise OSError(f"could not open camera index {index} (backend={backend})")
+        self.backend = backend
 
         # FOURCC before frame size: on V4L2 the driver otherwise renegotiates to
         # YUYV, whose bandwidth cannot sustain high rates over USB 2. macOS
@@ -227,12 +228,14 @@ class MonoCamera(Capture):
             "width": int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
             "height": int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
             "fps": float(self._cap.get(cv2.CAP_PROP_FPS)),
+            "backend": self._cap.getBackendName(),
+            "fourcc": int(self._cap.get(cv2.CAP_PROP_FOURCC)),
         }
 
     def _grab_loop(self):
         while not self._stop.is_set():
             ok, frame = self._cap.read()
-            if not ok:
+            if not ok or frame is None or not frame.size:
                 time.sleep(0.001)
                 continue
             t = time.monotonic()
@@ -361,7 +364,18 @@ def open_stereo(specs, max_skew_s=None, **kw):
     Build a `StereoCamera` from two CLI-friendly source strings.
     """
 
-    return StereoCamera([open_source(s, **kw) for s in specs], max_skew_s=max_skew_s)
+    specs = list(specs)
+    if len(specs) < 2 or len(set(specs)) != len(specs):
+        raise ValueError("stereo requires at least two distinct sources")
+    opened = []
+    try:
+        for spec in specs:
+            opened.append(open_source(spec, **kw))
+        return StereoCamera(opened, max_skew_s=max_skew_s)
+    except BaseException:
+        for camera in opened:
+            camera.close()
+        raise
 
 
 def in_notebook():
@@ -471,10 +485,31 @@ def default_backend():
     The capture backend for this platform.
 
         Defined here because `MonoCamera` is where a backend is actually opened;
-        `elp.py` imports it rather than re-deriving the same two-way choice.
+        `elp.py` imports it rather than re-deriving platform dispatch.
     """
 
-    return cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else cv2.CAP_V4L2
+    if sys.platform == "darwin":
+        return cv2.CAP_AVFOUNDATION
+    if sys.platform == "win32":
+        return cv2.CAP_DSHOW
+    if sys.platform.startswith("linux"):
+        return cv2.CAP_V4L2
+    return cv2.CAP_ANY
+
+
+def resolve_backend(backend=None):
+    """One explicit backend for both cameras; never mix fallback APIs mid-pair."""
+    if backend is None or backend == "auto":
+        return default_backend()
+    if isinstance(backend, int):
+        return backend
+    names = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF,
+             "avfoundation": cv2.CAP_AVFOUNDATION, "v4l2": cv2.CAP_V4L2,
+             "any": cv2.CAP_ANY}
+    try:
+        return names[str(backend).lower()]
+    except KeyError:
+        raise ValueError(f"unknown camera backend: {backend}; choose auto or {list(names)}") from None
 
 
 def measure_fps(source, n=120):

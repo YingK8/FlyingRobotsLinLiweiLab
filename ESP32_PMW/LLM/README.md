@@ -2,6 +2,16 @@
 
 第一版把两路视频、输入 pattern、电流记录和轨迹放入同一次实验，输出统一时间轴、起飞事件、曲线和两路同步预览。现阶段在本地运行，不需要 LLM API。
 
+**统一入口：[record_experiment.ipynb](record_experiment.ipynb)**。按配置、ChArUco 标定/复用验证、AprilTag 装置定位、试录、pattern 选择、正式实验、后处理分块运行。操作与校准复用规则见 [WORKFLOW.md](WORKFLOW.md)，pattern 库见 [patterns/README.md](patterns/README.md)。前半只用相机；正式 block 显式连接 flight，Record 后另点 START 才发送 ramp。不要在录像内手按 reset。
+
+**仅同步联调：** notebook Block 0 选择 `MODE="sync_check"`，按 **0→1→4→6→7→8→9** 运行，跳过 2、3、5；保存白线参考、视频、pattern/CS/LED 曲线，暂不输出三维轨迹。详见 [联调步骤](WORKFLOW.md#先做同步联调暂缺-cadbearing)。
+
+**只查驱动、不录像：** 可选 Block 7B 使用 Block 7 下拉框当前选中的 pattern 与串口，不需要相机、ROI、标定或试录。关闭其他串口使用者后将 `RUN_DRIVE_ONLY=True`，单独运行；READY 后立即启动，到时/Interrupt 尝试 stop，保留串口原始日志。按用户要求，Block 7B/8 均不按温度模型等待冷却，由操作者判断是否继续。测试结束将代码开关改回 False。日志在 `runs/drive_only/`，不能作为 Block 9 视频同步输入；LED 仍由 flight 固件点亮。
+
+Windows 首次在 `ESP32_PMW` 运行 `uv sync --python 3.13`，然后在 VS Code/Jupyter 选择 `.venv/Scripts/python.exe`；Mac 使用 `.venv/bin/python`。不要复制旧电脑的 `.venv`，此流程不需要 `--extra native`。下面历史示例中的 `.venv/bin/python` 在 Windows 改用 `.venv\Scripts\python.exe`；多行 shell 续行符也应按本机终端调整，优先使用 notebook。
+
+2026-10-27：Python 采集后端已分为 macOS AVFoundation / Windows DirectShow / Linux V4L2；Windows 可用 `--backend msmf` 对照测试，两相机必须统一后端，并重新核对编号。自动探测只是能读取指定尺寸的候选，不提供 Windows USB 身份保证。`--fps` 现在同时请求相机帧率与设置播放 FPS，实际速率仍按源时间测量。录像选择 `avc1` 或 `mp4v` 并记录实际编码器；两路用同一编码方式。Windows 双机实拍与帧率验收尚未完成。
+
 **第一次上机先看 [实验操作清单](EXPERIMENT_CHECKLIST.md)**：从双相机预览、实物标定、垂锤参考，到同步联调和首个真实实验包，逐步操作并记录进度。
 
 Flight 的 LED START、现有 runner 原始串口日志和离线自动关联见 [START_SYNC.md](START_SYNC.md)。已实现并通过离线验证，仍待烧录与台架验收。
@@ -39,7 +49,7 @@ flowchart LR
 |---|---|---|
 | 双相机录制 | 复用 `controller.camera.record`，保存原始逐帧时间、掉帧标志 | 软件配对，不是硬件同步曝光 |
 | 相机标定 | 复用 `controller.calib.calibrate`；每个 run 保存快照 | 必须匹配相机顺序、分辨率、旋转和裁剪 |
-| 实验坐标 | 垂线 + bearing + 投影后的 camera A 右方向 | 相机移动后重新标定/建立参考 |
+| 实验坐标 | 垂线 + bearing + 投影后的 camera A 右方向 | 整体移动后验证双目参数并重建装置参考 |
 | LED 对时 | ROI 亮度、迟滞、连续帧确认，保留事件区间 | 单次脉冲只估 offset；两次可估平均时钟比例 |
 | XYZ 与轴方向 | 双目物理点对应三角化；位置与方向独立质量门限 | 轴端点必须可见且是同一物理点 |
 | 自动 CV | 复用现有 disc 分割，逐帧导出 ellipse center | 实验性位置代理；不输出有效的轴方向 |

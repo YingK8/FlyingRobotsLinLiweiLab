@@ -28,7 +28,7 @@ arguments the loader used to take, so the call site is just
 | `resolution_ms` | `25` | compile step resolution (ms) |
 | `initial_freq` | `0.0` | starting global drive frequency (Hz); `0` = DC/stationary until the schedule ramps it up |
 | `initial_duty` | `[50,50,50,50]` | starting commutation duty per channel (A,B,C,D) |
-| `direction` | `"CCW"` | seeds all four phases from the project `CW {270,90,180,0}` / `CCW {90,270,180,0}` convention |
+| `direction` | `"CCW"` | seeds A/B/C/D phases from the project `CW {0,90,180,270}` / `CCW {0,270,180,90}` convention (operator-confirmed 2026-10-28; opposite pairs A/C and B/D) |
 | `initial_phase` | (from `direction`) | optional explicit `float[4]` phase override, per channel |
 
 A bare top-level **array** is still accepted — it is treated as the `schedule`
@@ -58,7 +58,7 @@ are logged as a warning at load time but don't abort the rest of the file.
 | `addCarrierEaseRampTask` | `from`, `to`, `duration_ms`, `shape` | S-curve ramp of carrier duty, all channels identically |
 | `addCarrierExponentialRampTask` | `from`, `to`, `duration_ms`, `shape` | exponential ramp of carrier duty, all channels identically |
 | `addPhaseRampTask` | `channels`, `from`, `to`, `duration_ms`, `shape` | S-curve ramp of one channel's phase, others unchanged (`shape` optional) |
-| `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention |
+| `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{0,90,180,270}` or CCW `{0,270,180,90}` convention; reversing direction swaps B/D |
 | `activateChannels` | `mask` (0-15 bitmask), `value` (ON carrier duty %) | instantly set carrier duty to `value` for masked channels, `0` for the rest |
 | `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation; no hardware effect, does not advance the queue |
 

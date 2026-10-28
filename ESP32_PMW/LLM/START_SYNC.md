@@ -1,6 +1,14 @@
 # Flight START 对时：第一版
 
-更新：2026-10-23。支持 `flight` 固件 + Python `hover_controller_runner`。代码已接入；尚未烧录、实拍或验证光学/电流延迟。`tilt` 和独立 `pmw_fly` 尚未接入这套采集流程。
+更新：2026-10-26。支持 `flight` 固件 + Python `hover_controller_runner`。代码已接入；尚未记录烧录、实拍或光学/电流延迟验证结果。`tilt` 和独立 `pmw_fly` 尚未接入这套采集流程。
+
+2026-10-27：用户确认已刷 flight。新增统一 notebook 开环录制入口（见 WORKFLOW.md），同样复用 CommandLink/SerialComm 和 START 协议。2026-10-28 按用户要求去掉 LLM 的模型冷却等待，保留驱动时长记账。它不需要 live pose 才能录制，但正式测量仍要求相机/装置验证。用户烧录确认不代表光学/电流延迟已经实测。
+
+## 当前 LED 接线
+
+- 2026-10-26，用户确认：START LED 已接到板上的 **D2 和 GND**。
+- 当前固件定义为 `src/constants.h` 中的 `LED_PIN = 2`（GPIO2）；本次只记录接线，没有修改 GPIO map。板上 D2 与 GPIO2 的对应关系尚未独立核验。
+- 亮灭测试、两相机可见性及 START 时间对齐仍待实测确认。
 
 ## 工作方式
 
@@ -37,7 +45,7 @@ SYNC_START v=1 led0=10000000 led1=10000010 drive0=10000012 drive1=10000100
 - 使用匹配实际机位、相机顺序、分辨率和旋转的标定；世界坐标仍按静态参考单独建立。
 - 确认两台相机都能清晰看到同一个 START LED，位置与运动目标不重叠。
 - 需要先由实验者按既有流程刷入更新后的 **flight** 固件。这份文档与本轮验证没有执行 upload，也没有改变 GPIO map。
-- 保留原有供电、停止操作和 thermal 流程。这里没有新增串口驱动入口，不运行另一个相机 recorder 或串口 reader。
+- 保留原有供电、停止操作和串口记账。LLM notebook 不按估算温度等待冷却；其他 controller 的 thermal gate 不变。不同时运行另一个相机 recorder 或串口 reader。
 
 ## 采集配置
 

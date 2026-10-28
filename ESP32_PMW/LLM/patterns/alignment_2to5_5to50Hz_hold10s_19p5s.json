@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "name": "alignment_2to5_5to50Hz_hold10s_19p5s",
+  "trigger": "time",
+  "frequency_segments": [
+    [2.0, 5.0, 5.0, 1, 2.0],
+    [5.0, 50.0, 4.5, 1, 2.0],
+    [50.0, 50.0, 10.0, 0, 1.0]
+  ],
+  "channel_updates": [],
+  "channel_settings_status": "firmware_defaults_unrecorded",
+  "source_schedule": "results/alignment_rate/20260914_droneC_10hzs/050hz/tilt.json",
+  "source_commit": "863a6c00289c84930c9735f6181a87f98027ff63",
+  "note": "Frequency-only comparison: reproduces the archived 50 Hz ramp and pre-cut 3 s settle + 7 s hold. No A/C cut or old down-ramp; host sends stop at 19.5 s. Uses current flight firmware defaults; not an exact reproduction of the old firmware/startup/hardware conditions. Not yet bench validated on the present setup."
+}

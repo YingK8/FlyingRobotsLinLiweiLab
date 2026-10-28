@@ -82,6 +82,10 @@ def main(argv=None):
     p.add_argument("--indices", nargs=2, type=int)
     p.add_argument("--width", type=int, default=640); p.add_argument("--height", type=int, default=400)
     p.add_argument("--fps", type=float, default=120)
+    p.add_argument("--backend", default="auto", choices=["auto", "dshow", "msmf", "avfoundation", "v4l2"])
+    p.add_argument("--codec", default="auto", choices=["auto", "avc1", "mp4v"])
+    p.add_argument("--seconds", type=float)
+    p.add_argument("--start", action="store_true", help="record immediately; useful for timed notebook/CLI runs")
     p.add_argument("--no-flip", action="store_true")
     p = subs.add_parser("record-telemetry", help="passive serial receive; port must not be owned by a running controller")
     p.add_argument("path"); p.add_argument("--port", required=True); p.add_argument("--seconds", type=float, required=True)
@@ -138,7 +142,8 @@ def main(argv=None):
         elif args.command == "record":
             from LLM.capture import record_flight
             result = record_flight(args.out, indices=args.indices, width=args.width, height=args.height,
-                                   fps=args.fps, rotate180=not args.no_flip)
+                                   fps=args.fps, rotate180=not args.no_flip, backend=args.backend,
+                                   codec=args.codec, seconds=args.seconds, start=args.start)
         elif args.command == "record-telemetry":
             from LLM.telemetry import record_telemetry
             result = record_telemetry(args.path, args.port, args.seconds)

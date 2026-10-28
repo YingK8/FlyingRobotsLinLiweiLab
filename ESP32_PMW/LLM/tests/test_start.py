@@ -119,19 +119,27 @@ def run():
         reject(lambda: fly(RunConfig(sync_start=True, dry_run=True)))
 
         # Actual CommandLink construction/reset/READY path against a fake transport.
-        for ready in (False, True):
+        for ready_at in (None, 1.0, 3.0):
             port = Port()
+            elapsed = [0.0]
+            emitted = [False]
             def boot_wait(seconds):
-                if seconds >= 1 and ready:
+                elapsed[0] += seconds
+                if ready_at is not None and elapsed[0] >= ready_at and not emitted[0]:
                     port.chunks.append(b"SYNC_READY v=1\n")
+                    emitted[0] = True
             with patch("controller.control.link.serial.Serial", return_value=port), \
-                    patch("controller.control.hover_controller_runner.time.sleep", side_effect=boot_wait):
+                    patch("controller.control.hover_controller_runner.time.sleep", side_effect=boot_wait), \
+                    patch("controller.control.hover_controller_runner.time.monotonic", side_effect=lambda:elapsed[0]):
                 def construct():
-                    return CommandLink("fake", False, root / f"ready-{ready}.log",
-                                       raw_log_path=root / f"ready-{ready}.jsonl", sync_start=True)
-                if not ready:
-                    reject(construct)
+                    return CommandLink("fake", False, root / f"ready-{ready_at}.log",
+                                       raw_log_path=root / f"ready-{ready_at}.jsonl", sync_start=True)
+                if ready_at is None:
+                    try: construct()
+                    except ValueError as exc: assert 'no serial bytes received' in str(exc)
+                    else: raise AssertionError('Missing READY accepted')
                     assert port.closed and not port.sent
+                    assert elapsed[0] >= 5
                 else:
                     owner = construct()
                     assert owner.sync_ready and not port.sent
@@ -176,6 +184,18 @@ def run():
         assert result["input_sha256"]["raw/telemetry.jsonl"] == sha256(raw)
         assert result["hardware_sync_validated"] is False
         assert read_json(run_dir / "processed/sync.json") == result
+        # Inputs-only processing must succeed with no rig/world/pose and decode its plot.
+        from LLM.experiment import postprocess
+        manifest=read_json(run_dir/'manifest.json')
+        write_json(run_dir/'manifest.json',manifest | {'experiment_mode':'sync_check'})
+        write_json(run_dir/'pattern.json', {'schema_version':1,'trigger':'time',
+            'frequency_segments':[[2,20,1,0,1]],'channel_updates':[],
+            'channel_settings_status':'firmware_defaults_unrecorded'})
+        checked=postprocess(run_dir,[16,16,24,24],[16,16,24,24])
+        assert checked['status']=='sync_check_inputs_only'
+        assert checked['hardware_sync_validated'] is False
+        assert cv2.imread(checked['input_curves']) is not None
+        assert not (run_dir/'processed/pose.csv').exists()
         # A failed re-association must remove the old working clocks.
         log(raw, ["SYNC_READY v=1"])
         reject(lambda: synchronize_start(run_dir, [16, 16, 24, 24], [16, 16, 24, 24]))

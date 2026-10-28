@@ -253,3 +253,34 @@ cone decay can be taken only where the seconds after the cut are exact.
 | Retiming a pre-flag take (§1.7) | `ai/alignment/retime_takes.py` → `retime.json`, `*.forward_t.csv` |
 | Never-consumed slot, interleaved pairing (§1.6) | `native/src/tracker.h`, `pose/tracker.py` |
 | Capture on AVFoundation directly (§1.6) | `native/src/capture.h`, `capture_avf.mm` |
+
+## 1.8 Portable capture and notebook commissioning (2026-10-27)
+
+`LLM/record_experiment.ipynb` calls the same Python recorder as the CLI. Windows uses
+DirectShow by default, macOS AVFoundation, Linux V4L2. An explicit backend applies to
+both cameras; switching APIs requires re-probing and visually confirming A/B because
+indices are API-local. Windows probing checks delivered pixels and supplies no USB
+identity proof. The native AVFoundation C++ path is separate and remains macOS-specific.
+
+There are three rates: requested camera FPS, consumed-pair FPS, and fixed container
+playback FPS. `record(fps=...)` now forwards the request to the device; a driver may still
+negotiate another mode/rate. `frames.csv` remains the timing evidence, including queue
+losses via `written`. Raw video playback duration is not experiment duration. Notebook
+recording disables inline preview by default so JPEG display is not in the acquisition
+loop. Preview is bounded and releases its cameras before the recording cell.
+
+The encoder chooses one working MP4 codec for both cameras (avc1 then mp4v on macOS;
+mp4v then avc1 on Windows), records the choice and feeds BGR frames. An environment
+check writes and decodes two synthetic clips. Each queued frame owns a copy so callers
+may reuse image buffers. Only the encoder thread releases its writers; shutdown drains
+the queue before saving final errors and `encoder_finalized=true`. A shutdown timeout
+leaves false and does not race release against write. Failed pair opening releases every
+successfully opened source.
+
+`LLM.capture.audit_flight` decodes the full pair and checks written rows before reporting
+saved FPS, frame gaps and host timestamp skew. File integrity and sampling quality are
+separate: warnings do not disappear behind PASS. The 10% rate, three-period gap, and
+10 ms host-skew checks are initial commissioning diagnostics, not validated physical
+accuracy limits. The offline suite covers mocked Windows dispatch, failed pair opening,
+codec fallback, late encoder errors, Interrupt cleanup, and real synthetic codec round
+trips. No Windows camera, USB topology or physical timing result is implied.

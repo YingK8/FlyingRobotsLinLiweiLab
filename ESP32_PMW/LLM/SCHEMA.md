@@ -92,6 +92,10 @@ LED edges 保存最后一帧 dark 到首帧 high 的 source-time 区间，以中
 
 已有 recorder 记录 host read completion，不是传感器曝光时刻。两相机经过 LED 对时之后仍不是同时曝光；几何阶段和处理阶段都会拒绝过大的时间差，但真正的精度须根据运动速度实测。
 
+2026-10-27 recorder 元数据增量（兼容旧文件）：`requested` 保存请求尺寸、FPS 与传输 FOURCC；`cameras` 保存驱动报告的尺寸、FPS、backend、FOURCC；这些均不等于实测帧率。`fps` 为 MP4 固定播放 FPS，`fps_measured` 为写入器收到的配对速率（含 queue drops）；实际保存帧率从 written=1 的时间戳计算。`codec` 为两视频使用的编码器，`capture_counters` 区分 grabber 已取得帧与被覆盖的未消费帧，不能当作传感器掉帧计数。
+
+`encoder_finalized=false` 表示尚未完成/超时，导入拒绝；编码线程完成后保存最终 `encoder_errors`。`capture_error` 非空时拒绝导入，保留部分录像供检查。`capture_audit.json` 是可选的本地验收报告：`integrity=PASS` 只证明两路解码帧数和 written 行数一致，采样速率/帧间隔/host skew 另以数值和 warnings 报告，不证明曝光同步。
+
 ### Flight START v1
 
 原始 `telemetry.jsonl` 可以包含 `SYNC_READY v=1` 与 `SYNC_START v=1 led0=<us> led1=<us> drive0=<us> drive1=<us>`。四个整数是设备单调微秒，顺序为 LED GPIO 写入前/后、首次 sequencer + carrier 应用前/后；不代表实测光学或电流起始。
@@ -129,3 +133,12 @@ baseline 的 z 中位数与 1.4826×MAD 估计噪声，阈值取 max(min_height_
 两个预览视频都使用相同 60 Hz 实验时间网格，选最近源帧，超过最大偏差时显示黑帧/MISSING。frame_map 保留重复帧、源索引、原实验时间、相差秒数；预览播放的第 0 秒是裁剪窗口开始，不是实验零点。
 
 `package.json` 保存输入、处理产物、代码的 SHA-256。给下游模型时同时提供 source、quality 和事件说明，不只给曲线图片。
+
+## 统一工作流增量（2026-10-27）
+
+- session.json 固定 session_id 与 camera config。录像 meta 保存同一快照；trial_audit / capture_audit 的 input_sha256 绑定实际文件。正式导入不接受传入的旧报告，重新解码审核当前 take。
+- calibration/verification.json 是固定 K/dist/R/t 的新图检验。calibration/evidence/ 保存验证原图、装置参考图、布局副本；对应 *_evidence.json 映射原路径与包内路径。
+- fixture_layout.json 中四角是 decoded canonical TL/TR/BR/BL，含黑边；不能按图像左上排序。bearing_center_fixture_mm 与所有 tag 都属于同一个 fixture frame。world evidence 保存 T_camera_A_from_fixture、双目垂线像素与输入哈希。
+- frequency-only pattern 使用 channel_settings_status=firmware_defaults_unrecorded 和 channel_updates=[]；sample_pattern 输出未知 duty/phase 为 NaN。此状态不表示零 duty 或零 phase。只有这一模式可由新实验面板执行；旧四路计划仍为离线输入。
+- raw/host_commands.log 记录 host-send；raw/telemetry.jsonl 为唯一 reader tee；不能改名为 applied_commands。host_start_send_complete_s / host_scheduled_stop_send_complete_s 只是 host 发送完成时刻。
+- export/input_curves.png 与 input_curves.meta.json 可在 pose 前生成，status=inputs_only_not_full_pipeline；不是完整轨迹/起飞报告。

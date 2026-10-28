@@ -34,6 +34,8 @@ def validate_pattern(pattern):
             raise ValueError("unsupported shape: POLY k>0, EASE k>=1, all |k|<=50")
     ramp.check(segments)
     updates = pattern.get("channel_updates", [])
+    if not updates and pattern.get("channel_settings_status") == "firmware_defaults_unrecorded":
+        return pattern
     if not updates or updates[0].get("t_s") != 0:
         raise ValueError("channel_updates must define all four duties/phases at t_s=0")
     last = -1.0
@@ -63,7 +65,7 @@ def sample_pattern(pattern, sample_hz=100):
     for t in times:
         while update_index + 1 < len(updates) and updates[update_index + 1]["t_s"] <= t:
             update_index += 1
-        u = updates[update_index]
+        u = updates[update_index] if updates else {"duty_pct": [np.nan]*4, "phase_deg": [np.nan]*4}
         row = {"t_s": float(t), "frequency_hz": ramp.frequency_at(segs, float(t)), "provenance": "planned"}
         for i, ch in enumerate(CHANNELS):
             row[f"duty_{ch}_pct"] = u["duty_pct"][i]

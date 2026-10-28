@@ -6,10 +6,10 @@
 #include <strings.h> // strcasecmp
 
 namespace {
-// Project-wide rotation conventions (see lib/JsonPwmSequencer/README.md):
-// coil order is A,B,C,D.
-const float PHASES_CW[4] = {270.0f, 90.0f, 180.0f, 0.0f};
-const float PHASES_CCW[4] = {90.0f, 270.0f, 180.0f, 0.0f};
+// Operator-confirmed 2026-10-28, matching src/drive_common.h and README.md:
+// A,B,C,D order; A/C and B/D are opposite, direction reversal swaps B/D.
+const float PHASES_CW[4] = {0.0f, 90.0f, 180.0f, 270.0f};
+const float PHASES_CCW[4] = {0.0f, 270.0f, 180.0f, 90.0f};
 } // namespace
 
 JsonPwmSequencer::JsonPwmSequencer(PwmController *phaseCtrl)

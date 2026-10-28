@@ -66,6 +66,10 @@ def connected():
         messages, never to pick an index.
     """
 
+    if sys.platform != "darwin":
+        # No fabricated identity: indices from a Windows API are not USB serial IDs.
+        # Probe frames below, then let the operator confirm A/B by covering a lens.
+        return []
     proc = subprocess.run(
         ["system_profiler", "SPCameraDataType", "-json"],
         capture_output=True, text=True, timeout=60,
@@ -84,7 +88,7 @@ def elp_ids(name=None):
     return [d.unique_id for d in connected() if d.name == name]
 
 
-def elp_indices(n=2, max_index=None):
+def elp_indices(n=2, max_index=None, backend=None):
     """
     The OpenCV indices that deliver the ELP's native mode, in probe order.
 
@@ -100,14 +104,15 @@ def elp_indices(n=2, max_index=None):
 
     want = native_mode()
     if max_index is None:
-        max_index = len(connected())
+        max_index = len(connected()) if sys.platform == "darwin" else 6
     found = []
     for i in range(max_index):
         cam = None
         try:
-            cam = sources.MonoCamera(index=i, width=want[0], height=want[1], grayscale=True)
-            got = cam.actual
-            if (got["width"], got["height"]) == want:
+            cam = sources.MonoCamera(index=i, width=want[0], height=want[1],
+                                     grayscale=True, backend=backend)
+            item = cam.read()
+            if item is not None and item[1].shape[:2] == (want[1], want[0]):
                 found.append(i)
         except Exception:
             continue                              # index absent, or held by something else

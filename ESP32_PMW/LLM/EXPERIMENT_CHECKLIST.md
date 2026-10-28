@@ -1,6 +1,10 @@
 # LLM 实验操作清单
 
-更新：2026-10-23。面向第一次上机采集；方框表示需要实际完成的事项，不能把已有代码或合成 demo 当作实测完成。Flight START 的代码与用法见 [START_SYNC.md](START_SYNC.md)，尚未进行硬件验收。
+2026-10-27 新增 Mac / Windows 共用的[逐格录像 notebook](record_experiment.ipynb)：先做环境检查、双机预览和 10 秒录像验收，再正式采集。它复用下面的录制/标定接口，不替代物理参考、START 或轨迹验收。下文保留原 Mac 操作记录；Windows 不照抄旧索引或 `.venv/bin/python` 路径。
+
+更新：2026-10-26。面向第一次上机采集；方框表示需要实际完成的事项，不能把已有代码或合成 demo 当作实测完成。Flight START 的代码与用法见 [START_SYNC.md](START_SYNC.md)，尚未进行硬件验收。
+
+当前操作者已确认双相机预览可用，实物标签 A 对应当前索引 1，B 对应当前索引 0，因此本次使用 `--indices 1 0`。拔插后重新核对实物标签与索引。LED 接线已记录在 START_SYNC.md；相机标定阶段不需要启动线圈、LED 或使用垂线。
 
 **你现在先做第 1–4 步：看清双相机画面 → 固定机位和标定 → 拍静态重力参考 → 建立实验坐标。** 第一阶段的成果是一组可追溯的静态参考数据，不需要启动线圈，也不需要等电流 phase 采集做好。
 
@@ -28,10 +32,10 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 ## 1. 只打开两个相机，确认画面
 
 ```bash
-.venv/bin/python -m controller.camera.record --mode 1280x800
+.venv/bin/python -m controller.camera.record --indices 1 0 --mode 1280x800
 ```
 
-程序自动寻找两台 ELP；先并排预览。点击预览窗口后，空格开始/停止录像，`q` 退出。现在可以只看画面。
+按当前 A/B 标签顺序并排预览。点击预览窗口后，空格开始/停止录像，`q` 退出。现在可以只看画面。
 
 - [ ] 两台相机都能看到 bearing、robot 及预期飞行范围。
 - [ ] 确认焦点和照明：robot 的可追踪位置、轴端点是否看得清，画面是否过暗、过曝或模糊。
@@ -52,6 +56,8 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 
 ## 2. 为当前机位做相机标定
 
+两台相机已刚性固定在同一个 holder 时，可以先在便于摆板的位置标定，再整体搬到实验位置。先按预计工作距离调好 W/T 变焦、N/∞ 对焦和光圈，锁定相机相对位姿。整体搬动后核对标定；在最终位置才建立 bearing/重力坐标。单独转动相机、改变间距、变焦或对焦后需重新评估并通常重做标定。
+
 ### 2.1 建立静态参考 run，准备标定板
 
 ```bash
@@ -60,24 +66,37 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 
 填写该目录 `manifest.json` 的 `initial_conditions`：robot、coil setup、bearing 的标识，以及机位、A/B、分辨率和旋转选择。尚未知的项目保留未知，不填写假值。
 
-- [ ] 选择与实物一致的板型。已有 PDF 位于 `controller/calib/assets/`：`charuco_9x6_6mm.pdf`、`charuco_4x12_6mm.pdf`、`charuco_9x6_letter.pdf`。
-- [ ] 新打印时选实际尺寸/100%，贴在平整硬板上。
-- [ ] 测实际单格边长；也可测多个完整格距的总长再除以格数。把板型、原始测量和换算值写入 manifest 的 notes。
+- [ ] 选择与实物一致的板型。现有 PDF 可直接打印，不需要另行下载随机板型：
+
+  | PDF | 图案设计尺寸（不含纸张留白） | `--board` |
+  |---|---|---|
+  | [较大 9×6 板](../controller/calib/assets/charuco_9x6_letter.pdf) | 约 150×100 mm，单格约 16.67 mm | `9x6_letter` |
+  | [小格 9×6 板](../controller/calib/assets/charuco_9x6_6mm.pdf) | 约 54×36 mm，单格约 6 mm | `9x6_6mm` |
+  | [窄长 4×12 板](../controller/calib/assets/charuco_4x12_6mm.pdf) | 约 24×72 mm，单格约 6 mm | `4x12_6mm` |
+
+  可先用较大 9×6 板，前提是在预计工作距离能放入两台相机的共同视野，并能改变倾角。视野较窄时使用小格版；不要为了把板塞进画面，在已经选好实验焦距后随意改变 W/T。这里是 ChArUco 棋盘，不能用装置上的零散 AprilTag 直接替代。
+- [ ] 新打印时选 Letter 纸、实际尺寸/100%，关闭 Fit to page/缩放适应；打印 PDF 原件，不打印预览截图。保留图案周围白边，平整贴在硬板上，避免褶皱、翘曲和覆盖图案的反光胶带。
+- [ ] 测实际单格边长：9×6 板可量棋盘图案外边界宽 W、高 H（不含白边），分别计算 W/9、H/6。两者应在测量误差内相符；明显不符时检查测量、打印拉伸和贴板变形，不靠取平均掩盖。单格是棋盘格，不是格内 marker。把板型、原始测量和换算值写入 manifest 的 notes。
+
+2026-10-26：已渲染检查较大和小格 9×6 PDF，并用现有板型检测器在渲染图上各检出 40/40 ChArUco 角点、27 个 marker。这只验证文件与程序匹配，不代表实物打印尺寸或相机标定已通过。
 
 **不要照抄历史的 5.95 mm，也不要只相信文件名中的 6 mm。** 当前 JSON 的 `square_mm_measured` 标志不能代替你对这张实物板的测量记录。
 
 ### 2.2 采集并求解
 
-下面按 9×6、约 6 mm 格子的板给出命令；若你用的是另一个 PDF，必须相应更改 `--board`。
+当前进度（2026-10-26）：下面 setup_001 示例保留为首次采集流程；两轮搬动前后图片已分离，当前通过的软件标定在 setup_002。继续当前实验时使用 setup_002，详见 [第二轮审核](CALIBRATION_APPEND_REVIEW_2026-10-26.md)，不要向混合批 setup_001 继续追加。
+
+2026-10-26 当前实物板：9×6 ChArUco、DICT_4X4_100；square 使用背面标注的 16.52 mm，marker 按用户最新选择使用 12.39 mm。这是按原设计比例计算的 12.5 × 16.52 / 16.667 ≈ 12.39 mm，假设实物采用同一设计且等比例缩放，未独立复测；替代此前选择的 12.22 mm。下面命令明确指定两项尺寸；换板时应重新填写，不能沿用这组数值。激活 `.venv` 后可把 `.venv/bin/python` 写成 `python`。
 
 ```bash
 .venv/bin/python -m controller.calib.calibrate \
   --bag LLM/runs/setup_001/raw/calibration_images \
   --rig LLM/runs/setup_001/calibration/stereo_rig.json \
   --out LLM/runs/setup_001/calibration/diagnostics \
-  --indices 实际A索引 实际B索引 \
-  --board 9x6_6mm \
-  --square-mm 实测单格毫米
+  --indices 1 0 \
+  --board 9x6_letter \
+  --square-mm 16.52 \
+  --marker-mm 12.39
 ```
 
 若第 1 步选了不旋转，这里加 `--no-flip`。本入口默认采集 1280×800，不需要添加 `--mode`。
@@ -86,6 +105,8 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 2. 改变板的位置、深度和倾角，覆盖 robot 将活动的区域；保证有足够多两台相机同时看见的姿态。
 3. 看界面提示补缺少的角度和区域。不要拿着板一直晃动，也不要只在一个平面内平移。
 4. 空格是暂停/继续自动拍照，`q` 结束采集并开始求解。这里空格的作用与录像不同。
+
+首次可采集约 20–30 个不同且合格的双目姿态作为操作目标，不是程序保证通过的数量。覆盖中央、左右、上下，加入近/中/远距离和左右、上下倾斜；每次摆放后等 saved pair 数增加再换姿态。一直不增加时查看 waiting on 的提示，不要只在同一姿态等待。最终以验收结果和误差/覆盖检查为准。
 
 - [ ] 求解显示 `PASS overall`，写出本次 `stereo_rig.json`。
 - [ ] 查看 diagnostics 中的覆盖范围、重投影和去畸变图；检查是否存在明显异常。
@@ -228,9 +249,9 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 
 | 项目 | 状态/结果 | 数据路径或备注 |
 |---|---|---|
-| 双相机预览 | 待实测 | |
-| 物理 A/B、模式与旋转确认 | 待实测 | |
-| 标定板实物尺寸与标定通过 | 待实测 | |
+| 双相机预览 | 用户已提供双路预览画面 | 2026-10-26；尚不代表标定通过 |
+| 物理 A/B、模式与旋转确认 | A=当前索引 1、B=当前索引 0 已由用户指定；旋转仍需保持一致 | 拔插后重新核对；标定采集 1280×800 |
+| 标定板实物尺寸与标定通过 | 第二轮独立计算 9/13 pairs，RMS 0.4041 px，软件验收通过 | 当前使用 setup_002；16.52 / 12.39 mm，独立量尺验证待做；[第二轮审核](CALIBRATION_APPEND_REVIEW_2026-10-26.md) |
 | 静态参考录像 | 待实测 | |
 | world_frame 与尺度/方向核对 | 待实测 | |
 | flight START 与 Python 串口日志接入 | 已实现，待实测 | START_SYNC.md；完整 device-applied 快照仍待实现 |

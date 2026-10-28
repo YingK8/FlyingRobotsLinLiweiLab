@@ -167,7 +167,7 @@ def build_rig(K_a, dist_a, K_b, dist_b, T_ba, spec, image_size,
                 "axis_separation_deg are frame-independent and valid; tilt_seen_deg and any "
                 "elevation reading are not, until the rig is rebased onto the drone disk "
                 "frame at integration with the pose estimator."),
-            "square_mm_measured": spec.square_mm != SQUARE_MM,
+            "square_mm_measured": False,  # Numeric override is not evidence of a measurement.
             **spec.summary(),
             "image_size": list(image_size),
             "n_pairs": stereo_info["n_pairs"],

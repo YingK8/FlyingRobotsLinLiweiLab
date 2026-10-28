@@ -10,15 +10,15 @@ so here everything is written and the pose pipeline picks it apart afterwards.
 Two consequences follow from that, and they are the whole design:
 
 * **Lossy is fine here, and only here.** Nothing detects a sub-pixel corner in this footage.
-  The pose pipeline segments a bright rim against a dark scene, which survives H.264 at a
-  sane bitrate. Calibration is the opposite case and pays for FFV1.
+  The pose pipeline segments a bright rim against a dark scene, recorded with H.264 or MPEG-4 Part 2. Compression quality still needs
+  checking on the real target. Calibration stores lossless PNG photographs.
 * **The two cameras do not fire together**, so frame *i* of ``A.mp4`` and ``B.mp4`` are a
   few milliseconds apart. `frames.csv` records each camera's own capture time, and
   `stereo.fuse` uses them to move both views to a common instant (`pose/theory.md`
   section 17). Without that file the videos are just two videos.
 
-Encoding runs on its own thread: H.264 costs a few milliseconds a frame and the read loop
-is otherwise idle waiting for the next pair.
+Encoding runs on its own thread behind a bounded queue; dropped pairs remain in
+frames.csv with written=0. See camera/theory.md section 1.8 for portable capture.
 
 Each take is its own **flight**: SPACE starts one, SPACE stops it, and it lands in a dated
 folder of its own with a directory per camera. Takes are not comparable -- a different trim,
@@ -41,6 +41,7 @@ import queue
 import re
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -54,8 +55,6 @@ from controller.camera import identify
 from controller.camera import sources
 
 DEFAULT_DIR = HERE.parents[1] / "results" / "flights"
-FOURCC = "avc1"          # H.264 in an .mp4. See the module docstring for why lossy is
-                         # acceptable in this file and nowhere near calibration.
 QUEUE_DEPTH = 64         # bounded: an encoder that falls behind must drop and say so,
                          # not grow until the machine swaps
 
@@ -118,7 +117,14 @@ class FlightWriter:
         per frame costs nothing and survives a kill -9.
     """
 
-    def __init__(self, out_dir=DEFAULT_DIR, tags="AB", fps=120.0, meta=None):
+    def __init__(self, out_dir=DEFAULT_DIR, tags="AB", fps=120.0, meta=None, codec="auto"):
+        if not np.isfinite(fps) or fps <= 0:
+            raise ValueError("video fps must be positive and finite")
+        if codec not in ("auto", "avc1", "mp4v"):
+            raise ValueError("codec must be auto, avc1 or mp4v")
+        self.codec_request, self.codec = codec, None
+        self._finish = threading.Event()
+        self._closed = False
         self.dir = new_flight(out_dir, tags, take_suffix((meta or {}).get("note")))
         self.tags, self.fps, self.meta = tags, float(fps), dict(meta or {})
         self.n, self.dropped, self.errors = 0, 0, 0
@@ -138,47 +144,73 @@ class FlightWriter:
         self._thread.start()
 
     def _run(self):
-        while True:
-            job = self._work.get()
+        try:
+            while True:
+                try:
+                    job = self._work.get(timeout=0.1)
+                except queue.Empty:
+                    if self._finish.is_set():
+                        break
+                    continue
+                try:
+                    for w, f in job:
+                        # BGR works with the Windows MP4 encoders as well as macOS.
+                        w.write(cv2.cvtColor(f, cv2.COLOR_GRAY2BGR) if f.ndim == 2 else f)
+                except Exception as e:
+                    self.errors += 1
+                    if self.errors == 1:
+                        print(f"encoder error (take requires validation): {e}")
+                finally:
+                    self._work.task_done()
+        finally:
+            # Only this thread releases writers, after its queue has drained.
+            for w in self.writers or []:
+                try:
+                    w.release()
+                except Exception:
+                    self.errors += 1
+            self._released = True
+
+    def _open_writers(self, size):
+        candidates = (["mp4v", "avc1"] if sys.platform == "win32" else ["avc1", "mp4v"])
+        if self.codec_request != "auto":
+            candidates = [self.codec_request]
+        paths = [self.dir / tag / f"{tag}.mp4" for tag in self.tags]
+        for codec in candidates:
+            writers = []
             try:
-                if job is None:
-                    # Finalise HERE, on the thread that wrote every frame. close() used to
-                    # release from the caller's thread after a 30 s join timeout, so on a
-                    # long take the queue was still draining and release() ran CONCURRENTLY
-                    # with write() -- which leaves mdat unpatched and no moov, i.e. an
-                    # unplayable file. Measured 2026-09-01: 11 of 13 takes were lost that
-                    # way, and the survivors were the short ones.
-                    for w in self.writers or []:
-                        try:
-                            w.release()
-                        except Exception as e:  # noqa: BLE001
-                            self.errors += 1
-                            print(f"  release failed (file unplayable): {e}")
-                    self._released = True
-                    return
-                for w, f in job:
-                    w.write(f)
-            except Exception as e:  # noqa: BLE001
-                self.errors += 1
-                if self.errors == 1:
-                    print(f"  encoder error (frames will be missing): {e}")
-            finally:
-                self._work.task_done()
+                for path in paths:
+                    writers.append(cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*codec),
+                                                   self.fps, size, True))
+                if all(w.isOpened() for w in writers):
+                    self.codec = codec
+                    return writers
+            except cv2.error:
+                pass
+            for w in writers:
+                w.release()
+            for path in paths:
+                path.unlink(missing_ok=True)
+        raise OSError(f"no working MP4 writer among {candidates}; run the notebook codec check")
 
     def add(self, t, frames, stamps=None, skew=0.0):
-        """One stereo read. Never raises and never blocks: a flight outranks its film."""
+        """Queue a stereo read without waiting for space; reject invalid frames/encoders."""
 
+        if self._closed:
+            raise RuntimeError("recorder is already closed")
+        if len(frames) != len(self.tags) or not frames:
+            raise ValueError("one frame per camera is required")
+        h, w = frames[0].shape[:2]
+        if any(f.shape[:2] != (h, w) for f in frames):
+            raise ValueError("camera frame dimensions differ")
+        if self.size is not None and self.size != [w, h]:
+            raise ValueError("frame dimensions changed during recording")
         if self.writers is None:
-            h, w = frames[0].shape[:2]
             self.size = [w, h]
-            self.writers = [cv2.VideoWriter(str(self.dir / tag / f"{tag}.mp4"),
-                                            cv2.VideoWriter_fourcc(*FOURCC), self.fps,
-                                            (w, h), False) for tag in self.tags]
-            if not all(x.isOpened() for x in self.writers):
-                raise OSError(f"no {FOURCC} writer on this build")
+            self.writers = self._open_writers((w, h))
         written = 1
         try:
-            self._work.put_nowait(list(zip(self.writers, frames)))
+            self._work.put_nowait(list(zip(self.writers, [f.copy() for f in frames])))
         except queue.Full:
             self.dropped += 1
             written = 0
@@ -197,50 +229,29 @@ class FlightWriter:
         return (self.n - 1) / span if self.n > 1 and span > 0 else 0.0
 
     def close(self, stats=None):
-        """
-        Finalise the take: what it means first, then flush the encoder.
-
-            Order matters, and it is the opposite of the obvious one. This runs from a
-            generator's `finally`, which can be executing while a `SystemExit` is
-            already propagating -- measured, not theorised -- so anything after a slow
-            step may simply never happen. `meta.json` is a few bytes and is what turns
-            two mp4s into a take, so it is written *before* the encoder flush and the
-            thread join that can be cut short.
-        """
-
+        """Drain and finalise before claiming success; repeated close is harmless."""
+        if self._closed:
+            return self.dir
+        self._closed = True
         self._csv.close()
-        (self.dir / "meta.json").write_text(json.dumps(
-            {**self.meta, "mode": self.size, "fps": self.fps,
-             # What the take ACTUALLY ran at. `fps` above is the mp4 header, fixed before
-             # the first frame arrived; this is measured, and the two disagreeing is
-             # normal -- the camera is not asked for a rate and delivers its mode's max.
-             "fps_measured": round(self.measured_fps(), 2), "n_frames": self.n,
-             "dropped": self.dropped, "encoder_errors": self.errors,
-             "skew": stats or {},
-             "created": datetime.now().isoformat(timespec="seconds")}, indent=2))
-
-        # Never `queue.join()`: it waits on a counter only the worker decrements, so a
-        # worker that died hangs the caller. Sentinel plus a bounded thread join.
-        try:
-            self._work.put(None, timeout=5.0)
-        except queue.Full:
-            pass
-        # Generous: the encoder has to drain the whole queue before it can finalise, and
-        # cutting it short is what corrupted the file rather than merely truncating it.
-        self._thread.join(timeout=120.0)
-        if not self._released:
-            # The worker died or never saw the sentinel. Release here as a last resort --
-            # it is not safe if the worker is still writing, but an unreleased writer is
-            # certainly unplayable, so this can only improve matters.
-            print("  encoder did not finalise; releasing from the caller as a fallback")
-            for w in self.writers or []:
-                w.release()
-        bad = [w.name for w in sorted(self.dir.glob("*/*.mp4"))
-               if b"moov" not in w.read_bytes()[-1 << 20:]]
-        if bad:
-            print(f"  UNPLAYABLE, no moov atom: {', '.join(bad)} -- this take is lost")
-        print(f"  {self.n} frame(s) -> {self.dir}"
-              + (f", {self.dropped} dropped" if self.dropped else ""))
+        metadata = {**self.meta, "mode": self.size, "fps": self.fps,
+                    "fps_semantics": "constant_rate_playback_only",
+                    "timestamp_semantics": "host_read_completion_not_exposure",
+                    "codec": self.codec, "fps_measured": round(self.measured_fps(), 2),
+                    "n_frames": self.n, "dropped": self.dropped,
+                    "encoder_errors": self.errors, "encoder_finalized": False,
+                    "skew": stats or {}, "created": datetime.now().isoformat(timespec="seconds")}
+        path = self.dir / "meta.json"
+        path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        self._finish.set()
+        self._thread.join(timeout=60.0)
+        if self._thread.is_alive() or not self._released:
+            # Do not race release() against a still-running native encoder.
+            raise RuntimeError(f"encoder did not finalise; incomplete take: {self.dir}")
+        metadata.update(encoder_errors=self.errors, encoder_finalized=True)
+        path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        print(f"  {self.n} capture pairs -> {self.dir}; {self.dropped} queue drops; "
+              f"capture {self.measured_fps():.1f} Hz, playback {self.fps:g} FPS ({self.codec})")
         return self.dir
 
 
@@ -258,94 +269,97 @@ def latest_flight(root=DEFAULT_DIR):
 
 
 def record(out_dir=DEFAULT_DIR, indices=None, width=1280, height=800, fps=120.0,
-           rotate180=True, max_skew_s=None, preview=True, start=False, note=None):
-    """Live preview; SPACE starts and stops recording, q quits. Returns the directory.
+           rotate180=True, max_skew_s=None, preview=True, start=False, note=None,
+           backend=None, codec="auto", seconds=None):
+    """Shared CLI/notebook recorder. Timed cells or Interrupt both close the take.
 
-    ``note`` is free text written into ``meta.json`` verbatim -- the operator's own
-    record of what this take was measuring (e.g. "150 Hz hold, ch0 carrier 30%"),
-    which the folder timestamp cannot say.
-
-    ``start=True`` rolls from the first frame and needs no key, which is the only way to
-    shoot from a notebook cell: `sources.Sink.show` returns -1 inline, so SPACE never
-    arrives and the window path's start/stop is unreachable there. Stop by interrupting
-    the kernel -- the take is closed in the `finally` either way.
-
-    ``max_skew_s`` is ``None`` on purpose. Re-reading until a pair lands close together is
-    the calibration trick, and it costs seven frames out of eight; a flight is recorded
-    once and cannot be re-shot, so every pair is kept and the skew is written down instead.
+    fps is requested from the camera AND used as the container playback rate; neither
+    establishes actual exposure times. Preserve frames.csv for analysis (theory.md section 1.8).
+    No skew rejection by default: keep every consumed pair and measure its skew.
     """
-
-    out_dir = Path(out_dir)
-    # None means 'the ELPs, as of now'; see identify.elp_indices.
-    idx = (identify.elp_indices() if indices is None
+    if codec not in ("auto", "avc1", "mp4v"):
+        raise ValueError("codec must be auto, avc1 or mp4v")
+    if seconds is not None and (not np.isfinite(seconds) or seconds <= 0):
+        raise ValueError("seconds must be positive and finite")
+    if not np.isfinite(fps) or fps <= 0 or width <= 0 or height <= 0:
+        raise ValueError("positive width, height and fps required")
+    idx = (identify.elp_indices(backend=backend) if indices is None
            else [indices] if isinstance(indices, int) else list(indices))
+    if len(idx) not in (1, 2) or len(set(idx)) != len(idx):
+        raise ValueError("choose one or two distinct camera indices")
     tags = "AB"[:len(idx)]
-
-    src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height,
-                               grayscale=True, rotate180=rotate180) if len(idx) == 1 else
-           sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s,
-                               width=width, height=height, grayscale=True,
-                               rotate180=rotate180))
-
-    meta = {"camera_indices": idx, "rotate180": bool(rotate180)}
+    options = dict(width=width, height=height, fps=fps, grayscale=True,
+                   rotate180=rotate180, backend=backend)
+    src = (sources.open_source(f"camera:{idx[0]}", **options) if len(idx) == 1 else
+           sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s, **options))
+    cameras = getattr(src, "sources", [src])
+    fw, sink, recording, done = None, None, False, []
+    meta = {"camera_indices": idx, "rotate180": bool(rotate180),
+            "requested": {"width": width, "height": height, "fps": fps, "fourcc": "MJPG"}}
     if note:
         meta["note"] = str(note)
-
-    fw, recording, t0 = None, False, 0.0
-    done = []
-    if start:
-        fw, recording = FlightWriter(out_dir, tags, fps, meta), True
-        print(f"recording -> {fw.dir}   (interrupt the kernel to stop)")
-    sink = sources.Sink("flight recorder").open() if preview else None
+    t0 = time.monotonic()
     try:
-      try:
-        while True:
+        meta["cameras"] = [cam.actual for cam in cameras]
+        print("Driver-reported modes (FPS is not a measurement):", meta["cameras"])
+        sink = sources.Sink("flight recorder").open() if preview else None
+        if sink is not None and sink.inline and not start and seconds is None:
+            raise ValueError("notebook preview needs seconds; recording needs start=True")
+        if start:
+            fw, recording = FlightWriter(out_dir, tags, fps, meta, codec=codec), True
+            print(f"recording -> {fw.dir}; Interrupt once to stop early, then wait for finalisation")
+        while seconds is None or time.monotonic() - t0 < seconds:
             item = src.read()
             if item is None:
-                print("source ended")
-                break
+                raise OSError("camera stopped delivering frames; take is partial, inspect before use")
             t, payload = item
             frames = list(payload) if isinstance(payload, (list, tuple)) else [payload]
-
+            if any(f.shape[:2] != (height, width) for f in frames):
+                raise OSError(f"requested {width}x{height}, received {[f.shape for f in frames]}")
             if recording:
-                fw.add(t, frames, getattr(src, "last_stamps", None),
-                       getattr(src, "last_skew", 0.0))
-
-            if preview:
-                view = np.hstack([f if f.ndim == 3 else
-                                  cv2.cvtColor(f, cv2.COLOR_GRAY2BGR) for f in frames])
-                n = fw.n if fw else 0
-                cv2.putText(view, (f"REC {t - t0:5.1f}s  {n} frames" if recording
-                                   else f"{n} frames   SPACE = record, q = quit"),
-                            (10, view.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
-                            (0, 0, 255) if recording else (255, 255, 255), 2, cv2.LINE_AA)
+                fw.add(t, frames, getattr(src, "last_stamps", None), getattr(src, "last_skew", 0.0))
+            if sink is not None and sink.due():
+                views = []
+                for tag, f in zip(tags, frames):
+                    view = f.copy() if f.ndim == 3 else cv2.cvtColor(f, cv2.COLOR_GRAY2BGR)
+                    cv2.putText(view, tag, (12, 32), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                (0, 255, 0), 2)
+                    views.append(view)
+                view = np.hstack(views)
+                text = (f"REC {time.monotonic()-t0:.1f}s {fw.n} pairs" if recording else "PREVIEW")
+                text += " | Interrupt to finish" if sink.inline else " | SPACE record/stop; q quit"
+                cv2.putText(view, text, (10, height-15), cv2.FONT_HERSHEY_SIMPLEX, .6,
+                            (0, 0, 255) if recording else (255, 255, 255), 1)
                 key = sink.show(view)
                 if key == ord("q"):
                     break
                 if key == ord(" "):
-                    recording = not recording
-                    t0 = t
-                    if recording:               # each take is its own flight folder
-                        fw = FlightWriter(out_dir, tags, fps, meta)
-                        print("recording")
-                    else:
-                        print(f"stopped at {fw.n} frames")
+                    if recording:
                         done.append(fw.close(_skew(src)))
                         fw = None
-      except KeyboardInterrupt:
-        # A cell has no q; interrupting must still close the flight cleanly below.
-        print("\ninterrupted")
+                    else:
+                        fw = FlightWriter(out_dir, tags, fps, meta, codec=codec)
+                    recording = not recording
+    except KeyboardInterrupt:
+        print("Interrupted; finalising files. Wait for this cell to finish.")
+    except BaseException as exc:
+        if fw is not None:
+            fw.meta["capture_error"] = str(exc)
+        raise
     finally:
-        if sink is not None:
-            sink.close()
-        if fw is not None:                      # quit while still rolling
-            done.append(fw.close(_skew(src)))
-        stats = _skew(src)
-        src.close()
-
-    print(f"\n{len(done)} flight(s) in {out_dir}")
-    if stats:
-        print(f"  capture skew: {stats}")
+        # Release cameras even if encoder shutdown or GUI cleanup fails.
+        try:
+            src.close()
+        finally:
+            try:
+                if sink is not None:
+                    sink.close()
+            finally:
+                if fw is not None:
+                    fw.meta["capture_counters"] = [
+                        {"grabbed": c.n_grabbed, "overwritten_before_consumption": c.n_dropped}
+                        for c in cameras]
+                    done.append(fw.close(_skew(src)))
     return done
 
 
@@ -455,6 +469,9 @@ def main(argv=None):
                    help="default: whichever indices the two ELPs hold right now")
     p.add_argument("--mode", default="1280x800")
     p.add_argument("--fps", type=float, default=120.0)
+    p.add_argument("--backend", default="auto", choices=["auto", "dshow", "msmf", "avfoundation", "v4l2"])
+    p.add_argument("--codec", default="auto", choices=["auto", "avc1", "mp4v"])
+    p.add_argument("--seconds", type=float, help="end this preview/recording after this many seconds")
     p.add_argument("--no-flip", action="store_true")
     p.add_argument("--note", default=None,
                    help="free text into meta.json, e.g. \"align C 100Hz coil A C shut down\"")
@@ -467,7 +484,7 @@ def main(argv=None):
         return 0
     w, h = (int(v) for v in a.mode.lower().split("x"))
     record(a.out, a.indices, width=w, height=h, fps=a.fps, rotate180=not a.no_flip,
-           start=a.start, note=a.note)
+           start=a.start, note=a.note, backend=a.backend, codec=a.codec, seconds=a.seconds)
     return 0
 
 

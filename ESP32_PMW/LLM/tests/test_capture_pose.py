@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from LLM.capture import import_flight, load_flight
+from LLM.capture import audit_flight, import_flight, load_flight
 from LLM.pose import triangulate_annotations
 
 
@@ -73,6 +73,17 @@ def run_tests():
         np.testing.assert_array_equal(flight["frame_indices"], [0, 2, 3])
         np.testing.assert_allclose(flight["times_a"], [10, 10.04, 10.06])
         assert flight["metadata"]["dropped_capture_rows"] == 1
+        audit = audit_flight(source, target_fps=50)
+        assert audit["integrity"] == "PASS" and audit["decoded_frames_per_camera"] == 3
+        assert audit["queue_dropped_pairs"] == 1 and audit["warnings"]
+        meta_path = source / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        for key, value, message in (("encoder_finalized", False, "did not finalize"),
+                                    ("capture_error", "camera timed out", "stopped with an error"),
+                                    ("encoder_errors", 1, "encoder errors")):
+            meta_path.write_text(json.dumps({**meta, key: value}))
+            _expect_error(lambda: load_flight(source), message)
+        meta_path.write_text(json.dumps(meta))
         imported = import_flight(source, tmp / "run")
         assert imported["sha256"]["frames.csv"]
         assert (source / "frames.csv").read_bytes() == (tmp / "run/raw/camera/frames.csv").read_bytes()

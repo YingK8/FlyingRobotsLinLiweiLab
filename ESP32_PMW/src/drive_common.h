@@ -10,8 +10,11 @@
 #include "safety_startup.h"
 #include "telemetry.h"
 
-static const float PHASES_CW[NUM_CHANNELS] = {270.0f, 90.0f, 180.0f, 0.0f};
-static const float PHASES_CCW[NUM_CHANNELS] = {90.0f, 270.0f, 180.0f, 0.0f};
+// Operator-confirmed coil order A,B,C,D (2026-10-28): A/C and B/D are opposite.
+// See controller/control/theory.md, "Coil phase convention (2026-10-28)".
+// Reversing direction swaps B/D; keep JsonPwmSequencer's direction table aligned.
+static const float PHASES_CW[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
+static const float PHASES_CCW[NUM_CHANNELS] = {0.0f, 270.0f, 180.0f, 90.0f};
 static const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 

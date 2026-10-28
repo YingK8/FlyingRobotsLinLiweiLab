@@ -60,7 +60,11 @@ def load_flight(run_or_capture_dir):
     for path in required:
         if not path.is_file():
             raise ValueError(f"Missing recording file: {path}")
-    metadata = json.loads((root / "meta.json").read_text())
+    metadata = json.loads((root / "meta.json").read_text(encoding="utf-8"))
+    if metadata.get("encoder_finalized") is False:
+        raise ValueError("Recording encoder did not finalize; video may still be changing")
+    if metadata.get("capture_error"):
+        raise ValueError(f"Recording stopped with an error: {metadata['capture_error']}")
     if metadata.get("encoder_errors", 0):
         raise ValueError("Recording reports encoder errors; frame/time mapping is unsafe")
     rows = pd.read_csv(root / "frames.csv", comment="#")
@@ -154,7 +158,8 @@ def import_flight(source_dir, run_dir):
 
 
 def record_flight(out_dir, *, indices=None, width=1280, height=800, fps=120.0,
-                  rotate180=True, max_skew_s=0.01, preview=True, start=False, note=None):
+                  rotate180=True, max_skew_s=None, preview=True, start=False, note=None,
+                  backend=None, codec="auto", seconds=None):
     """Use the established interactive camera recorder; never open serial or drive.
 
     This creates dated takes beneath ``out_dir``. Import a completed take using
@@ -164,7 +169,53 @@ def record_flight(out_dir, *, indices=None, width=1280, height=800, fps=120.0,
 
     return record(out_dir=out_dir, indices=indices, width=width, height=height,
                   fps=fps, rotate180=rotate180, max_skew_s=max_skew_s,
-                  preview=preview, start=start, note=note)
+                  preview=preview, start=start, note=note,
+                  backend=backend, codec=codec, seconds=seconds)
+
+
+def audit_flight(path, target_fps=None, max_skew_s=0.01):
+    """Decode both streams and report timing separately from file integrity.
+
+    A valid mapping is not evidence of simultaneous exposures or adequate sampling.
+    The rate/gap/skew warnings are commissioning checks, not calibrated accuracy.
+    """
+    data = load_flight(path)
+    meta = data["metadata"]
+    rates, gaps, spans = {}, {}, {}
+    warnings = []
+    if len(data["times_a"]) < 2:
+        warnings.append("Fewer than two frames: no measured rate available")
+    for tag in "ab":
+        t = data[f"times_{tag}"]
+        dt = np.diff(t)
+        spans[tag] = float(t[-1] - t[0])
+        rates[tag] = float((len(t)-1) / spans[tag]) if spans[tag] > 0 else None
+        gaps[tag] = {"median_ms": float(np.median(dt)*1000) if len(dt) else None,
+                     "max_ms": float(dt.max()*1000) if len(dt) else None}
+        if target_fps and rates[tag] is not None:
+            if abs(rates[tag] / target_fps - 1) > .1:
+                warnings.append(f"{tag.upper()}: saved rate differs from requested {target_fps:g} FPS by >10%")
+            if dt.max() > 3 / target_fps:
+                warnings.append(f"{tag.upper()}: timestamp gap exceeds 3 requested frame periods")
+    skew = np.abs(data["times_a"] - data["times_b"])
+    if np.any(skew > max_skew_s):
+        warnings.append(f"{int((skew > max_skew_s).sum())} pairs exceed {max_skew_s*1000:g} ms host timestamp skew")
+    if meta["dropped_capture_rows"]:
+        warnings.append(f"{meta['dropped_capture_rows']} pairs dropped by encoder queue; mapping preserved")
+    header_fps = meta.get("fps")
+    if header_fps and any(rate and abs(rate/header_fps - 1) > .05 for rate in rates.values()):
+        warnings.append("Raw MP4 playback speed differs from source time; use frames.csv for analysis")
+    result = {"integrity": "PASS", "source": str(_capture_dir(path).resolve()),
+              "decoded_frames_per_camera": len(data["times_a"]),
+              "csv_capture_rows": len(data["times_a"]) + meta["dropped_capture_rows"],
+              "queue_dropped_pairs": meta["dropped_capture_rows"],
+              "saved_fps_from_timestamps": rates, "timestamp_span_s": spans,
+              "frame_gaps": gaps, "playback_fps": header_fps,
+              "host_skew_ms": {"median": float(np.median(skew)*1000),
+                               "p95": float(np.percentile(skew, 95)*1000),
+                               "max": float(skew.max()*1000)},
+              "warnings": warnings, "hardware_sync_validated": False}
+    return result
 
 
 if __name__ == "__main__":

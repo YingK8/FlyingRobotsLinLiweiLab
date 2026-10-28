@@ -76,6 +76,12 @@ child's stdin-EOF backstop covers a supervisor that crashed; nothing covers the 
 bench supply's 10 A limit and the GPIO14 button are the whole story there. `fly()` calls `coil_thermal.wait_until_safe()` for you and **refuses to arm if
 that file is missing**, because `ai/` is gitignored and a fresh clone does not have it.
 
+**LLM notebook exception (operator request, 2026-10-28):** Block 7B (`LLM/drive_only.py`)
+and Block 8 (`LLM/experiment_panel.py`) do not call the modeled-temperature cooldown
+gate. The operator decides whether to run. Keep ramp validation, READY, timed/Interrupt
+stop and SerialComm drive-duration accounting; do not reintroduce `_thermal_gate` in
+these two entry points. Other controller paths retain their existing thermal gates.
+
 Keep a single ramp under a minute. `ramp.check` refuses a profile over `MAX_RAMP_S` rather
 than clamping it, since the segments go to the firmware verbatim.
 

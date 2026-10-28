@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "rise_2to210Hz_30s_ease_k2",
+  "trigger": "time",
+  "frequency_segments": [
+    [
+      2.0,
+      210.0,
+      30.0,
+      1,
+      2.0
+    ]
+  ],
+  "channel_updates": [],
+  "channel_settings_status": "firmware_defaults_unrecorded",
+  "note": "Copied from controller.control.ramp.DEFAULT on 2026-10-27; historical preset, not validated for current robot/setup. Runner sends stop at ramp duration, then records 2 s post-roll. No feedback or per-channel schedule."
+}

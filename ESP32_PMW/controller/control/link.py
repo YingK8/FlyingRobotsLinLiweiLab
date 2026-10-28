@@ -144,6 +144,7 @@ class SerialComm:
                 self._raw_log.close()
             raise
         self._rxbuf = ""
+        self.rx_bytes = 0
         self._drive_since = None
         self._drive_s = 0.0
 
@@ -171,8 +172,9 @@ class SerialComm:
         # until it returns None, so at 200 Hz a 120-byte telemetry line cost 120 syscalls
         # in whichever tick it landed in -- fine against a 5 ms budget, not against 2 ms.
         if self.ser.in_waiting:
-            self._rxbuf += self.ser.read(self.ser.in_waiting).decode(
-                "utf-8", errors="replace")
+            chunk = self.ser.read(self.ser.in_waiting)
+            self.rx_bytes += len(chunk)
+            self._rxbuf += chunk.decode("utf-8", errors="replace")
         while True:
             hits = [j for j in (self._rxbuf.find("\r"), self._rxbuf.find("\n")) if j >= 0]
             if not hits:

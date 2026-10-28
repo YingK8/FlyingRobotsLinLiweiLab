@@ -4621,3 +4621,100 @@ intervals and the log hash, and never substitutes host-send time. This estimates
 single offset, not drift or a measured timing accuracy. See `LLM/START_SYNC.md` for
 capture and bench acceptance. Full per-update device-applied schedules and true
 current magnitude/phase remain separate work.
+
+
+### Inputs-only notebook check (2026-10-27)
+
+The LLM notebook distinguishes `sync_check` from a measured 3-D experiment.
+Temporal START association needs the optical event and device clock, not the
+CAD-to-camera transform. The inputs-only path therefore requires the current
+session's audited trial and static reference images, but does not fabricate a
+rig verification, bearing origin or gravity vector. It uses the same CommandLink
+and stop path. On 2026-10-28 the operator explicitly removed modeled-temperature
+cooldown waiting from LLM Blocks 7B/8; shared serial drive-duration accounting remains.
+Other controller thermal gates are unchanged. Geometry requirements remain distinct
+between the two notebook modes.
+Postprocessing stops at frequency, filtered CS and LED brightness. Aligned LED
+traces are an outcome of offset fitting, not independent evidence of simultaneous
+exposure/current onset. The measured path retains all geometry requirements.
+
+### Startup diagnosis
+
+The synchronized Python constructor now drains serial throughout a bounded 5 s
+READY window after its single RTS reset, instead of sleeping 1.5 s and reading
+once. Firmware boot already includes a 1 s delay plus SPIFFS/ADC initialization;
+the longer window is a diagnostic timeout, not a claimed measured boot bound.
+The link counts received bytes so a timeout distinguishes no RX from incomplete
+or non-READY data. Missing READY still closes the link without a ramp command.
+`python -m LLM.serial_check --port ...` invokes only that constructor and closes
+it, saving a unique log directory. Use with coil power off, since reset behavior
+of an unknown flashed firmware cannot be inferred from a USB device name.
+
+### Frequency-only bench check
+
+`LLM.drive_only.run_frequency_pattern` is the explicit no-camera notebook adapter
+(Block 7B). It uses the existing `ramp.seq_lines`, `CommandLink.send_takeoff`,
+`SerialComm` drive-duration accounting; cooldown is operator-managed as of 2026-10-28.
+It does not add a firmware
+command or change duty, phase or GPIO configuration. `require_ready=True` waits
+for the same boot READY as the recorded path, independently of `sync_start`.
+The recorded path still requires real capture pre-roll; no fabricated capture
+samples are supplied by the bench adapter.
+
+READY is followed immediately by the selected sequence. A missing START after
+2 seconds, firmware rejection/block, reboot or Python exception aborts the check;
+normal completion uses the selected duration. The finally path attempts stop,
+collects an OFF reply for up to 1 second and closes the serial owner for thermal
+accounting. A stopped/failed transport cannot guarantee physical shutdown.
+Logs distinguish START acknowledgement, STOP send and OFF reply; controller
+frequency/duty reports remain commanded state, not measured pin waveforms. The
+LED still rises in flight firmware, but there is no optical synchronization claim.
+
+#### 2026-10-28 alignment-rate comparison for near-zero current
+
+The serial-only take `LLM/runs/drive_only/20261027_235833_a2a77e` received START
+and OFF acknowledgements, ran 2→210 Hz for 30 s, and reported carrier=100% on
+all channels during drive. Across 61 CS samples A/C/D remained 0.00 A and B
+reached 0.03 A. The operator separately reports both supplies set to 10 V,
+10 A limit, with displayed draw rising to about 0.1 A then falling; this is not
+a time-stamped coil-current measurement.
+
+Compare against the archived schedule in commit `863a6c00` (2026-09-14):
+`PwmSequencer`, `JsonPwmSequencer`, `main_tilt`, GPIO constants and platformio
+configuration are unchanged. PwmController only gained batch `setPhases`;
+this frequency-only path continues to use the existing per-channel `setPhase`.
+Carrier initialization, 0→100% transition and commutation output code match.
+The flight mixer with mag=0/collective=100 writes four 100% carriers; sequencer
+NAN carrier values mean leave unchanged, not zero. SPINUP has a break and cannot
+fall through into IDLE's allCoilsOff. No gradual carrier ramp-down was found.
+Source equivalence does not establish which binary was flashed historically,
+nor verify the real GPIO waveform, the present board wiring or supply voltage.
+
+Historical `results/tilt_sweep/20260914_112949_droneC/sweep.log` has a 50 Hz,
+all-carriers-100% sample of A=0.98, B=2.28, C=1.19, D=1.88 A. Historical A/C
+zero offsets are known bad (section 23.1); use this only as evidence that the
+older telemetry was not near zero, not as a target supply/RMS current.
+
+`LLM/patterns/alignment_2to5_5to50Hz_hold10s_19p5s.json` matches the archived
+050hz schedule's first two EASE k=2 ramps (2→5 in 5 s, 5→50 in 4.5 s) and
+3+7 s pre-cut dwell. It stops at 19.5 s, omits the A/C cut and down-ramp, uses
+current flight firmware, and is not an exact replication of the old experiment.
+Its segments/boundaries/duration were checked offline against the archive; it
+has not been executed on the bench by the assistant. A same-frequency dwell
+comparison and real carrier/commutation pin measurements remain the next
+ways to discriminate a firmware/output problem from the downstream circuit.
+
+#### Coil phase convention (2026-10-28)
+
+The operator confirmed the current coil labels: A/C are opposite and B/D are
+opposite. Commanded commutation phases in A,B,C,D order are now CW
+`{0,90,180,270}` and CCW `{0,270,180,90}`. Reversal exchanges B/D while A=0
+and C=180 remain fixed. Both `src/drive_common.h` and JsonPwmSequencer's
+`direction`/`setDirection` mapping use this convention. Explicit JSON
+`initial_phase` or runtime phase commands still override it.
+
+`main_flight` continues to select CW; selecting CCW is a separate operator
+choice. GPIO assignments, duty, frequency ramps and historical experiment
+snapshots are unchanged. Existing firmware must be reflashed to use these
+tables. These are commanded signal phases, not measured current phases or
+a verified physical rotation direction from a specified viewing side.

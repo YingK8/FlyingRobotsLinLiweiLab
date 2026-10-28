@@ -158,7 +158,16 @@ def open_group(indices, mode=None, max_skew_s=None, **kw):
     """
 
     idx = [indices] if isinstance(indices, int) else list(indices)
-    cams = [open_elp(index=i, mode=mode, **kw) for i in idx]
+    if not idx or len(set(idx)) != len(idx):
+        raise ValueError("camera indices must be nonempty and distinct")
+    cams = []
+    try:
+        for i in idx:
+            cams.append(open_elp(index=i, mode=mode, **kw))
+    except BaseException:
+        for cam in cams:
+            cam.close()
+        raise
     if len(cams) == 1:
         return cams[0], cams
     return sources.StereoCamera(cams, max_skew_s=max_skew_s), cams

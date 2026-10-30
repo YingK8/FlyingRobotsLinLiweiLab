@@ -164,7 +164,7 @@ RESEND_S = 0.5
 # well. Deliberately the same period as RESEND_S: both answer "is this thing still alive".
 WITHHELD_LOG_S = 0.5
 
-SPINUP, FLIGHT = 1, 2  # main_flight.cpp State: IDLE=0 SPINUP=1 FLIGHT=2 LANDING=3 OFF=4
+SPINUP, FLIGHT, OFF = 1, 2, 4  # main_flight.cpp State: IDLE=0 SPINUP=1 FLIGHT=2 LANDING=3 OFF=4
 
 # Seconds the coils may stay driven with no pose fix before the host stops them.
 #
@@ -443,6 +443,21 @@ class CommandLink:
         self.log.close()
         if self.comm:
             self.comm.close()
+
+    def stop(self, timeout_s: float = 1.0) -> bool:
+        """Send `stop`; return whether the firmware reported OFF."""
+        self.send("stop")
+        if not self.comm:
+            return False
+        if self.state == OFF:
+            return True
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self.drain()
+            if self.state == OFF:
+                return True
+            time.sleep(.02)
+        return False
 
 
 def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,

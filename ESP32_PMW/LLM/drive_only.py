@@ -51,7 +51,7 @@ def run_frequency_pattern(pattern_path, serial_port, *, output_root):
     def receive(line, sent=False):
         if sent:
             return
-        if line.startswith('SYNC_START v=1 '):
+        if line.startswith('SYNC_START '):
             summary['start_acknowledged'] = True
         if summary['stop_sent'] and line.startswith('state=4 '):
             summary['stop_acknowledged'] = True
@@ -91,16 +91,9 @@ def run_frequency_pattern(pattern_path, serial_port, *, output_root):
             if owner is not None:
                 try:
                     summary['stop_sent'] = True
-                    try:
-                        owner.send('stop')
-                    except BaseException:
-                        summary['stop_sent'] = False
-                        raise
-                    deadline = time.monotonic() + 1
-                    while time.monotonic() < deadline and not summary['stop_acknowledged']:
-                        owner.drain()
-                        time.sleep(.02)
+                    summary['stop_acknowledged'] = owner.stop() or summary['stop_acknowledged']
                 except BaseException as exc:
+                    summary['stop_sent'] = False
                     summary['stop_error'] = str(exc) or type(exc).__name__
                     print(f'STOP could not be confirmed: {summary["stop_error"]}', flush=True)
                 finally:

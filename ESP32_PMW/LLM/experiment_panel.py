@@ -41,7 +41,7 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
     if driven:
         from LLM.pattern import validate_pattern
         from controller.control import ramp
-        from controller.control.hover_controller_runner import CommandLink
+        from controller.control.hover_controller_runner import CommandLink, OFF
         run = Path(run)
         manifest = read_json(run/'manifest.json')
         if manifest.get('camera_session') != session: raise ValueError('Prepared run/session mismatch')
@@ -148,8 +148,10 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
                             link.send_takeoff(); drive_t = time.monotonic(); result['drive_start_sent'] = True
                             writer.meta['host_start_send_complete_s'] = drive_t
                     if drive_t is not None and stop_t is None and now-drive_t >= duration:
-                        link.send('stop'); stop_t = time.monotonic()
+                        link.stop(timeout_s=0); stop_t = time.monotonic()
                         writer.meta['host_scheduled_stop_send_complete_s'] = stop_t
+                    if stop_t is not None and link.state == OFF:
+                        result['drive_stop_acknowledged'] = True
                     if stop_t is not None and now-stop_t >= 2: break
                 if now-last_ui >= .2:
                     last_ui = now

@@ -1,0 +1,1038 @@
+{
+  "resolution_ms": 25,
+  "initial_freq": 50.0,
+  "initial_duty": [
+    50.0,
+    50.0,
+    50.0,
+    50.0
+  ],
+  "initial_phase": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "schedule": [
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 50.0
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T000_G000"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 180.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T030_G000"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 194.47
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 345.53
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        10.803580473050816,
+        19.97786607063578,
+        18.354137485331716,
+        18.354137485331716
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        10.803580473050816,
+        19.97786607063578,
+        18.354137485331716,
+        18.354137485331716
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T060_G000"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 204.09
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 335.91
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        0.9406738349394884,
+        16.831002613104044,
+        19.46684671289848,
+        19.46684671289848
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        0.9406738349394884,
+        16.831002613104044,
+        19.46684671289848,
+        19.46684671289848
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T090_G000"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 207.3
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 332.7
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        9.174285597584962,
+        9.174285597584966,
+        20.0,
+        20.0
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        9.174285597584962,
+        9.174285597584966,
+        20.0,
+        20.0
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T090_G090"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 332.7
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 207.3
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        20.0,
+        20.0,
+        9.174285597584962,
+        9.174285597584966
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        20.0,
+        20.0,
+        9.174285597584962,
+        9.174285597584966
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T090_G180"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 332.7
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 207.3
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        9.174285597584966,
+        9.174285597584962,
+        20.0,
+        20.0
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        9.174285597584966,
+        9.174285597584962,
+        20.0,
+        20.0
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T090_G270"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 207.3
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 332.7
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        20.0,
+        20.0,
+        9.174285597584966,
+        9.174285597584962
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        20.0,
+        20.0,
+        9.174285597584966,
+        9.174285597584962
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T060_G180"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 335.91
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 204.09
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        16.831002613104044,
+        0.9406738349394884,
+        19.46684671289848,
+        19.46684671289848
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        16.831002613104044,
+        0.9406738349394884,
+        19.46684671289848,
+        19.46684671289848
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T030_G180"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 345.53
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 194.47
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        19.97786607063578,
+        10.803580473050816,
+        18.354137485331716,
+        18.354137485331716
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        19.97786607063578,
+        10.803580473050816,
+        18.354137485331716,
+        18.354137485331716
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T000_G180"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 180.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_T000_G000"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 180.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "duration_ms": 800
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1500
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": [
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532,
+        17.771676448043532
+      ],
+      "to": 0.0,
+      "duration_ms": 800
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 800
+    },
+    {
+      "method": "label",
+      "value": "AXIS_DONE"
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 500
+    }
+  ]
+}

@@ -1,0 +1,538 @@
+{
+  "resolution_ms": 25,
+  "initial_freq": 10.0,
+  "initial_duty": [
+    50.0,
+    50.0,
+    50.0,
+    50.0
+  ],
+  "initial_phase": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "schedule": [
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 50.0
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "label",
+      "value": "ROT_Z_REF_CCW"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 90.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 270.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 180.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROT_Y_CCW_TH72P9"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 72.87
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 287.13
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROT_Y_CW_TH72P9"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 287.13
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 72.87
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROT_X_CCW_TH72P9"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 72.87
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 287.13
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROT_X_CW_TH72P9"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 287.13
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 72.87
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROT_Y_CCW_REPEAT_TH72P9"
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        0
+      ],
+      "value": 72.87
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        1
+      ],
+      "value": 287.13
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        2
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addPhaseTask",
+      "channels": [
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 200
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 0.0,
+      "to": 15.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 2000
+    },
+    {
+      "method": "addChannelCarrierRampTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "from": 15.0,
+      "to": 0.0,
+      "duration_ms": 1000
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 1000
+    },
+    {
+      "method": "label",
+      "value": "ROTATING_DONE"
+    },
+    {
+      "method": "addCarrierDutyCycleTask",
+      "channels": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "value": 0.0
+    },
+    {
+      "method": "addWaitTask",
+      "duration_ms": 500
+    }
+  ]
+}

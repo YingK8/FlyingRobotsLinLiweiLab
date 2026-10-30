@@ -10,35 +10,76 @@ import pandas as pd
 from LLM.capture import load_flight
 from LLM.io import inventory, invalidate_report, read_json, sha256, write_json
 from LLM.pattern import sample_pattern
-from LLM.sync import detect_led, fit_clock, map_times
+from LLM.sync import decode_markers, detect_led, fit_clock, map_times
 from LLM.takeoff import detect_takeoff
 from LLM.telemetry import parse_log
 from LLM.world import transform_pose_dataframe
 
 
-def synchronize(run, roi_a, roi_b, pulse_times=(0.0,)):
+def synchronize(run, roi_a, roi_b, pulse_times=(0.0,), markers=None):
+    """Fit the camera clocks to the LED; `markers` selects the START/STOP decode path."""
     run = Path(run)
     invalidate_report(run, "Alignment changed or failed; rerun process after a successful sync.")
     flight = load_flight(run)
-    cfg = read_json(run / "config.json")["led"]
-    # A failed new attempt must not leave an old clock silently usable.
+    led_config = read_json(run / "config.json")["led"]
+    detector_config = dict(led_config)
+    tolerance_ratio = float(detector_config.pop("marker_tol_rel", .25))
     (run / "processed/sync.json").unlink(missing_ok=True)
     result = {"schema_version": 1, "clocks": {},
-              "association": "operator identifies these LED pulses as the listed experiment events",
-              "hardware_sync_validated": False, "led": {}}
+              "association": ("operator identifies these LED pulses as the listed experiment events"
+                              if markers is None else
+                              "firmware-declared START/STOP markers decoded in both cameras"),
+              "hardware_sync_validated": False, "led": {}, "markers": {}}
     result["input_sha256"] = {name: sha256(run / name) for name in
                               ("raw/camera/frames.csv", "raw/camera/A/A.mp4", "raw/camera/B/B.mp4")}
-    result["led_config"] = cfg
+    result["led_config"] = led_config
     for ch, roi in (("A", roi_a), ("B", roi_b)):
-        detected = detect_led(flight[f"video_{ch.lower()}"], flight[f"times_{ch.lower()}"], roi, cfg)
+        detected = detect_led(flight[f"video_{ch.lower()}"], flight[f"times_{ch.lower()}"], roi, detector_config)
         pd.DataFrame(detected.pop("trace")).to_csv(run / f"processed/led_{ch}.csv", index=False)
         detected["video_path"] = f"raw/camera/{ch}/{ch}.mp4"
         result["led"][ch] = detected
-        if detected["status"] != "detected" or len(detected["edges"]) != len(pulse_times):
+        if markers is None:
+            if detected["status"] != "detected" or len(detected["edges"]) != len(pulse_times):
+                write_json(run / "processed/sync_attempt.json", result)
+                raise ValueError(f"camera {ch}: detected {len(detected['edges'])} LED rises, expected {len(pulse_times)}; inspect ROI/pulse association")
+            result["clocks"][f"camera_{ch}"] = fit_clock(
+                [e["source_time_s"] for e in detected["edges"]], pulse_times, f"camera_{ch}")
+            continue
+        decoded = decode_markers(detected, markers["on_s"], markers["gap_s"], tolerance_ratio)
+        result["markers"][ch] = decoded
+        starts = [m for m in decoded["markers"] if m["kind"] == "start"]
+        stops = [m for m in decoded["markers"] if m["kind"] == "stop"]
+        if len(starts) != 1 or len(stops) > 1:
             write_json(run / "processed/sync_attempt.json", result)
-            raise ValueError(f"camera {ch}: detected {len(detected['edges'])} LED rises, expected {len(pulse_times)}; inspect ROI/pulse association")
-        result["clocks"][f"camera_{ch}"] = fit_clock(
-            [e["source_time_s"] for e in detected["edges"]], pulse_times, f"camera_{ch}")
+            raise ValueError(
+                f"camera {ch}: decoded {len(starts)} START and {len(stops)} STOP markers; "
+                "expected exactly one START and at most one STOP -- check the ROI covers "
+                "only the LED and that the pulse pair is inside the recording")
+        if stops and stops[0]["first_source_time_s"] <= starts[0]["first_source_time_s"]:
+            write_json(run / "processed/sync_attempt.json", result)
+            raise ValueError(f"camera {ch}: STOP decoded before START")
+        if (markers.get("stop_experiment_s") is not None) != bool(stops):
+            write_json(run / "processed/sync_attempt.json", result)
+            raise ValueError(
+                f"camera {ch}: the raw log and the video disagree about the STOP marker "
+                f"(log {'has' if markers.get('stop_experiment_s') is not None else 'has no'} "
+                f"one, video decoded {len(stops)}); refuse rather than align a truncated take")
+        source = [starts[0]["first_source_time_s"]]
+        target = [0.0]
+        if stops:
+            source.append(stops[0]["first_source_time_s"])
+            target.append(float(markers["stop_experiment_s"]))
+        result["clocks"][f"camera_{ch}"] = fit_clock(source, target, f"camera_{ch}")
+    if markers is not None:
+        a, b = result["markers"]["A"], result["markers"]["B"]
+        skew = a["markers"][0]["first_source_time_s"] - b["markers"][0]["first_source_time_s"]
+        bound = max(2 * max(a["frame_period_s"], b["frame_period_s"]), .02)
+        result["cross_camera"] = {"start_skew_s": skew, "bound_s": bound}
+        if abs(skew) > bound:
+            write_json(run / "processed/sync_attempt.json", result)
+            raise ValueError(
+                f"cameras disagree on the START marker by {abs(skew) * 1e3:.1f} ms "
+                f"(bound {bound * 1e3:.1f} ms); one ROI is not on the LED")
     write_json(run / "processed/sync.json", result)
     return result
 

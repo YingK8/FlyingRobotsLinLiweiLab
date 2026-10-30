@@ -1,4 +1,4 @@
-"""Associate one recorded flight START with optical edges, never host-send time."""
+"""Associate one recorded flight START with optical markers, never host-send time."""
 from __future__ import annotations
 
 import json
@@ -11,23 +11,19 @@ from LLM.pipeline import add_clock, synchronize
 from LLM.telemetry import parse_log
 
 _START = re.compile(
-    r"SYNC_START v=1 led0=([0-9]+) led1=([0-9]+) drive0=([0-9]+) drive1=([0-9]+)")
+    r"SYNC_START v=2 led0=([0-9]+) led1=([0-9]+) drive0=([0-9]+) drive1=([0-9]+) "
+    r"on_us=([0-9]+) gap_us=([0-9]+)")
+_STOP = re.compile(r"SYNC_STOP v=2 t0=([0-9]+) t1=([0-9]+) on_us=([0-9]+) gap_us=([0-9]+)")
 
 
 def read_start(path):
-    """Require exactly one ready boot and one complete event in the raw RX log.
-
-    Firmware timestamps use esp_timer_get_time() microseconds. Existing t= current
-    telemetry uses millis(), the same ESP timer divided by 1000 (before wrap).
-    Resets/re-arms, malformed events and time reversal require a separate run.
-    """
-    ready, event = False, None
+    """One READY, one START and at most one STOP; everything else is refused."""
+    ready, start, stop = False, None, None
     previous_host = -math.inf
     for line_no, raw in enumerate(Path(path).read_text().splitlines(), 1):
         try:
             row = json.loads(raw)
-            line = row["line"]
-            host = row["host_receive_s"]
+            line, host = row["line"], row["host_receive_s"]
             if (not isinstance(line, str) or isinstance(host, bool)
                     or not isinstance(host, (int, float)) or not math.isfinite(host)):
                 raise ValueError("invalid RX record")
@@ -42,50 +38,77 @@ def read_start(path):
             ready = True
         elif line.startswith("SYNC_START"):
             match = _START.fullmatch(line)
-            if not ready or event is not None or match is None:
-                raise ValueError("missing READY, duplicate START, or malformed START")
+            if not ready or start is not None or match is None:
+                raise ValueError("missing READY, duplicate START, malformed START, or a "
+                                 "SYNC_START v=1 log from firmware that no longer exists")
             values = [int(value) for value in match.groups()]
-            if values != sorted(values) or values[-1] >= (2**32) * 1000:
+            if values[:4] != sorted(values[:4]) or values[3] >= (2**32) * 1000:
                 raise ValueError("invalid START order or unsupported millis() wrap")
-            event = dict(zip(("led0_us", "led1_us", "drive0_us", "drive1_us"), values))
-            event.update(raw_line_number=line_no, host_receive_s=host)
-    if event is None:
-        raise ValueError("no device SYNC_START v=1 in raw log; do not infer it from seq=go or host time")
-    # Validates device resets even when the log contains no second READY banner.
+            if min(values[4:]) <= 0:
+                raise ValueError("START marker timing must be positive")
+            start = dict(zip(("led0_us", "led1_us", "drive0_us", "drive1_us",
+                              "on_us", "gap_us"), values))
+            start.update(raw_line_number=line_no, host_receive_s=host)
+        elif line.startswith("SYNC_STOP"):
+            match = _STOP.fullmatch(line)
+            if start is None or stop is not None or match is None:
+                raise ValueError("STOP before START, duplicate STOP, or malformed STOP")
+            values = [int(value) for value in match.groups()]
+            if values[:2] != sorted(values[:2]) or values[1] >= (2**32) * 1000:
+                raise ValueError("invalid STOP order or unsupported millis() wrap")
+            if values[0] < start["drive1_us"]:
+                raise ValueError("STOP precedes the drive start")
+            if values[2:] != [start["on_us"], start["gap_us"]]:
+                raise ValueError("STOP marker timing disagrees with START; mixed recordings")
+            stop = dict(zip(("t0_us", "t1_us", "on_us", "gap_us"), values))
+            stop.update(raw_line_number=line_no, host_receive_s=host)
+    if start is None:
+        raise ValueError("no device SYNC_START v=2 in raw log; do not infer it from seq=go or host time")
     current = parse_log(path)
     if current.attrs["parse_errors"]:
         raise ValueError("malformed telemetry; inspect the raw log before START association")
     for row in current.itertuples():
-        if ((row.raw_line_number < event["raw_line_number"]
-             and row.t_device_s > event["led0_us"] / 1e6)
-                or (row.raw_line_number > event["raw_line_number"]
-                    and row.t_device_s + .001 < event["drive1_us"] / 1e6)):
+        if ((row.raw_line_number < start["raw_line_number"]
+             and row.t_device_s > start["led0_us"] / 1e6)
+                or (row.raw_line_number > start["raw_line_number"]
+                    and row.t_device_s + .001 < start["drive1_us"] / 1e6)):
             raise ValueError("telemetry clock disagrees with START; possible reset or mixed recordings")
-    return event
+    return {"start": start, "stop": stop}
 
 
 def synchronize_start(run, roi_a, roi_b):
-    """One optical rise per camera + one device event -> all three clock mappings."""
+    """Two optical markers per camera + one device event -> all three clock mappings."""
     run = Path(run)
     invalidate_report(run, "START association changed or failed; rerun sync-start then process.")
     sync_path = run / "processed/sync.json"
     sync_path.unlink(missing_ok=True)
-    event = read_start(run / "raw/telemetry.jsonl")
-    reference_s = (event["led0_us"] + event["led1_us"]) / 2e6
-    result = synchronize(run, roi_a, roi_b, [0.0])
+    device_events = read_start(run / "raw/telemetry.jsonl")
+    start, stop = device_events["start"], device_events["stop"]
+    reference_s = (start["led0_us"] + start["led1_us"]) / 2e6
+    stop_experiment_s = None if stop is None else (stop["t0_us"] + stop["t1_us"]) / 2e6 - reference_s
+    result = synchronize(run, roi_a, roi_b, markers={
+        "on_s": start["on_us"] / 1e6, "gap_s": start["gap_us"] / 1e6,
+        "stop_experiment_s": stop_experiment_s})
     try:
         clock = add_clock(run, "esp", [reference_s], [0.0],
-                          f"raw/telemetry.jsonl line {event['raw_line_number']}: LED GPIO call midpoint; optical/electrical delay unvalidated")
+                          f"raw/telemetry.jsonl line {start['raw_line_number']}: LED GPIO call midpoint; optical/electrical delay unvalidated")
         result["clocks"]["esp"] = clock
         result["input_sha256"]["raw/telemetry.jsonl"] = sha256(run / "raw/telemetry.jsonl")
-        result["device_start"] = event | {
+        result["device_start"] = start | {
             "led_reference_device_s": reference_s,
-            "drive_apply_interval_t_s": [event[key] / 1e6 - reference_s
+            "drive_apply_interval_t_s": [start[key] / 1e6 - reference_s
                                          for key in ("drive0_us", "drive1_us")],
             "measurement_kind": "software_call_brackets_not_measured_current_onset",
             "drift_measured": False,
         }
-        result["association"] = "operator selected START LED ROIs; one optical rise per camera matched to the sole device START"
+        if stop is not None:
+            result["device_stop"] = stop | {
+                "stop_reference_device_t_s": stop_experiment_s,
+                "measurement_kind": "software_call_brackets_not_measured_current_onset"}
+        result["association"] = (
+            "operator selected START LED ROIs; the firmware-declared pulse pair was decoded "
+            "in both cameras and matched to the sole device START"
+            + (" and STOP" if stop is not None else ""))
         write_json(sync_path, result)
     except BaseException:
         sync_path.unlink(missing_ok=True)

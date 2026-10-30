@@ -53,7 +53,8 @@ def init_run(path, source="real"):
     write_json(path / "config.json", {
         "schema_version": 1,
         "max_stereo_skew_s": 0.01,
-        "led": {"threshold": 160, "low_threshold": 80, "min_on_frames": 2},
+        "led": {"threshold": 160, "low_threshold": 80, "min_on_s": None,
+                "marker_tol_rel": 0.25},
         "takeoff": {"baseline_start_s": 0.0, "baseline_end_s": 0.2,
                     "min_height_mm": 1.0, "noise_sigma_factor": 5.0,
                     "min_upward_speed_mm_s": 1.0, "sustain_s": 0.05,

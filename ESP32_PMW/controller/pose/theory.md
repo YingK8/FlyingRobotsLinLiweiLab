@@ -3618,3 +3618,179 @@ survive, and a preview is the one place a robot is likely to sit still.
 | Which camera stopped (22.6) | `TrackerStats::age_ms`, `stereo_frames`'s stop message |
 | Why the poses stopped (22.8) | `live_viz._why_no_pose`, differenced across the silence |
 | Plate step held per-second (22.8) | `pose/tracker.py` `PLATE_STEP_REF_HZ`, `plate_step` |
+
+
+## 23. Pose from moments: the minor axis and two planes, with no model of the body
+
+Written 2026-10-30. Implemented in `pose/axis_pose.py` (reference) and
+`native/src/axis_pose.c` (C11), held together by `native_parity.py --stage axis`.
+
+Everything before this chapter recovers the axis by back-projecting an ellipse through a
+cone (`conic.backproject_ellipse`, Safaee-Rad 1992). That is exact for a **planar circle of
+known radius**, and the rotor is neither: the disc has thickness and the rim and no-rim
+robots have different silhouettes. This chapter replaces the cone with the one quantity
+whose meaning survives thickness: the direction of the silhouette's minor axis.
+
+**Terms used here.**
+
+- **rod** -- the robot's thin central shaft along the spin axis, running from the disc
+  centre up to a bright **hub**, with **legs** and wires off the hub
+  (`results/rim/rod_demo.png`). Older code calls it the "mast" (`disc_pose.find_mast`).
+- **rim** -- the outer duct ring of the robots that have one.
+- **mask** -- the binary image of pixels that differ from the background plate by more than
+  the threshold.
+- **moments** -- the mask's pixel count, centroid and 2x2 covariance; the covariance's
+  eigenvectors are the **major** and **minor** axes.
+- **distance transform** -- each mask pixel's distance to the nearest background pixel; its
+  maximum is the half-width of the thickest part of the mask.
+- **morphological opening** -- erode then dilate with a fixed kernel; removes anything
+  thinner than the kernel. Tried and rejected below.
+- **ray gap** -- how far the two cameras' centroid rays miss each other at closest approach.
+
+### 23.1 The minor axis alone does not give a 3D axis, and b/a is biased
+
+In one view the minor axis is the image direction of the tilt; the tilt *magnitude* has to
+come from the axis ratio, $\cos\theta = b/a$. Simulated through the real rig
+($f \approx 1372$ px at 640x400), $r = 5$ mm thin circles, tilt 5-60 deg, centres across the
+FOV, $Z$ = 150 and 300 mm, 2000 trials per cell, error to the true normal (best of each
+method's two candidates):
+
+| method | noise 0: median / p95 / max | 0.3 px edge noise: median / p95 | Python cost |
+|---|---|---|---|
+| `backproject_ellipse` | 0.000 / 0.000 / 0.000 deg | 0.16-0.32 / 0.9-1.7 deg | ~0.2 ms |
+| minor axis + b/a about the optical axis | 6.5 / 11.8 / 24 deg | 6.4-6.7 / 11.5-12.1 deg | ~10 us |
+| minor axis + b/a about the ray to the centre | 0.87 / 4.4 / 13 deg | 0.85-0.97 / 4.7 deg | ~14 us |
+
+The b/a error does **not** fall with distance: it is the image plane's obliquity to the ray,
+a function of where in the FOV the rotor sits. Backproject's zero is a statement about an
+ideal thin circle and is not carried over to a thick disc. **Negative result: neither the
+cone nor the axis ratio is used.**
+
+### 23.2 Two planes, and continuity picks the eigenvector
+
+A body of revolution is mirror-symmetric about every plane holding its axis. The plane
+through the lens and the axis is one of them, so its image -- a line through the
+silhouette's centroid -- is the silhouette's symmetry line, which is one of its two
+principal axes (for a bare disc, the minor one). Back-project that line: the rays through
+the centroid $c$ and through $c + \hat u$ span the plane, with normal
+$n_i = r(c) \times r(c + \hat u)$ in world coordinates. Two views give two planes and
+
+$$\hat a = \frac{n_A \times n_B}{\lVert n_A \times n_B \rVert}.$$
+
+No radius, no thickness, no b/a, and no cone branch (`stereo.match`, 21.6). It degenerates
+when the planes are parallel; `MIN_SIN` (5 deg, a guess) refuses the pair before then.
+
+**Which eigenvector is the axis is not decided by the eigenvalues.** Anything symmetric
+about the axis -- a rod, a hub -- leaves the eigenvectors where they are but can make the
+axis direction the *larger* one, so "take the minor" flips by 90 deg. Each view therefore
+offers both, and of the four plane pairs the axis nearest ``ref`` wins and takes its sign:
+``ref`` is the last frame's axis, `UP` on the first frame. With no filtering at all, this
+alone matched a perfect-continuity oracle on every symmetric-rod case (below).
+
+Position is the closest approach of the two centroid rays (as
+`disc_pose.triangulate_centre`). A ray gap past `MAX_GAP_MM` (1 mm, a guess; good synthetic
+poses close to <= 0.22 mm) refuses the pair: the two views did not find the same object.
+
+### 23.3 The rod: why it is filtered, and how
+
+**Continuity alone is not enough.** No filter, flip resolved by a perfect-continuity
+oracle, 20 poses (`_render` bodies, real rig):
+
+| body | axis median / max | position median | bias along the axis |
+|---|---|---|---|
+| no rod | 0.13 / 0.23 deg | 0.05 mm | +0.01 mm |
+| rod 0.6 x 12 mm | 0.43 / 3.4 deg | 1.11 mm | +1.1 mm |
+| rod 1.2 x 20 mm | 0.11 / 0.41 deg | 3.28 mm | +3.3 mm |
+| rod + wire off the rim | **41 / 45 deg** | 1.85 mm | +1.6 mm |
+| rod + hub + legs | 1.4 / 19 deg | 5.0 mm | +5.0 mm |
+
+The rod's pixels pull each centroid along the axis, so the triangulated point rides 1-5 mm
+**high**, by an amount that changes with the rod's projected length -- not a constant to
+calibrate out, and height is what the hover loop controls. Anything *not* symmetric about
+the axis (a wire, a leg) rotates the eigenvectors themselves, and no choice between them
+recovers the axis.
+
+**Which filter.** Same harness, 20 poses per case:
+
+| case | opening, 11 px | Gaussian sigma 8, threshold 0.5 | Gaussian pyramid, 1/8 | **scale-adaptive** |
+|---|---|---|---|---|
+| rod 0.6 x 12 | 0.15 / 0.32 deg | 0.17 / 0.36 | 1.37 / 90 | **0.13 / 0.29** |
+| rod 1.2 x 20 | 93 deg | 93 deg | 95 deg | **0.17 / 0.39** |
+| rod + wire | 0.28 / 94.6 | 0.55 / 94.0 | 84 / 98 | **0.21 / 0.46** |
+| rod + wire + 0.2 % salt | 0.28 / 94.6 | 0.52 / 94.0 | 84 / 98 | **0.21 / 0.47** |
+| cost, one view, ROI ~140x140 | 0.18 ms | 0.89 ms | 0.10 ms | 0.26 ms |
+
+Every fixed-scale filter fails on the wide rod, for one reason: the scale that separates
+rod from disc is set by the disc's own size *in that view*, and an edge-on disc is no
+thicker than a wide rod. **Negative result: the fixed opening (`disc_pose.OPEN_PX`), a
+single-scale Gaussian and a Gaussian pyramid are all rejected.** Searching a Gaussian stack
+for the lowest-frequency structure ends at the blob whose scale is its largest inscribed
+radius, and the distance transform gives that radius directly in one O(N) pass. So
+(`axis_pose.mask`):
+
+1. $b$ = the distance transform's maximum, the half-width of the thickest part.
+2. The core $dt > \alpha b$ ($\alpha$ = 0.5; 0.3 let wide rods through, 0.7 eroded edge-on
+   discs) loses everything thinner than $\alpha b$.
+3. Of the core's components the **largest by area** is kept: a hub can be thicker than an
+   edge-on disc, rarely bigger.
+4. It is grown back by $\alpha b$ inside the mask, so the disc's edge keeps full resolution.
+
+**Holes are not filled.** A ring's moments equal the filled disc's already, and filling
+closed rod + legs + disc into one fake blob bigger than the disc (that was every bad frame
+in the first hub run).
+
+**Open: the hub.** This rig's cameras are both roughly level (`stereo_rig.json`), so an
+upright robot is **edge-on to both views**. The rendered hub -- a guess at 4 mm across,
+twice the 2 mm disc -- then has the largest inscribed radius, the disc's core vanishes at
+$\alpha b$, and in some frames both views keep the hub, agree with each other, and pass the
+gap gate: 13/20 solved, worst 40 deg. Skipping cores with no readable minor axis (round
+blobs) fixed the hub at a cut of 0.6 but lost near-face-on rings; 0.8 and 0.95 kept the
+rings and let the hub through. That trade is tuned against a guessed hub, so it is left
+open until a real take gives the hub's size. Live, the ROI centred on the last centroid
+and position continuity keep the hub out of most frames.
+
+### 23.4 What it measured (synthetic, `axis_pose._self_check`)
+
+`axis_pose.CASES`, rendered through `stereo_rig.json` at ~138 mm (the views' crossing),
++-8 mm, tilt 0-40 deg from up, $r$ = 5 mm, 2 mm thick unless stated, 20 poses each, no image
+noise, ``ref`` = `UP`:
+
+| body | solved | axis median / max | position median / max |
+|---|---|---|---|
+| thin disc, 0.3 mm | 20/20 | 0.10 / 0.26 deg | 0.05 / 0.15 mm |
+| disc | 20/20 | 0.13 / 0.45 deg | 0.06 / 0.08 mm |
+| ring, 4 mm hole | 20/20 | 0.12 / 0.23 deg | 0.06 / 0.10 mm |
+| rod 0.6 x 12 | 20/20 | 0.13 / 0.29 deg | 0.05 / 0.09 mm |
+| rod 1.2 x 20 | 20/20 | 0.17 / 0.39 deg | 0.06 / 0.14 mm |
+| rod + wire | 20/20 | 0.21 / 0.46 deg | 0.07 / 0.10 mm |
+| rod + wire + salt | 20/20 | 0.21 / 0.47 deg | 0.07 / 0.10 mm |
+| rod 1.2 x 12 + hub (known failure, 23.3) | 13/20 | 0.20 / 40 deg | 0.09 / 12 mm |
+
+**Not yet measured on a real take** -- the recordings are on the USB stick; that comparison
+(against `DiscStereoEstimator` and the rod direction, scored by second difference) gates any
+deletion and must give the hub's real size.
+
+Cost, M-series, Python timer (nanobind call overhead included in the C numbers):
+
+| stage | full 640x400 | ROI ~140x140 |
+|---|---|---|
+| `mask` (cv2: threshold, 2 distance transforms, components) | 2.1 ms | 0.26 ms |
+| `axis_view` (C moments) | 0.145 ms | 0.012 ms |
+| `axis_pose` (C, both views, 4 plane pairs) | 0.004 ms | -- |
+
+About 0.55 ms per pose with an ROI against 3.31 ms for the rim core (22.5): the estimator is
+no longer what limits the rate, the cameras are (~395 frames/s interleaved, 22.1). C and
+Python agree bit for bit (`--stage axis`, max 0).
+
+### 23.5 Correspondence with the implementation
+
+| Concept | Code |
+|---|---|
+| Scale-adaptive rod filter, no hole fill (23.3) | `axis_pose.mask`, `ALPHA` |
+| Moments -> centroid, minor axis, refusals | `axis_pose.moments`, `axis_pose.c` `axis_view` |
+| Undistorted world ray (OpenCV fixed point) | `axis_pose._ray`, `axis_pose.c` `ray` |
+| Two planes, eigenvector by continuity, sign (23.2) | `axis_pose.pose` ``ref``, `axis_pose.c` `axis_pose` |
+| Ray-gap gate (23.2) | `MAX_GAP_MM`, `axis_cfg.max_gap_mm` |
+| One home for the constants | `axis_pose.CFG`, passed in as `struct axis_cfg` |
+| Synthetic bodies (23.3, 23.4) | `axis_pose._render`, `CASES`, `_self_check` |
+| Parity | `native_parity.py` `stage_axis` |

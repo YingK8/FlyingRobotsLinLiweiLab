@@ -22,7 +22,7 @@ void loop() {
   ctl.run();
 
   // --- experiment-specific behavior: LED steady-on while the DC window holds ---
-  digitalWrite(LED_PIN, seq.isDone() ? LOW : HIGH);
+  if (seq.isDone()) led().holdOff(); else led().holdOn();
 
   driveTelemetry(ctl);
 }

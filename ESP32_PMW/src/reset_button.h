@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SyncLedPin.h"
 #include "constants.h"
 #include "safety_startup.h"
 #include <Arduino.h>
@@ -47,7 +48,7 @@ inline void checkResetButton() {
       highSince = (now == 0) ? 1 : now; // avoid the 0 "not held" sentinel
     else if (now - highSince >= RESET_DEBOUNCE_MS) {
       forceAllGatesLow(); // instant hard-off
-      digitalWrite(LED_PIN, LOW);
+      sync_led::led().holdOff();
       Serial.println("[block] button pressed -- gates off, press again to restart");
       while (digitalRead(RESET_BUTTON_PIN) == HIGH)
         delay(5);     // wait out the blocking press

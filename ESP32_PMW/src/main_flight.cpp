@@ -104,6 +104,16 @@ static void allCoilsOff() {
   for (int i = 0; i < NUM_CHANNELS; i++) ctl.setCarrierDutyCycle(i, 0.0f);
 }
 
+static void reportStop() {
+  const int64_t t0 = esp_timer_get_time();
+  led().sendStopSignal();
+  const int64_t t1 = esp_timer_get_time();
+  Serial.printf("SYNC_STOP v=2 t0=%lld t1=%lld on_us=%u gap_us=%u\n",
+                (long long)t0, (long long)t1,
+                (unsigned)led().timing().on_ms * 1000u,
+                (unsigned)led().timing().gap_ms * 1000u);
+}
+
 // Split "a:b:c" into up to `n` floats. Fields left unwritten keep the caller's default,
 // so a short command is not a command full of zeros.
 static void splitFloats(const String &s, float *out, int n) {
@@ -140,19 +150,20 @@ static bool cmdSeq(const String &arg) {
     if (seqN == 0) { Serial.println("!seq empty"); return false; }
     seq.compile(25, seqF0, INITIAL_DUTY, SPIN_PHASES);
     collective = SPINUP_THROTTLE;
-    // See controller/control/theory.md, "Recorded flight START". These are
-    // software call brackets, not measured optical/PWM/current onset times.
     const int64_t led0 = esp_timer_get_time();
-    digitalWrite(LED_PIN, HIGH);
+    led().sendStartSignal();
     const int64_t led1 = esp_timer_get_time();
     const int64_t drive0 = esp_timer_get_time();
     seq.start();
     applyMixer(); // first carrier application, before any blocking serial output
     const int64_t drive1 = esp_timer_get_time();
     state = SPINUP;
-    Serial.printf("SYNC_START v=1 led0=%lld led1=%lld drive0=%lld drive1=%lld\n",
+    Serial.printf("SYNC_START v=2 led0=%lld led1=%lld drive0=%lld drive1=%lld "
+                  "on_us=%u gap_us=%u\n",
                   (long long)led0, (long long)led1,
-                  (long long)drive0, (long long)drive1);
+                  (long long)drive0, (long long)drive1,
+                  (unsigned)led().timing().on_ms * 1000u,
+                  (unsigned)led().timing().gap_ms * 1000u);
     Serial.printf("seq go: %d segment(s) from %.2f Hz\n", seqN, seqF0);
     return true;
   }
@@ -248,8 +259,11 @@ static void dispatch(String cmd) {
   else if (key == "hover") { magSet = 0.0f;                                    ok = true; }
   else if (key == "land")  { if (state == SPINUP || state == FLIGHT) state = LANDING;
                              ok = true; }
-  else if (key == "stop")  { allCoilsOff(); digitalWrite(LED_PIN, LOW);
-                            state = OFF; ok = true; }
+  else if (key == "stop")  { const bool wasDriven =
+                               state == SPINUP || state == FLIGHT || state == LANDING;
+                             allCoilsOff();
+                             if (wasDriven) reportStop();
+                             state = OFF; ok = true; }
   else if (key == "freq")   ok = cmdFreq(arg);
   else if (key == "seq")    ok = cmdSeq(arg);
   else if (key == "probe")  ok = cmdProbe(arg);
@@ -344,7 +358,7 @@ void loop() {
       if (millis() - lastStep >= 20) {
         lastStep = millis();
         if (ctl.rampDownStep(2.0f)) {
-          digitalWrite(LED_PIN, LOW);
+          reportStop();
           state = OFF; Serial.println("state=4 (OFF)");
         }
       }

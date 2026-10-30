@@ -5,10 +5,13 @@
 
 #include "JsonPwmSequencer.h"
 #include "PwmController.h"
+#include "SyncLedPin.h"
 #include "constants.h"
 #include "reset_button.h"
 #include "safety_startup.h"
 #include "telemetry.h"
+
+using sync_led::led;
 
 // Operator-confirmed coil order A,B,C,D (2026-10-28): A/C and B/D are opposite.
 // See controller/control/theory.md, "Coil phase convention (2026-10-28)".
@@ -52,8 +55,8 @@ inline void driveBoot(bool activeLed = true) {
   delay(1000);
   forceAllGatesLow();
   initResetButton();
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, activeLed ? HIGH : LOW); // flight reserves the rising edge for START
+  led().attachTo(LED_PIN);
+  if (activeLed) led().holdOn();
 
   if (!SPIFFS.begin(/*formatOnFail*/ false))
     Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");
@@ -63,6 +66,7 @@ inline void driveBoot(bool activeLed = true) {
 // "t=.. freq=.. | I[A]: .. | duty[%]: .. | spread=.. bal=.. trip=..".
 inline void driveTelemetry(PwmController &c) {
   checkResetButton(); // poll every loop (before the 500 ms print throttle below)
+  led().advance();
 
   static unsigned long last = 0;
   unsigned long now = millis();

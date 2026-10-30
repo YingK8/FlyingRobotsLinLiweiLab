@@ -35,9 +35,13 @@ class PinLed {
   const PulseTiming &timing() const { return machine_.timing(); }
 
  private:
-  void write() { digitalWrite(pin_, machine_.isOn() ? HIGH : LOW); }
+  void write() {
+    if (pin_ == unattached) return;
+    digitalWrite(pin_, machine_.isOn() ? HIGH : LOW);
+  }
 
-  uint8_t pin_ = 255;
+  static constexpr uint8_t unattached = 255;
+  uint8_t pin_ = unattached;
   SyncLed machine_;
 };
 

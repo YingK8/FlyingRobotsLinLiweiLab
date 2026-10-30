@@ -26,7 +26,7 @@ void loop() {
   size_t step = seq.currentIndex();
   if (step != lastStep) {
     lastStep = step;
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    led().flip();
   }
 
   driveTelemetry(ctl);

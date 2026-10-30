@@ -57,6 +57,7 @@ class DriveOnlyTests(unittest.TestCase):
                     assert kw['require_ready'] and not kw.get('sync_start', False)
                     self.lines = kw['takeoff_cmd']
                     self.on_line = None
+                    self.state = None
                     if mode == 'no_ready':
                         raise ValueError('No READY')
                 def send_takeoff(self):
@@ -65,7 +66,7 @@ class DriveOnlyTests(unittest.TestCase):
                     if mode == 'reject':
                         self.on_line('!seq rejected')
                     if mode != 'no_ack':
-                        self.on_line('SYNC_START v=1 led0=1 led1=2 drive0=3 drive1=4')
+                        self.on_line('SYNC_START v=2 led0=1 led1=2 drive0=3 drive1=4 on_us=30000 gap_us=30000')
                 def drain(self):
                     if mode == 'interrupt' and 'stop' not in commands:
                         raise KeyboardInterrupt()
@@ -73,7 +74,11 @@ class DriveOnlyTests(unittest.TestCase):
                     commands.append(c)
                     if mode == 'stop_failure':
                         raise OSError('Disconnected')
+                    self.state = 4
                     self.on_line('state=4 col=100')
+                def stop(self, timeout_s=1.0):
+                    self.send('stop')
+                    return self.state == 4
                 def close(self):
                     closed.append(True)
             def sleep(seconds):

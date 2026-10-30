@@ -14,7 +14,7 @@ a two-camera stereo rig.
 | `pmw_fly` | the standalone controller built from the same objects as `pmw_pose`, opted into with `-DPMW_FLY=ON`. Driven ONLY by `controller/control/fly_native.py`, which owns arming and the thermal stamp -- see Safety |
 | `lib/DriveFrame/` | the binary DRIVE/ACK wire format, included by the firmware AND by `controller/native/`. One definition; `controller/control/drive_frame.py` mirrors it for tooling and is held to the C++ encoder's own bytes |
 | `ai/` | gitignored scratchpad: bench harnesses and offline design tooling. `ai/thermal/coil_thermal.py` is load-bearing (see Safety) |
-| `controller/report.py` | one command for the whole offline pass on a take: solve, mast, angles, the command record, the plots and the overlay video, all into `<take>/report/`. The stages are the modules above; this only orders them |
+| `controller/report.py` | one command for the whole offline pass on a take: solve, rod (`find_mast`), angles, the command record, the plots and the overlay video, all into `<take>/report/`. The stages are the modules above; this only orders them |
 | `controller/run.ipynb` | the operator notebook, one cell per stage; cell 12 flies |
 | `results/`, `data/` | captures and outputs; each has a README mapping files to the script that made them |
 

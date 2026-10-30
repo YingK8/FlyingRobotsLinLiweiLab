@@ -3963,6 +3963,13 @@ still for each step is cut `SETTLE_BACK_S` before the *next* label rather than a
 current one: the rotor spends most of a 2.5 s hold swinging into the new lean, and it is
 the settled attitude that is the measurement.
 
+The LED used to be the counter-example. It toggled once per **step** while the line was
+printed once per **label change**, so a 2.5 s hold produced ~100 optical edges against one
+printed event and no edge could be tied to a line -- the video had more information than
+the log and none of it was usable. Since 2026-10-30 it blinks once per label change through
+`lib/SyncLed`, and it boots dark so the first label's rising edge is unambiguous. This
+firmware still fits no offset; the blink is what would let it, if that is ever wanted.
+
 ### 23.3 A take that dropped a frame cannot be cut, and is refused
 
 `FlightWriter` writes a row to `frames.csv` for every stereo read, but hands the frame to
@@ -4598,13 +4605,89 @@ bright on the sole accepted `seq=go`, dark again on stop/landing completion. Oth
 firmware keeps its existing boot/step indications. GPIO14 blocking still forces
 all gates low and the LED off. No GPIO map or alternative energising command is added.
 
+The LED is the only clock the two cameras and the ESP32 share, so its programming is a
+protocol, and since 2026-10-30 it lives in exactly one place: `lib/SyncLed`. Six files
+used to write `LED_PIN` directly, with six different policies; the mains now declare an
+intent (`led().sendStartSignal()`, `led().sendStopSignal()`, `led().sendBlink()`) and the library
+owns the pin, the timing and the state machine. `driveBoot()` hands it the pin once, so
+the library never includes `src/constants.h` and the GPIO map stays where it is.
+
+### The marker, and why one rising edge was not enough
+
+| call | edges | resting level |
+|---|---|---|
+| `sendStartSignal()` | ON at t, OFF at t+`on_ms`, ON at t+`on_ms`+`gap_ms` | ON |
+| `sendStopSignal()` | OFF at t, ON at t+`on_ms`, OFF at t+`on_ms`+`gap_ms` | OFF |
+| `sendBlink()` | ON at t, OFF at t+`blink_ms` | OFF |
+
+`on_ms = gap_ms = 30`. The first edge is the anchor; the second is what makes the anchor
+believable. A reflection, a monitor, or the rotor's own specular highlight can produce one
+rising edge inside an ROI, and the old decoder's only defence was "exactly one rise exists
+in this recording" -- which says nothing about *which* bright thing produced it.
+
+A marker is only armed if its first edge can actually be written. A stuck-on LED at
+`seq=go` therefore emits nothing, rather than a falling edge 30 ms later that a camera
+would read as the beginning of a STOP. `advance()` is polled from the main loop and never
+waits, so `seq=go` can bracket the first edge and the first carrier application with one
+clock; the remaining two edges are emitted by `loop()`.
+
 Inside `seq=go`, after compiling the existing ramp, `esp_timer_get_time()` brackets
-`digitalWrite(LED_PIN, HIGH)`, then `seq.start()` plus the first `applyMixer()`.
-Only after these calls does firmware print `SYNC_START v=1 led0=... led1=...
-drive0=... drive1=...`. These are software application brackets; the LED's optical
+`led().sendStartSignal()`, then `seq.start()` plus the first `applyMixer()`. Only after these
+calls does firmware print `SYNC_START v=2 led0=... led1=... drive0=... drive1=...
+on_us=... gap_us=...`, and `SYNC_STOP v=2 t0=... t1=... on_us=... gap_us=...` on `stop`
+or on LANDING completion. These are software application brackets; the LED's optical
 delay, PWM latch/ISR timing, inter-channel skew and coil current response are not
 measured by them. Current `millis()` telemetry shares the same ESP timer, with
 millisecond quantisation and a 32-bit wrap; the offline association refuses wrap.
+
+`on_us`/`gap_us` travel with the event so the offline decoder derives its tolerance from
+what this firmware did. A duplicated constant on the host is how the two sides drift apart
+without anyone noticing.
+
+### What the marker does and does not fix
+
+**Quantisation is the error budget, and it is now bounded.** Exposure at 210 fps is
+4.76 ms. The old decoder reported a bracket `[last dark, first confirmed bright]` that
+could span `min_on_frames + 1` periods -- 25 ms at 120 fps, 14 ms at 210 -- and that
+bracket was the whole accuracy of a single-anchor offset. The bracket is now one frame
+wide by construction, and the second edge confirms the first instead of extending it.
+
+**`min_on_frames` was a duration in disguise.** At 120 fps it meant 16.7 ms; the same
+number on the 208 fps tracker path would mean 9.6 ms. It is now `min_on_s`, defaulted from
+the measured median frame interval. This is the fourth instance of the trap 22.8 records.
+
+**A short pulse cannot be missed, and cannot beat.** 30 ms is 3.6 periods at 120 fps and
+6.3 at 210, so a pulse always covers at least three exposures; and it is not an integer
+multiple of either period, so it cannot alias into "always on" the way a pulse equal to the
+frame period would. The library stores milliseconds and never converts to frames.
+
+**The STOP marker is a second anchor.** `fit_clock` already fitted an affine map from two
+anchors; there was only ever one, so `drift_measured` was permanently `False`. With the
+STOP decoded in both cameras, the camera clocks estimate scale as well as offset, and the
+residual becomes a number worth reading instead of an identity.
+
+**Both cameras must agree.** Their first edges are compared against a bound of two frame
+periods (floor 20 ms). One ROI that is not on the LED now fails loudly instead of producing
+a plausible clock for one camera.
+
+**A block-button press cannot fake a STOP.** GPIO14 forces the LED off mid-flight, which is
+one falling edge with no confirmation pulse after it. The two-edge decoder rejects it. The
+same holds for a `stop` that lands inside a START marker: the marker is overwritten, the
+recording carries both events, and `LLM/start.py` refuses the take.
+
+### Why not a Hamming-coded bit stream
+
+Hamming(7,4) corrects *independent* bit errors. The error mechanism here is a **burst** --
+a dropped frame, a rolling-shutter smear, or a motion-blurred exposure flips a run of
+adjacent slots, not one. Seven slots at two frames each is 67 ms at 210 fps and 117 ms at
+120, which is affordable in time but buys protection against the wrong failure, and it
+still needs a preamble to frame the word. Redundancy in the **edge sequence** is what
+survives sampling, which is what the two-edge marker is: a code of distance 2 from both
+"always on" and "always off" in edge space, doubled by requiring the same decode in two
+independent cameras. If a numeric ID is ever wanted, a 4-bit payload under Hamming(7,4) is
+the right *payload* protection -- but the sync must never depend on it.
+
+### Host side
 
 Python `RunConfig.sync_start=True` requires recorded cameras and `telemetry_path`.
 The existing `SerialComm` reader tees complete RX lines to exclusive JSONL, including
@@ -4615,12 +4698,21 @@ inferred from this pre-roll gate. Manual takeoff uses the already-reset IDLE dev
 a second reset/start needs a new run. The thermal gate and shutdown path remain the
 existing runner's responsibility. Native `pmw_fly` and tilt are not adapted here.
 
-`LLM sync-start` requires one optical rise in each video and one device START in the
-raw log. It uses the GPIO-call midpoint as the device reference, preserves both call
-intervals and the log hash, and never substitutes host-send time. This estimates a
-single offset, not drift or a measured timing accuracy. See `LLM/START_SYNC.md` for
-capture and bench acceptance. Full per-update device-applied schedules and true
-current magnitude/phase remain separate work.
+`LLM sync-start` requires the START marker in each video and one device START in the raw
+log; a log `SYNC_STOP` must be matched by a decoded STOP in **both** videos or the take is
+refused as truncated. It uses the GPIO-call midpoint as the device reference, preserves
+both call intervals and the log hash, and never substitutes host-send time. A `v=1` log --
+a bare rising edge -- is refused rather than degraded to one anchor. See
+`LLM/START_SYNC.md` for capture and bench acceptance. Full per-update device-applied
+schedules and true current magnitude/phase remain separate work.
+
+### Tilt: the LED that could not be associated with anything
+
+`main_tilt.cpp` toggled the LED once per **sequencer step** while printing `label=` once
+per **label change**. A 2.5 s hold compiles to ~100 queue steps sharing one label, so the
+optical edges outnumbered the printed events ~100:1 and no edge could be tied to a line.
+It now blinks once per label change, matching what it prints, and boots dark so the first
+label's edge is unambiguous. `tilt_sweep.py` aligns to `label=` and is unaffected.
 
 
 ### Inputs-only notebook check (2026-10-27)

@@ -1,5 +1,15 @@
 # LLM 工作状态
 
+## 2026-10-30：LED 对时改为双脉冲标记
+
+- LED 编程收进 `lib/SyncLed`：`src/main_*.cpp` 只声明意图（`led().sendStartSignal()` / `sendStopSignal()` / `sendBlink()`），不再直接写 `LED_PIN`。`driveBoot()` 只把引脚交给它一次，库不依赖 `src/constants.h`。
+- START/STOP 各是一对脉冲边沿（亮-灭-亮 / 灭-亮-灭，30/30 ms）。单边沿没有冗余：ROI 里一个反光就能满足「只有一次上升沿」。30 ms 是 3.6 个 120 fps 帧周期、6.3 个 210 fps 帧周期，且不是任一帧周期的整数倍，所以不会被漏采也不会拍频。
+- `SYNC_START` 升到 v=2 并带 `on_us/gap_us`；新增 `SYNC_STOP v=2`。离线容差由固件实际宽度推导，不在主机侧重复常量。
+- 离线：`min_on_frames` 改为 `min_on_s`（默认取实测帧周期中位数），边沿区间由 `min_on_frames + 1` 帧缩到 1 帧；`sync-start` 要求两台相机解出同一对边沿并互相比对，日志有 STOP 而视频没有则拒绝。解出 STOP 后相机时钟有两个锚点，`drift_measured` 才可能为 true。
+- `SYNC_STOP` 只在真正离开驱动状态时发出：IDLE/OFF 里的重复 `stop`（例如 `safe_off.py`）不再多打印一条，否则离线解析会把它当成重复 STOP 而拒绝整次录像。
+- `main_tilt` 原来按**步**闪灯、按**标签变化**打印 `label=`，光学边沿比可关联事件多约 100 倍；改为按标签变化闪一次，并开机保持暗。
+- 未执行烧录或硬件操作：脉冲宽度、两机可见性、LED/驱动/电流延迟仍待台架验收（[START_SYNC.md](START_SYNC.md)）。
+
 ## 2026-10-28：GitHub 同步前验证
 
 - 本轮重新运行完整 `LLM self-check`、`controller.camera.test_record` 和 `controller.calib.test_calibrate`，全部通过；flight / tilt 固件编译通过，未执行烧录或硬件操作。

@@ -96,11 +96,19 @@ LED edges 保存最后一帧 dark 到首帧 high 的 source-time 区间，以中
 
 `encoder_finalized=false` 表示尚未完成/超时，导入拒绝；编码线程完成后保存最终 `encoder_errors`。`capture_error` 非空时拒绝导入，保留部分录像供检查。`capture_audit.json` 是可选的本地验收报告：`integrity=PASS` 只证明两路解码帧数和 written 行数一致，采样速率/帧间隔/host skew 另以数值和 warnings 报告，不证明曝光同步。
 
-### Flight START v1
+### Flight START/STOP v2
 
-原始 `telemetry.jsonl` 可以包含 `SYNC_READY v=1` 与 `SYNC_START v=1 led0=<us> led1=<us> drive0=<us> drive1=<us>`。四个整数是设备单调微秒，顺序为 LED GPIO 写入前/后、首次 sequencer + carrier 应用前/后；不代表实测光学或电流起始。
+原始 `telemetry.jsonl` 可以包含：
 
-`sync-start` 仅接受每份日志一个 READY 和一个 START、每路视频一个光学上升沿。`sync.json.device_start` 保存原始时间、日志行号、LED 中点参考和 `drive_apply_interval_t_s`；`clocks.esp` 从该设备参考映射到实验零点。原始日志哈希纳入 `input_sha256`，修改后必须重跑。仍为 `hardware_sync_validated=false`，单事件 `drift_measured=false`。具体采集步骤见 [START_SYNC.md](START_SYNC.md)。
+```text
+SYNC_READY v=1
+SYNC_START v=2 led0=<us> led1=<us> drive0=<us> drive1=<us> on_us=<us> gap_us=<us>
+SYNC_STOP v=2 t0=<us> t1=<us> on_us=<us> gap_us=<us>
+```
+
+整数都是设备单调微秒。`led0/led1` 包围 START 标记第一个边沿的 GPIO 写操作，`drive0/drive1` 包围首次 sequencer + carrier 应用，`t0/t1` 包围 STOP 标记第一个边沿；都不代表实测光学或电流起始。`on_us/gap_us` 是固件实际使用的脉冲与间隔宽度，离线容差由它推导。
+
+`sync-start` 要求每份日志一个 READY、一个 START、至多一个 STOP，且两台视频各解出同一对脉冲边沿；日志有 STOP 而视频没有（或反之）视为录像被截断并拒绝。`sync.json.markers` 保存每台相机的解出结果（边沿时刻、实测 on/gap、容差），`cross_camera` 保存两台第一边沿之差与其上限，`device_start`/`device_stop` 保存原始时间、日志行号和 LED 中点参考。有 STOP 时相机时钟有两个锚点，`fit_clock` 估计比例，`drift_measured=true`；只有一个锚点时仍为 false。原始日志哈希纳入 `input_sha256`，修改后必须重跑。`v=1`（单个上升沿）的日志被拒绝，不降级为单锚点。仍为 `hardware_sync_validated=false`。具体采集步骤见 [START_SYNC.md](START_SYNC.md)。
 
 ## 电流原始日志
 

@@ -1,6 +1,6 @@
 # Flight START 对时：第一版
 
-更新：2026-10-26。支持 `flight` 固件 + Python `hover_controller_runner`。代码已接入；尚未记录烧录、实拍或光学/电流延迟验证结果。`tilt` 和独立 `pmw_fly` 尚未接入这套采集流程。
+更新：2026-10-30。支持 `flight` 固件 + Python `hover_controller_runner`。协议升到 v=2：START/STOP 各是一对脉冲边沿，见「标记协议」。代码已接入；尚未记录烧录、实拍或光学/电流延迟验证结果。`tilt` 和独立 `pmw_fly` 尚未接入这套采集流程。
 
 2026-10-27：用户确认已刷 flight。新增统一 notebook 开环录制入口（见 WORKFLOW.md），同样复用 CommandLink/SerialComm 和 START 协议。2026-10-28 按用户要求去掉 LLM 的模型冷却等待，保留驱动时长记账。它不需要 live pose 才能录制，但正式测量仍要求相机/装置验证。用户烧录确认不代表光学/电流延迟已经实测。
 
@@ -15,8 +15,9 @@
 1. Python runner 打开唯一串口，保存原始接收日志，按既有流程 reset 到 IDLE。
 2. 新 flight 固件初始化后 LED 保持灭，输出 `SYNC_READY v=1`。
 3. 同一个 runner 打开并录制双相机。对时模式要求至少 0.25 秒的录制源时间跨度后才允许 START；这是软件前置检查，不证明帧已经成功编码或 LED 确实可见。
-4. 使用原有 `seq=clear/ramp/go` 启动路径。在接受 `seq=go` 后，固件依次切换 LED、应用 sequencer 初始状态及四路 carrier，并保存调用前后的设备时间；随后才打印事件。
-5. 离线 `sync-start` 找到两机各一个 LED 上升沿，并与唯一的设备事件关联，建立相机 A、相机 B、ESP 到实验时间的映射。
+4. 使用原有 `seq=clear/ramp/go` 启动路径。在接受 `seq=go` 后，固件依次切换 LED（标记的第一个边沿）、应用 sequencer 初始状态及四路 carrier，并保存调用前后的设备时间；随后才打印事件。标记的第二个和第三个边沿由 `loop()` 发出，不阻塞启动。
+5. 停止时（`stop` 或 LANDING 完成）固件发出 STOP 标记并打印 `SYNC_STOP`；只在真正离开驱动状态时发出，IDLE/OFF 里的重复 `stop` 不再打印，所以多按一次 Stop 不会污染日志。
+6. 离线 `sync-start` 在两机各解出一对 START 边沿，并与唯一的设备事件关联，建立相机 A、相机 B、ESP 到实验时间的映射；若日志和两台视频都有 STOP 标记，则用第二个锚点估计时钟比例（`drift_measured=true`），否则只有偏移。
 
 一次 run 只允许一次 START。重拍、重启、停止后再起飞都新建 run。对时模式的面板 takeoff 不再额外 reset；构造 runner 时已经 reset。其他模式保持原有 re-arm 行为。
 
@@ -26,19 +27,36 @@
 
 ```text
 SYNC_READY v=1
-SYNC_START v=1 led0=10000000 led1=10000010 drive0=10000012 drive1=10000100
+SYNC_START v=2 led0=10000000 led1=10000010 drive0=10000012 drive1=10000100 on_us=30000 gap_us=30000
+SYNC_STOP v=2 t0=10333300 t1=10333310 on_us=30000 gap_us=30000
 ```
 
 示例数字不是测量结果。四个时间都是 `esp_timer_get_time()` 的微秒值：
 
-- `led0/led1` 包围 LED GPIO 写操作。
+- `led0/led1` 包围标记第一个边沿的 GPIO 写操作。
+- `on_us/gap_us` 是固件实际使用的脉冲与间隔宽度，随事件一起传回，离线容差由它推导，不在主机侧重复常量。
+- `t0/t1` 包围 STOP 标记第一个边沿的 GPIO 写操作。
 - `drive0/drive1` 包围 `seq.start()` 和首次 `applyMixer()`；各通道写入并非同时发生。
 - 没有在这两个操作之间打印串口，以免串口阻塞人为拉开间隔。
 - 正常 stop/landing 完成时 LED 灭；GPIO14 的阻断行为保留。LED 灭不是精确电流归零的测量。
 
 这些是**软件调用时间区间**，不是示波器测得的 PWM 边沿、LED 发光时刻或电流建立时刻。离线暂取 LED 调用区间中点为 ESP 的 START 参考，光学边沿有帧间区间与未知曝光/传输延迟；`hardware_sync_validated=false`。实际电流延迟不消除。
 
-当前 Arduino ESP32 的 `millis()` 和上述微秒时钟同源，原有电流日志 `t=` 仍按毫秒解析。第一版拒绝跨设备 reset、多 START 和 millis 回绕。单次事件只估 offset，不声称验证了漂移；结束第二脉冲尚未实现。
+当前 Arduino ESP32 的 `millis()` 和上述微秒时钟同源，原有电流日志 `t=` 仍按毫秒解析。解析拒绝跨设备 reset、多 START、STOP 在 START 之前或重复、以及 millis 回绕。START 单锚点只估 offset；STOP 标记提供第二个锚点后 `fit_clock` 估比例，残差是光学量化误差而不是准确度证明。
+
+## 标记协议
+
+| 调用 | 边沿 | 结束电平 |
+|---|---|---|
+| `led().sendStartSignal()` | t 亮、t+on 灭、t+on+gap 亮 | 亮 |
+| `led().sendStopSignal()` | t 灭、t+on 亮、t+on+gap 灭 | 灭 |
+| `led().sendBlink()` | t 亮、t+blink 灭 | 灭 |
+
+`on=gap=30 ms`。选择依据是实测帧周期（120 fps 为 8.33 ms，210 fps 为 4.76 ms）：30 ms 是 3.6 和 6.3 个周期，所以脉冲不会落在两次曝光之间被漏掉；它也不是任一帧周期的整数倍，所以不会与帧率拍频成「常亮」。**这是时长，不是帧数**——`min_on_frames` 那样的常量在 120 fps 和 208 fps 下含义不同。
+
+第一个边沿是锚点，第二个边沿才让它可信：一个反光、一个显示器、转子自身的高光都能在一个 ROI 里产生一个上升沿，却产生不了「30 ms 亮 + 30 ms 灭 + 再亮」。GPIO14 阻断只给出一个下降沿，没有确认脉冲，因此不会被误读成 STOP。
+
+为什么不用 Hamming 码：Hamming(7,4) 纠正的是独立比特错误，而这里的错误是突发的（丢帧、卷帘拖影、运动模糊会把连续几个时隙一起翻掉），并且串行 LED 流在导频之前没有帧边界。鲁棒性来自**边沿序列**的冗余，再加上两台相机必须解出同一个标记。完整论证见 `controller/control/theory.md`「Recorded flight START」。
 
 ## 上机前准备
 
@@ -110,7 +128,8 @@ ROI 是各相机保存图像中的 LED 像素区域，中文占位符必须替�
 ## 首次台架验收
 
 - [ ] 新 flight 固件输出 READY，LED 在 START 前为暗。
-- [ ] 原始双视频有足够暗帧，START 后两机均有清晰亮帧。
+- [ ] 原始双视频里，START 的「亮-灭-亮」三段在两台相机都可见；只看到一段上升沿说明脉冲宽度或帧率不对。
+- [ ] 停止后两机都解出 STOP 标记；`processed/sync.json` 中 `drift_measured` 为 true。
 - [ ] 原始日志仅一次 START，四个时间戳顺序合理。
 - [ ] `sync-start` 成功，人工对照视频/LED 亮度轨迹和设备事件。
 - [ ] 用实际测量核对 LED、驱动边沿与电流的延迟/抖动；仅软件编译和合成测试不能勾选这一项。

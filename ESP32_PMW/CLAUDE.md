@@ -22,7 +22,9 @@ a two-camera stereo rig.
 
 The GPIO map in `src/constants.h` is golden. Never do arithmetic on a pin constant, never
 renumber or "tidy" the A/B/C/D blocks, never assume PWM and carrier pins are adjacent.
-They are wired that way on the board and nowhere else.
+They are wired that way on the board and nowhere else. The LED is the one pin with a
+protocol: `lib/SyncLed` owns it, `driveBoot()` hands it the pin once, and no
+`src/main_*.cpp` writes `LED_PIN` directly. See `control/theory.md`, "Recorded flight START".
 
 ## Where the reasoning lives
 
@@ -177,6 +179,8 @@ uv run python controller/control/sysid.py --list              # the identificati
 uv run python controller/control/sysid.py --stage 0           # free: fits (f0,Q) from old runs
 c++ -std=c++17 -O2 -I lib/DriveFrame/src -o /tmp/tdf \
   lib/DriveFrame/test_drive_frame.cpp && /tmp/tdf              # the wire format
+c++ -std=c++17 -O2 -I lib/SyncLed/src -o /tmp/tsl \
+  lib/SyncLed/test_sync_led.cpp && /tmp/tsl                    # the optical marker
 uv run python controller/pose/tracker.py        # pairing, skew guard, view-cache exactness (no camera)
 uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives

@@ -389,6 +389,81 @@ builds. $\Delta$ and the baseline are frame-independent and remain valid; elevat
 readings such as `tilt_seen_deg` do not, until the rig is rebased onto the robot's disk frame
 at rest when the estimator is wired into visual servoing ([§11.6](../control/theory.md) (ch.4)).
 
+## 15. Fixture localization: what the AprilTags do, and what a take does not keep
+
+The coil array carries twelve `tag36h11` tags: one on each of three faces of four corner
+blocks. `LLM/setup_geometry.py` is the only code in the tree that reads them, and it reads
+them **once per session**, not once per recording.
+
+`localize_fixture` detects the tags in a single static reference pair (`A.png`, `B.png`),
+keeps the IDs present in both images and in the surveyed layout, and hands
+`fit_target` the corresponding 3-D CAD corners. `fit_target` is a six-parameter
+`least_squares` over the reprojection residual of **both** cameras, seeded by
+`solvePnP(SQPNP)` on camera A, with every camera matrix held fixed. That is the point of
+the arrangement: a moved rig cannot pass by quietly re-estimating `K` or the relative
+pose, because those are not free parameters. A fit that fails, or that puts a point behind
+a camera, is a refusal, not a retry.
+
+The recovered `T_camera_A_from_fixture` is then combined with a stereo-triangulated plumb
+line to build `world_frame.json`: origin at the surveyed bearing centre, `z` up the plumb,
+`x` the fixture's own direction projected into the plane normal to `z`. Because `x` comes
+from the fixture and not from the camera, moving the camera holder does not rotate the
+experiment's XY.
+
+### What a recording keeps
+
+`A.mp4`, `B.mp4`, `frames.csv`, `meta.json`. **No tag poses.** `record_flight` and
+`controller/camera/record.py` contain no tag code at all. The tags are visible in every
+frame of every take and nothing reads them there.
+
+So a fixture that shifts between takes is invisible to the data. The world frame is
+session-scoped and the tags that justify it were photographed before the run; if the coil
+array is nudged, or the bearing is replaced, every pose in the take is silently expressed
+in a frame that no longer describes the bench. The verification gates bind the
+*calibration* to a session (`require_verified` checks the rig hash and the input hashes),
+and none of them binds the *fixture* to a take.
+
+### Why not detect tags per frame
+
+Two reasons, and the second is the one that matters.
+
+Detection cost is real -- `ArucoDetector` on a 1280x800 frame is tens of milliseconds,
+against 4.76 ms of exposure at 210 fps -- but the fixture is **static**. Sampling it at
+1 Hz would cost nothing measurable. The actual obstacle is that a per-frame tag stream
+would answer a question nobody asked: the fixture pose does not change during a flight,
+and a time series of it is one number repeated 20 000 times with noise on it.
+
+What the take needs is one comparison: *is the fixture where the session said it was?*
+
+### The design that fits: offline at import
+
+Write `tags.json` beside `meta.json`, produced by the import step rather than the
+recorder, because the recorder is on the hot path and the fixture is not:
+
+- decode a sparse sample of each take (the first and last few encoded frames, plus ~1 Hz
+  through the middle), on both cameras;
+- for each observation, record `frame_index`, the two source times, the tag IDs, their
+  corner pixels, and the single-camera pose with its reprojection residual -- so a
+  mis-detection is visible as a number rather than a boolean;
+- fit `T_camera_A_from_fixture` from the tags present in **both** cameras, with the same
+  fixed-camera-model solver `localize_fixture` uses, and store it next to the session's
+  `world_frame.json` evidence;
+- compare the two. A fixture that moved by more than a stated tolerance (millimetres and
+  degrees, both to be chosen against a measured repeatability, not guessed) flags the take,
+  and `process` refuses to express its poses in a world frame that no longer applies.
+
+Until then, the honest statement about a take is the one the data supports: the tags in the
+video were not read, so the take's world frame rests on the session's reference pair and
+nothing else.
+
+### What is not established
+
+`LLM/config/fixture_layout.json` still has `survey_confirmed: false` and every
+`corners_fixture_mm` null, so this path has never produced a world frame. The ID-to-face
+mapping, the bearing's height above the tray, and the 25 mm black-edge reading are all
+unfilled or unconfirmed. The code refuses rather than guessing, which is why the numbers
+above are described and not quoted.
+
 ## 16. Capture synchronisation: why the shutter refuses
 
 Everything in §14 assumes the two views describe **one** board position. Two USB cameras do

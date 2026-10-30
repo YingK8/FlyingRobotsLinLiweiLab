@@ -198,12 +198,12 @@ cd "/Users/yyc/Documents/LAB/Lin_Lab/Micro Drone/FlyingRobotsLinLiweiLab/ESP32_P
 
 第一版可以先交付带明确定义的 CS 曲线，继续推进视频和 pattern；四路真实 current magnitude/phase 仍列为后续测量任务，不能用 commanded phase 替代 measured phase。
 
-- [ ] 明确 START 事件与设备时间，并验证两相机拍得到暗→亮边沿。
+- [ ] 明确 START 事件与设备时间，并验证两相机拍得到完整的「亮-灭-亮」脉冲对；只有单个上升沿说明脉冲宽度小于帧周期或 ROI 不对。
 - [ ] 保存日志的入口已经接入实际运行路径；单个串口只有一个 reader，单套相机只有一个采集者。
 - [ ] 已检查实际频率应用记录与计划 pattern 的区别。
 - [ ] 用已确认的台架条件验证同步误差；实际电流晚于 START 的响应延迟保留，不人为拉齐。
 
-旧固件 LED 开机亮灯/tilt 步骤闪灯不能直接当 START；更新后的 flight 才有本文的 START 事件。`LLM record-telemetry` 不能与正在占用串口的 controller 并行抢读；新路径用原 reader 的 tee。此清单前四步不要求连接 ESP；`probe`、固件烧录/复位及驱动 notebook 都不属于相机测试步骤。
+旧固件 LED 开机亮灯/tilt 步骤闪灯不能直接当 START；更新后的 flight 才有本文的 START 事件，且 `SYNC_START` 必须是 v=2（v=1 的日志会被离线拒绝）。`LLM record-telemetry` 不能与正在占用串口的 controller 并行抢读；新路径用原 reader 的 tee。此清单前四步不要求连接 ESP；`probe`、固件烧录/复位及驱动 notebook 都不属于相机测试步骤。
 
 ## 6. 采第一组完整实验，先固定一种 pattern
 

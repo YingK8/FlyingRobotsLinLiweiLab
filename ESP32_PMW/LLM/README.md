@@ -50,7 +50,7 @@ flowchart LR
 | 双相机录制 | 复用 `controller.camera.record`，保存原始逐帧时间、掉帧标志 | 软件配对，不是硬件同步曝光 |
 | 相机标定 | 复用 `controller.calib.calibrate`；每个 run 保存快照 | 必须匹配相机顺序、分辨率、旋转和裁剪 |
 | 实验坐标 | 垂线 + bearing + 投影后的 camera A 右方向 | 整体移动后验证双目参数并重建装置参考 |
-| LED 对时 | ROI 亮度、迟滞、连续帧确认，保留事件区间 | 单次脉冲只估 offset；两次可估平均时钟比例 |
+| LED 对时 | ROI 亮度、迟滞、按实测帧周期推导的时长门限，解出 START/STOP 脉冲对 | START 只估 offset；解出 STOP 后两个锚点估比例 |
 | XYZ 与轴方向 | 双目物理点对应三角化；位置与方向独立质量门限 | 轴端点必须可见且是同一物理点 |
 | 自动 CV | 复用现有 disc 分割，逐帧导出 ellipse center | 实验性位置代理；不输出有效的轴方向 |
 | 电流 | 解析现有四路低频 CS telemetry；保留原始日志 | 不是有符号波形、基波幅值、RMS 或实测 phase |
@@ -126,7 +126,7 @@ SPACE 开始/停止录制，q 结束。默认图像翻转 180°，与已有 reco
 
 这里 ROI 也是示例。若有两个可对应的脉冲，例如实验时间 0 s、10 s，用 `--pulse-times 0 10`。检测数必须与事件数一致，不猜哪个闪烁是 START。查看 `processed/led_A.csv`、`led_B.csv`、`sync.json` 的区间与原视频。
 
-更新后的 `flight` 固件在 IDLE 保持 LED 灭，接受 `seq=go` 时记录 LED/首次驱动调用时间。配合 Python runner 的 `sync_start=True` 与 `telemetry_path` 后，使用下面命令自动关联三路时钟（ROI 数字仍是示例）：
+更新后的 `flight` 固件在 IDLE 保持 LED 灭，接受 `seq=go` 时记录标记第一个边沿/首次驱动调用时间，停止时打印 `SYNC_STOP`。配合 Python runner 的 `sync_start=True` 与 `telemetry_path` 后，使用下面命令自动关联三路时钟（ROI 数字仍是示例）：
 
 ```bash
 .venv/bin/python -m LLM sync-start LLM/runs/run_001 --roi-a 20 20 24 24 --roi-b 40 30 24 24

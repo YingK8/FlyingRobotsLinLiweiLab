@@ -3,6 +3,7 @@
 // buffers wrapped in cv::Mat headers -- never as cv::Mat objects, because the cv2
 // wheel and Homebrew's OpenCV are different builds with different ABIs.
 // See controller/pose/theory.md 21.
+#include "axis_pose.h"
 #include "control.h"
 #include "pmw.h"
 #include "tracker.h"
@@ -126,6 +127,17 @@ Camera camera_cpp(nb::handle d) {
     c.distcv = cv::Mat((int)c.dist.size(), 1, CV_64F);
     for (size_t i = 0; i < c.dist.size(); ++i) c.distcv.at<double>((int)i, 0) = c.dist[i];
     return c;
+}
+axis_cam axis_cam_cpp(nb::handle d) {
+    const Camera c = camera_cpp(d);
+    axis_cam k{c.K(0, 0), c.K(1, 1), c.K(0, 2), c.K(1, 2), {0, 0, 0, 0, 0}, {}, {c.T[0], c.T[1], c.T[2]}};
+    for (size_t i = 0; i < 5 && i < c.dist.size(); ++i) k.dist[i] = c.dist[i];
+    for (int i = 0; i < 9; ++i) k.R[i] = c.R(i / 3, i % 3);
+    return k;
+}
+axis_cfg axis_cfg_cpp(nb::dict d) {
+    return {nb::cast<int64_t>(d["min_px"]), nb::cast<double>(d["max_round"]),
+            nb::cast<double>(d["min_sin"]), nb::cast<int>(d["iters"]), nb::cast<double>(d["max_gap_mm"])};
 }
 std::vector<Camera> cameras_cpp(nb::handle seq) {
     std::vector<Camera> out;
@@ -730,4 +742,29 @@ NB_MODULE(pmw_pose, m) {
             return std::make_pair(c.q()(0), c.q()(1));
         })
         .def_prop_ro("prev_f_field", &pmw::HoverController::prev_f_field);
+
+    // ---- axis_pose.c: the model-free core (pose/theory.md 23)
+    m.def("axis_view", [](Gray mask, nb::dict cfg) -> nb::object {
+        const axis_cfg k = axis_cfg_cpp(cfg);
+        struct axis_view v;
+        if (::axis_view(mask.data(), (int)mask.shape(1), 0, 0, (int)mask.shape(1), (int)mask.shape(0), &k, &v))
+            return nb::none();
+        return nb::make_tuple(v.n, v.cx, v.cy, v.ux, v.uy);
+    }, "mask"_a, "cfg"_a);
+    m.def("axis_pose", [](nb::handle cams, nb::handle views, Vec ref, nb::dict cfg) -> nb::object {
+        const axis_cfg k = axis_cfg_cpp(cfg);
+        axis_cam c[2] = {axis_cam_cpp(cams[0]), axis_cam_cpp(cams[1])};
+        struct axis_view v[2];
+        for (int i = 0; i < 2; ++i) {
+            nb::handle t = views[i];
+            v[i] = {nb::cast<int64_t>(t[0]), nb::cast<double>(t[1]), nb::cast<double>(t[2]),
+                    nb::cast<double>(t[3]), nb::cast<double>(t[4])};
+        }
+        const Vector3d u = as_vec3(ref);
+        const double ud[3] = {u[0], u[1], u[2]};
+        struct axis_pose p;
+        if (::axis_pose(&c[0], &c[1], &v[0], &v[1], ud, &k, &p)) return nb::none();
+        return nb::make_tuple(nb::make_tuple(p.xyz[0], p.xyz[1], p.xyz[2]),
+                              nb::make_tuple(p.axis[0], p.axis[1], p.axis[2]), p.gap);
+    }, "cams"_a, "views"_a, "ref"_a, "cfg"_a);
 }

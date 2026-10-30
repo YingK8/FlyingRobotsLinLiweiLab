@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.15...3.30)
-project(pmw_pose LANGUAGES CXX OBJCXX)
+project(pmw_pose LANGUAGES C CXX OBJCXX)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -30,13 +32,14 @@ find_package(Eigen3 REQUIRED)
 # ---------------------------------------------------------------------------------------
 add_library(pmw_core OBJECT
   src/evidence.cpp src/conic.cpp src/segment.cpp src/trf.cpp src/refine.cpp src/stereo.cpp
-  src/capture_avf.mm)
+  src/axis_pose.c src/capture_avf.mm)
 set_target_properties(pmw_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(pmw_core PUBLIC src ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(pmw_core PUBLIC ${OpenCV_LIBS} Eigen3::Eigen)
 # ARC, for the .mm only -- it is what makes the AVFoundation objects held as C++ members
 # of AvfCamera reference-counted correctly.
 set_source_files_properties(src/capture_avf.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+set_source_files_properties(src/axis_pose.c PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic;-Werror")
 # No fused multiply-add: numpy rounds every product and sum separately, and the
 # analytic Jacobian's normal columns are a forward difference at sqrt(eps), which
 # amplifies a one-ulp difference in the rim points to 1e-5 of the Jacobian

@@ -612,8 +612,47 @@ def stage_control(args):
     return ok
 
 
+def stage_axis(args):
+    """`axis_pose` (moments -> two-plane axis) against `native/src/axis_pose.c`, synthetic.
+
+    No recording: the bodies are `axis_pose.CASES`, rendered through the real rig, so the
+    stage runs on any machine and visits ring, disc, rod, wire and hub alike. The rod
+    filter (`axis_pose.mask`) is OpenCV on both sides and is not what this compares.
+    """
+
+    from controller.calib import rig as rigmod
+    from controller.pose import axis_pose as ap
+
+    print("axis: silhouette moments and the two-plane axis")
+    cams = rigmod.StereoRig.load().cameras
+    cds = [nat.camera_dict(c) for c in cams]
+    ref = np.asarray(ap.UP, float)
+    dv, dp, n = [], [], 0
+    for _, kw, *_ in ap.CASES:
+        for centre, axis in ap._poses(n=3):
+            masks = [ap.mask(ap._render(c, centre, axis, **kw)) for c in cams]
+            v_py = [ap.moments(m) for m in masks]
+            v_c = [None if m is None else nat.pmw_pose.axis_view(np.ascontiguousarray(m), ap.CFG) for m in masks]
+            for a, b in zip(v_py, v_c):
+                if (a is None) != (b is None):
+                    return _report("axis_view refusals", [np.inf], 0.0)
+                if a is not None:
+                    dv.append(np.abs(np.subtract(a, b)).max())
+            if any(v is None for v in v_py):
+                continue
+            p_py, p_c = ap.pose(cams, v_py, ref), nat.pmw_pose.axis_pose(cds, v_c, ref, ap.CFG)
+            if (p_py is None) != (p_c is None):
+                return _report("axis_pose refusals", [np.inf], 0.0)
+            if p_py is not None:
+                n += 1
+                dp.append(max(np.abs(p_py[0] - p_c[0]).max(), np.abs(p_py[1] - p_c[1]).max(), abs(p_py[2] - p_c[2])))
+    print(f"  {n} poses compared")
+    return _report("axis_view", dv, 1e-9) & _report("axis_pose", dp, 1e-9)
+
+
 STAGES = {"evidence": stage_evidence, "segment": stage_segment, "refine": stage_refine,
-          "solve": stage_solve, "filter": stage_filter, "control": stage_control}
+          "solve": stage_solve, "filter": stage_filter, "control": stage_control,
+          "axis": stage_axis}
 
 
 def _self_check(args):

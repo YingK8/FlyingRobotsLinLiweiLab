@@ -1,0 +1,2 @@
+flight_dir,freq_hz,n_repeats,amp_deg,rate_1090_deg_s,rate_sd,tau_s,tau_sigma_s,n_settled,baseline_drift_deg,agree_med_deg,datum
+results/flights/2026-09-09_203936,10.0,1,-0.02178413429156567,nan,nan,nan,nan,0,nan,14.8,rest

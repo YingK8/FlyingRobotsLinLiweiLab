@@ -1,0 +1,278 @@
+(Source: /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/PCB/PWM_amp/PWM_amp.kicad_sch)
+(Date: 2026-06-07T12:32:10-0700)
+!0_1uf_capacitor_smd_c_0805_2012metric_pad1_18x1_45mm_handsolder!'0.1uF';,
+	C1,
+	C2,
+	C7,
+	C8
+!100uf_eeh-zc1h10_cap_eeh-zc_10p3x10p3_pan!100uF;,
+	C3,
+	C5
+!1k_resistor_smd_r_0805_2012metric_pad1_20x1_40mm_handsolder!1k;,
+	R1,
+	R5,
+	R6,
+	R7,
+	R8,
+	R9
+!1uf_capacitor_smd_c_0805_2012metric_pad1_18x1_45mm_handsolder!1uF;,
+	C4,
+	C6
+!4_7k_resistor_smd_r_0805_2012metric_pad1_20x1_40mm_handsolder!'4.7k';,
+	R2,
+	R3,
+	R10,
+	R11,
+	R12
+!conn_01x02_pin_pinheader_1x04_p2_54mm_vertical_kicad_mod_matrix5x5!Conn_01x02_Pin;,
+	J3,
+	J4
+!conn_01x06_pin_connector_pinheader_2_54mm_pinheader_1x06_p2_54mm_vertical!Conn_01x06_Pin;,
+	J1,
+	J2
+!fdd8447l_package_to_sot_smd_to-252-2!FDD8447L;,
+	Q1,
+	Q2
+!nc7svu04p5x_package_to_sot_smd_sot-353_sc-70-5!NC7SVU04P5X;,
+	U3,
+	U4
+!smcj18a_diode_smd_d_smc-rm10_universal_handsoldering!SMCJ18A;,
+	D1
+!vnh5019a-e_package_so_st_multipowerso-30!'VNH5019A-E';,
+	U1,
+	U2
+!xt30upb-m_xt30upb-m_amass_xt30upb-m!'XT30UPB-M';,
+	J5,
+	J10
+!xt60pw-m_xt60pw-m_amass_xt60pw-m!'XT60PW-M';,
+	J49
+$NETS
+'+3V_1';,
+	C1.1,
+	C2.1,
+	J1.5,
+	J2.5,
+	R2.2,
+	R3.2,
+	R10.2,
+	R11.2,
+	U1.7,
+	U2.7,
+	U3.5,
+	U4.5
+GND1;,
+	C1.2,
+	C2.2,
+	J1.6,
+	J2.6,
+	R7.1,
+	R9.1,
+	U3.3,
+	U4.3
+INA1;,
+	U2.4,
+	U4.4
+INA2;,
+	U1.4,
+	U3.4
+INB1;,
+	J1.1,
+	U2.10,
+	U4.2
+INB2;,
+	J2.1,
+	U1.10,
+	U3.2
+'NET-(J1-PIN_2)';,
+	J1.2,
+	R5.1,
+	R6.1
+'NET-(J1-PIN_3)';,
+	J1.3,
+	U2.6
+'NET-(J1-PIN_4)';,
+	J1.4,
+	R4.1
+'NET-(J10-PADP)';,
+	J10.P,
+	U2.1,
+	U2.25,
+	U2.30,
+	U2.33
+'NET-(J2-PIN_2)';,
+	J2.2,
+	R1.1,
+	R8.1
+'NET-(J2-PIN_3)';,
+	J2.3,
+	U1.6
+'NET-(J2-PIN_4)';,
+	J2.4,
+	R12.1
+'NET-(J3-PIN_1)';,
+	J3.1,
+	U1.15,
+	U1.16,
+	U1.21,
+	U1.32
+'NET-(J3-PIN_2)';,
+	J3.2,
+	J5.N
+'NET-(J4-PIN_1)';,
+	J4.1,
+	U2.15,
+	U2.16,
+	U2.21,
+	U2.32
+'NET-(J4-PIN_2)';,
+	J4.2,
+	J10.N
+'NET-(J5-PADP)';,
+	J5.P,
+	U1.1,
+	U1.25,
+	U1.30,
+	U1.33
+'NET-(Q1-D)';,
+	C5.1,
+	C7.1,
+	Q1.2,
+	U2.3,
+	U2.13,
+	U2.23,
+	U2.31
+'NET-(Q1-G)';,
+	Q1.1,
+	U2.11
+'NET-(Q2-D)';,
+	C3.1,
+	C8.1,
+	Q2.2,
+	U1.3,
+	U1.13,
+	U1.23,
+	U1.31
+'NET-(Q2-G)';,
+	Q2.1,
+	U1.11
+'NET-(U1-CS)';,
+	R9.2,
+	R12.2,
+	U1.8
+'NET-(U1-EN{SLASH}DIAGA)';,
+	R1.2,
+	R11.1,
+	U1.5
+'NET-(U1-EN{SLASH}DIAGB)';,
+	R8.2,
+	R10.1,
+	U1.9
+'NET-(U2-CS)';,
+	R4.2,
+	R7.2,
+	U2.8
+'NET-(U2-EN{SLASH}DIAGA)';,
+	R2.1,
+	R6.2,
+	U2.5
+'NET-(U2-EN{SLASH}DIAGB)';,
+	R3.1,
+	R5.2,
+	U2.9
+PGND1;,
+	C3.2,
+	C4.2,
+	C5.2,
+	C6.2,
+	C7.2,
+	C8.2,
+	D1.2,
+	J49.2,
+	J49.SH1,
+	J49.SH2,
+	U1.18,
+	U1.19,
+	U1.20,
+	U1.26,
+	U1.27,
+	U1.28,
+	U2.18,
+	U2.19,
+	U2.20,
+	U2.26,
+	U2.27,
+	U2.28
+VM1;,
+	C4.1,
+	C6.1,
+	D1.1,
+	J49.1,
+	Q1.3,
+	Q2.3,
+	U1.12,
+	U2.12
+'UNCONNECTED-(U1-NC-PAD14)';,
+	U1.14
+'UNCONNECTED-(U1-NC-PAD17)';,
+	U1.17
+'UNCONNECTED-(U1-NC-PAD2)';,
+	U1.2
+'UNCONNECTED-(U1-NC-PAD22)';,
+	U1.22
+'UNCONNECTED-(U1-NC-PAD24)';,
+	U1.24
+'UNCONNECTED-(U1-NC-PAD29)';,
+	U1.29
+'UNCONNECTED-(U2-NC-PAD14)';,
+	U2.14
+'UNCONNECTED-(U2-NC-PAD17)';,
+	U2.17
+'UNCONNECTED-(U2-NC-PAD2)';,
+	U2.2
+'UNCONNECTED-(U2-NC-PAD22)';,
+	U2.22
+'UNCONNECTED-(U2-NC-PAD24)';,
+	U2.24
+'UNCONNECTED-(U2-NC-PAD29)';,
+	U2.29
+'UNCONNECTED-(U3-NC-PAD1)';,
+	U3.1
+'UNCONNECTED-(U4-NC-PAD1)';,
+	U4.1
+$PACKAGES
+$A_PROPERTIES
+ROOM /;,
+	C1,
+	C2,
+	C3,
+	C4,
+	C5,
+	C6,
+	C7,
+	C8,
+	D1,
+	J1,
+	J2,
+	J3,
+	J4,
+	J5,
+	J10,
+	J49,
+	Q1,
+	Q2,
+	R1,
+	R2,
+	R3,
+	R4,
+	R5,
+	R6,
+	R7,
+	R8,
+	R9,
+	R10,
+	R11,
+	R12,
+	U1,
+	U2,
+	U3,
+	U4

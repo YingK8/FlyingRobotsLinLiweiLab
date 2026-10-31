@@ -13,59 +13,39 @@
 
 using sync_led::led;
 
-// Operator-confirmed coil order A,B,C,D (2026-10-28): A/C and B/D are opposite.
-// See controller/control/theory.md, "Coil phase convention (2026-10-28)".
-// Reversing direction swaps B/D; keep JsonPwmSequencer's direction table aligned.
+// A/C and B/D are opposite: reversing direction swaps B/D
 static const float PHASES_CW[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 static const float PHASES_CCW[NUM_CHANNELS] = {0.0f, 270.0f, 180.0f, 90.0f};
 static const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-// VNH5019 CS gain, A per V -- per-board calibration (shared across experiments).
 static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
 
-// Per-channel series resonance, from `coil_phase.py --measure`. The robot responds to the
-// phase of the coil CURRENT, which these two numbers per channel fully determine:
-//
-//     theta_k(f) = atan( Q_k * (f/f0_k - f0_k/f) )
-//
-// `PwmController::setPhaseTrim` subtracts that from the command so the four currents come
-// out level. See `controller/control/theory.md` 22.
-//
-// ALL ZERO / Q ZERO = UNCALIBRATED, and the trim stays off. That is deliberate: a guessed
-// trim rotates the field by a number nobody measured, which is worse than no trim at all.
-// Fill these in only from a probe sweep on the bank actually fitted -- f0 goes as C^-1/2,
-// so they are void the moment the capacitor bank changes (it went 400 -> 800 uF on
-// 2026-09-01, which is what invalidated every fitted constant before that date).
+// all zero = uncalibrated and the trim stays off; void when the capacitor bank changes
 static const float COIL_F0_HZ[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 static const float COIL_Q[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-// Boot: serial + force every gate LOW before any driver exists, optional LED on. Call
-// first in setup(), before ctl.begin(), so the coils can't glitch on and the
-// ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
+// call first in setup(), before ctl.begin(), so no gate glitches on
 inline void driveBoot(bool activeLed = true) {
-  // Before begin(), or it has no effect. The default RX FIFO is 256 bytes, and one
-  // blocking 120-byte `driveTelemetry` printf at 921600 takes ~1.3 ms, during which ~120
-  // more bytes arrive -- so a 200 Hz command stream plus one telemetry line already sits
-  // inside a factor of two of overflowing it, and an overflow is silent: the framer sees
-  // a truncated frame, counts a CRC failure, and the coils hold their last command.
-  // 1 kB buys ~5 ms of slack for the cost of 768 bytes of RAM.
+  // first, before the delay: the carrier pins float from reset until this line, and a
+  // floating carrier drove all four bridges to full on 2026-10-30
+  forceAllGatesLow();
+  // 1 kB RX buffer: an overflow is silent and the coils hold their last command
   Serial.setRxBufferSize(1024);
   Serial.begin(SERIAL_BAUD);
   delay(1000);
-  forceAllGatesLow();
   initResetButton();
   led().attachTo(LED_PIN);
   if (activeLed) led().holdOn();
 
-  if (!SPIFFS.begin(/*formatOnFail*/ false))
+  if (!SPIFFS.begin(false))
     Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");
 }
 
-// Shared 2 Hz telemetry line, same field layout the ai/ log parsers expect:
-// "t=.. freq=.. | I[A]: .. | duty[%]: .. | spread=.. bal=.. trip=..".
+// telemetry field layout is protocol: the ai/ log parsers read it by name
 inline void driveTelemetry(PwmController &c) {
-  checkResetButton(); // poll every loop (before the 500 ms print throttle below)
+  // call every loop or a button press is never seen
+  checkResetButton();
   led().advance();
 
   static unsigned long last = 0;
@@ -79,7 +59,8 @@ inline void driveTelemetry(PwmController &c) {
   for (int i = 0; i < NUM_CHANNELS; i++)
     duty[i] = c.getCarrierDutyCycle(i);
 
-  float imin = im ? im[0] : 0.0f, imax = im ? im[0] : 0.0f;
+  float imin = im ? im[0] : 0.0f;
+  float imax = im ? im[0] : 0.0f;
   if (im)
     for (int i = 1; i < NUM_CHANNELS; i++) {
       if (im[i] < imin) imin = im[i];

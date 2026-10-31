@@ -1,7 +1,5 @@
-// Minimal flashable demo/verification target for lib/SerialComm: echoes each
-// incoming line back prefixed with "echo: ". Drive it with `pio device monitor`
-// to confirm both directions work non-blocking over real hardware.
 #include <Arduino.h>
+
 #include "SerialComm.h"
 
 SerialComm comm;

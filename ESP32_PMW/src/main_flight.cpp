@@ -1,7 +1,3 @@
-// Live PC-commanded flight: spin-up -> hover -> directional acceleration.
-//
-// `seq=` is the ONLY way to ramp the coils. The profile belongs to the host, where it
-// can be retuned without a reflash; this firmware compiles in no ramp of its own.
 #include "coil_probe.h"
 #include "drive_common.h"
 #include "frame_link.h"
@@ -16,48 +12,32 @@ static const float MIX_GAIN = 0.6f;
 
 static PwmController ctl(PWM_PINS, SPIN_PHASES, INITIAL_DUTY, NUM_CHANNELS);
 static PwmSequencer seq(&ctl);
-// `frame_link` rather than `SerialComm`: the ASCII commands below are unchanged and still
-// arrive as lines, but the periodic DRIVE frame shares the same stream, and SerialComm
-// accumulates into an Arduino `String` one character at a time -- a heap allocation per
-// command, 200 times a second. SerialComm is untouched; three other mains still use it.
 static drive_frame::Framer framer;
 
-// Per-channel phase as COMMANDED. Kept here rather than read back from PwmController
-// because `getPhase` would report the RLC-trimmed value, and the echo should say what was
-// asked for. Seeded from the compile-time spin phases so `phase=` with no prior frame is
-// a delta from the rotation the ramp used, not from zero.
 static float phaseDeg[NUM_CHANNELS] = {SPIN_PHASES[0], SPIN_PHASES[1],
                                        SPIN_PHASES[2], SPIN_PHASES[3]};
 
-// ACK bookkeeping. One ACK per ACK_EVERY frames: at 200 Hz that is 10 Hz and 110 B/s,
-// enough for the host to measure drop rate and round-trip latency without adding a
-// back-channel that competes with telemetry.
 static const uint16_t ACK_EVERY = 20;
 static uint16_t lastDriveSeq = 0;
 static uint16_t sinceAck = 0;
 
-enum State { IDLE, SPINUP, FLIGHT, LANDING, OFF }; // the host parses these numbers
+enum State { IDLE, SPINUP, FLIGHT, LANDING, OFF };
 static State state = IDLE;
 
-static float collective = 0.0f; // % carrier ceiling (throttle)
-static int seqN = 0;            // segments appended since the last seq=clear
-static float seqF0 = 0.0f;      // start frequency of the first segment
+static float collective = 0.0f;
+static int seqN = 0;
+static float seqF0 = 0.0f;
 
-static float azSet = 0.0f;      // deg
-static float magSet = 0.0f;     // 0..1
+static float azSet = 0.0f;
+static float magSet = 0.0f;
 
-// `duty=A:B:C:D`: per-channel carrier % that REPLACES the az/mag mixer while set. The
-// host's tilt-servo loop (controller/control/tilt_servo.py) needs four independent
-// amplitudes -- a balance trim plus one coil dropped to a fraction of its trimmed value --
-// and the mixer's single cos lobe cannot express that. `collective` still scales it, so
-// `throttle=` and the LANDING ramp behave the same either way. `duty=off` clears it.
+// `duty=` replaces the tilt mixer while set; `throttle=` still scales it
 static bool dutySet = false;
 static float dutyPct[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-// Thrust-vector mixer: drop the az-facing coils' ceilings so the disk tilts toward
-// az. Strong side stays at collective, the balance reference. Verify sign on rig.
+// verify the tilt sign on the rig before trusting it
 static void applyMixer() {
   for (int i = 0; i < NUM_CHANNELS; i++) {
     float frac;
@@ -73,27 +53,21 @@ static void applyMixer() {
 
 static void splitFloats(const String &s, float *out, int n);
 
+// not a drive path: changing a phase energises nothing
 static bool cmdDuty(const String &arg) {
   if (arg == "off") { dutySet = false; return true; }
   float v[NUM_CHANNELS];
-  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = dutyPct[i];   // short command keeps the rest
+  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = dutyPct[i];
   splitFloats(arg, v, NUM_CHANNELS);
   for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(v[i], 0.0f, 100.0f);
   dutySet = true;
   return true;
 }
 
-// `phase=A:B:C:D` -- per-channel commutation phase in degrees. The library has had
-// `setPhase` since the beginning and nothing ever exposed it, so the host could only ever
-// command four amplitudes and one frequency; the phases were whatever `SPIN_PHASES`
-// compiled in. Identifying the actuation map needs them (control/theory.md 25), and the
-// DRIVE frame carries them, so the ASCII form exists too for bench work.
-//
-// NOT counted as drive by `link._note_drive`: changing a phase energises nothing on its
-// own. It is the carrier that puts current in the coils.
+// IDLE only: clearing mid-run empties the queue and jumps to FLIGHT still energised
 static bool cmdPhase(const String &arg) {
   float v[NUM_CHANNELS];
-  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = phaseDeg[i];   // short command keeps the rest
+  for (int i = 0; i < NUM_CHANNELS; i++) v[i] = phaseDeg[i];
   splitFloats(arg, v, NUM_CHANNELS);
   for (int i = 0; i < NUM_CHANNELS; i++) phaseDeg[i] = v[i];
   ctl.setPhases(phaseDeg);
@@ -114,8 +88,7 @@ static void reportStop() {
                 (unsigned)led().timing().gap_ms * 1000u);
 }
 
-// Split "a:b:c" into up to `n` floats. Fields left unwritten keep the caller's default,
-// so a short command is not a command full of zeros.
+// fields left unwritten keep the caller's default, so a short command is not zeros
 static void splitFloats(const String &s, float *out, int n) {
   String rest = s;
   for (int i = 0; i < n && rest.length(); i++) {
@@ -125,14 +98,11 @@ static void splitFloats(const String &s, float *out, int n) {
   }
 }
 
-// `seq=ramp:...` mode field, indexed by the integer the host sends. Same order as
-// `TaskMode` and as `controller/control/constants.py` RAMP_POLYNOMIAL/EASE/EXPONENTIAL.
+// indexed by the integer the host sends; same order as control/constants.py
 static const TaskMode RAMP_MODES[] = {
     TaskMode::POLYNOMIAL, TaskMode::EASE, TaskMode::EXPONENTIAL};
 static const int N_RAMP_MODES = sizeof(RAMP_MODES) / sizeof(RAMP_MODES[0]);
 
-// Each handler returns true when the command took effect, false when it declined and has
-// already said why. Only a true prints the state echo.
 static bool cmdSeq(const String &arg) {
   if (state != IDLE) { Serial.printf("!seq state=%d\n", (int)state); return false; }
 
@@ -155,7 +125,8 @@ static bool cmdSeq(const String &arg) {
     const int64_t led1 = esp_timer_get_time();
     const int64_t drive0 = esp_timer_get_time();
     seq.start();
-    applyMixer(); // first carrier application, before any blocking serial output
+    // first carrier application, before any blocking serial output
+    applyMixer();
     const int64_t drive1 = esp_timer_get_time();
     state = SPINUP;
     Serial.printf("SYNC_START v=2 led0=%lld led1=%lld drive0=%lld drive1=%lld "
@@ -168,7 +139,7 @@ static bool cmdSeq(const String &arg) {
     return true;
   }
   if (sub == "ramp") {
-    float v[5] = {0, 0, 0, 0, 1.0f};   // from, to, ms, mode, k
+    float v[5] = {0, 0, 0, 0, 1.0f};
     splitFloats(rest, v, 5);
     if (!(v[0] > 0.0f) || !(v[1] > 0.0f) || !(v[2] > 0.0f)) {
       Serial.println("!seq ramp needs from:to:ms>0");
@@ -190,24 +161,27 @@ static bool cmdSeq(const String &arg) {
   return false;
 }
 
-// probe=<hz>[:<ms>[:<carrier %>]] -- one lock-in burst measuring the coil CURRENT phase
-// per channel. IDLE only: it energises, and it must not be able to fire mid-flight.
-//
-// The burst BLOCKS, so for its duration neither the GPIO14 button nor a host `stop` is
-// serviced. That is why PROBE_MAX_MS is short and the coils are cut the instant it
-// returns: the window is bounded by construction rather than by anything watching it.
-// Nothing here holds the coils on after the call.
+static constexpr uint8_t LED_WORD = 0b0110011;
+
+// the LED word locates the LED, never a clock
+static bool cmdLed(const String &arg) {
+  if (arg != "code") { Serial.println("!led arg"); return false; }
+  if (state != IDLE) { Serial.printf("!led state=%d\n", (int)state); return false; }
+  led().sendCode(LED_WORD);
+  Serial.printf("SYNC_CODE v=1 word=0x%02x bit_us=%u\n", LED_WORD,
+                (unsigned)led().timing().code_ms * 1000u);
+  return true;
+}
+
+// IDLE only: this energises, and the blocking burst services no button or stop
 static const uint32_t PROBE_MAX_MS = 2000;
-static const float PROBE_DUTY = 60.0f;   // % carrier. Near resonance full drive pulled
-                                         // 4.08 A (theory.md 18.8) against a 2 A
-                                         // continuous rating, and the lock-in does not
-                                         // need the amplitude -- only the angle.
-static const uint32_t PROBE_SETTLE_MS = 250;   // >> the RLC ringdown, Q/f0 is ~ms here
+static const float PROBE_DUTY = 60.0f;
+static const uint32_t PROBE_SETTLE_MS = 250;
 
 static bool cmdProbe(const String &arg) {
   if (state != IDLE) { Serial.printf("!probe state=%d\n", (int)state); return false; }
 
-  float v[3] = {0.0f, 1200.0f, PROBE_DUTY};   // hz, ms, carrier %
+  float v[3] = {0.0f, 1200.0f, PROBE_DUTY};
   splitFloats(arg, v, 3);
   if (!(v[0] > 0.0f)) { Serial.println("!probe needs hz>0"); return false; }
   const uint32_t ms = (uint32_t)clampf(v[1], 100.0f, (float)PROBE_MAX_MS);
@@ -218,12 +192,10 @@ static bool cmdProbe(const String &arg) {
   delay(PROBE_SETTLE_MS);
 
   ProbeResult r;
-  // SPIN_PHASES is the commanded reference the measured angle is taken against. Note it
-  // is the BASE phase: any trim already applied is what we are trying to see the effect
-  // of, so a post-trim probe correctly reports the RESIDUAL.
   const bool ok = coilProbe(ADC_PINS, NUM_CHANNELS, v[0], ms, SPIN_PHASES, r);
   allCoilsOff();
-  ctl.setGlobalFrequency(0.0f);   // back to DC idle, so the echo does not read as driving
+  // back to DC idle, so the echoed frequency does not read as driving
+  ctl.setGlobalFrequency(0.0f);
 
   if (!ok) { Serial.println("!probe no samples"); return false; }
   Serial.printf("PROBE f=%.2f A=%.0f,%.2f B=%.0f,%.2f C=%.0f,%.2f D=%.0f,%.2f "
@@ -242,8 +214,6 @@ static bool cmdFreq(const String &arg) {
   return true;
 }
 
-// Commands are `key` or `key=value`. Splitting on '=' once is what keeps the arms free of
-// hand-counted substring offsets, which had to match each prefix's length by eye.
 static void dispatch(String cmd) {
   cmd.trim();
   cmd.toLowerCase();
@@ -269,8 +239,9 @@ static void dispatch(String cmd) {
   else if (key == "probe")  ok = cmdProbe(arg);
   else if (key == "duty")   ok = cmdDuty(arg);
   else if (key == "phase")  ok = cmdPhase(arg);
+  else if (key == "led")    ok = cmdLed(arg);
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|phase=|hover|land|stop|freq=|probe=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|phase=|led=code|hover|land|stop|freq=|probe=)\n",
                   cmd.c_str());
     return;
   }
@@ -282,31 +253,20 @@ static void dispatch(String cmd) {
 }
 
 void setup() {
-  driveBoot(false); // LED dark until the accepted seq=go, other environments unchanged
-  ctl.begin(); // DC; the ramp sets the running frequency
+  driveBoot(false);
+  ctl.begin();
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
-  ctl.enableCurrentSense(ADC_PINS, SENS, /*tripA*/ 0.0f);
-  // No-op until COIL_F0_HZ / COIL_Q are filled in from a probe sweep: setPhaseTrim
-  // refuses a table with any non-positive entry, so an uncalibrated build drives the
-  // commanded phase raw rather than a guessed correction.
+  ctl.enableCurrentSense(ADC_PINS, SENS,   0.0f);
+  // trim stays off unless every table entry is positive
   ctl.setPhaseTrim(COIL_F0_HZ, COIL_Q);
   Serial.printf("[flight] phase trim %s\n",
                 ctl.phaseTrimActive() ? "ARMED from drive_common.h" : "off (uncalibrated)");
   Serial.println("SYNC_READY v=1");
 }
 
-// One DRIVE frame -> the coils. Reuses the state `duty=` already drives rather than
-// adding a parallel path: `dutySet` makes `applyMixer` take the per-channel branch, and
-// `collective` still scales it, so `throttle=` and the LANDING ramp behave identically
-// whether the host is sending frames or ASCII.
-//
-// **`amp = 0` in a frame is NOT a stop.** It leaves the state machine in FLIGHT with the
-// sequencer alive and the bridges driving at zero duty. Only `stop` de-energises, and
-// only telemetry proves it (`safe_off.py`). A stop that depended on a CRC passing would
-// be a stop a corrupted link could eat, which is why it is not a flag in here.
+// amp = 0 in a frame is not a stop: only `stop` de-energises
 static void applyDrive(const drive_frame::Drive &d) {
-  // Same gate as `cmdFreq`: a frame must not be able to drive the coils from IDLE, where
-  // the operator believes the board is quiet.
+  // a frame must never drive the coils from IDLE
   if (state != SPINUP && state != FLIGHT) return;
   for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(d.amp_pct[i], 0.0f, 100.0f);
   dutySet = true;
@@ -314,9 +274,7 @@ static void applyDrive(const drive_frame::Drive &d) {
   ctl.setPhases(phaseDeg);
   if (d.freq_hz > 0.0f) ctl.setGlobalFrequency(d.freq_hz);
   lastDriveSeq = d.seq;
-  // No echo. `dispatch` prints a ~70-byte state line on every accepted ASCII command;
-  // at 200 Hz that is 14 kB/s of back-channel competing with telemetry for the same
-  // UART. The ACK below carries the same information at 10 Hz and 11 bytes.
+  // no per-frame echo: the ACK carries the same at 10 Hz
   if (++sinceAck >= ACK_EVERY) {
     sinceAck = 0;
     drive_frame::Ack a;
@@ -331,9 +289,7 @@ static void applyDrive(const drive_frame::Drive &d) {
 }
 
 void loop() {
-  // Drain everything waiting, not one line per call. `SerialComm` returned at most one
-  // line per `loop()`, which was fine for a command a second and is not for 200 a second:
-  // anything the loop does not take stays in the 1 kB FIFO until it overflows.
+  // drain everything waiting, or the 1 kB FIFO overflows silently
   while (Serial.available()) {
     drive_frame::Got g = framer.feed((uint8_t)Serial.read(), (uint32_t)micros());
     if (g == drive_frame::Got::Frame) applyDrive(framer.drive());
@@ -342,7 +298,7 @@ void loop() {
       Serial.println("! line over 128 chars, truncated");
   }
 
-  ctl.run(); // sense + balance + overcurrent trip
+  ctl.run();
 
   switch (state) {
     case SPINUP:

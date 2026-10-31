@@ -5,16 +5,7 @@
 #include "safety_startup.h"
 #include <Arduino.h>
 
-// Momentary block/unblock button on RESET_BUTTON_PIN (GPIO14), wired to drive
-// the pin to 3V3 when pressed (active HIGH). The internal pulldown holds it LOW
-// at rest, so no external resistor is needed. Toggle semantics:
-//   press while active  -> BLOCK: every gate forced low, LED off, firmware halts
-//   press while blocked -> ESP.restart(): clean gates-low boot, LED back on,
-//                          experiment restarts (see driveBoot())
-// Shared via drive_common.h. The LED (GPIO2, onboard) is normally ON while active;
-// flight reserves it for START (dark in IDLE). The blocking button always turns it off.
-
-// Wait for one debounced press (HIGH held RESET_DEBOUNCE_MS) then release.
+// press while active blocks every gate; press again reboots
 inline void waitForPress() {
   const unsigned long RESET_DEBOUNCE_MS = 30;
   for (;;) {
@@ -24,40 +15,35 @@ inline void waitForPress() {
     while (digitalRead(RESET_BUTTON_PIN) == HIGH)
       delay(5);
     if (millis() - start >= RESET_DEBOUNCE_MS)
-      return; // held long enough -- confirmed press, now released
+      return;
   }
 }
 
-// Configure the pin. Call once in setup() (folded into driveBoot()).
 inline void initResetButton() {
-  pinMode(RESET_BUTTON_PIN, INPUT_PULLDOWN); // idle LOW; HIGH only while pressed
+  pinMode(RESET_BUTTON_PIN, INPUT_PULLDOWN);
 }
 
-// Poll every loop iteration (folded into driveTelemetry()). Debounces the press:
-// the pin must read HIGH continuously for RESET_DEBOUNCE_MS before we act. On a
-// confirmed press it forces the coils off, turns the LED off, and parks here
-// (blocked) until the next confirmed press, which reboots -- setup() runs again
-// and the experiment restarts from a clean boot.
+// call every loop or a press is never seen
 inline void checkResetButton() {
   static const unsigned long RESET_DEBOUNCE_MS = 30;
-  static unsigned long highSince = 0; // 0 = not currently held high
+  static unsigned long highSince = 0;
 
   if (digitalRead(RESET_BUTTON_PIN) == HIGH) {
     unsigned long now = millis();
     if (highSince == 0)
-      highSince = (now == 0) ? 1 : now; // avoid the 0 "not held" sentinel
+      highSince = (now == 0) ? 1 : now;
     else if (now - highSince >= RESET_DEBOUNCE_MS) {
-      forceAllGatesLow(); // instant hard-off
+      forceAllGatesLow();
       sync_led::led().holdOff();
       Serial.println("[block] button pressed -- gates off, press again to restart");
       while (digitalRead(RESET_BUTTON_PIN) == HIGH)
-        delay(5);     // wait out the blocking press
-      waitForPress(); // park here until the next press
+        delay(5);
+      waitForPress();
       Serial.println("[block] button pressed -- restarting");
       Serial.flush();
       ESP.restart();
     }
   } else {
-    highSince = 0; // released before debounce elapsed -- restart the timer
+    highSince = 0;
   }
 }

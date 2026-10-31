@@ -4687,6 +4687,24 @@ survives sampling, which is what the two-edge marker is: a code of distance 2 fr
 independent cameras. If a numeric ID is ever wanted, a 4-bit payload under Hamming(7,4) is
 the right *payload* protection -- but the sync must never depend on it.
 
+### The Hamming word finds the LED; it never sets the clock
+
+Which pixels are the LED used to be an ROI the operator picked for each camera. That is
+the one judgement `synchronize_start` still needed from a person. `led=code` (IDLE only,
+energises nothing) now blinks a start bit and then `hamming_encode(LED_ID)`, 7 slots MSB
+first, `code_ms = 80` each. `CommandLink.send_takeoff` sends it before `seq=go`
+and waits out the word, because `seq=go`'s START would cancel it. `scene.locate_led`
+differences consecutive frames, takes the region that changes most, reads its brightness
+at the slot centres and keeps it only if the word decodes to `LED_ID` (correcting one bit).
+Both cameras must decode it. The ROI is the enclosing circle of the changed pixels plus
+padding. This is the payload use the section above allows: the word answers *where* and
+*is it ours*, and the 30 ms START/STOP edges still answer *when*.
+
+**80 ms is chosen so the word cannot be read as a marker.** `decode_markers` accepts an
+ON-OFF-ON at 30 ms within max(25 %, two frame periods), which is under 17 ms even at
+120 fps. A `101` in the word is 80/80 ms and is refused. 80 ms is also 9.6 frames at
+120 fps, so slot-centre sampling has margin on both sides.
+
 ### Host side
 
 Python `RunConfig.sync_start=True` requires recorded cameras and `telemetry_path`.

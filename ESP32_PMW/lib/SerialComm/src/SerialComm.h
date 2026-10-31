@@ -2,21 +2,16 @@
 
 #include <Arduino.h>
 
-// Non-blocking, newline-framed serial link. Framing: ASCII lines ending in \n,
-// \r, or \r\n; no checksum. Matches the PC-side tools in ai/experiments/
-// (run_experiment.py, trigger_reset_log.py).
+// no handshake: a baud mismatch is silent
 class SerialComm {
 public:
   explicit SerialComm(Stream &port = Serial) : _port(port) {}
 
-  // Call once per loop(); never blocks. Writes `outgoing` + '\n' if non-empty.
-  // Returns the first complete line drained this call (buffer cleared), else "".
-  // Extra buffered lines stay in Serial for the next call. Lines longer than
-  // MAX_LINE_LEN are discarded whole rather than truncated.
+  // returns at most one line per call; the rest wait for the next call
   String handleSerialComm(const String &outgoing = String());
 
 private:
-  static const size_t MAX_LINE_LEN = 128; // overflow guard against garbage
+  static const size_t MAX_LINE_LEN = 128; // an over-long out is discarded whole, never truncated
 
   Stream &_port;
   String _rxBuf;

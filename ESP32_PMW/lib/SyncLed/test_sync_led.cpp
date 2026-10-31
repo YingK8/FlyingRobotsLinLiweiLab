@@ -9,11 +9,13 @@ using namespace sync_led;
 
 namespace {
 
-std::vector<std::pair<uint32_t, bool>> edgesOf(SyncLed &led, uint32_t from_ms, uint32_t span_ms) {
+std::vector<std::pair<uint32_t, bool>> edgesOf(SyncLed &led, uint32_t from_ms,
+                                                uint32_t span_ms) {
     std::vector<std::pair<uint32_t, bool>> edges;
     bool on = led.isOn();
     edges.push_back({from_ms, on});
-    for (uint32_t now_ms = from_ms + 1; now_ms <= from_ms + span_ms; ++now_ms) {
+    for (uint32_t now_ms = from_ms + 1;
+         now_ms <= from_ms + span_ms; ++now_ms) {
         if (led.advanceTo(now_ms)) {
             on = led.isOn();
             edges.push_back({now_ms, on});
@@ -38,7 +40,8 @@ int main() {
         assert(edges.size() == 3);
         assert(edges[0].first == 1000 && edges[0].second);
         assert(edges[1].first == 1000 + timing.on_ms && !edges[1].second);
-        assert(edges[2].first == 1000 + timing.on_ms + timing.gap_ms && edges[2].second);
+        assert(edges[2].first == 1000 + timing.on_ms + timing.gap_ms &&
+               edges[2].second);
         assert(!led.isSendingSignal() && led.isOn());
         assert(led.advanceTo(100000) == false);
         assert(led.isOn());
@@ -54,7 +57,8 @@ int main() {
         assert(edges.size() == 3);
         assert(edges[0].first == 5000 && !edges[0].second);
         assert(edges[1].first == 5000 + timing.on_ms && edges[1].second);
-        assert(edges[2].first == 5000 + timing.on_ms + timing.gap_ms && !edges[2].second);
+        assert(edges[2].first == 5000 + timing.on_ms + timing.gap_ms &&
+               !edges[2].second);
         assert(!led.isSendingSignal() && !led.isOn());
     }
 
@@ -75,7 +79,8 @@ int main() {
         assert(!led.isOn() && led.isSendingSignal());
         led.holdOff();
         assert(!led.isSendingSignal() && !led.isOn());
-        for (uint32_t now_ms = timing.on_ms + 3; now_ms < 500; ++now_ms)
+        for (uint32_t now_ms = timing.on_ms + 3; now_ms < 500;
+             ++now_ms)
             assert(!led.advanceTo(now_ms));
         assert(!led.isOn());
     }
@@ -85,7 +90,8 @@ int main() {
         led.holdOn();
         assert(!led.sendStartSignal(0));
         assert(!led.isSendingSignal());
-        for (uint32_t now_ms = 0; now_ms < 200; ++now_ms) assert(!led.advanceTo(now_ms));
+        for (uint32_t now_ms = 0; now_ms < 200; ++now_ms)
+            assert(!led.advanceTo(now_ms));
         assert(led.isOn());
         assert(led.sendStopSignal(0));
         assert(!led.isOn() && led.isSendingSignal());
@@ -108,6 +114,17 @@ int main() {
         assert(edges.size() == 3);
         assert(edges[1].first == 5 && edges[2].first == 12);
         assert(led.timing().on_ms == 5 && led.timing().gap_ms == 7);
+    }
+
+    {
+        SyncLed led;
+        const uint32_t slot = timing.code_ms;
+        assert(led.sendCode(0b0110011, 0));
+        auto edges = edgesOf(led, 0, 10 * slot);
+        const std::vector<std::pair<uint32_t, bool>> expected = {
+            {0, true}, {slot, false}, {2 * slot, true}, {4 * slot, false}, {6 * slot, true}, {8 * slot, false}};
+        assert(edges == expected);
+        assert(!led.isSendingSignal() && !led.isOn());
     }
 
     printf("SyncLed: START/STOP are 3-edge pulse pairs at %u/%u ms, blink is one pulse,\n"

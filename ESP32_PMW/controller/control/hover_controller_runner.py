@@ -379,7 +379,10 @@ class CommandLink:
         if not self.sync_can_start():
             raise ValueError("START requires ready firmware and at least 0.25 s of recorded pre-roll; use a new run after START")
         if self.sync_start:
+            from controller.pose.scene import CODE_BIT_S
             self.sync_sent = True  # one attempt per recording, including rejected/lost commands
+            self.send("led=code")
+            time.sleep(10 * CODE_BIT_S)  # start bit + 7 slots + dark slot; seq=go would cut it short
         for c in self.takeoff_cmd:
             self.send(c)
 

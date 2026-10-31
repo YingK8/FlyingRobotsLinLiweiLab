@@ -20,10 +20,22 @@ void loop()  { led().advance(); }          // at most one edge, never blocks
 | `sendStartSignal()` | ON, OFF after `on_ms`, ON after `gap_ms` | ON |
 | `sendStopSignal()` | OFF, ON after `on_ms`, OFF after `gap_ms` | OFF |
 | `sendBlink()` | ON, OFF after `blink_ms` | OFF |
+| `sendCode(word7)` | start bit ON, then 7 bits MSB first at `code_ms`, then OFF | OFF |
 | `holdOn()` / `holdOff()` | one edge, if the level changes | — |
 
 The first edge is the anchor; the second confirms it. Both must be seen or the host
 refuses the take.
+
+## Layout
+
+| file | what | Arduino needed |
+|---|---|---|
+| `SyncLed.h` / `SyncLed.cpp` | `PulseTiming`, `Signal`, and the state machine — given `now_ms`, decides the level | no |
+| `SyncLedPin.h` / `SyncLedPin.cpp` | `PinLed` and `led()`: holds the pin, feeds `millis()`, writes the level | yes |
+
+They stay two classes on purpose. `SyncLed.h` includes only `<stdint.h>`, which is what
+lets the self-check below link with a plain host `c++`; merging the pin into it would
+drag `<Arduino.h>` in and the protocol would only be testable on the board.
 
 ## Rules
 
@@ -39,7 +51,8 @@ refuses the take.
 ## Self-check
 
 ```bash
-c++ -std=c++17 -O2 -I lib/SyncLed/src -o /tmp/tsl lib/SyncLed/test_sync_led.cpp && /tmp/tsl
+c++ -std=c++17 -O2 -I lib/SyncLed/src -o /tmp/tsl \
+  lib/SyncLed/test_sync_led.cpp lib/SyncLed/src/SyncLed.cpp && /tmp/tsl
 ```
 
 Why two edges and why not a Hamming code: `controller/control/theory.md`, "Recorded

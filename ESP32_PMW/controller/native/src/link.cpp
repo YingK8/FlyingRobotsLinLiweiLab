@@ -16,9 +16,7 @@ SerialLink::~SerialLink() { close(); }
 
 void SerialLink::open(const std::string& dev, int baud) {
     close();
-    // O_NONBLOCK on the open too, or the open itself blocks waiting for carrier detect on
-    // a port with no modem lines. O_NOCTTY: a controlling terminal would deliver SIGHUP
-    // here on unplug, and the supervisor owns that decision.
+    // O_NONBLOCK on the open: the open must not block on carrier detect.
     fd_ = ::open(dev.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd_ < 0)
         throw std::runtime_error("open " + dev + ": " + std::strerror(errno));
@@ -26,24 +24,21 @@ void SerialLink::open(const std::string& dev, int baud) {
     termios t{};
     if (tcgetattr(fd_, &t) != 0)
         throw std::runtime_error("tcgetattr: " + std::string(std::strerror(errno)));
-    cfmakeraw(&t);                 // 8N1, no echo, no canonical mode, no flow control
-    t.c_cflag |= (CLOCAL | CREAD); // CLOCAL: ignore modem status lines
+    cfmakeraw(&t);
+    t.c_cflag |= (CLOCAL | CREAD);
     t.c_cflag &= ~CRTSCTS;
     t.c_cc[VMIN] = 0;
-    t.c_cc[VTIME] = 0;             // reads return immediately with whatever is there
+    t.c_cc[VTIME] = 0;
     if (tcsetattr(fd_, TCSANOW, &t) != 0)
         throw std::runtime_error("tcsetattr: " + std::string(std::strerror(errno)));
 
-    // 921600 is not a POSIX-standard rate. On Darwin the way to set an arbitrary rate is
-    // IOSSIOSPEED, AFTER tcsetattr -- a later tcsetattr would undo it.
+    // IOSSIOSPEED must follow tcsetattr, or a later tcsetattr undoes the rate.
     speed_t sp = (speed_t)baud;
     if (ioctl(fd_, IOSSIOSPEED, &sp) == -1)
         throw std::runtime_error("IOSSIOSPEED " + std::to_string(baud) + ": " +
                                  std::strerror(errno));
 
-    // DTR and RTS LOW. On this board they are wired to EN and IO0, so asserting them is a
-    // reset into the bootloader; `link.py` sets `dtr = False, rts = False` at open for
-    // exactly this reason, and opening the port must not be able to drop the coils.
+    // DTR and RTS low: asserting them resets the board into the bootloader.
     int bits = TIOCM_DTR | TIOCM_RTS;
     ioctl(fd_, TIOCMBIC, &bits);
 
@@ -86,10 +81,7 @@ bool SerialLink::send_line(const std::string& s) {
 
 void SerialLink::send_stop() {
     if (fd_ < 0) return;
-    // Three times, each with a leading newline. The newline ends any half-written ASCII
-    // line; the gap before the next byte ends any half-received binary frame; three
-    // copies survive a burst of corruption. `stop` is idempotent (`safe_off.py` relies on
-    // that), so sending it more than once costs nothing.
+    // Three copies with a leading newline: ends a partial line, survives corruption.
     const char* s = "\nstop\n";
     for (int i = 0; i < 3; ++i) (void)!::write(fd_, s, 6);
 }
@@ -102,8 +94,7 @@ void SerialLink::poll(double now_s, std::vector<std::string>* lines) {
         if (n <= 0) break;
         for (ssize_t i = 0; i < n; ++i) {
             uint8_t b = buf[i];
-            // The reverse channel is ACK frames (0xA6) mixed with the 2 Hz ASCII
-            // telemetry line. Same two-framing rule as the firmware's, mirrored.
+            // The reverse direction mixes ACK frames with the ASCII telemetry output.
             if (b == drive_frame::SYNC_ACK && pending_.empty()) {
                 ack_buf_[0] = b;
                 ack_n_ = 1;
@@ -126,7 +117,7 @@ void SerialLink::poll(double now_s, std::vector<std::string>* lines) {
             } else if (pending_.size() < 256) {
                 pending_.push_back((char)b);
             } else {
-                pending_.clear();       // overflow guard: garbage, not a line we lost
+                pending_.clear();
             }
         }
         if (n < (ssize_t)sizeof(buf)) break;
@@ -139,10 +130,7 @@ void SerialLink::on_ack(const drive_frame::Ack& a, double now_s) {
     st_.fw_n_crc = a.n_crc;
     st_.fw_state = a.state;
     const double sent = sent_at_[a.seq_echo % RTT_RING];
-    // Host -> board -> host, and it contains BOTH USB quanta. Reported as an upper bound
-    // on one-way latency, never halved: the two directions are not symmetric and there is
-    // nothing here that measures the split.
     if (sent > 0.0 && now_s >= sent && now_s - sent < 1.0) st_.rtt_s.push_back(now_s - sent);
 }
 
-}  // namespace pmw
+}

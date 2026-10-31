@@ -8,9 +8,10 @@ struct PulseTiming {
   uint16_t on_ms = 30;
   uint16_t gap_ms = 30;
   uint16_t blink_ms = 30;
+  uint16_t code_ms = 80; // controller/pose/scene.py CODE_BIT_S
 };
 
-enum class Signal : uint8_t { None, Start, Stop, Blink };
+enum class Signal : uint8_t { None, Start, Stop, Blink, Code };
 
 class SyncLed {
  public:
@@ -24,51 +25,26 @@ class SyncLed {
   bool sendStartSignal(uint32_t now_ms) { return beginSignal(Signal::Start, true, now_ms); }
   bool sendStopSignal(uint32_t now_ms) { return beginSignal(Signal::Stop, false, now_ms); }
   bool sendBlink(uint32_t now_ms) { return beginSignal(Signal::Blink, true, now_ms); }
+  bool sendCode(uint8_t word7, uint32_t now_ms) { word_ = word7; return beginSignal(Signal::Code, true, now_ms); }
 
   bool holdOn() { return endSignal(true); }
   bool holdOff() { return endSignal(false); }
 
-  bool advanceTo(uint32_t now_ms) {
-    if (signal_ == Signal::None) return false;
-    const Signal running = signal_;
-    const uint32_t segment_ms = (edgesWritten_ == 0) ? timing_.on_ms : timing_.gap_ms;
-    if (now_ms - lastEdgeMs_ < segment_ms) return false;
-    lastEdgeMs_ = now_ms;
-    if (running == Signal::Blink) {
-      signal_ = Signal::None;
-      return setOn(false);
-    }
-    if (++edgesWritten_ < 2) return setOn(running == Signal::Stop);
-    signal_ = Signal::None;
-    return setOn(running == Signal::Start);
-  }
+  bool advanceTo(uint32_t now_ms);
 
  private:
-  bool beginSignal(Signal signal, bool on, uint32_t now_ms) {
-    if (!setOn(on)) return false;
-    signal_ = signal;
-    edgesWritten_ = 0;
-    lastEdgeMs_ = now_ms;
-    return true;
-  }
+  bool beginSignal(Signal signal, bool on, uint32_t now_ms);
 
-  bool endSignal(bool on) {
-    signal_ = Signal::None;
-    edgesWritten_ = 0;
-    return setOn(on);
-  }
+  bool endSignal(bool on);
 
-  bool setOn(bool on) {
-    if (isOn_ == on) return false;
-    isOn_ = on;
-    return true;
-  }
+  bool setOn(bool on);
 
   PulseTiming timing_;
   Signal signal_ = Signal::None;
   uint8_t edgesWritten_ = 0;
   uint32_t lastEdgeMs_ = 0;
-  bool isOn_ = false;
+  bool isOn_ = false; // starts dark so the first rising edge is unambiguous
+  uint8_t word_ = 0;
 };
 
 }  // namespace sync_led

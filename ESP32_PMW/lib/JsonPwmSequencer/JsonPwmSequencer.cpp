@@ -6,8 +6,7 @@
 #include <strings.h> // strcasecmp
 
 namespace {
-// Operator-confirmed 2026-10-28, matching src/drive_common.h and README.md:
-// A,B,C,D order; A/C and B/D are opposite, direction reversal swaps B/D.
+// Operator-confirmed A,B,C,D order; A/C and B/D oppose; reversal swaps B/D.
 const float PHASES_CW[4] = {0.0f, 90.0f, 180.0f, 270.0f};
 const float PHASES_CCW[4] = {0.0f, 270.0f, 180.0f, 90.0f};
 } // namespace
@@ -24,44 +23,44 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
     return false;
   }
   size_t size = file.size();
+  // Elastic document: no fixed pool size to guess for a large schedule.
   std::unique_ptr<char[]> buf(new char[size + 1]);
   file.readBytes(buf.get(), size);
   buf[size] = '\0';
   file.close();
 
-  // Elastic document (ArduinoJson v7): grows its internal pool as needed, so
-  // there's no fixed byte-capacity to guess for a large generated experiment.
   JsonDocument doc;
   auto err = deserializeJson(doc, buf.get());
   if (err) {
     Serial.printf("[JsonPwmSequencer] parse failed: %s (file=%u bytes, "
                   "free heap=%u bytes)\n",
-                  err.c_str(), (unsigned)size, (unsigned)ESP.getFreeHeap());
+                  err.c_str(), (unsigned)size,
+                  (unsigned)ESP.getFreeHeap());
     return false;
   }
 
-  // Initial state from the file; project defaults fill any absent key. A bare
-  // top-level array is the schedule with all defaults.
   uint32_t resolutionMs = 25;
-  float initialFreq = 0.0f; // DC / stationary at rest; the schedule ramps it up
+  float initialFreq = 0.0f; // DC at rest; the schedule ramps it up
   float initialDuty[4] = {50, 50, 50, 50};
-  float initialPhase[4] = {PHASES_CCW[0], PHASES_CCW[1], PHASES_CCW[2],
-                           PHASES_CCW[3]};
+  float initialPhase[4] = {PHASES_CCW[0],
+                                  PHASES_CCW[1],
+                                  PHASES_CCW[2],
+                                  PHASES_CCW[3]};
 
   JsonArray arr;
   if (doc.is<JsonArray>()) {
     arr = doc.as<JsonArray>();
   } else {
     JsonObject cfg = doc.as<JsonObject>();
-    resolutionMs = cfg["resolution_ms"] | resolutionMs;
+    resolutionMs =
+        cfg["resolution_ms"] | resolutionMs;
     initialFreq = cfg["initial_freq"] | initialFreq;
 
     JsonArray dutyArr = cfg["initial_duty"].as<JsonArray>();
     for (int i = 0; i < 4 && i < (int)dutyArr.size(); i++)
       initialDuty[i] = dutyArr[i] | initialDuty[i];
 
-    // "direction" seeds all four phases from the project CW/CCW convention;
-    // an explicit "initial_phase" array (if present) overrides per-channel.
+    // direction seeds all four phases; initial_phase overrides per channel.
     const char *dir = cfg["direction"] | "";
     if (strcasecmp(dir, "cw") == 0) {
       for (int i = 0; i < 4; i++)
@@ -77,20 +76,18 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
   reserve(arr.size());
   _stepLabels.reserve(arr.size());
 
-  // Running full state: TRAJECTORY_POINT tasks need every channel, so each
-  // per-channel command updates one entry here and pushes the whole snapshot.
+  // A trajectory point needs all four channels, so every one pushes a step.
   float curFreq = initialFreq;
   float curDuty[4];
   float curPhase[4];
-  float curCarrier[4]; // NAN = untouched; applyCurrentState() skips those channels
+  float curCarrier[4]; // NAN leaves that i's carrier untouched
   for (int i = 0; i < 4; i++) {
     curDuty[i] = initialDuty[i];
     curPhase[i] = initialPhase[i];
     curCarrier[i] = NAN;
   }
 
-  // Label active for whatever step gets pushed next; "label" entries update
-  // this without pushing a queue entry of their own.
+  // A label object sets the step label for the steps that follow it.
   String currentLabel;
 
   std::vector<String> unknownMethods;
@@ -101,13 +98,12 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
     float value = obj["value"] | 0.0f;
     float from = obj["from"] | 0.0f;
     float to = obj["to"] | 0.0f;
-    float shape = obj["shape"] | NAN; // curve param for any ramp; NAN = default
+    float shape = obj["shape"] | NAN; // NAN selects the ramp_mode default
     uint32_t durationMs = obj["duration_ms"] | 0;
     bool called = false;
     bool pushedTask = false;
 
-    // Target channel(s): "channels" is an int (one) or an array (many, applied in
-    // one simultaneous snapshot). In-range (0-3) only; other entries dropped.
+    // "channels" is one channel or an array applied in one snapshot.
     int channels[4];
     int nChannels = 0;
     if (obj["channels"].is<JsonArray>()) {
@@ -125,13 +121,17 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
     if (method == "addDutyCycleTask" && nChannels > 0) {
       for (int i = 0; i < nChannels; i++)
         curDuty[channels[i]] = constrain(value, 0.0f, 100.0f);
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+      addSequenceTask(makeTrajectoryTask(curFreq, curDuty,
+                                    curPhase,
+                                    curCarrier));
       called = true;
       pushedTask = true;
     } else if (method == "addPhaseTask" && nChannels > 0) {
       for (int i = 0; i < nChannels; i++)
         curPhase[channels[i]] = value;
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+      addSequenceTask(makeTrajectoryTask(curFreq, curDuty,
+                                    curPhase,
+                                    curCarrier));
       called = true;
       pushedTask = true;
     } else if (method == "addWaitTask") {
@@ -140,46 +140,45 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
       pushedTask = true;
     } else if (method == "addLinearRampTask") {
       addRampTask(from, to, durationMs, TaskType::PWM_FREQ,
-                  TaskMode::POLYNOMIAL, shape);
+                 TaskMode::POLYNOMIAL, shape);
       curFreq = to;
       called = true;
       pushedTask = true;
     } else if (method == "addEaseRampTask") {
-      addRampTask(from, to, durationMs, TaskType::PWM_FREQ, TaskMode::EASE,
-                  shape);
+      addRampTask(from, to, durationMs, TaskType::PWM_FREQ,
+                 TaskMode::EASE, shape);
       curFreq = to;
       called = true;
       pushedTask = true;
     } else if (method == "addExponentialRampTask") {
       addRampTask(from, to, durationMs, TaskType::PWM_FREQ,
-                  TaskMode::EXPONENTIAL, shape);
+                 TaskMode::EXPONENTIAL, shape);
       curFreq = to;
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierRampTask") {
       addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
-                  TaskMode::POLYNOMIAL, shape);
+                 TaskMode::POLYNOMIAL, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierEaseRampTask") {
       addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
-                  TaskMode::EASE, shape);
+                 TaskMode::EASE, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierExponentialRampTask") {
       addRampTask(from, to, durationMs, TaskType::CARRIER_DUTY,
-                  TaskMode::EXPONENTIAL, shape);
+                 TaskMode::EXPONENTIAL, shape);
       for (int i = 0; i < 4; i++)
         curCarrier[i] = to;
       called = true;
       pushedTask = true;
     } else if (method == "addPhaseRampTask" && nChannels > 0) {
-      // Ramp only the named channel(s); NAN leaves the others alone. Same
-      // "channels" int-or-array form as the instant per-channel setters.
+      // NAN leaves unnamed channels alone; same channel form as the setters.
       float starts[4] = {NAN, NAN, NAN, NAN};
       float ends[4] = {NAN, NAN, NAN, NAN};
       for (int i = 0; i < nChannels; i++) {
@@ -187,36 +186,44 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
         ends[channels[i]] = to;
         curPhase[channels[i]] = to;
       }
-      addRampTask(starts, ends, 4, durationMs, TaskType::PWM_PHASE,
-                  TaskMode::EASE, shape);
+      addRampTask(starts, ends, 4, durationMs,
+                 TaskType::PWM_PHASE, TaskMode::EASE, shape);
       called = true;
       pushedTask = true;
     } else if (method == "addCarrierDutyCycleTask" && nChannels > 0) {
       for (int i = 0; i < nChannels; i++)
         curCarrier[channels[i]] = constrain(value, 0.0f, 100.0f);
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+      addSequenceTask(makeTrajectoryTask(curFreq, curDuty,
+                                    curPhase,
+                                    curCarrier));
       called = true;
       pushedTask = true;
     } else if (method == "setDirection") {
-      // value != 0 => CCW, else CW (see PHASES_CW/PHASES_CCW above).
-      const float *phases = (value != 0.0f) ? PHASES_CCW : PHASES_CW;
+      // value 0 is clockwise, anything else counter-clockwise.
+      const float *phases =
+          (value != 0.0f) ? PHASES_CCW : PHASES_CW;
       for (int i = 0; i < 4; i++)
         curPhase[i] = phases[i];
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+      addSequenceTask(makeTrajectoryTask(curFreq, curDuty,
+                                    curPhase,
+                                    curCarrier));
       called = true;
       pushedTask = true;
     } else if (method == "activateChannels") {
-      // "mask" bit i set => channel i carrier duty = value (clamped); else 0.
+      // A set mask bit drives the channel at value, a clear bit at zero.
       float onDuty = constrain(value, 0.0f, 100.0f);
       for (int i = 0; i < 4; i++)
-        curCarrier[i] = ((mask >> i) & 1) ? onDuty : 0.0f;
-      addSequenceTask(makeTrajectoryTask(curFreq, curDuty, curPhase, curCarrier));
+        curCarrier[i] =
+            ((mask >> i) & 1) ? onDuty : 0.0f;
+      addSequenceTask(makeTrajectoryTask(curFreq, curDuty,
+                                    curPhase,
+                                    curCarrier));
       called = true;
       pushedTask = true;
     } else if (method == "label") {
       const char *labelCStr = obj["value"] | "";
       currentLabel = String(labelCStr);
-      called = true; // recognized, but pushes nothing; doesn't advance the queue
+      called = true; // recognized but appends nothing
     }
 
     if (pushedTask) {
@@ -234,6 +241,7 @@ bool JsonPwmSequencer::loadFromJsonFile(const char *filename) {
     }
   }
 
-  compile(resolutionMs, initialFreq, initialDuty, initialPhase);
+  compile(resolutionMs, initialFreq,
+                    initialDuty, initialPhase);
   return true;
 }

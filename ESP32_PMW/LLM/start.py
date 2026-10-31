@@ -76,13 +76,37 @@ def read_start(path):
     return {"start": start, "stop": stop}
 
 
-def synchronize_start(run, roi_a, roi_b):
+def led_roi(video_path, times, seconds=5.0):
+    import cv2
+    from controller.pose.scene import locate_led
+    capture, frames = cv2.VideoCapture(str(video_path)), []
+    while len(frames) < len(times) and times[len(frames)] - times[0] <= seconds:
+        ok, frame = capture.read()
+        if not ok:
+            break
+        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+    capture.release()
+    circle = locate_led(frames, times[:len(frames)])
+    if circle is None:
+        raise ValueError(f"no Hamming LED code in the first {seconds:g} s of {video_path}; pass the ROI by hand")
+    cx, cy, r = circle
+    height, width = frames[0].shape
+    x, y = max(int(cx - r), 0), max(int(cy - r), 0)
+    return [x, y, min(int(2 * r + 1), width - x), min(int(2 * r + 1), height - y)]
+
+
+def synchronize_start(run, roi_a=None, roi_b=None):
     """Two optical markers per camera + one device event -> all three clock mappings."""
     run = Path(run)
     invalidate_report(run, "START association changed or failed; rerun sync-start then process.")
     sync_path = run / "processed/sync.json"
     sync_path.unlink(missing_ok=True)
     device_events = read_start(run / "raw/telemetry.jsonl")
+    if roi_a is None or roi_b is None:
+        from LLM.capture import load_flight
+        flight = load_flight(run)
+        roi_a, roi_b = (roi or led_roi(flight[f"video_{tag}"], flight[f"times_{tag}"])
+                        for roi, tag in ((roi_a, "a"), (roi_b, "b")))
     start, stop = device_events["start"], device_events["stop"]
     reference_s = (start["led0_us"] + start["led1_us"]) / 2e6
     stop_experiment_s = None if stop is None else (stop["t0_us"] + stop["t1_us"]) / 2e6 - reference_s

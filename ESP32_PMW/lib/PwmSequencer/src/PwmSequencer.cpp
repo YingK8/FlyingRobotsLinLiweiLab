@@ -39,6 +39,7 @@ PwmSequencer::PwmSequencer(PwmController *phaseCtrl) {
     _initialPhaseDegrees[i] = 0.0f;
     _currentDutyCycles[i] = 0.0f;
     _currentPhaseDegrees[i] = 0.0f;
+    // NAN marks a channel this step leaves untouched.
     _currentCarrierDutyCycles[i] = NAN;
   }
 }
@@ -47,6 +48,7 @@ void PwmSequencer::reserve(size_t size) { _queue.reserve(size); }
 
 void PwmSequencer::clear() {
   _queue.clear();
+  // Drives the initial state now, so it holds even with an empty queue.
   resetStreamingState();
 }
 
@@ -61,7 +63,6 @@ void PwmSequencer::addWaitTask(uint32_t durationMs) {
   _queue.push_back(task);
 }
 
-// Global ramp
 void PwmSequencer::addRampTask(float start, float end, uint32_t durationMs,
                                  TaskType type, TaskMode ramp_mode, float shape) {
   const float starts[4] = {start, start, start, start};
@@ -69,7 +70,6 @@ void PwmSequencer::addRampTask(float start, float end, uint32_t durationMs,
   addRampTask(starts, ends, 4, durationMs, type, ramp_mode, shape);
 }
 
-// Per-channel ramp
 void PwmSequencer::addRampTask(const float *starts, const float *ends,
                                  int numChannels, uint32_t durationMs,
                                  TaskType type, TaskMode ramp_mode, float shape) {
@@ -80,10 +80,11 @@ void PwmSequencer::addRampTask(const float *starts, const float *ends,
   task.durationUs = (int64_t)durationMs * 1000LL;
 
   if (type == TaskType::PWM_FREQ) {
-    // Frequency is global; only channel 0 is meaningful.
+    // Frequency is global; only channel 0 is read.
     task.startFreq = starts[0];
     task.endFreq = ends[0];
     _queue.push_back(task);
+    // Only frequency, dutyCycles, carrierDuties and phase can be ramped.
     return;
   }
 
@@ -107,7 +108,7 @@ void PwmSequencer::addRampTask(const float *starts, const float *ends,
     end_traj = task.endPhases;
     break;
   default:
-    return; // you can only ramp frequency, duty, carrier duty, or phase
+    return;
   }
 
   for (int i = 0; i < 4; i++) {
@@ -121,7 +122,7 @@ void PwmSequencer::addRampTask(const float *starts, const float *ends,
       start_traj[i] = s;
       end_traj[i] = e;
     } else {
-      start_traj[i] = NAN; // if channel is not selected (NAN), skip
+      start_traj[i] = NAN;
       end_traj[i] = NAN;
     }
   }
@@ -136,8 +137,7 @@ float PwmSequencer::applyCurve(TaskMode mode, float t, float shape) {
 
   switch (mode) {
   case TaskMode::EASE: {
-    // Symmetric S-curve (sigmoid), not a power: it eases in AND out about
-    // t=0.5. k=1 is linear, larger k sharpens the transition.
+    // Symmetric about midpoint; k=1 is linear, larger k is sharper.
     float k = isnan(shape) ? 2.0f : shape;
     if (k < 1.0f)
       k = 1.0f;
@@ -146,16 +146,13 @@ float PwmSequencer::applyCurve(TaskMode mode, float t, float shape) {
     return a / (a + b);
   }
   case TaskMode::EXPONENTIAL: {
-    // Exponent multiplier: k>0 slow-start/fast-finish, k<0 the reverse.
     float k = isnan(shape) ? 2.0f : shape;
     if (fabsf(k) < 1e-6f)
-      return t; // degenerates to linear
+      return t;
     return (expf(k * t) - 1.0f) / (expf(k) - 1.0f);
   }
   case TaskMode::POLYNOMIAL:
   default: {
-    // t^p about the origin: p=1 linear, p>1 slow-start, 0<p<1 fast-start.
-    // p<=0 would step or blow up, so it falls back to linear.
     float p = (isnan(shape) || shape <= 0.0f) ? 1.0f : shape;
     return powf(t, p);
   }
@@ -219,8 +216,6 @@ void PwmSequencer::start() {
     _currentCarrierDutyCycles[i] = NAN;
   }
 
-  // Push the initial state to the hardware immediately, so the configured
-  // frequency/duty/phase are driven even before (or without) any queued task.
   applyCurrentState();
 }
 
@@ -228,9 +223,6 @@ bool PwmSequencer::isDone() const {
   return _currentFrameIdx >= _queue.size();
 }
 
-// =========================================================
-// HIGH-SPEED HOT LOOP: No math, just pointer lookups
-// =========================================================
 void PwmSequencer::run() {
   if (_queue.empty() || _currentFrameIdx >= _queue.size())
     return;
@@ -268,8 +260,6 @@ void PwmSequencer::run() {
 
     if (task.type == TaskType::PWM_FREQ || task.type == TaskType::PWM_DUTY ||
         task.type == TaskType::PWM_PHASE || task.type == TaskType::CARRIER_DUTY) {
-      // Interpolate the quantity selected by task.type at fraction t. A
-      // zero-duration task is an instant set (handled below via t = 1).
       auto applyRampAt = [&](float t) {
         switch (task.type) {
         case TaskType::CARRIER_DUTY:

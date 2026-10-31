@@ -6,39 +6,28 @@
 
 namespace sync_led {
 
+// the pin is handed over once by driveBoot()
 class PinLed {
  public:
-  void attachTo(uint8_t pin) {
-    pin_ = pin;
-    pinMode(pin_, OUTPUT);
-    machine_.holdOff();
-    write();
-  }
+  void attachTo(uint8_t pin);
 
   void sendStartSignal() { machine_.sendStartSignal(millis()); write(); }
   void sendStopSignal() { machine_.sendStopSignal(millis()); write(); }
   void sendBlink() { machine_.sendBlink(millis()); write(); }
+  void sendCode(uint8_t word7) { machine_.sendCode(word7, millis()); write(); }
   void holdOn() { machine_.holdOn(); write(); }
   void holdOff() { machine_.holdOff(); write(); }
 
-  void flip() {
-    if (machine_.isOn()) holdOff();
-    else holdOn();
-  }
+  void flip();
 
-  void advance() {
-    if (machine_.advanceTo(millis())) write();
-  }
+  void advance();
 
   bool isOn() const { return machine_.isOn(); }
   bool isSendingSignal() const { return machine_.isSendingSignal(); }
   const PulseTiming &timing() const { return machine_.timing(); }
 
  private:
-  void write() {
-    if (pin_ == unattached) return;
-    digitalWrite(pin_, machine_.isOn() ? HIGH : LOW);
-  }
+  void write();
 
   static constexpr uint8_t unattached = 255;
   uint8_t pin_ = unattached;
@@ -46,7 +35,7 @@ class PinLed {
 };
 
 inline PinLed &led() {
-  static PinLed instance;
+static PinLed instance;
   return instance;
 }
 

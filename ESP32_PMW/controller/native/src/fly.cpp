@@ -1,21 +1,3 @@
-// `pmw_fly`: the whole live loop in one process -- capture, pose, filter, control, coils.
-//
-// Nothing here decides a number. Every constant arrives in the config file written by
-// `controller/control/native_config.py`, and an unknown or missing key is fatal at
-// startup rather than defaulted, so a value cannot silently exist twice.
-//
-// ARMING. This binary REFUSES to energise without `--armed-token`, which only
-// `controller/control/fly_native.py` issues, and it issues it only after
-// `ai/thermal/coil_thermal.wait_until_safe()` has returned. That is not ceremony: the
-// coils reach 80 C after four ramps, there is no temperature sensor, and the thermal
-// model is a Python module this process deliberately does not reimplement. One writer to
-// the stamp file, forever, and it is the supervisor. See `CLAUDE.md` "Safety".
-//
-// The supervisor also holds this process's stdin. EOF there means the supervisor is gone,
-// and the coils are cut -- a host-side liveness backstop for free. It cannot cover the
-// USB cable; nothing here can.
-//
-// See `control/theory.md` 27.
 
 #include "control.h"
 #include "link.h"
@@ -40,10 +22,7 @@ using namespace pmw;
 
 namespace {
 
-// ---- config ---------------------------------------------------------------------------
-// A flat `key value` text file, not JSON: the whole point of this file is that it has no
-// dependencies the firmware side does not, and a JSON parser is a library or 300 lines to
-// carry for a dict of scalars. `native_config.py` writes it and owns every value.
+// A pose source with no camera, so the whole chain below the camera stays testable.
 struct Cfg {
     std::map<std::string, std::string> kv;
 
@@ -62,7 +41,7 @@ struct Cfg {
             kv[k] = (b == std::string::npos) ? "" : rest.substr(b);
         }
     }
-    // Throws, never defaults. The rule `pmw::Config` sets, for the same reason.
+    // Throws, never defaults: a missing key must be fatal at startup.
     const std::string& str(const char* k) const {
         auto it = kv.find(k);
         if (it == kv.end()) throw std::runtime_error(std::string("config missing '") + k + "'");
@@ -113,60 +92,30 @@ const char* KEYS[] = {"accel_mm_s2", "p0_pos", "p0_vel", "gate_sigma", "max_gate
                       "freq_slew_hz_per_s", "vel_cutoff_hz", "suspect_mm", "K"};
 
 
-// A pose source with no camera: the C++ twin of `hover_controller_runner.stub_ticks` and
-// of `fly(dry_run=True)`. It exists for the same reason they do -- the whole chain below
-// the camera (gate, predictor, control law, wire encode, CSV, safety ladder) is testable
-// without a rig, and shipping it untested because the rig is elsewhere is how untested
-// code comes to look tested.
-//
-// `drop_every`/`drop_len` punch dropouts of a chosen length so the coast -> stale -> land
-// ladder is exercised deliberately rather than whenever the robot happens to be lost, and
-// `outlier_every` injects a jump the innovation gate must reject.
-//
-// **`--sim-outlier-every 1` is a BIAS, not a stream of outliers**, and the gate correctly
-// ignores it: every pose carries the same offset, so after the first there is no
-// innovation to reject and the filter is simply tracking a shifted trajectory. That is
-// the right answer -- a constant offset is a calibration error, not an outlier -- and it
-// is worth knowing before reading `0 gated` as a failure. The `MAX_GATED` escape, which
-// needs a SUSTAINED excursion after normal tracking, is exercised in
-// `native_parity.py --stage filter` against both implementations at once.
 class SimPose {
 public:
     SimPose(double rate_hz, int drop_every, int drop_len, int outlier_every)
         : dt_(1.0 / rate_hz), drop_every_(drop_every), drop_len_(drop_len),
           outlier_every_(outlier_every) {}
 
-    //: The pose valid at `now`, or nullptr during a dropout. `seq` advances only when a
-    //: pose is produced, which is what the control loop keys "new fix" on.
     const Vector3d* at(double now, std::uint64_t* seq, double* stamp) {
-        // Seed the schedule from the first call. `steady_clock` counts from boot, so a
-        // `next_` starting at 0 is decades in the past and every tick looks due -- the
-        // source then fires at the CONTROL rate instead of its own, and the coast path
-        // never runs. Measured while writing this: 5 coast ticks in 6001 at a nominal
-        // 100 Hz source against a 500 Hz loop, where ~4800 were expected.
+        // seed the schedule from the first call, or every tick looks due
         if (next_ == 0.0) next_ = now;
         if (now < next_) return nullptr;
         next_ += dt_;
         n_++;
-        // A dropout every `drop_every_` poses, lasting `drop_len_` of them.
         if (drop_every_ > 0 && (n_ % drop_every_) < (std::uint64_t)drop_len_) {
             n_lost_++;
             return nullptr;
         }
         const double t = n_ * dt_;
-        // A slow lateral drift and a gentle climb: something the constant-velocity model
-        // tracks, so a rejected update is visibly the gate and not the trajectory.
         xyz_ = Vector3d(2.0 * std::sin(0.35 * t), 1.5 * std::cos(0.28 * t),
                         60.0 + 3.0 * std::sin(0.2 * t));
         if (outlier_every_ > 0 && n_ % outlier_every_ == 0) {
             xyz_ += Vector3d(30.0, -25.0, 45.0);
             n_outlier_++;
         }
-        *seq = ++pose_seq_;
-        // The SHUTTER stamp, deliberately behind `now`: a real fix is already this old by
-        // the time the loop sees it, and the filter must propagate from here, not from the
-        // tick (19.6). A source that stamps `now` would hide a whole class of error.
-        *stamp = now - 0.010;
+        // the shutter stamp sits behind now, as a real fix does
         return &xyz_;
     }
     std::uint64_t n_lost() const { return n_lost_; }
@@ -181,17 +130,17 @@ private:
 
 std::atomic<bool> g_stop{false};
 
-// stdin is the supervisor's liveness channel. EOF means it is gone; a line is a command.
+// stdin is the supervisor's liveness channel: EOF means it is gone.
 void watch_stdin(std::vector<std::string>* cmds, std::mutex* m) {
     std::string line;
     while (std::getline(std::cin, line)) {
         std::lock_guard<std::mutex> lk(*m);
         cmds->push_back(line);
     }
-    g_stop.store(true);   // EOF: the supervisor died, and the coils must not outlive it
+    g_stop.store(true);
 }
 
-}  // namespace
+}
 
 int main(int argc, char** argv) {
     std::string cfg_path, port, token, csv_path;
@@ -222,15 +171,13 @@ int main(int argc, char** argv) {
     Cfg cfg;
     try {
         cfg.load(cfg_path);
-        (void)control_cfg(cfg);          // validate every key before anything opens
+        (void)control_cfg(cfg);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "config: %s\n", e.what());
         return 2;
     }
 
-    // THE ARMING GATE. Without the supervisor's token this process will not open the
-    // serial port at all, so there is no path by which running `pmw_fly` by hand can
-    // energise a coil with the thermal model unaware of it.
+    // arming gate: without the supervisor's token, do not even open the port
     if (token.empty()) {
         std::fprintf(stderr,
             "REFUSING to arm: no --armed-token.\n"
@@ -280,8 +227,7 @@ int main(int argc, char** argv) {
                  "cmd_tilt_x,cmd_tilt_y,mag,az,armed,spin,lost,i_a,i_b,i_c,i_d\n";
             Row r;
             auto num = [&](double v) {
-                // NaN -> blank. The 21-column schema's rule, carried across the port:
-                // a 0.00 here would read as measured-and-level.
+                // NaN as blank: a 0.00 would read as measured-and-level
                 if (std::isnan(v)) return std::string();
                 char b[32];
                 std::snprintf(b, sizeof(b), "%.4f", v);
@@ -305,8 +251,6 @@ int main(int argc, char** argv) {
     }
 
     const double ts = cc.ts;
-    // `computation` from a measurement, not a guess. Seeded from the config and refined
-    // below once the tick body has been timed; a thread that overruns it is demoted.
     if (!set_realtime(ts, cfg.num("rt_computation_s"), cfg.num("rt_constraint_s")))
         std::fprintf(stderr, "warning: could not set THREAD_TIME_CONSTRAINT_POLICY -- "
                              "the loop will run, with the scheduler's tail\n");
@@ -314,7 +258,7 @@ int main(int argc, char** argv) {
     ClockStats clk;
     const double t0 = now_s();
     double next = t0, last = t0;
-    double t_fix = t0;              // WALL time of the last fix, not frame time
+    double t_fix = t0;
     double f_cmd = cc.f_hover, f_hat = cc.f_hover;
     std::uint64_t n_gate_rej = 0, n_coast = 0, n_stale = 0, last_seq = 0;
     double t_meas = t0;
@@ -330,7 +274,7 @@ int main(int argc, char** argv) {
         clk.note(now - last, ts);
         last = now;
         next += ts;
-        if (next < now) next = now + ts;   // fell behind: resync, and it was counted
+        if (next < now) next = now + ts;
 
         if (link.is_open()) {
             lines.clear();
@@ -345,29 +289,18 @@ int main(int argc, char** argv) {
             cmds.clear();
         }
 
-        // ---- pose -> filter -> predictor -> control ---------------------------------
         bool fresh = false;
         double dt_meas = 0.0;
         if (sim) {
             std::uint64_t pseq = 0;
             double stamp = 0.0;
             const Vector3d* z = sim->at(now, &pseq, &stamp);
-            // A pose is new only if its SEQUENCE advanced and its stamp is later than the
-            // last fix's. A repeat, or one older than the filter, carries no information
-            // about now and must not drag the state.
+            // a pose is new only if its seq advanced and its stamp is later
             if (z && pseq > last_seq && stamp > t_meas) {
                 last_seq = pseq;
-                // Propagate to the SHUTTER stamp, update there, then forward to now.
-                // 19.6's t_pred rule: the next coast then spans the fix's full pipeline
-                // age, which is the latency compensation, and it is free here because the
-                // filter and the pose source share one clock.
+                // propagate to the shutter stamp, update there, then forward to now
                 filt.predict(std::max(stamp - t_meas, 0.0));
-                // R inflation from the frame's own quality. One term, because
-                // `discrepancy_mm` is the only quality signal in millimetres and so the
-                // only one commensurate with R without a scale nobody has measured. The
-                // hard gate stays underneath: inflation alone would let a quarter-turn
-                // branch flip through with merely a larger R. (Simulated source: quality
-                // is nominal, so the factor is 1 and the gate is what acts.)
+                // inflation alone lets a branch flip through; the hard gate stays underneath
                 const double s_inf = 1.0;
                 Matrix3d R = Matrix3d::Zero();
                 R(0, 0) = R(1, 1) = 0.05 * 0.05 * s_inf;
@@ -376,11 +309,9 @@ int main(int argc, char** argv) {
                 if (!took) n_gate_rej++;
                 dt_meas = stamp - t_meas;
                 t_meas = stamp;
-                t_fix = now;                      // WALL time, for the lost-land guard
+                t_fix = now;
                 fresh = true;
-                // Raw position, filtered VELOCITY. `filter.py` measures filtered position
-                // as 1.4% WORSE than raw -- depth error autocorrelates at r = 0.966 -- so
-                // the filter is a rejector and a rate source, never a smoother.
+                // raw position, filtered velocity: the filter is a rejector, not a smoother
                 pred.update(took ? *z : filt.value(), filt.rate(), stamp);
             }
         }
@@ -406,7 +337,7 @@ int main(int argc, char** argv) {
             r.lost = (int)(sim ? sim->n_lost() : 0);
             r.f_hz = f_cmd;
             r.x = p(0); r.y = p(1); r.z = p(2);
-            r.tilt = r.tilt_az = r.acc_tx = r.acc_ty = NAN;   // no attitude source here
+            r.tilt = r.tilt_az = r.acc_tx = r.acc_ty = NAN;
             r.cmd_tx = ux(0); r.cmd_ty = uy(0);
             r.mag = std::hypot(ux(0), uy(0));
             r.az = std::fmod(std::atan2(uy(0), ux(0)) * 180.0 / M_PI + 360.0, 360.0);
@@ -415,9 +346,7 @@ int main(int argc, char** argv) {
             ring.push(r);
         }
 
-        // THE LADDER'S LAST RUNG. Wall clock, not frame time: the hazard includes the
-        // pose producer stalling, and a stalled producer freezes frame time -- so a
-        // frame-time deadline never expires in exactly the case it exists for.
+        // wall clock, not frame time: a stalled producer freezes frame time
         if (now - t_fix > cfg.num("lost_land_s") && link.is_open()) {
             std::printf("TRACKING LOST for %.2fs with the coils driven -- stopping\n",
                         now - t_fix);

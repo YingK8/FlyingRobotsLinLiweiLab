@@ -180,7 +180,7 @@ uv run python controller/control/sysid.py --stage 0           # free: fits (f0,Q
 c++ -std=c++17 -O2 -I lib/DriveFrame/src -o /tmp/tdf \
   lib/DriveFrame/test_drive_frame.cpp && /tmp/tdf              # the wire format
 c++ -std=c++17 -O2 -I lib/SyncLed/src -o /tmp/tsl \
-  lib/SyncLed/test_sync_led.cpp && /tmp/tsl                    # the optical marker
+  lib/SyncLed/test_sync_led.cpp lib/SyncLed/src/SyncLed.cpp && /tmp/tsl   # the optical marker
 uv run python controller/pose/tracker.py        # pairing, skew guard, view-cache exactness (no camera)
 uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives

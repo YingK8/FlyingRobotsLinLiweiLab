@@ -8,8 +8,8 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from LLM.io import init_run, read_json, sha256, write_json
-from LLM.start import read_start, synchronize_start
+from LLM.record.io import init_run, read_json, sha256, write_json
+from LLM.analyse.start import read_start, synchronize_start
 from controller.control.link import SerialComm
 from controller.control.hover_controller_runner import CommandLink, RunConfig, fly
 
@@ -210,7 +210,7 @@ def run():
         assert abs(result["cross_camera"]["start_skew_s"]) < result["cross_camera"]["bound_s"]
         assert read_json(run_dir / "processed/sync.json") == result
         # Inputs-only processing must succeed with no rig/world/pose and decode its plot.
-        from LLM.experiment import postprocess
+        from LLM.record.experiment import postprocess
         manifest=read_json(run_dir/'manifest.json')
         write_json(run_dir/'manifest.json',manifest | {'experiment_mode':'sync_check'})
         write_json(run_dir/'pattern.json', {'schema_version':1,'trigger':'time',

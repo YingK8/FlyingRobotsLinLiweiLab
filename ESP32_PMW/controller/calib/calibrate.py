@@ -627,7 +627,13 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
         spec, views_a, views_b, K_a, dist_a, K_b, dist_b, image_size
     )
     print()
+    return judge_calibration(pairs, image_size, K_a, dist_a, intr_a, K_b, dist_b, intr_b,
+                             T_ba, seed_T, spread, stereo_info, elp_ids)
 
+
+def judge_calibration(pairs, image_size, K_a, dist_a, intr_a, K_b, dist_b, intr_b,
+                      T_ba, seed_T, spread, stereo_info, elp_ids=()):
+    """Solved intrinsics + extrinsics -> residuals, acceptance and the result dict."""
     from controller.calib.results import acceptance, stereo_residuals, structure_report, uncertainty_um
 
     resid = stereo_residuals(
@@ -673,7 +679,7 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
         "struct_a": struct_a,
         "struct_b": struct_b,
         "passed": passed,
-        "elp_ids": elp_ids,
+        "elp_ids": list(elp_ids),
     }
 
 
@@ -747,23 +753,23 @@ def main(argv=None):
         )
 
     cal = run_calibration(spec, a.bag)
+    meta = {"camera_indices": list(a.indices), "rotate180": not a.no_flip}
+    return 0 if save_calibration(cal, spec, a.bag, a.rig, a.out, meta) else 1
+
+
+def save_calibration(cal, spec, bag, rig, out, meta):
+    """Diagnostic figures always; the rig JSON only if acceptance passed. Returns passed."""
     from controller.calib.results import write_results
     from controller.calib.plots import coverage_figure, figures, undistort_figure
 
-    coverage_figure(spec, a.bag, a.out)
-    figures(cal["pairs"], cal["image_size"], cal["resid"], out_dir=a.out)
-    undistort_figure(cal, a.bag, a.out)
+    coverage_figure(spec, bag, out)
+    figures(cal["pairs"], cal["image_size"], cal["resid"], out_dir=out)
+    undistort_figure(cal, bag, out)
     if not cal["passed"]:
         print("\nacceptance failed -- nothing written. Fix the capture, not the limit.")
-        return 1
-    write_results(
-        cal,
-        spec,
-        a.rig,
-        a.out,
-        meta={"camera_indices": list(a.indices), "rotate180": not a.no_flip},
-    )
-    return 0
+        return False
+    write_results(cal, spec, rig, out, meta=meta)
+    return True
 
 
 if __name__ == "__main__":

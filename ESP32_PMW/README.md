@@ -2,38 +2,49 @@
 
 Controls a 4-channel phased PWM coil array to spin and tilt a magnetic disk. Each channel has an independent phase offset and a carrier PWM for H-bridge current control.
 
+## Where things are
+
+**To record a flight, open `LLM/record_experiment.ipynb`** (steps in `LLM/README.md`).
+
+```
+ESP32_PMW/
+├── LLM/                    recorded experiments: stereo video + coil current + LED sync
+│   ├── record_experiment.ipynb   ← the main notebook, one Bench step per cell
+│   ├── bench.py                  ← Bench: calibrate → verify → record → run → analyse
+│   ├── record/  analyse/      before+during the run / after it
+│   └── patterns/  tests/
+├── controller/             live control host (Python package)
+│   ├── camera/ calib/ pose/ control/ viz/   one stage each; theory.md per stage
+│   ├── native/             C++ pose/control core (pmw_pose, pmw_fly)
+│   └── run.ipynb           closed-loop flight notebook
+├── src/  lib/  platformio.ini   ESP32 firmware (one main_*.cpp per env)
+├── spiffs_data/            schedules for schedule-driven envs
+├── ai/                     gitignored scratchpad; ai/thermal/coil_thermal.py is load-bearing
+├── results/  data/         captures and outputs
+└── docs/                   PCB docs (stale -- see CLAUDE.md)
+```
+
+Rules, safety and commands: `CLAUDE.md`.
+
 ---
 
 ## Upload
 
-Each experiment is a self-contained firmware that loads its schedule from SPIFFS
-and **runs on boot** (no arming). Upload the JSON payloads once, then the firmware:
+**Upload `flight`** (the default) for recorded flights (`LLM/record_experiment.ipynb`) and for
+closed-loop flight (`controller/run.ipynb`). Coil PSU off while flashing.
 
 ```bash
-pio run -e <env> --target uploadfs   # packs spiffs_data/*.json to flash (once)
-pio run -e <env> --target upload     # builds + flashes the firmware
+pio run -e flight -t upload
 ```
 
-| Environment | Source file | Balance | Purpose |
-|---|---|---|---|
-| `flight` *(default)* | `main_flight.cpp` | PI | live PC-commanded takeoff → hover → directional accel |
-| `servo` | `main_servo.cpp` | PI | dumb serial shim; the host owns the control loop |
-| `takeoff_upside_down` | `main_takeoff_upside_down.cpp` | PI | CW, EASE 1→200 Hz over 25 s at 100% carrier, then overshoot to 210 Hz and settle at 190 |
-| `comp_test` | `calibration/main_comp_test.cpp` | passthrough | per-channel trim A/B test |
-| `coupling_test` | `calibration/main_coupling_test.cpp` | passthrough | coil-coupling sweep |
-| `dc` | `calibration/main_dc.cpp` | passthrough | DC current-sense calibration |
-| `serialcomm_demo` | `examples/main_serialcomm_demo.cpp` | — | `lib/SerialComm` echo demo, not a flight target |
+| Environment | Source | Used by |
+|---|---|---|
+| `flight` *(default)* | `main_flight.cpp` | LLM notebook, `controller/run.ipynb`; host sends `seq=` ramps |
+| `servo` | `main_servo.cpp` | `cs_cal.py`, `tilt_servo.py`; dumb serial shim, host owns the loop |
+| `tilt` | `main_tilt.cpp` | `tilt_sweep.py`; runs `spiffs_data/tilt.json` **on boot** -- `pio run -e tilt -t uploadfs` first |
 
-All seven envs above build. `main_flight.cpp` was briefly missing the
-declarations for its state variables (`state`, `collective`, `azSet`, `magSet`,
-`clampf`, the mode enum, `SPINUP_THROTTLE`, `FREQ_MIN/MAX`); that block is back,
-and `pio run -e flight` links at 6.8% RAM / 27.0% flash.
-
-`platformio.ini` used to declare `tilt`, `takeoff`, `carrier_ramp`, `ceiling`,
-`current_pid`, and `hover_zigzag` as well. Their sources were deleted in
-`5866dd5`, so those env blocks are gone too. The three `calibration/` envs build
-but need their JSON payloads, which were removed in the same commit -- recover
-from git history before rerunning one.
+The calibration rigs (`coupling_test`, `comp_test`, `dc`), `takeoff_upside_down` and
+`serialcomm_demo` were removed 2026-11-02; nothing on the host used them. Recover from git history.
 
 "PI" = the current-balance loop (folded into `PwmController`, opt-in via
 `enableCurrentBalance()`) rebalances the four channels beneath the schedule's

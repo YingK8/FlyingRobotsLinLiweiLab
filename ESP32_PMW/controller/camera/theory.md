@@ -277,7 +277,7 @@ the queue before saving final errors and `encoder_finalized=true`. A shutdown ti
 leaves false and does not race release against write. Failed pair opening releases every
 successfully opened source.
 
-`LLM.capture.audit_flight` decodes the full pair and checks written rows before reporting
+`LLM.record.takes.audit_flight` decodes the full pair and checks written rows before reporting
 saved FPS, frame gaps and host timestamp skew. File integrity and sampling quality are
 separate: warnings do not disappear behind PASS. The 10% rate, three-period gap, and
 10 ms host-skew checks are initial commissioning diagnostics, not validated physical

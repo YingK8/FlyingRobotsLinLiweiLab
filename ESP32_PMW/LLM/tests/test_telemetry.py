@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from LLM.telemetry import parse_log
+from LLM.record.telemetry import parse_log
 
 
 class TelemetryTests(unittest.TestCase):

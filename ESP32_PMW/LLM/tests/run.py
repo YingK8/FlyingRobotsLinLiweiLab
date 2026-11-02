@@ -3,12 +3,10 @@ import unittest
 
 
 def run():
-    from LLM.tests import test_sync, test_capture_pose, test_auto_pose, test_pipeline, test_world_takeoff, test_telemetry, test_reference, test_start
+    from LLM.tests import test_sync, test_capture_pose, test_pipeline, test_world_takeoff, test_telemetry, test_start
     test_sync.run()
     test_capture_pose.run_tests()
-    test_auto_pose.run()
     test_telemetry.run()
-    test_reference.run()
     test_start.run()
     result = unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromModule(test_world_takeoff))
     if not result.wasSuccessful():
@@ -24,6 +22,8 @@ def run():
     if not result.wasSuccessful():
         raise AssertionError("frequency-only bench checks failed")
     test_pipeline.run()
+    from LLM.tests import test_bench
+    test_bench.run()
 
 
 if __name__ == "__main__":

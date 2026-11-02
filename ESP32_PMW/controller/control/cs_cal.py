@@ -202,6 +202,9 @@ def record(args):
     w = csv.DictWriter(f, FIELDS)
     w.writeheader()
     try:
+        # an explicit EN pulse: a bare port open did not always reset a hung board
+        # (2026-10-30: three runs got 0 bytes until esptool's RTS reset revived it)
+        comm.reset_device()
         wait_idle(comm)
         comm.handle_serial_comm("S")
         comm.handle_serial_comm("F0")  # DC: the phase now picks a leg, it does not rotate

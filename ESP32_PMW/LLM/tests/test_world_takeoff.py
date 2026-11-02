@@ -4,8 +4,8 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from LLM.world import build_world_frame, transform_pose_dataframe, validate_world_frame
-from LLM.takeoff import detect_takeoff
+from LLM.analyse.world import build_world_frame, transform_pose_dataframe, validate_world_frame
+from LLM.analyse.takeoff import detect_takeoff
 
 
 class WorldTests(unittest.TestCase):

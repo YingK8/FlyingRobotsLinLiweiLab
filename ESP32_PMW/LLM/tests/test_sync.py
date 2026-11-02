@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from LLM.sync import decode_markers, detect_led, detect_led_trace, fit_clock, map_times
+from LLM.analyse.led import decode_markers, detect_led, detect_led_trace, fit_clock, map_times
 
 
 def _reject(call):

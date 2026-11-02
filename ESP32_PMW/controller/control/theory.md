@@ -4673,7 +4673,7 @@ a plausible clock for one camera.
 **A block-button press cannot fake a STOP.** GPIO14 forces the LED off mid-flight, which is
 one falling edge with no confirmation pulse after it. The two-edge decoder rejects it. The
 same holds for a `stop` that lands inside a START marker: the marker is overwritten, the
-recording carries both events, and `LLM/start.py` refuses the take.
+recording carries both events, and `LLM/analyse/start.py` refuses the take.
 
 ### Why not a Hamming-coded bit stream
 
@@ -4721,7 +4721,7 @@ log; a log `SYNC_STOP` must be matched by a decoded STOP in **both** videos or t
 refused as truncated. It uses the GPIO-call midpoint as the device reference, preserves
 both call intervals and the log hash, and never substitutes host-send time. A `v=1` log --
 a bare rising edge -- is refused rather than degraded to one anchor. See
-`LLM/START_SYNC.md` for capture and bench acceptance. Full per-update device-applied
+`LLM/README.md` for capture and bench acceptance. Full per-update device-applied
 schedules and true current magnitude/phase remain separate work.
 
 ### Tilt: the LED that could not be associated with anything
@@ -4756,13 +4756,13 @@ once. Firmware boot already includes a 1 s delay plus SPIFFS/ADC initialization;
 the longer window is a diagnostic timeout, not a claimed measured boot bound.
 The link counts received bytes so a timeout distinguishes no RX from incomplete
 or non-READY data. Missing READY still closes the link without a ramp command.
-`python -m LLM.serial_check --port ...` invokes only that constructor and closes
+`python -m LLM.record.serial_check --port ...` invokes only that constructor and closes
 it, saving a unique log directory. Use with coil power off, since reset behavior
 of an unknown flashed firmware cannot be inferred from a USB device name.
 
 ### Frequency-only bench check
 
-`LLM.drive_only.run_frequency_pattern` is the explicit no-camera notebook adapter
+`LLM.record.drive_only.run_frequency_pattern` is the explicit no-camera notebook adapter
 (Block 7B). It uses the existing `ramp.seq_lines`, `CommandLink.send_takeoff`,
 `SerialComm` drive-duration accounting; cooldown is operator-managed as of 2026-10-28.
 It does not add a firmware

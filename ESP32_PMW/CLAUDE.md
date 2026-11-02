@@ -78,8 +78,8 @@ child's stdin-EOF backstop covers a supervisor that crashed; nothing covers the 
 bench supply's 10 A limit and the GPIO14 button are the whole story there. `fly()` calls `coil_thermal.wait_until_safe()` for you and **refuses to arm if
 that file is missing**, because `ai/` is gitignored and a fresh clone does not have it.
 
-**LLM notebook exception (operator request, 2026-10-28):** Block 7B (`LLM/drive_only.py`)
-and Block 8 (`LLM/experiment_panel.py`) do not call the modeled-temperature cooldown
+**LLM notebook exception (operator request, 2026-10-28):** `Bench.drive_without_cameras` (`LLM/record/drive_only.py`)
+and `Bench.run` (`LLM/record/panel.py`) do not call the modeled-temperature cooldown
 gate. The operator decides whether to run. Keep ramp validation, READY, timed/Interrupt
 stop and SerialComm drive-duration accounting; do not reintroduce `_thermal_gate` in
 these two entry points. Other controller paths retain their existing thermal gates.
@@ -161,6 +161,21 @@ is a guessed trim with more code.
 mixer while set (`duty=off` clears). It exists for `controller/control/tilt_servo.py`, which
 needs four independent amplitudes; `link._note_drive` counts it. It scales `collective`, so
 `throttle=` and the landing ramp behave the same either way.
+
+## LLM/: recorded experiments
+
+`LLM/record_experiment.ipynb` drives `LLM/bench.py` (`Bench`), one step per cell; `LLM/README.md`
+has the steps. Its docs and notebook text are in Chinese -- keep them that way.
+
+- Raw video, timestamps, calibration, patterns and serial logs are evidence: never overwrite
+  them. Processed outputs can be rebuilt.
+- Keep planned / host-sent / device-applied / measured separate. Duty is not current; a
+  commanded phase is not the measured current phase.
+- Never fabricate a time (no capture times from FPS); never fill an invalid frame from the last.
+- Ramps only via `controller/control/ramp.py`, serial only via `SerialComm`.
+- `Bench.run` / `Bench.drive_without_cameras` skip the thermal gate (see Safety).
+- After a non-trivial change: `.venv/bin/python -m LLM self-check`. Offline checks are not
+  bench validation; say which you ran.
 
 ## Commands
 

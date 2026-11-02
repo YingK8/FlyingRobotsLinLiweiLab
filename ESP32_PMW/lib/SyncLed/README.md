@@ -56,4 +56,4 @@ c++ -std=c++17 -O2 -I lib/SyncLed/src -o /tmp/tsl \
 ```
 
 Why two edges and why not a Hamming code: `controller/control/theory.md`, "Recorded
-flight START". Host side: `LLM/START_SYNC.md`.
+flight START". Host side: `LLM/README.md`.

@@ -10,8 +10,8 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from LLM.capture import audit_flight, import_flight, load_flight
-from LLM.pose import triangulate_annotations
+from LLM.record.takes import audit_flight, import_flight, load_flight
+from LLM.analyse.pose import triangulate_annotations
 
 
 def _expect_error(function, message):

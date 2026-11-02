@@ -9,10 +9,10 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 from controller.calib.rig import StereoRig, Camera
-from LLM.io import write_json, sha256
-from LLM.setup_geometry import fit_target, camera_key, localize_fixture, require_verified
-from LLM.experiment import new_session, audit_take, check_trial, finish_take
-from LLM.pattern import sample_pattern
+from LLM.record.io import write_json, sha256
+from LLM.analyse.rig import fit_target, camera_key, localize_fixture, require_verified
+from LLM.record.experiment import new_session, audit_take, check_trial, finish_take
+from LLM.record.pattern import sample_pattern
 from LLM.tests.test_capture_pose import _capture
 
 
@@ -34,7 +34,7 @@ def pixels(rig, xyz):
 
 class WorkflowTests(unittest.TestCase):
     def test_sync_check_requires_current_trial_and_reference_without_geometry(self):
-        from LLM.experiment import prepare_sync_run, prepare_run, postprocess
+        from LLM.record.experiment import prepare_sync_run, prepare_run, postprocess
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             session=new_session(root/'sessions',dict(CAM,width=320,height=240,rotate180=False))
@@ -56,7 +56,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertFalse((run/'calibration/world_frame.json').exists())
             self.assertEqual(sha256(ref/'A.png'),sha256(run/'raw/static_reference/A.png'))
             with self.assertRaisesRegex(ValueError,'geometry'):
-                postprocess(run,[0,0,2,2],[0,0,2,2],experimental_auto=True)
+                postprocess(run,[0,0,2,2],[0,0,2,2],annotations="x.csv")
             with self.assertRaises(ValueError):
                 prepare_run(root,session,root/'missing_rig.json',{}, {},trial,**kw)
             write_json(ref/'meta.json',{**reference_meta,'session_id':'stale'})
@@ -78,7 +78,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertGreater(bad['rms_px'],3)
 
     def test_new_charuco_bag_checks_without_recalibration(self):
-        from LLM.setup_geometry import verify_bag
+        from LLM.analyse.rig import verify_bag
         from controller.calib.calibrate import CharucoSpec
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); rig,path=synthetic(root)
@@ -178,7 +178,7 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(ValueError):sample_pattern(p)
 
     def test_panel_stop_priority_and_exception_cleanup(self):
-        from LLM.experiment_panel import run_panel
+        from LLM.record.panel import run_panel
         for fails in (False,True):
             events=[];handles={};clock=[0.]
             class Handle:
@@ -230,8 +230,8 @@ class WorkflowTests(unittest.TestCase):
                 pattern=root/'p.json';write_json(pattern,{'schema_version':1,'trigger':'time',
                     'frequency_segments':[[2,50,1,0,1]],'channel_updates':[],
                     'channel_settings_status':'firmware_defaults_unrecorded'})
-                with patch('LLM.experiment_panel._check_loopback'),patch('viser.ViserServer',Server),patch('LLM.experiment_panel.sources.open_stereo',return_value=Source()), \
-                     patch('LLM.experiment_panel.FlightWriter',Writer),patch('LLM.experiment_panel.time.monotonic',side_effect=lambda:clock[0]), \
+                with patch('LLM.record.panel._check_loopback'),patch('viser.ViserServer',Server),patch('LLM.record.panel.sources.open_stereo',return_value=Source()), \
+                     patch('LLM.record.panel.FlightWriter',Writer),patch('LLM.record.panel.time.monotonic',side_effect=lambda:clock[0]), \
                      patch('controller.control.hover_controller_runner.CommandLink',Link), \
                      patch('controller.control.hover_controller_runner._thermal_gate',
                            side_effect=AssertionError('LLM must not wait on thermal model')):

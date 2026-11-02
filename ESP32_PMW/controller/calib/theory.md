@@ -392,7 +392,7 @@ at rest when the estimator is wired into visual servoing ([§11.6](../control/th
 ## 15. Fixture localization: what the AprilTags do, and what a take does not keep
 
 The coil array carries twelve `tag36h11` tags: one on each of three faces of four corner
-blocks. `LLM/setup_geometry.py` is the only code in the tree that reads them, and it reads
+blocks. `LLM/analyse/rig.py` is the only code in the tree that reads them, and it reads
 them **once per session**, not once per recording.
 
 `localize_fixture` detects the tags in a single static reference pair (`A.png`, `B.png`),
@@ -458,7 +458,7 @@ nothing else.
 
 ### What is not established
 
-`LLM/config/fixture_layout.json` still has `survey_confirmed: false` and every
+`LLM/analyse/fixture_layout.json` still has `survey_confirmed: false` and every
 `corners_fixture_mm` null, so this path has never produced a world frame. The ID-to-face
 mapping, the bearing's height above the tray, and the 25 mm black-edge reading are all
 unfilled or unconfirmed. The code refuses rather than guessing, which is why the numbers

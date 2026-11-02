@@ -1,15 +1,14 @@
 """Integration checks use synthetic videos and known geometry, not hardware."""
-import json
 import tempfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from LLM.demo import make_demo
-from LLM.io import read_json, write_json
-from LLM.pattern import example_pattern, sample_pattern, validate_pattern
-from LLM.pipeline import add_clock, process_run, synchronize
+from LLM.tests.demo import make_demo
+from LLM.record.io import read_json, write_json
+from LLM.record.pattern import example_pattern, sample_pattern, validate_pattern
+from LLM.analyse.pipeline import add_clock, process_run, synchronize
 from controller.control import ramp
 
 

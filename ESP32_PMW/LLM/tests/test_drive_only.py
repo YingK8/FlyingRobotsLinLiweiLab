@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from LLM import drive_only
+from LLM.record import drive_only as drive_only
 from controller.control import ramp
 
 

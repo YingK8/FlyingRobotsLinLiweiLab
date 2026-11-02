@@ -1,7 +1,7 @@
 """The bench session as plain-English steps; the order and the "why" are in README.md.
 
-Each method only orders existing functions (controller/calib, LLM/experiment*.py) and keeps
-the state between steps. Only `run` and `drive_without_cameras` energise the coils.
+Each method is one bench step; record_experiment.ipynb calls them in order. Only `run`
+and `drive_without_cameras` energise the coils.
 """
 from pathlib import Path
 from uuid import uuid4
@@ -9,18 +9,11 @@ from uuid import uuid4
 from controller.calib.calibrate import BOARDS
 
 PROJECT = Path(__file__).resolve().parents[1]
-PATTERNS = PROJECT / "LLM/patterns"
 FIXTURE_LAYOUT = PROJECT / "LLM/analyse/fixture_layout.json"   # old paper AprilTags
 HOLDER_LAYOUT = PROJECT / "LLM/analyse/holder_layout.json"     # v3 CAD checker marks (default)
 #: The printed 9x6 letter board at its caliper-measured pitch, 16.52 mm (marker scales to
 #: 12.39 mm). The value setup_002 was calibrated with; re-measure if you reprint.
 BOARD = BOARDS["9x6_letter"].with_square_mm(16.52)
-
-
-def pattern_path(pattern):
-    """A pattern name from LLM/patterns, or a path to a pattern JSON."""
-    path = Path(pattern)
-    return path if path.suffix == ".json" else PATTERNS / f"{pattern}.json"
 
 
 class Bench:
@@ -47,12 +40,6 @@ class Bench:
         return run_panel(self.session, output_root=self.folder / "preview_takes", max_seconds=10)
 
     # ---- calibration ------------------------------------------------------------------
-    def calibrate(self):
-        """Full ChArUco calibration: intrinsics of A and B, then the A->B extrinsics."""
-        self.collect_charuco_frames()
-        self.calibrate_intrinsics()
-        return self.calibrate_extrinsics()
-
     def collect_charuco_frames(self, folder=None):
         """Auto-shutter capture of still board poses seen by both cameras (q to finish)."""
         if (self.camera["width"], self.camera["height"]) != (1280, 800):
@@ -106,7 +93,7 @@ class Bench:
         """Fresh still board poses at the final rig position; only the board pose is fitted."""
         from LLM.analyse.rig import verify_bag
         if self.calibration is None:
-            raise ValueError("calibrate() or use_calibration(path) first")
+            raise ValueError("calibrate_extrinsics() or use_calibration(path) first")
         self.verification = self.world = None
         bag = self.folder / f"verify_{uuid4().hex[:8]}" / "images"
         self._capture(bag)
@@ -185,25 +172,30 @@ class Bench:
         self.trial = audit_take(result["take"], self.session)
         return self.trial
 
-    def show_pattern(self, pattern):
-        """Plot a pattern's planned frequency before flying it."""
-        from LLM.record.io import read_json
-        from LLM.record.pattern import sample_pattern
-        path = pattern_path(pattern)
-        return sample_pattern(read_json(path)).plot(x="t_s", y="frequency_hz", grid=True, title=path.stem)
+    def show_ramp(self, ramp):
+        """Plot a ramp's planned frequency before driving it."""
+        from LLM.record.ramps import load_ramp, planned_frequency, ramp_path
+        import matplotlib.pyplot as plt
+        path = ramp_path(ramp)
+        ax = planned_frequency(load_ramp(path)).plot(x="t_s", y="frequency_hz", grid=True, title=path.stem)
+        plt.close(ax.figure)
+        return ax.figure
 
     def check_serial(self):
         """Reset the ESP and wait for SYNC_READY; sends no drive. True on PASS."""
         from LLM.record.serial_check import check
         return check(self._port(), self.runs / "serial_checks") == 0
 
-    def drive_without_cameras(self, pattern):
-        """Drive a pattern with no video (power/current debugging). ENERGISES THE COILS."""
-        from LLM.record.drive_only import run_frequency_pattern
-        return run_frequency_pattern(pattern_path(pattern), self._port(), output_root=self.runs / "drive_only")
+    def drive_without_cameras(self, ramp):
+        """Drive a ramp with no video (power/current debugging). ENERGISES THE COILS."""
+        from LLM.record.drive_only import drive_ramp
+        from LLM.record.ramps import ramp_path
+        return drive_ramp(ramp_path(ramp), self._port(), output_root=self.runs / "drive_only")
 
-    def run(self, pattern, *, note, warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30):
+    def run(self, ramp, *, note, warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30):
         """Record -> START (LED + drive) -> automatic stop -> import. ENERGISES THE COILS.
+
+        `ramp` is a name in LLM/ramps (or a path). Call analyse() afterwards.
 
         Measured run when the calibration is verified and the fixture located; otherwise
         a sync check (video + CS + LED, no geometry). LED ROIs [x,y,w,h] are optional:
@@ -211,8 +203,9 @@ class Bench:
         """
         from LLM.record.experiment import finish_take, prepare_run, prepare_sync_run
         from LLM.record.panel import run_panel
-        from LLM.record.io import read_json, snapshot
-        from controller.control import ramp
+        from LLM.record.io import snapshot
+        from LLM.record.ramps import load_ramp, ramp_path
+        from controller.control.ramp import duration_s, label
         port = self._port()
         if self.trial is None:
             raise ValueError("record() a trial first")
@@ -226,11 +219,12 @@ class Bench:
             run = prepare_sync_run(self.runs, self.session, self.trial, self.reference_pair,
                                    note=note, warning_review=warnings_reviewed)
         self.last_run, self.leds = run, (led_a, led_b)
-        snapshot(pattern_path(pattern), run / "pattern.json")
-        segments = read_json(run / "pattern.json")["frequency_segments"]
+        snapshot(ramp_path(ramp), run / "ramp.json")
+        segments = load_ramp(run / "ramp.json")
+        print("Ramp:", label(segments))
         result = run_panel(self.session, output_root=run / "raw/captures", run=run,
-                           pattern_path=run / "pattern.json", serial_port=port, roi_a=led_a, roi_b=led_b,
-                           max_seconds=ramp.duration_s(segments) + extra_seconds)
+                           ramp_path=run / "ramp.json", serial_port=port, roi_a=led_a, roi_b=led_b,
+                           max_seconds=duration_s(segments) + extra_seconds)
         if result["take"] is None:
             raise ValueError("Preview only, nothing recorded; call run() again for a new run")
         report = finish_take(result["take"], self.session, run)

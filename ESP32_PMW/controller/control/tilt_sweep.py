@@ -97,7 +97,7 @@ def run(port=None, out_dir=None, width=640, height=400, fps=210.0, rotate180=Tru
 
     # Same gate as `fly()`, for the same reason: ~95 s of drive per sweep and no
     # temperature sensor anywhere on the rig. Missing model = refuse, never assume cold.
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
     # `SCHEDULE_DRIVE_S` is a measured total for the OLD 8-point schedule. Any caller
     # flashing a different schedule must pass its own, or the gate budgets for a run that
     # is not the one about to happen.

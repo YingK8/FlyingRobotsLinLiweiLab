@@ -1,0 +1,7 @@
+{
+  "note": "2026-10-28 request: 2 -> 190 Hz linear in 30 s, hold 10 s (40 s of drive). Not bench-validated.",
+  "segments": [
+    {"from_hz": 2.0, "to_hz": 190.0, "seconds": 30.0, "shape": "linear"},
+    {"from_hz": 190.0, "to_hz": 190.0, "seconds": 10.0, "shape": "linear"}
+  ]
+}

@@ -21,8 +21,8 @@ Optimiser: `differential_evolution`, which is population-based sampling, iterate
 L-BFGS-B gradient polish on the winner. Global optimality is not provable for a problem this
 non-convex, so the run reports best-of-N restarts with a spread diagnostic instead of claiming it.
 
-    uv run python ai/design/optimise_array.py --self-check
-    uv run python ai/design/optimise_array.py
+    uv run python LLM/design/optimise_array.py --self-check
+    uv run python LLM/design/optimise_array.py
 """
 
 from __future__ import annotations
@@ -36,10 +36,10 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
 
-from ai.design import coil_geometry as cg
-from ai.design import drive_model as dm
-from ai.design import spatial_model as sm
-from ai.design import stability_cert as sc
+from LLM.design import coil_geometry as cg
+from LLM.design import drive_model as dm
+from LLM.design import spatial_model as sm
+from LLM.design import stability_cert as sc
 
 OUT_DIR = Path(__file__).resolve().parents[2] / "results" / "array_optimisation"
 

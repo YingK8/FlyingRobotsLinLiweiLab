@@ -225,9 +225,9 @@ def run(port=None, freqs=(100.0,), identify_only=False, hold_hz=100.0, out_dir=N
     from controller.viz import live_viz as lv
 
     try:
-        from ai.thermal import coil_thermal
+        from LLM.thermal import coil_thermal
     except ImportError:
-        raise SystemExit("ai/thermal/coil_thermal.py missing -- refusing to arm (CLAUDE.md Safety)")
+        raise SystemExit("LLM/thermal/coil_thermal.py missing -- refusing to arm (CLAUDE.md Safety)")
 
     # `--identify` used to collapse to ONE frequency, from when the Jacobian was wanted
     # only as a sign certification. It is now also the input to `coil_map.fit_geometry`,

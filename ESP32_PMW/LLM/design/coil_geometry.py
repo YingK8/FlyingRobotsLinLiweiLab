@@ -18,7 +18,7 @@ Three facts drive the shape of it, all derived in section 15.1:
     DC is separate The steady ring couples only to the rotor's axial moment, the rotating rings
                    only to its in-plane one. Different coils, different jobs, no interference.
 
-    uv run python ai/design/coil_geometry.py --self-check
+    uv run python LLM/design/coil_geometry.py --self-check
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import math
 
 import numpy as np
 
-from ai.design import spatial_model as sm
+from LLM.design import spatial_model as sm
 
 COIL_R = 0.0105       # loop radius, m, as the rig is built
 COIL_LEN = 0.022      # coil body axial extent, m: the 22 mm in the MATLAB filename

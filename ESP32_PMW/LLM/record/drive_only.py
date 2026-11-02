@@ -9,13 +9,15 @@ from uuid import uuid4
 import threading
 import time
 
-from LLM.record.io import read_json, write_json
-from LLM.record.pattern import validate_pattern
+import shutil
+
+from LLM.record.io import write_json
+from LLM.record.ramps import load_ramp
 from controller.control import ramp
 from controller.control.hover_controller_runner import CommandLink
 
 
-def run_frequency_pattern(pattern_path, serial_port, *, output_root):
+def drive_ramp(ramp_path, serial_port, *, output_root):
     """Reset flight, require READY, execute once, then stop. No camera/ROI needed.
 
     Calling this function starts real drive after READY; cooldown is operator-managed.
@@ -26,24 +28,18 @@ def run_frequency_pattern(pattern_path, serial_port, *, output_root):
         raise RuntimeError('Run on main thread so notebook Interrupt can stop the test')
     if not serial_port:
         raise ValueError('Select the actual ESP serial port')
-    planned = validate_pattern(read_json(pattern_path))
-    if (planned.get('channel_settings_status') != 'firmware_defaults_unrecorded'
-            or planned.get('channel_updates')):
-        raise ValueError('Only frequency patterns using firmware channel defaults are supported')
-    segments = tuple(map(tuple, planned['frequency_segments']))
+    segments = load_ramp(ramp_path)
     duration = ramp.duration_s(segments)
-    print(f'Selected pattern: {planned.get("name", Path(pattern_path).stem)}; '
-          f'actual drive duration: {duration:g} s', flush=True)
     # Operator explicitly removed modeled-temperature waiting for LLM on 2026-10-28.
-    # Pattern validation, READY, timed stop and SerialComm drive accounting remain.
+    # Ramp validation, READY, timed stop and SerialComm drive accounting remain.
     folder = Path(output_root).resolve() / (datetime.now().strftime('%Y%m%d_%H%M%S_') + uuid4().hex[:6])
     folder.mkdir(parents=True, exist_ok=False)
-    write_json(folder/'pattern.json', planned)
+    shutil.copy2(ramp_path, folder/'ramp.json')
     summary = dict(mode='drive_only', video_recorded=False, optical_sync_validated=False,
                    serial_port=serial_port, duration_s=duration, status='opening',
                    start_acknowledged=False, stop_sent=False, stop_acknowledged=False)
     write_json(folder/'result.json', summary)
-    print(f'Frequency-only test: {planned.get("name", Path(pattern_path).stem)}, {duration:g} s', flush=True)
+    print(f'Ramp {Path(ramp_path).stem}: {ramp.label(segments)}, {duration:g} s of drive', flush=True)
     print(f'Logs: {folder}\nNo cameras. START follows READY; Interrupt requests STOP.', flush=True)
     owner = None
     started = False
@@ -69,7 +65,7 @@ def run_frequency_pattern(pattern_path, serial_port, *, output_root):
                             takeoff_cmd=ramp.seq_lines(segments),
                             raw_log_path=folder/'telemetry.jsonl', require_ready=True)
         owner.on_line = receive
-        print('READY received. Sending selected pattern now.', flush=True)
+        print('READY received. Sending the ramp now.', flush=True)
         started = True
         t0 = time.monotonic()
         owner.send_takeoff()

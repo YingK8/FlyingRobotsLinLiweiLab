@@ -142,8 +142,8 @@ HIGH_REPEATS = 5
 #: appears exactly where the heat is, which is the high frequencies and between chunks.
 PROMPT_ABOVE_S = 60.0
 #: The out-of-process way to answer that prompt: write a temperature, or "go", into this file.
-#: Beside the thermal stamp it re-anchors, and gitignored with the rest of `ai/`.
-OPERATOR_FILE = ROOT / "ai" / "thermal" / "operator_reading"
+#: Beside the thermal stamp it re-anchors; both are gitignored per-machine state.
+OPERATOR_FILE = ROOT / "LLM" / "thermal" / "operator_reading"
 #: How often a waiting prompt looks for an answer. Also bounds how late an early release is.
 OPERATOR_POLL_S = 5.0
 
@@ -163,7 +163,7 @@ def heat_c(log_path, fallback_s=0.0):
     ``fallback_s`` -- erring toward the conservative number rather than toward zero.
     """
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     rows = []
     for raw in Path(log_path).read_text(errors="replace").splitlines():
@@ -221,7 +221,7 @@ def cool_for(temp_c, next_point_c):
 
     import math
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     need = COOL_TO_C - HEAT_SCALE * next_point_c
     if temp_c <= need:
@@ -306,7 +306,7 @@ def wait_or_prompt(seconds, why=""):
         time.sleep(seconds)
         return
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     tty = sys.stdin.isatty()
     deadline, last_note = time.monotonic() + seconds, 0.0
@@ -366,7 +366,7 @@ def _operator_line(timeout):
 def _stamp(temp_c):
     """Write a MEASURED temperature into the thermal stamp -- the model's only real anchor."""
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     coil_thermal.STAMP.parent.mkdir(parents=True, exist_ok=True)
     coil_thermal.STAMP.write_text(f"{temp_c:.1f}  {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -439,7 +439,7 @@ def plan(freq, repeats):
 def _predicted_c(freq, drive_s):
     """Rough heat for one point, from the current-vs-frequency table. A prior, not a fit."""
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     # Measured commutated sum |I| against drive frequency (13 sweep.logs, 2406 samples).
     tbl = [(20, 2.37), (40, 4.61), (60, 6.68), (80, 10.41), (100, 13.82), (170, 13.94)]
@@ -484,7 +484,7 @@ def run_chunk(freq, repeats=5, port=None, out_dir=None, dry_run=False, cool=True
     not safety, it is just delay.
     """
 
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
 
     p = plan(freq, repeats)
     print(f"\n=== {freq:g} Hz x {repeats} ===")
@@ -677,7 +677,7 @@ def sweep(freqs=None, repeats=5, port=None, out_dir=None, cool=True, force_hot=F
                     # `run_chunk` cools only BETWEEN its repeats, so a chunk's first take --
                     # and a resumed campaign's first take -- would start on whatever heat
                     # the last one left. Cool for it here, before the flash energises.
-                    from ai.thermal import coil_thermal
+                    from LLM.thermal import coil_thermal
                     wait = cool_for(coil_thermal.temp_now(), plan(f, 1)["heat_per_repeat_c"])
                     if _out_of_time(wait + plan(f, 1)["drive_s"] + 60.0):
                         print(f"\n  --stop-after-h: {wait:.0f} s of cooling plus the first "
@@ -760,7 +760,7 @@ def _self_check():
                          f"C={a:.2f} D={a:.2f} | duty[%]: A=100.0 B=100.0 C=100.0 "
                          f"D=100.0 | spread=0.0 bal=0 trip=0")
         log.write_text("\n".join(lines))
-        from ai.thermal import coil_thermal
+        from LLM.thermal import coil_thermal
         c, n = heat_c(log, 0.0)
         assert n == 21, n
         assert abs(c - coil_thermal.HEAT_C_PER_S * 10.0) < 0.05, c
@@ -831,7 +831,7 @@ def _self_check():
     # the gate: a reading below the threshold opens it and is reused while fresh; the check
     # runs on temp paths so it cannot touch the real stamp or a real operator reading
     global OPERATOR_FILE
-    from ai.thermal import coil_thermal as _ct
+    from LLM.thermal import coil_thermal as _ct
     real_op, real_stamp = OPERATOR_FILE, _ct.STAMP
     with tempfile.TemporaryDirectory() as d:
         OPERATOR_FILE, _ct.STAMP = Path(d) / "op", Path(d) / "stamp"

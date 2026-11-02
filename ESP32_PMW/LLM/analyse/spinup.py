@@ -9,9 +9,9 @@ The witness is a motion latch, not a tachometer: above about fps/8 the per-frame
 phase aliases and the true rate is unrecoverable, so this reports turning / rocking /
 still and the frame it changed on, never a speed. See `pose/theory.md` on blade phase.
 
-    uv run python ai/spinup/detector.py                        # the newest flight
-    uv run python ai/spinup/detector.py results/flights/<dir>
-    uv run python ai/spinup/detector.py --all                  # every flight, one line each
+    uv run python LLM/analyse/spinup.py                        # the newest flight
+    uv run python LLM/analyse/spinup.py results/flights/<dir>
+    uv run python LLM/analyse/spinup.py --all                  # every flight, one line each
 """
 
 from __future__ import annotations

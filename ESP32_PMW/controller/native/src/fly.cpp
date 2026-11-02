@@ -182,7 +182,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "REFUSING to arm: no --armed-token.\n"
             "The coils are driven only through controller/control/fly_native.py, which\n"
-            "holds the thermal model (ai/thermal/coil_thermal.py) and is the one writer\n"
+            "holds the thermal model (LLM/thermal/coil_thermal.py) and is the one writer\n"
             "of the energised-seconds stamp. Coils reach 80 C after four ramps and there\n"
             "is no temperature sensor. Run fly_native.py; do not run this by hand.\n");
         return 3;

@@ -72,18 +72,13 @@ def check_bench_flow():
         assert bench.verify_calibration() == {"passed": True}
         bench.photograph_reference()
         bench.record()
-        report = bench.run(_any_pattern(), note="n")
+        report = bench.run("alignment_50Hz", note="n")
         assert report == {"imported": str(Path(tmp) / "run")}
-        assert (Path(tmp) / "run/pattern.json").exists()
+        assert (Path(tmp) / "run/ramp.json").exists()
         out = bench.analyse()
         assert out["rois"] == (None, None), "no LED ROI given -> found during analyse"
     assert [c[0] for c in calls] == ["capture", "panel", "panel", "sync_run", "panel"], calls
     assert calls[-1][2] is True and calls[-1][3] is None, "the run panel opens serial, ROI optional"
-
-
-def _any_pattern():
-    from LLM.bench import PATTERNS
-    return sorted(PATTERNS.glob("*.json"))[0]
 
 
 def run():

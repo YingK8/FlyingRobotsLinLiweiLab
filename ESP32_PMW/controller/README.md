@@ -15,7 +15,7 @@ camera  ──frames──▶  calib  ──K, rig, datum──▶  pose  ──
 | 4 | [`control/`](control/) | field frequency and lateral commands over serial | [Control](control/theory.md) |
 
 Plus [`viz/`](viz/) (`live_viz.py`), which is not a pipeline stage: it is the live
-viser view of the estimated pose. It lives here rather than in `../ai/` because
+viser view of the estimated pose. It lives here rather than in `../LLM/` because
 `control/hover_controller_runner.py` imports it to show what the loop is doing.
 
 The layering is enforced, not merely intended: each module's `sys.path` bootstrap
@@ -24,9 +24,9 @@ quietly creating a cycle. Stages 1-3 hold to this strictly. The two exceptions a
 `viz/`, which reaches back to `camera`, `calib` and `pose` to draw them, and
 `control/hover_controller_runner.py`, which adds `../viz` to show the loop live.
 
-Everything that is not pipeline or view code, tests, sweeps, one-shot
-validation, instrumentation, sysID, plotting, lives in [`../ai/`](../ai/), which
-may depend on all four stages.
+Everything that is not pipeline or view code -- recorded experiments, the thermal model,
+offline design models -- lives in [`../LLM/`](../LLM/README.md), which may depend on all
+four stages.
 
 ## Running it
 
@@ -75,10 +75,5 @@ Two things worth knowing before the first run:
 
 ## Tests
 
-```bash
-uv run python ai/tests/run_tests.py
-```
-
-`stereo::test_speed` is expected to fail and is left visible on purpose: the full
-two-view solve takes ~3.4 ms of a 4.17 ms budget at 240 Hz, and segmentation needs
-the rest. `segment.py` documents it.
+Each module self-checks under `__main__` (CLAUDE.md, Commands). The old `ai/tests` suite was
+deleted 2026-08-31.

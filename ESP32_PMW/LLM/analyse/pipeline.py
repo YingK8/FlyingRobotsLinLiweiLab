@@ -8,7 +8,7 @@ import pandas as pd
 
 from LLM.record.takes import load_flight
 from LLM.record.io import inventory, invalidate_report, read_json, sha256, write_json
-from LLM.record.pattern import sample_pattern
+from LLM.record.ramps import load_ramp, planned_frequency, run_ramp_path
 from LLM.analyse.led import decode_markers, detect_led, fit_clock, map_times
 from LLM.analyse.takeoff import detect_takeoff
 from LLM.record.telemetry import parse_log
@@ -110,7 +110,7 @@ def _plots(run, pose, plan, current, takeoff, window, source):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(6, 1, figsize=(12, 14), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True, constrained_layout=True)
     fig.suptitle(f"{run.name} | {source.upper()} | LED-aligned evidence, timing not hardware-validated")
     for c in "xyz":
         axes[0].plot(pose.t_s, pose[f"{c}_mm"], label=c)
@@ -122,24 +122,16 @@ def _plots(run, pose, plan, current, takeoff, window, source):
         axes[1].text(.02, .5, "Orientation unavailable: directed axis not observed", transform=axes[1].transAxes)
     if plan is not None:
         axes[2].plot(plan.t_s, plan.frequency_hz, label="planned frequency")
-        for ch in "ABCD":
-            axes[3].step(plan.t_s, plan[f"duty_{ch}_pct"], where="post", label=ch)
-            axes[4].step(plan.t_s, plan[f"phase_{ch}_deg"], where="post", label=ch)
     else:
-        axes[2].text(.02, .5, "No planned pattern supplied", transform=axes[2].transAxes)
+        axes[2].text(.02, .5, "No ramp supplied", transform=axes[2].transAxes)
     axes[2].set_ylabel("Frequency (Hz)")
-    axes[3].set_ylabel("Planned duty (%)")
-    axes[4].set_ylabel("Planned phase (deg)")
-    if plan is not None and plan[[f"duty_{ch}_pct" for ch in "ABCD"]].isna().all().all():
-        for ax in axes[3:5]:
-            ax.text(.02, .5, "Channel settings unrecorded; firmware defaults, not measured current", transform=ax.transAxes)
     if current is not None and "t_s" in current:
         for ch in "ABCD":
-            axes[5].plot(current.t_s, current[f"current_{ch}_A"], ".-", label=ch)
+            axes[3].plot(current.t_s, current[f"current_{ch}_A"], ".-", label=ch)
     else:
-        axes[5].text(.02, .5, "Current missing or unsynchronized; no aligned curve shown", transform=axes[5].transAxes)
-    axes[5].set_ylabel("Filtered CS (A)")
-    axes[5].set_xlabel("Experiment time (s), LED START = 0")
+        axes[3].text(.02, .5, "Current missing or unsynchronized; no aligned curve shown", transform=axes[3].transAxes)
+    axes[3].set_ylabel("Filtered CS (A)")
+    axes[3].set_xlabel("Experiment time (s), LED START = 0")
     for ax in axes:
         ax.grid(alpha=.2)
         ax.axvline(0, color="gray", linestyle=":")
@@ -262,7 +254,7 @@ def process_run(run, clips=True):
               "crop_reason": "detected takeoff with context" if takeoff["status"] == "detected" else "full overlap; no confirmed takeoff",
               "start_event": "LED START; actual current rise may occur later"}
     write_json(run / "processed/events.json", events)
-    plan = sample_pattern(read_json(run / "pattern.json")) if (run / "pattern.json").exists() else None
+    plan = planned_frequency(load_ramp(run_ramp_path(run))) if run_ramp_path(run).exists() else None
     if plan is not None:
         plan.to_csv(run / "processed/command_planned.csv", index=False)
     current, current_status = None, "missing"
@@ -315,7 +307,7 @@ def process_run(run, clips=True):
                "metric_scale_measured": pose_meta.get("metric_scale_measured"),
                "warnings": ["LED observation timestamps are not exposure timestamps.",
                             "Current sense is a low-rate filtered estimate, not signed waveform/RMS/current phase.",
-                            "Planned pattern is not evidence of exact firmware execution.",
+                            "The planned ramp is not evidence of exact firmware execution.",
                             "Center-height takeoff is a proxy; verify against actual bearing clearance."]}
     if "experimental_ellipse_center_proxy" in quality["pose_methods"]:
         quality["warnings"].append("Automatic ellipse centers are unvalidated silhouette proxies; geometric acceptance is not physical tracking accuracy.")

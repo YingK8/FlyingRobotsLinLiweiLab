@@ -13,7 +13,7 @@ parameter not derivable from the model: seed guess, re-identify on the rig.
 
 The reduced 4-state design model (x, xd, z, zd) treats rotation as a phase-locked inner
 actuator, f_robot ~ f_field. Its 16.8 Hz mode is above a 30 Hz camera's Nyquist, so the outer
-loop must not try to shape it. See ai/design/spatial_model.py for the 3-D plant that
+loop must not try to shape it. See LLM/design/spatial_model.py for the 3-D plant that
 supersedes this one.
 
 Self-check: uv run python controller/control/hover_model.py
@@ -31,7 +31,7 @@ from controller.control import constants as C
 
 GRAVITY = 9.80665  # m/s^2 (MATLAB line 613)
 
-# Polar moment about the spin axis, kg m^2. From the CAD tensor; ai/design/spatial_model.py's
+# Polar moment about the spin axis, kg m^2. From the CAD tensor; LLM/design/spatial_model.py's
 # robot_params()
 # recomputes it. theory.md section 3. Supersedes the older constant the *_gui.m files carry.
 I_ROBOT = 3.3578361348541667e-9

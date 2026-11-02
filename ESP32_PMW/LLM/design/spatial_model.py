@@ -26,7 +26,7 @@ weight at z = 20 mm, trapping vertically and expelling laterally, as Earnshaw re
 Ported from matlab/MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m; theory.md Appendix A
 lists the departures. Physical constants come from CAD, theory.md section 3.
 
-Self-check: uv run python ai/design/spatial_model.py
+Self-check: uv run python LLM/design/spatial_model.py
 """
 
 from __future__ import annotations

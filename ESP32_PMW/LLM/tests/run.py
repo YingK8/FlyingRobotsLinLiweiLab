@@ -26,6 +26,8 @@ def run():
         result = unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromModule(module))
         if not result.wasSuccessful():
             raise AssertionError(f"{module.__name__} checks failed")
+    import runpy
+    runpy.run_module("LLM.record.ramps", run_name="__main__")   # every LLM/ramps file loads
     test_pipeline.run()
     from LLM.tests import test_bench
     test_bench.run()

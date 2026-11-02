@@ -7,7 +7,8 @@ import pandas as pd
 
 from LLM.tests.demo import make_demo
 from LLM.record.io import read_json, write_json
-from LLM.record.pattern import example_pattern, sample_pattern, validate_pattern
+from LLM.record.ramps import load_ramp, planned_frequency
+from LLM.tests.demo import DEMO_RAMP
 from LLM.analyse.pipeline import add_clock, process_run, synchronize
 from controller.control import ramp
 
@@ -21,17 +22,19 @@ def _reject(call):
 
 
 def run():
-    plan = example_pattern()
-    values = sample_pattern(plan)
+    with tempfile.TemporaryDirectory() as tmp:
+        write_json(Path(tmp) / "r.json", DEMO_RAMP)
+        segs = load_ramp(Path(tmp) / "r.json")
+        for bad in ([{"from_hz": 2, "to_hz": 100, "seconds": .0001, "shape": "linear"}],
+                    [{"from_hz": 0, "to_hz": 100, "seconds": 1, "shape": "linear"}]):
+            write_json(Path(tmp) / "bad.json", {"segments": bad})
+            _reject(lambda: load_ramp(Path(tmp) / "bad.json"))
+    values = planned_frequency(segs)
     assert values.frequency_hz.iloc[0] == 2 and values.frequency_hz.iloc[-1] == 170
-    assert ramp.seq_lines(plan["frequency_segments"])[-1] == "seq=go"
+    assert ramp.seq_lines(segs)[-1] == "seq=go"
     assert ramp.frequency_at([[0, 100, 1, ramp.EASE, 2]], .25) == 10
     assert abs(ramp.frequency_at([[0, 100, 1, ramp.EXP, 2]], .5) - 100/(np.e+1)) < 1e-10
     assert ramp.frequency_at([[0, 100, 1, ramp.POLY, 2]], .5) == 25
-    for key, value in (("trigger", "takeoff"), ("frequency_segments", [[2, 100, float("nan"), 0, 1]]),
-                       ("frequency_segments", [[2, 100, .0001, 0, 1]])):
-        invalid = dict(plan); invalid[key] = value
-        _reject(lambda: validate_pattern(invalid))
     with tempfile.TemporaryDirectory(prefix="llm-pipeline-test-") as tmp:
         run_dir = Path(tmp) / "run"
         quality = make_demo(run_dir)
@@ -60,7 +63,7 @@ def run():
         (run_dir / "raw/applied_commands.csv").unlink()
         # Missing optional evidence on a rerun must never resurrect old curves.
         (run_dir / "raw/telemetry.jsonl").unlink()
-        (run_dir / "pattern.json").unlink()
+        (run_dir / "ramp.json").unlink()
         quality = process_run(run_dir, clips=False)
         assert quality["current_status"] == "missing"
         assert not (run_dir / "export/current.csv").exists()
@@ -75,7 +78,7 @@ def run():
         cfg = read_json(run_dir / "config.json"); cfg["led"]["threshold"] = 150
         write_json(run_dir / "config.json", cfg)
         _reject(lambda: process_run(run_dir, clips=False))
-    print("pipeline: geometry, pattern, clock provenance, takeoff, clips and rerun checks passed")
+    print("pipeline: geometry, ramp, clock provenance, takeoff, clips and rerun checks passed")
 
 
 if __name__ == "__main__":

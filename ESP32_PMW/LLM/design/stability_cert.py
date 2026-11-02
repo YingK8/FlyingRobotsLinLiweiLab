@@ -21,7 +21,7 @@ and cannot be Hurwitz however good the geometry is. Asymptotic stability therefo
 non-zero alignment damping, and `min_align_tau` reports how much. That number is a rig
 identification, never a result.
 
-    uv run python ai/design/stability_cert.py --self-check
+    uv run python LLM/design/stability_cert.py --self-check
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import numpy as np
 from scipy.linalg import solve_continuous_lyapunov
 from scipy.optimize import brentq
 
-from ai.design import spatial_model as sm
+from LLM.design import spatial_model as sm
 
 _ZH = np.array([0.0, 0.0, 1.0])
 
@@ -176,13 +176,13 @@ def min_align_tau(plant, f, z_eq, taus=None):
 
 
 def _self_check():
-    from ai.design import coil_geometry as cg
+    from LLM.design import coil_geometry as cg
 
     p = sm.robot_params()
 
     # 1. The generalised trim agrees with open_loop_sweep's specialised one when there is no
     # DC channel, which is what licenses replacing it.
-    from ai.design import open_loop_sweep as ols
+    from LLM.design import open_loop_sweep as ols
     coils = sm.quick_coils("cross", d=0.046, tilt_deg=15.0, amp=1.25, model="dipole")
     plant = sm.Plant(coils, p, f_hover=110.0, use_grad=True)
     mine = stable_trim(plant, 92.0)

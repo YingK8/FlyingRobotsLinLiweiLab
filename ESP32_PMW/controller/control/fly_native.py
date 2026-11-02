@@ -7,7 +7,7 @@
 WHY A SUPERVISOR AT ALL
 -----------------------
 `CLAUDE.md` makes one rule about the coils: **every drive path goes through the one
-chokepoint that stamps energised seconds into `ai/thermal/coil_thermal.py`.** Coils reach
+chokepoint that stamps energised seconds into `LLM/thermal/coil_thermal.py`.** Coils reach
 80 C after four ramps, there is no temperature sensor, and the model is the only thing
 standing between a session and a de-magnetised rotor. A native binary that opened its own
 serial port would bypass it.
@@ -63,15 +63,15 @@ SETTLE_S = 12.0
 
 
 def _thermal():
-    """The model, or a refusal. `ai/` is gitignored, so a fresh clone does not have it."""
+    """The model, or a refusal."""
 
     try:
-        from ai.thermal import coil_thermal
+        from LLM.thermal import coil_thermal
     except ImportError:
         sys.exit(
-            "REFUSING to arm: ai/thermal/coil_thermal.py is missing.\n"
+            "REFUSING to arm: LLM/thermal/coil_thermal.py is missing.\n"
             "It is the only estimate of coil temperature this rig has -- there is no\n"
-            "sensor -- and `ai/` is gitignored, so a fresh clone does not have it.\n"
+            "sensor.\n"
             "Restore it before driving the coils.")
     return coil_thermal
 
@@ -192,13 +192,13 @@ def demo():
     else:
         print("fly_native: pmw_fly not built -- skipped the arming checks")
 
-    # 3. A missing thermal model must REFUSE, not proceed. `ai/` is gitignored and a fresh
-    #    clone genuinely does not have it, so this path is reachable in practice.
+    # 3. A missing thermal model must REFUSE, not proceed: it is the only temperature
+    #    estimate this rig has.
     import builtins
     real_import = builtins.__import__
 
     def no_thermal(name, *a, **k):
-        if name.startswith("ai.thermal"):
+        if name.startswith("LLM.thermal"):
             raise ImportError("simulated missing model")
         return real_import(name, *a, **k)
 

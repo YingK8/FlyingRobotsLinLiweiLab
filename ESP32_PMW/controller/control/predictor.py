@@ -145,7 +145,7 @@ class PlantPredictor(StatePredictor):
 
         super().__init__(**kw)
         if plant is None:
-            from ai.design.spatial_model import Plant, quick_coils, robot_params
+            from LLM.design.spatial_model import Plant, quick_coils, robot_params
 
             plant = Plant(quick_coils(), robot_params())
         self.plant = plant

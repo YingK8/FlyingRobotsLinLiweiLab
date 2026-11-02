@@ -12,7 +12,6 @@ from controller.calib.rig import StereoRig, Camera
 from LLM.record.io import write_json, sha256
 from LLM.analyse.rig import fit_target, camera_key, localize_fixture, require_verified
 from LLM.record.experiment import new_session, audit_take, check_trial, finish_take
-from LLM.record.pattern import sample_pattern
 from LLM.tests.test_capture_pose import _capture
 
 
@@ -168,15 +167,6 @@ class WorkflowTests(unittest.TestCase):
             evidence.write_bytes(b'changed')
             with self.assertRaises(ValueError): require_verified(report,path,CAM,'s')
 
-    def test_frequency_only_never_invents_channel_values(self):
-        p={'schema_version':1,'trigger':'time','frequency_segments':[[2,50,1,0,1]],
-           'channel_updates':[],'channel_settings_status':'firmware_defaults_unrecorded'}
-        df=sample_pattern(p)
-        self.assertTrue(df.duty_A_pct.isna().all())
-        self.assertEqual(df.frequency_hz.iloc[-1],50)
-        del p['channel_settings_status']
-        with self.assertRaises(ValueError):sample_pattern(p)
-
     def test_panel_stop_priority_and_exception_cleanup(self):
         from LLM.record.panel import run_panel
         for fails in (False,True):
@@ -201,11 +191,11 @@ class WorkflowTests(unittest.TestCase):
                 def read(self):
                     self.n+=1;clock[0]+=.1;self.last_stamps=(clock[0],clock[0])
                     if self.n==1:handles['Record'].callback(None)
-                    if self.n==5:handles['START pattern + LED'].callback(None)
+                    if self.n==5:handles['START ramp + LED'].callback(None)
                     if self.n==6:
                         if fails:raise OSError('fake camera failure')
                         # STOP and START together must not permit another START.
-                        handles['Stop / finish'].callback(None);handles['START pattern + LED'].callback(None)
+                        handles['Stop / finish'].callback(None);handles['START ramp + LED'].callback(None)
                     return clock[0],[np.zeros((64,80),np.uint8)]*2
                 def close(self):events.append('camera_closed')
             class Writer:
@@ -227,15 +217,13 @@ class WorkflowTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp);s=new_session(root/'sessions',dict(CAM,width=80,height=64))
                 run=root/'run';(run/'raw').mkdir(parents=True);write_json(run/'manifest.json',{'camera_session':s})
-                pattern=root/'p.json';write_json(pattern,{'schema_version':1,'trigger':'time',
-                    'frequency_segments':[[2,50,1,0,1]],'channel_updates':[],
-                    'channel_settings_status':'firmware_defaults_unrecorded'})
+                pattern=root/'p.json';write_json(pattern,{'segments':[{'from_hz':2,'to_hz':50,'seconds':1,'shape':'linear'}]})
                 with patch('LLM.record.panel._check_loopback'),patch('viser.ViserServer',Server),patch('LLM.record.panel.sources.open_stereo',return_value=Source()), \
                      patch('LLM.record.panel.FlightWriter',Writer),patch('LLM.record.panel.time.monotonic',side_effect=lambda:clock[0]), \
                      patch('controller.control.hover_controller_runner.CommandLink',Link), \
                      patch('controller.control.hover_controller_runner._thermal_gate',
                            side_effect=AssertionError('LLM must not wait on thermal model')):
-                    args=dict(output_root=root/'takes',max_seconds=10,run=run,pattern_path=pattern,
+                    args=dict(output_root=root/'takes',max_seconds=10,run=run,ramp_path=pattern,
                               serial_port='FAKE',roi_a=[0,0,5,5],roi_b=[0,0,5,5])
                     if fails:
                         with self.assertRaisesRegex(OSError,'fake'):run_panel(s,**args)

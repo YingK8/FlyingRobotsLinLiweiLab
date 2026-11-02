@@ -27,13 +27,13 @@ field while you move it.
 | 6 | `link.py` | `SerialComm`: the host half of the firmware link |
 | 6b | `takeoff_report.py` | per-attempt takeoff metrics: liftoff knee, capture verdict, L/C refit. Section 18 |
 | 6c | `robust_cert.py` | exact gain/phase margins of the shipped gains, over mass and COM. Section 20 |
-| 7 | `ai/design/spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
-| 8 | `ai/design/spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
-| 9 | `ai/design/simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
-| 10 | `ai/design/open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
-| 12 | `ai/design/coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
-| 13 | `ai/design/stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
-| 14 | `ai/matlab/` | the original interactive sims these models were ported from |
+| 7 | `LLM/design/spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
+| 8 | `LLM/design/spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
+| 9 | `LLM/design/simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
+| 10 | `LLM/design/open_loop_sweep.py` | is any fixed-current array passively stable? Section 14 |
+| 12 | `LLM/design/coil_geometry.py`, `drive_model.py` | array geometry and the drive. Section 15 |
+| 13 | `LLM/design/stability_cert.py`, `optimise_array.py` | certify one design, then search. Section 15 |
+| 14 | `LLM/design/matlab/` | the original interactive sims these models were ported from |
 
 Sections 1–11 are the scalar altitude plant, one input and one axis. Sections 12–15 are the
 three-dimensional one, and are self-contained apart from the inertia in section 3 and the
@@ -790,7 +790,7 @@ holds and the §7–§8 model is the complete story.
 §7's model is one-dimensional by construction: A3 makes the field uniform, so it applies pure
 torque, and lateral motion has nowhere to come from. Drop A3 and the picture changes
 completely. `matlab/MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` simulates the
-plant that results, and `ai/design/spatial_model.py` is its port. The differences are
+plant that results, and `LLM/design/spatial_model.py` is its port. The differences are
 structural, not incremental:
 
 | | §7–§8 | this section |
@@ -1116,7 +1116,7 @@ MATLAB does not run in this environment, so `spatial_model.py` cannot be checked
 trajectories against the original. It is pinned by invariants instead, all of which run on:
 
 ```bash
-uv run python ai/design/spatial_model.py
+uv run python LLM/design/spatial_model.py
 ```
 
 They cover geometry, the field and its analytic gradient, the torque and force structure, and
@@ -1326,7 +1326,7 @@ of its role.
 
 ### 13.6 Running it
 
-`ai/design/simulate_spatial.py` drives the loop in two modes over the same plant and controller.
+`LLM/design/simulate_spatial.py` drives the loop in two modes over the same plant and controller.
 
 **Headless** (the default) runs a scripted target sequence, hold, 6 mm across, 4 mm up, then
 a diagonal, writes `spatial_mpc_sim.png`, and asserts the settling, constraint and
@@ -1366,7 +1366,7 @@ radius $d$, outward coil tilt $\theta$ and drive frequency $f$, and found geomet
 quasi-static lateral stiffness goes negative. This section derives what that quantity is a
 limit of, why it is not sufficient, and what the sufficient condition actually is.
 
-`ai/design/open_loop_sweep.py` is the executable form. It reuses §12's model unchanged.
+`LLM/design/open_loop_sweep.py` is the executable form. It reuses §12's model unchanged.
 
 ### 14.1 Where the lateral restoring force comes from
 
@@ -1615,9 +1615,9 @@ everywhere, not just at the three points it was checked on.
 | the pinned numbers in §14.3 | `open_loop_sweep._self_check` |
 
 ```bash
-uv run python ai/design/open_loop_sweep.py --self-check
-uv run python ai/design/open_loop_sweep.py            # about 25 minutes
-uv run python ai/design/open_loop_sweep.py --reuse    # cached stage A, seconds
+uv run python LLM/design/open_loop_sweep.py --self-check
+uv run python LLM/design/open_loop_sweep.py            # about 25 minutes
+uv run python LLM/design/open_loop_sweep.py --reuse    # cached stage A, seconds
 ```
 
 ---
@@ -1847,11 +1847,11 @@ existing four; the steady ring draws constant current and needs a bench supply, 
 | the search, and the Pareto front | `optimise_array.py` |
 
 ```bash
-uv run python ai/design/coil_geometry.py --self-check
-uv run python ai/design/drive_model.py --self-check
-uv run python ai/design/stability_cert.py --self-check
-uv run python ai/design/optimise_array.py --self-check
-uv run python ai/design/optimise_array.py
+uv run python LLM/design/coil_geometry.py --self-check
+uv run python LLM/design/drive_model.py --self-check
+uv run python LLM/design/stability_cert.py --self-check
+uv run python LLM/design/optimise_array.py --self-check
+uv run python LLM/design/optimise_array.py
 ```
 
 ## 16. What the measurement noise does to the loop
@@ -4034,7 +4034,7 @@ with their original section numbers.
 Two model families were ported *into* Python. The four 1-D files (three `*_gui.m`
 plus `frequency_tracking_statespace_sim.m`) map onto §1–§11, and
 `MultiCoilBeamformingGUI_quickGeom_rigidTilt_coil22mm.m` maps onto §12–§13 as
-`ai/design/spatial_model.py`. Function and variable names are kept across the port, so the two
+`LLM/design/spatial_model.py`. Function and variable names are kept across the port, so the two
 read side by side and `grep` finds the counterpart.
 
 Three departures from the multi-coil original, each argued at its own section: the field
@@ -4516,7 +4516,7 @@ in a jitter metric.
 ### 27.5 The chokepoint problem a native binary creates
 
 `CLAUDE.md` has one rule about the coils: every drive path goes through the thing that
-stamps energised seconds into `ai/thermal/coil_thermal.py`. Coils reach 80 C after four
+stamps energised seconds into `LLM/thermal/coil_thermal.py`. Coils reach 80 C after four
 ramps and there is no temperature sensor. A binary that opened its own serial port would
 walk straight around it.
 
@@ -4762,7 +4762,7 @@ of an unknown flashed firmware cannot be inferred from a USB device name.
 
 ### Frequency-only bench check
 
-`LLM.record.drive_only.run_frequency_pattern` is the explicit no-camera notebook adapter
+`LLM.record.drive_only.drive_ramp` is the explicit no-camera notebook adapter
 (Block 7B). It uses the existing `ramp.seq_lines`, `CommandLink.send_takeoff`,
 `SerialComm` drive-duration accounting; cooldown is operator-managed as of 2026-10-28.
 It does not add a firmware
@@ -4805,7 +4805,7 @@ all-carriers-100% sample of A=0.98, B=2.28, C=1.19, D=1.88 A. Historical A/C
 zero offsets are known bad (section 23.1); use this only as evidence that the
 older telemetry was not near zero, not as a target supply/RMS current.
 
-`LLM/patterns/alignment_2to5_5to50Hz_hold10s_19p5s.json` matches the archived
+`LLM/ramps/alignment_50Hz.json` matches the archived
 050hz schedule's first two EASE k=2 ramps (2→5 in 5 s, 5→50 in 4.5 s) and
 3+7 s pre-cut dwell. It stops at 19.5 s, omits the A/C cut and down-ramp, uses
 current flight firmware, and is not an exact replication of the old experiment.

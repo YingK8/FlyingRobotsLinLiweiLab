@@ -86,7 +86,7 @@ def run():
         fake._drive_since, fake._drive_s = None, 1.0
         stamped = []
         thermal = SimpleNamespace(add_energised=lambda seconds: stamped.append(seconds) or 25)
-        with patch.dict("sys.modules", {"ai.thermal": SimpleNamespace(coil_thermal=thermal)}):
+        with patch.dict("sys.modules", {"LLM.thermal": SimpleNamespace(coil_thermal=thermal)}):
             fake.close()
         assert stamped == [1.0]
         for lines in (["seq go: 1 segment(s)"], [EVENT],
@@ -213,6 +213,7 @@ def run():
         from LLM.record.experiment import postprocess
         manifest=read_json(run_dir/'manifest.json')
         write_json(run_dir/'manifest.json',manifest | {'experiment_mode':'sync_check'})
+        # Old-format pattern.json on purpose: runs recorded before 2026-11-02 must still analyse.
         write_json(run_dir/'pattern.json', {'schema_version':1,'trigger':'time',
             'frequency_segments':[[2,20,1,0,1]],'channel_updates':[],
             'channel_settings_status':'firmware_defaults_unrecorded'})

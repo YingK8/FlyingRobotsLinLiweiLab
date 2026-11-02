@@ -13,7 +13,7 @@ a two-camera stereo rig.
 | `controller/native/` | `pmw_pose`: the C++ port of everything `StereoPoseEstimator.update` does per frame (`pose/theory.md` 21), plus the live capture and the interleaved tracker (22), plus the control core -- filter, predictor, LQR (`control/theory.md` 27). Built by `uv sync --extra native`; `pose/stereo_native.py` wraps the estimator, `pose/tracker.py` the tracker, and `live_viz._stereo_estimator` picks the native core when it is importable. The Python stays as the reference and `pose/native_parity.py` holds the two together |
 | `pmw_fly` | the standalone controller built from the same objects as `pmw_pose`, opted into with `-DPMW_FLY=ON`. Driven ONLY by `controller/control/fly_native.py`, which owns arming and the thermal stamp -- see Safety |
 | `lib/DriveFrame/` | the binary DRIVE/ACK wire format, included by the firmware AND by `controller/native/`. One definition; `controller/control/drive_frame.py` mirrors it for tooling and is held to the C++ encoder's own bytes |
-| `ai/` | gitignored scratchpad: bench harnesses and offline design tooling. `ai/thermal/coil_thermal.py` is load-bearing (see Safety) |
+| `LLM/` | recorded experiments (below), plus `thermal/coil_thermal.py` (load-bearing, see Safety), `design/` (offline array/plant/MPC models + `matlab/`) and `analyse/spinup.py` |
 | `controller/report.py` | one command for the whole offline pass on a take: solve, rod (`find_mast`), angles, the command record, the plots and the overlay video, all into `<take>/report/`. The stages are the modules above; this only orders them |
 | `controller/run.ipynb` | the operator notebook, one cell per stage; cell 12 flies |
 | `results/`, `data/` | captures and outputs; each has a README mapping files to the script that made them |
@@ -45,10 +45,9 @@ a number is a guess. A constant with no provenance is a bug waiting for a sessio
   arguments were superseded by `controller/pose/theory.md` and `calib/theory.md`; its
   RealSense plan was never built. Kept only because live code still cites its section
   numbers. Read the chapters instead.
-- anything that says `ai/` holds the old sweep / sysid / validation tree. That tree was
-  deleted 2026-08-31. `ai/` is now a gitignored scratchpad holding `thermal/`, `spinup/`,
-  `design/` and `matlab/`. The flight path depends on exactly one file in it,
-  `ai/thermal/coil_thermal.py`, and refuses to arm without it.
+- anything that cites `ai/`. Its sweep / sysid / validation tree was deleted 2026-08-31;
+  on 2026-11-02 the rest moved into `LLM/` (`thermal/`, `design/`, `analyse/spinup.py`) and
+  the dead rim-analysis scripts were dropped (recover from git, commit 592d27f).
 
 ## Safety
 
@@ -63,7 +62,7 @@ argument for putting them back is in `controller/control/theory.md` 4.0. The kil
 3. the **GPIO14** button on the board (`src/reset_button.h`).
 
 **Coils overheat before anything else breaks.** Measured: +1 C per 2 s of drive, and 80 C
-reached after four ramps. There is no temperature sensor, so `ai/thermal/coil_thermal.py`
+reached after four ramps. There is no temperature sensor, so `LLM/thermal/coil_thermal.py`
 models it (heat rate, Newton cooling, a 70 C ceiling) and the stamping lives at the
 chokepoint rather than in the caller. There are exactly TWO chokepoints and no others:
 
@@ -76,7 +75,7 @@ chokepoint rather than in the caller. There are exactly TWO chokepoints and no o
 **With no firmware watchdog, a USB unplug leaves the coils driven indefinitely.** The
 child's stdin-EOF backstop covers a supervisor that crashed; nothing covers the cable. The
 bench supply's 10 A limit and the GPIO14 button are the whole story there. `fly()` calls `coil_thermal.wait_until_safe()` for you and **refuses to arm if
-that file is missing**, because `ai/` is gitignored and a fresh clone does not have it.
+that file is missing**.
 
 **LLM notebook exception (operator request, 2026-10-28):** `Bench.drive_without_cameras` (`LLM/record/drive_only.py`)
 and `Bench.run` (`LLM/record/panel.py`) do not call the modeled-temperature cooldown
@@ -167,7 +166,7 @@ needs four independent amplitudes; `link._note_drive` counts it. It scales `coll
 `LLM/record_experiment.ipynb` drives `LLM/bench.py` (`Bench`), one step per cell; `LLM/README.md`
 has the steps. Its docs and notebook text are in Chinese -- keep them that way.
 
-- Raw video, timestamps, calibration, patterns and serial logs are evidence: never overwrite
+- Raw video, timestamps, calibration, ramps (`LLM/ramps`) and serial logs are evidence: never overwrite
   them. Processed outputs can be rebuilt.
 - Keep planned / host-sent / device-applied / measured separate. Duty is not current; a
   commanded phase is not the measured current phase.
@@ -200,7 +199,7 @@ uv run python controller/pose/tracker.py        # pairing, skew guard, view-cach
 uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives
 uv run python controller/report.py results/tilt_sweep/<take>   # the whole offline pipeline
-uv run python ai/spinup/detector.py --all       # did the rotor turn on each take?
+uv run python LLM/analyse/spinup.py --all       # did the rotor turn on each take?
 ```
 
 Self-checks are a `demo()` or `_self_check()` under `if __name__ == "__main__"`, using plain

@@ -120,7 +120,7 @@ def _git_sha() -> str:
 
 
 def _thermal():
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
     return coil_thermal
 
 

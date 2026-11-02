@@ -125,10 +125,10 @@ def _thermal_gate(cfg) -> float:
         return ramp_s
 
     try:
-        from ai.thermal import coil_thermal
+        from LLM.thermal import coil_thermal
     except ImportError as exc:
         raise SystemExit(
-            "refusing to arm: ai/thermal/coil_thermal.py is missing, so nothing is "
+            "refusing to arm: LLM/thermal/coil_thermal.py is missing, so nothing is "
             "tracking coil heat. The coils reach 80 C after four ramps and there is no "
             "temperature sensor. Restore it before flying."
         ) from exc

@@ -14,7 +14,7 @@ which are what the amplifier has to deliver. A run that tracks beautifully while
 limit has not solved the problem.
 
 Usage:
-    uv run python ai/design/simulate_spatial.py [--live] [--grad]
+    uv run python LLM/design/simulate_spatial.py [--live] [--grad]
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ import time
 
 import numpy as np
 
-from ai.design.spatial_model import make_state
-from ai.design.spatial_mpc import closed_loop, default_mpc
+from LLM.design.spatial_model import make_state
+from LLM.design.spatial_mpc import closed_loop, default_mpc
 
 HOVER = np.array([0.0, 0.0, 0.0130])  # default target, m
 START = np.array([0.006, -0.004, 0.0180])

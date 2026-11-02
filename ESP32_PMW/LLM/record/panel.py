@@ -23,7 +23,7 @@ def _check_loopback():
         probe.bind(('127.0.0.1', 0))
 
 
-def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=None,
+def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
               serial_port=None, roi_a=None, roi_b=None, port=8088):
     """Preview -> Record -> optional flight START -> Stop/finalize, one take per call.
 
@@ -39,19 +39,17 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
     session = copy.deepcopy(session); camera = session['camera']; driven = run is not None
     planned = None
     if driven:
-        from LLM.record.pattern import validate_pattern
+        from LLM.record.ramps import load_ramp
         from controller.control import ramp
         from controller.control.hover_controller_runner import CommandLink, OFF
         run = Path(run)
         manifest = read_json(run/'manifest.json')
         if manifest.get('camera_session') != session: raise ValueError('Prepared run/session mismatch')
         if not serial_port: raise ValueError('Choose the actual ESP serial port explicitly')
-        planned = validate_pattern(read_json(pattern_path))
-        if planned.get('channel_settings_status') != 'firmware_defaults_unrecorded' or planned.get('channel_updates'):
-            raise ValueError('This runner executes frequency-only patterns; channel schedules are not implemented')
+        planned = load_ramp(ramp_path)
         if (run/'raw/telemetry.jsonl').exists() or any((run/'raw/captures').glob('*/meta.json')):
             raise ValueError('One START attempt per run; prepare a new run')
-        duration = ramp.duration_s(planned['frequency_segments'])
+        duration = ramp.duration_s(planned)
         if max_seconds < duration + 3: raise ValueError('Recording cap must allow ramp plus pre/post roll (at least 3 s)')
         if (roi_a is None) != (roi_b is None):
             raise ValueError('Give LED ROIs for both cameras or neither (neither: found after the run)')
@@ -60,7 +58,7 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
                     or min(roi[:2]) < 0 or min(roi[2:]) <= 0
                     or roi[0]+roi[2] > camera['width'] or roi[1]+roi[3] > camera['height']):
                 raise ValueError('Specify in-bounds LED [x,y,width,height] for BOTH cameras')
-        snapshot(pattern_path, run/'pattern.json')
+        snapshot(ramp_path, run/'ramp.json')
         # No modeled-temperature wait, per operator request on 2026-10-28.
     _check_loopback()
     import viser
@@ -81,7 +79,7 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
         physical = server.gui.add_checkbox(confirmation, False)
         buttons = {}
         for key, label in [('snapshot','Save static reference pair'), ('record','Record'),
-                           ('start','START pattern + LED'), ('stop','Stop / finish'), ('close','Close preview')]:
+                           ('start','START ramp + LED'), ('stop','Stop / finish'), ('close','Close preview')]:
             buttons[key] = server.gui.add_button(label, disabled=key=='start')
             buttons[key].on_click(lambda _, e=events[key]: e.set())
         options = {k: camera[k] for k in ('width','height','fps','rotate180','backend')}
@@ -96,7 +94,7 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, pattern_path=No
         cleanup.callback(finalize)
         if driven:
             link = CommandLink(serial_port, False, str(run/'raw/host_commands.log'),
-                               takeoff_cmd=ramp.seq_lines(planned['frequency_segments']),
+                               takeoff_cmd=ramp.seq_lines(planned),
                                raw_log_path=run/'raw/telemetry.jsonl', sync_start=True)
             cleanup.callback(link.close)
             # Registered last: stop drive BEFORE encoder finalisation/camera release.

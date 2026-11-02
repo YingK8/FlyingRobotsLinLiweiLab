@@ -250,10 +250,10 @@ class SerialComm:
                 print(f"[serial log] close failed: {exc}; raw log may be incomplete", file=sys.stderr)
         if secs > 0.5:
             try:
-                from ai.thermal import coil_thermal
+                from LLM.thermal import coil_thermal
             except ImportError:
                 print(f"[coils] THERMAL MODEL MISSING -- {secs:.0f}s of drive NOT tracked.\n"
-                      f"[coils] restore ai/thermal/coil_thermal.py before the next run.")
+                      f"[coils] restore LLM/thermal/coil_thermal.py before the next run.")
                 return
             t = coil_thermal.add_energised(secs)
             print(f"[coils] {secs:.0f}s energised this session -> ~{t:.0f}C estimated")

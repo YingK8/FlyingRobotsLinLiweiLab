@@ -166,7 +166,7 @@ def triangulate(run, annotations):
 def input_curves(run, sync):
     """Frequency plan and observed low-rate current, even before pose annotations."""
     from LLM.record.telemetry import parse_log
-    from LLM.record.pattern import sample_pattern
+    from LLM.record.ramps import load_ramp, planned_frequency, run_ramp_path
     from LLM.analyse.led import map_times
     import matplotlib
     matplotlib.use('Agg')
@@ -176,7 +176,7 @@ def input_curves(run, sync):
     current['t_s'] = map_times(current.t_device_s.to_numpy(float), sync['clocks']['esp']) if len(current) else []
     current.to_csv(run/'processed/current.csv', index=False)
     write_json(run/'processed/current.meta.json', current.attrs)
-    plan = sample_pattern(read_json(run/'pattern.json'))
+    plan = planned_frequency(load_ramp(run_ramp_path(run)))
     plan.to_csv(run/'processed/command_planned.csv', index=False)
     fig, axes = plt.subplots(3, 1, figsize=(10, 9), sharex=True, constrained_layout=True)
     axes[0].plot(plan.t_s, plan.frequency_hz, label='Planned frequency')
@@ -202,4 +202,4 @@ def input_curves(run, sync):
     write_json(run/'export/input_curves.meta.json', {
         'status':'inputs_only_not_full_pipeline', 'current_samples':len(current),
         'hardware_sync_validated':False, 'input_sha256':{p:sha256(run/p) for p in
-          ['pattern.json','processed/sync.json','raw/telemetry.jsonl']}})
+          [run_ramp_path(run).name,'processed/sync.json','raw/telemetry.jsonl']}})

@@ -45,9 +45,7 @@ class DriveOnlyTests(unittest.TestCase):
     def exercise(self, mode):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            pattern = dict(schema_version=1, name='test', trigger='time',
-                           frequency_segments=[[2, 10, 3, 1, 2]], channel_updates=[],
-                           channel_settings_status='firmware_defaults_unrecorded')
+            pattern = dict(segments=[dict(from_hz=2, to_hz=10, seconds=3, shape='ease', k=2)])
             (root/'input.json').write_text(json.dumps(pattern))
             now = [0.0]
             commands = []
@@ -89,16 +87,16 @@ class DriveOnlyTests(unittest.TestCase):
                     patch.object(drive_only.time, 'monotonic', side_effect=lambda: now[0]), \
                     patch.object(drive_only.time, 'sleep', side_effect=sleep):
                 if mode in ('ok', 'stop_failure'):
-                    drive_only.run_frequency_pattern(root/'input.json', 'fake', output_root=root/'out')
+                    drive_only.drive_ramp(root/'input.json', 'fake', output_root=root/'out')
                 else:
                     with self.assertRaises((RuntimeError, ValueError, KeyboardInterrupt)):
-                        drive_only.run_frequency_pattern(root/'input.json', 'fake', output_root=root/'out')
+                        drive_only.drive_ramp(root/'input.json', 'fake', output_root=root/'out')
                 gate.assert_not_called()
             summary = json.loads(next((root/'out').glob('*/result.json')).read_text())
             if mode == 'no_ready':
                 self.assertEqual(commands, [])
             else:
-                self.assertEqual(commands, ramp.seq_lines(pattern['frequency_segments']) + ['stop'])
+                self.assertEqual(commands, ramp.seq_lines(((2, 10, 3, ramp.EASE, 2),)) + ['stop'])
                 self.assertEqual(closed, [True])
             if mode == 'ok':
                 self.assertGreaterEqual(now[0], 3)

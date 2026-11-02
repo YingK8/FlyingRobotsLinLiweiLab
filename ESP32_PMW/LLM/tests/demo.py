@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 
 from LLM.record.io import init_run, sha256, write_json
-from LLM.record.pattern import example_pattern
+from LLM.record.ramps import load_ramp
+
+DEMO_RAMP = json.loads('{"note": "demo only", "segments": [{"from_hz": 2, "to_hz": 180, "seconds": 2, "shape": "ease", "k": 2}, {"from_hz": 180, "to_hz": 210, "seconds": 0.5, "shape": "linear"}, {"from_hz": 210, "to_hz": 170, "seconds": 0.5, "shape": "linear"}]}')
 from LLM.analyse.pipeline import add_clock, process_run, synchronize
 from LLM.analyse.pose import triangulate_annotations
 from LLM.analyse.world import build_world_frame
@@ -80,11 +82,11 @@ def make_demo(path):
                "raw/camera/A/A.mp4", "raw/camera/B/B.mp4", "raw/annotations.csv"]
     write_json(run / "processed/pose_camera.meta.json", pose.attrs | {
         "input_sha256": {name: sha256(run / name) for name in sources}})
-    write_json(run / "pattern.json", example_pattern())
+    write_json(run / "ramp.json", DEMO_RAMP)
     with (run / "raw/telemetry.jsonl").open("w") as stream:
         for i, t in enumerate(np.arange(0, 3.5, .5)):
             vals = [(.3+.1*np.sin(t))*v for v in (1, .95, 1.03, .97)]
-            frequency = ramp.frequency_at(example_pattern()["frequency_segments"], float(t))
+            frequency = ramp.frequency_at(load_ramp(run / "ramp.json"), float(t))
             line = f"t={10000+int(t*1000)} freq={frequency:.1f} | I[A]: " + " ".join(f"{c}={v:.3f}" for c, v in zip("ABCD", vals)) + " | duty[%]: A=20 B=20 C=20 D=20 | trip=0"
             stream.write(json.dumps({"host_receive_s": 100.5+t+.02, "line": line})+"\n")
     synchronize(run, [20, 20, 24, 24], [20, 20, 24, 24], [0, 3])

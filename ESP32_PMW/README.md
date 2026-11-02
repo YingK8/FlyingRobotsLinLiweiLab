@@ -9,17 +9,18 @@ Controls a 4-channel phased PWM coil array to spin and tilt a magnetic disk. Eac
 ```
 ESP32_PMW/
 ├── LLM/                    recorded experiments: stereo video + coil current + LED sync
-│   ├── record_experiment.ipynb   ← the main notebook, one Bench step per cell
+│   ├── record_experiment.ipynb   ← the main notebook: imports, settings, then one cell per step
 │   ├── bench.py                  ← Bench: calibrate → verify → record → run → analyse
-│   ├── record/  analyse/      before+during the run / after it
-│   └── patterns/  tests/
+│   ├── record/  analyse/      before+during the run / after it (analyse/spinup.py: did the rotor turn)
+│   ├── thermal/               coil_thermal.py: the coil temperature model -- load-bearing, see CLAUDE.md Safety
+│   ├── design/                offline coil-array / 3-D plant / MPC models, + matlab/ originals
+│   └── ramps/  tests/         ramps/: the coil frequency profile each run drives
 ├── controller/             live control host (Python package)
 │   ├── camera/ calib/ pose/ control/ viz/   one stage each; theory.md per stage
 │   ├── native/             C++ pose/control core (pmw_pose, pmw_fly)
 │   └── run.ipynb           closed-loop flight notebook
 ├── src/  lib/  platformio.ini   ESP32 firmware (one main_*.cpp per env)
 ├── spiffs_data/            schedules for schedule-driven envs
-├── ai/                     gitignored scratchpad; ai/thermal/coil_thermal.py is load-bearing
 ├── results/  data/         captures and outputs
 └── docs/                   PCB docs (stale -- see CLAUDE.md)
 ```
@@ -62,7 +63,7 @@ pio run -e flight --target upload && pio device monitor -e flight
 
 The host-side Python is in two places: the vision → control pipeline that flies
 the robot is in [`controller/`](controller/README.md), and the sweeps, sysID,
-validation and plotting are in `ai/` (run with `uv run python ai/<script>.py`).
+design models and recorded-experiment tooling are in [`LLM/`](LLM/README.md).
 
 ---
 

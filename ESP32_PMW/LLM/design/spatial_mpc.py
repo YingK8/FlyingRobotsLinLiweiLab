@@ -27,7 +27,7 @@ Scheme: real-time iteration. One SQP pass per control step, warm-started from th
 solution shifted forward, inputs move-blocked. The plant costs ~105 us per step and a gradient
 over B blocks costs (3B+1) rollouts, which is what fits the budget.
 
-Self-check: uv run python ai/design/spatial_mpc.py
+Self-check: uv run python LLM/design/spatial_mpc.py
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import numpy as np
 from scipy.linalg import solve_continuous_are
 from scipy.optimize import minimize
 
-from ai.design.spatial_model import (
+from LLM.design.spatial_model import (
     GRAVITY,
     Plant,
     StepOut,

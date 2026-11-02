@@ -166,9 +166,9 @@ def measure(port=None, freqs=PROBE_F_HZ, ms=PROBE_MS, verbose=True):
         raise SystemExit(f"{len(freqs)} points x {ms} ms = {total_s:.0f}s of drive, "
                          f"over the {C.MAX_RAMP_S:.0f}s cap -- shorten the sweep")
 
-    # Same gate `fly()` uses. `ai/` is gitignored, so a fresh clone has no thermal model and
+    # Same gate `fly()` uses. Without the thermal model this
     # must refuse to energise rather than guess the coils are cold.
-    from ai.thermal import coil_thermal
+    from LLM.thermal import coil_thermal
     coil_thermal.wait_until_safe()
 
     link = SerialComm(port=port)

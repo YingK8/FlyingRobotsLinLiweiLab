@@ -22,7 +22,7 @@ Together those say the present bipolar square drive is already the right choice:
 4/pi = 1.27x the fundamental per rail volt that a sine does. A sine would save 19 % of the
 heating, but heating is not what binds.
 
-    uv run python ai/design/drive_model.py --self-check
+    uv run python LLM/design/drive_model.py --self-check
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ def coast_time(f, i_spin, k_drag=3.0e-10):
 
 
 def _self_check():
-    from ai.design import spatial_model as sm
+    from LLM.design import spatial_model as sm
 
     p = sm.robot_params()
 

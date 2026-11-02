@@ -25,8 +25,8 @@ This module sweeps every knob against R and reports where the feasible region is
 Every quantity comes from spatial_model.py unchanged. Both field backends run on every
 point, so section 12.9's point-dipole error is a measured column rather than a caveat.
 
-    uv run python ai/design/open_loop_sweep.py --self-check
-    uv run python ai/design/open_loop_sweep.py
+    uv run python LLM/design/open_loop_sweep.py --self-check
+    uv run python LLM/design/open_loop_sweep.py
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import brentq
 
-from ai.design import spatial_model as sm
+from LLM.design import spatial_model as sm
 
 OUT_DIR = Path(__file__).resolve().parents[2] / "results" / "open_loop_sweep"
 

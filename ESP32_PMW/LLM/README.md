@@ -9,7 +9,8 @@ bench.calibrate()              # collect_charuco_frames -> calibrate_intrinsics 
 bench.use_calibration(path)    #   ……或复用已有 stereo_rig.json
 bench.verify_calibration()     # 最终机位拍 >=5 个新的静止板子姿态；须 PASS
 bench.photograph_reference()   # 移走板子；LED 与垂线两机都要看得到
-bench.locate_fixture(plumb)    # 可选：AprilTag + 垂线 -> 世界原点与重力
+bench.find_holder_marks()      # 可选：holder 四象限交点；填 holder_regions.json 后再跑一次命名
+bench.locate_fixture(plumb)    # 可选：已命名交点 + bearing + 垂线 -> 世界原点与重力
 bench.record()                 # 10 秒纯相机试录，自动审核
 bench.run(pattern, note="...") # Record -> START -> 自动 stop。会驱动线圈
 bench.analyse()                # LED 对时 -> export/input_curves.png；给 annotations= 时再出 XYZ/起飞
@@ -25,7 +26,7 @@ bench.analyse()                # LED 对时 -> export/input_curves.png；给 ann
 | `record_experiment.ipynb` | 主 notebook，一格一个 `bench` 步骤 |
 | `bench.py` | `Bench`：把下面各模块按实验顺序串起来 |
 | `record/` | 实验前与实验中：`experiment`（session/run 准备、导入、后处理）、`panel`（浏览器录制面板）、`takes`（录像校验/导入）、`pattern`、`telemetry`（串口日志解析）、`drive_only`、`serial_check`、`io`（run 目录/JSON/哈希） |
-| `analyse/` | 实验后：`led`（LED 边沿与标记解码）、`start`（START/STOP 关联、`find_led`）、`rig`（标定验证、装置定位）、`pose`（双目三角化）、`world`（重力坐标）、`pipeline`（导出）、`takeoff`（起飞事件）、`fixture_layout.json`（装置 tag/bearing 布局） |
+| `analyse/` | 实验后：`led`（LED 边沿与标记解码）、`start`（START/STOP 关联、`find_led`）、`rig`（标定验证、装置定位）、`pose`（双目三角化）、`world`（重力坐标）、`pipeline`（导出）、`takeoff`（起飞事件）、`holder*`（holder 四象限标记检测与定位，见 `HOLDER_MARKERS.md`）、`holder_layout.json`（v3 CAD 20 点）、`coil_base.step`（底座 CAD，与标记同坐标系待核对）、`fixture_layout.json`（旧纸质 AprilTag） |
 | `patterns/` `tests/` | 输入 pattern、离线自检 |
 
 ## 什么时候重标
@@ -55,6 +56,7 @@ bench.analyse()                # LED 对时 -> export/input_curves.png；给 ann
 - 只执行 frequency pattern（`channel_updates: []`）。到时主机发 stop，再录 2 秒。
 - `rise_2to210Hz_30s_ease_k2` 是旧的 `ramp.DEFAULT`。
 - `alignment_2to5_5to50Hz_hold10s_19p5s` 复现 2026-09-14 的 50 Hz 电流对照。
+- `rise_2to190Hz_30s_linear_hold10s`（40 s）、`rise_2to20Hz_5s_20to190Hz_20s_linear_hold10s`（35 s）：2026-10-28 新增，未经台架验证。
 
 ## run 目录
 ```
@@ -70,5 +72,6 @@ export/       input_curves.png, overview.png, pose.csv, current.csv, camera_A/B.
 NaN 表示未观测，不是零。
 
 ## 待办
-- `analyse/fixture_layout.json` 仍缺 CAD tag 角点和 bearing 位置（`survey_confirmed=false`）。
+- `holder_layout.json` 的 bearing 实测位置未填（`survey_confirmed=false`）；holder 检测只在 CAD 渲染图上验证过，实拍识别率与定位精度待测。
+- `fixture_layout.json`（旧 AprilTag）仍缺 CAD tag 角点和 bearing。
 - 还没有双脉冲固件的实录：`find_led`、光学延迟、LED 可见性都未经台架验证。

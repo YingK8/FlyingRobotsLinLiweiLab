@@ -10,7 +10,8 @@ from controller.calib.calibrate import BOARDS
 
 PROJECT = Path(__file__).resolve().parents[1]
 PATTERNS = PROJECT / "LLM/patterns"
-FIXTURE_LAYOUT = PROJECT / "LLM/analyse/fixture_layout.json"
+FIXTURE_LAYOUT = PROJECT / "LLM/analyse/fixture_layout.json"   # old paper AprilTags
+HOLDER_LAYOUT = PROJECT / "LLM/analyse/holder_layout.json"     # v3 CAD checker marks (default)
 #: The printed 9x6 letter board at its caliper-measured pitch, 16.52 mm (marker scales to
 #: 12.39 mm). The value setup_002 was calibrated with; re-measure if you reprint.
 BOARD = BOARDS["9x6_letter"].with_square_mm(16.52)
@@ -132,14 +133,43 @@ class Bench:
         self.reference_pair = Path(result["reference_pair"])
         return self.reference_pair
 
-    def locate_fixture(self, plumb, layout=FIXTURE_LAYOUT):
-        """Optional: AprilTags + plumb line -> world origin and gravity (needs a verified rig)."""
-        from LLM.record.io import write_json
-        from LLM.analyse.rig import localize_fixture
+    def find_holder_marks(self):
+        """Detect the checker centres in the reference pair (no hardware).
+
+        First call writes an empty `holder_regions.json` next to the photos; fill in one
+        [x, y, w, h] per visible CAD name and call again to name them. See analyse/HOLDER_MARKERS.md."""
+        from LLM.analyse.holder import inspect_holder, make_holder_regions
         if self.reference_pair is None:
             raise ValueError("photograph_reference() first")
-        self.world = localize_fixture(self.reference_pair, self.calibration, layout, plumb,
-                                      self.camera, session_id=self.session["session_id"])
+        regions = self.reference_pair / "holder_regions.json"
+        if not regions.exists():
+            make_holder_regions(self.reference_pair, regions)
+        report = inspect_holder(self.reference_pair, regions_path=regions)
+        print("Edit, then call again:", regions)
+        return {tag: report["cameras"][tag]["landmarks"] for tag in "AB"}
+
+    def locate_fixture(self, plumb, layout=None):
+        """Optional: named holder marks (or AprilTags) + plumb line -> world origin and gravity.
+
+        `layout` defaults to a per-session copy of holder_layout.json: measure the bearing,
+        fill `bearing_center_fixture_mm`, then set `survey_confirmed=true`. Pass
+        FIXTURE_LAYOUT for the old AprilTag sheets."""
+        import shutil
+        from LLM.record.io import read_json, write_json
+        from LLM.analyse.rig import localize_fixture
+        from LLM.analyse.holder_geometry import localize_holder
+        if self.reference_pair is None:
+            raise ValueError("photograph_reference() first")
+        if layout is None:
+            layout = self.folder / "holder_layout.json"
+            if not layout.exists():
+                shutil.copyfile(HOLDER_LAYOUT, layout)
+        args = dict(session_id=self.session["session_id"])
+        if read_json(layout).get("pattern_type") == "checker_quadrants":
+            self.world = localize_holder(self.reference_pair, self.calibration, layout,
+                                         self.reference_pair / "holder_regions.json", plumb, self.camera, **args)
+        else:
+            self.world = localize_fixture(self.reference_pair, self.calibration, layout, plumb, self.camera, **args)
         write_json(self.folder / "world_frame.json", self.world)
         return self.world
 

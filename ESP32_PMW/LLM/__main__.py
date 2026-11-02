@@ -89,6 +89,11 @@ def main(argv=None):
     p.add_argument("--no-flip", action="store_true")
     p = subs.add_parser("record-telemetry", help="passive serial receive; port must not be owned by a running controller")
     p.add_argument("path"); p.add_argument("--port", required=True); p.add_argument("--seconds", type=float, required=True)
+    p = subs.add_parser("inspect-holder", help="detect printed checker centers in saved A.png/B.png; no hardware")
+    p.add_argument("pair")
+    p.add_argument("--regions", help="image-bound named ROI JSON; omit for unassigned candidates")
+    p.add_argument("--layout", help="holder CAD layout JSON; defaults to bundled v3 geometry")
+    p.add_argument("--init-regions", help="create an empty image-bound ROI template at this path")
     subs.add_parser("self-check", help="offline tests; no camera, serial, or coil drive")
     args = parser.parse_args(argv)
     try:
@@ -147,6 +152,18 @@ def main(argv=None):
         elif args.command == "record-telemetry":
             from LLM.telemetry import record_telemetry
             result = record_telemetry(args.path, args.port, args.seconds)
+        elif args.command == "inspect-holder":
+            from LLM.holder import DEFAULT_LAYOUT, inspect_holder, make_holder_regions
+            layout = args.layout or DEFAULT_LAYOUT
+            if args.init_regions:
+                make_holder_regions(args.pair, args.init_regions, layout_path=layout)
+            report = inspect_holder(args.pair, regions_path=args.regions, layout_path=layout)
+            result = {'report': str(Path(args.pair)/'holder_detections.json'),
+                      'cameras': {tag: {'candidates': len(row['candidates']),
+                                       'landmarks': {name: item['status'] for name, item in row['landmarks'].items()},
+                                       'overlay': row['overlay']}
+                                  for tag, row in report['cameras'].items()},
+                      'physical_accuracy_validated': False}
         else:
             from LLM.tests.run import run
             run(); result = "All offline checks passed"

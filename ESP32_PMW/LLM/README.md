@@ -2,7 +2,9 @@
 
 第一版把两路视频、输入 pattern、电流记录和轨迹放入同一次实验，输出统一时间轴、起飞事件、曲线和两路同步预览。现阶段在本地运行，不需要 LLM API。
 
-**统一入口：[record_experiment.ipynb](record_experiment.ipynb)**。按配置、ChArUco 标定/复用验证、AprilTag 装置定位、试录、pattern 选择、正式实验、后处理分块运行。操作与校准复用规则见 [WORKFLOW.md](WORKFLOW.md)，pattern 库见 [patterns/README.md](patterns/README.md)。前半只用相机；正式 block 显式连接 flight，Record 后另点 START 才发送 ramp。不要在录像内手按 reset。
+统一入口：[record_experiment.ipynb](record_experiment.ipynb)。按配置、ChArUco 标定/复用验证、holder 标记定位、试录、pattern 选择、正式实验、后处理分块运行。操作与校准复用规则见 [WORKFLOW.md](WORKFLOW.md)，pattern 库见 [patterns/README.md](patterns/README.md)。前半只用相机；正式 block 显式连接 flight，Record 后另点 START 才发送 ramp。不要在录像内手按 reset。
+
+新版 CAD 的黑白四象限标记已接入 Block 4/4B/5：自动检测交点，按当前参考图中的命名 ROI 关联 CAD，联合双目定位；旧纸质 AprilTag 路径仍可选。用法、20 个点的名称和实物验证边界见 [holder 标记说明](HOLDER_MARKERS.md)。
 
 **仅同步联调：** notebook Block 0 选择 `MODE="sync_check"`，按 **0→1→4→6→7→8→9** 运行，跳过 2、3、5；保存白线参考、视频、pattern/CS/LED 曲线，暂不输出三维轨迹。详见 [联调步骤](WORKFLOW.md#先做同步联调暂缺-cadbearing)。
 

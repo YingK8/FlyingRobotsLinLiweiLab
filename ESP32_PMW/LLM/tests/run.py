@@ -23,6 +23,11 @@ def run():
     result = unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromModule(test_drive_only))
     if not result.wasSuccessful():
         raise AssertionError("frequency-only bench checks failed")
+    from LLM.tests import test_holder_detection, test_holder, test_holder_geometry
+    for module in (test_holder_detection, test_holder, test_holder_geometry):
+        result = unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromModule(module))
+        if not result.wasSuccessful():
+            raise AssertionError(f"{module.__name__} checks failed")
     test_pipeline.run()
 
 

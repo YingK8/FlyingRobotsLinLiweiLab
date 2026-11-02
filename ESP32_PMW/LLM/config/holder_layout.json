@@ -1,0 +1,728 @@
+{
+  "version": "holder_v3_boss_D73p8_H5",
+  "status": "DESIGN_COORDINATES_NOT_EXPERIMENTALLY_ACCEPTED",
+  "units": "mm",
+  "frame": "native_IGES_CAD_not_experiment_world",
+  "definition": "Intersection of four flush 8x8 mm material quadrants on named surface",
+  "points": {
+    "P1": [
+      1.5,
+      -37.5,
+      40.0
+    ],
+    "P2": [
+      97.5,
+      -37.5,
+      40.0
+    ],
+    "P3": [
+      97.5,
+      58.5,
+      40.0
+    ],
+    "P4": [
+      1.5,
+      58.5,
+      40.0
+    ],
+    "P1_X_L": [
+      -10.5,
+      -37.5,
+      12.0
+    ],
+    "P1_X_H": [
+      -10.5,
+      -37.5,
+      30.0
+    ],
+    "P1_Y_L": [
+      1.5,
+      -49.5,
+      12.0
+    ],
+    "P1_Y_H": [
+      1.5,
+      -49.5,
+      30.0
+    ],
+    "P2_X_L": [
+      109.5,
+      -37.5,
+      12.0
+    ],
+    "P2_X_H": [
+      109.5,
+      -37.5,
+      30.0
+    ],
+    "P2_Y_L": [
+      97.5,
+      -49.5,
+      12.0
+    ],
+    "P2_Y_H": [
+      97.5,
+      -49.5,
+      30.0
+    ],
+    "P3_X_L": [
+      109.5,
+      58.5,
+      12.0
+    ],
+    "P3_X_H": [
+      109.5,
+      58.5,
+      30.0
+    ],
+    "P3_Y_L": [
+      97.5,
+      70.5,
+      12.0
+    ],
+    "P3_Y_H": [
+      97.5,
+      70.5,
+      30.0
+    ],
+    "P4_X_L": [
+      -10.5,
+      58.5,
+      12.0
+    ],
+    "P4_X_H": [
+      -10.5,
+      58.5,
+      30.0
+    ],
+    "P4_Y_L": [
+      1.5,
+      70.5,
+      12.0
+    ],
+    "P4_Y_H": [
+      1.5,
+      70.5,
+      30.0
+    ]
+  },
+  "surfaces": {
+    "P1": {
+      "kind": "top",
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "cad_mm": [
+        1.5,
+        -37.5,
+        40.0
+      ]
+    },
+    "P2": {
+      "kind": "top",
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "cad_mm": [
+        97.5,
+        -37.5,
+        40.0
+      ]
+    },
+    "P3": {
+      "kind": "top",
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "cad_mm": [
+        97.5,
+        58.5,
+        40.0
+      ]
+    },
+    "P4": {
+      "kind": "top",
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "cad_mm": [
+        1.5,
+        58.5,
+        40.0
+      ]
+    },
+    "P1_X_L": {
+      "kind": "side",
+      "block": "P1",
+      "face_axis": "X",
+      "outward_normal": [
+        -1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        -10.5,
+        -37.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P1_X_H": {
+      "kind": "side",
+      "block": "P1",
+      "face_axis": "X",
+      "outward_normal": [
+        -1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        -10.5,
+        -37.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P1_Y_L": {
+      "kind": "side",
+      "block": "P1",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        -1,
+        0
+      ],
+      "cad_mm": [
+        1.5,
+        -49.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P1_Y_H": {
+      "kind": "side",
+      "block": "P1",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        -1,
+        0
+      ],
+      "cad_mm": [
+        1.5,
+        -49.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P2_X_L": {
+      "kind": "side",
+      "block": "P2",
+      "face_axis": "X",
+      "outward_normal": [
+        1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        109.5,
+        -37.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P2_X_H": {
+      "kind": "side",
+      "block": "P2",
+      "face_axis": "X",
+      "outward_normal": [
+        1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        109.5,
+        -37.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P2_Y_L": {
+      "kind": "side",
+      "block": "P2",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        -1,
+        0
+      ],
+      "cad_mm": [
+        97.5,
+        -49.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P2_Y_H": {
+      "kind": "side",
+      "block": "P2",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        -1,
+        0
+      ],
+      "cad_mm": [
+        97.5,
+        -49.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P3_X_L": {
+      "kind": "side",
+      "block": "P3",
+      "face_axis": "X",
+      "outward_normal": [
+        1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        109.5,
+        58.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P3_X_H": {
+      "kind": "side",
+      "block": "P3",
+      "face_axis": "X",
+      "outward_normal": [
+        1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        109.5,
+        58.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P3_Y_L": {
+      "kind": "side",
+      "block": "P3",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        1,
+        0
+      ],
+      "cad_mm": [
+        97.5,
+        70.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P3_Y_H": {
+      "kind": "side",
+      "block": "P3",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        1,
+        0
+      ],
+      "cad_mm": [
+        97.5,
+        70.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P4_X_L": {
+      "kind": "side",
+      "block": "P4",
+      "face_axis": "X",
+      "outward_normal": [
+        -1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        -10.5,
+        58.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P4_X_H": {
+      "kind": "side",
+      "block": "P4",
+      "face_axis": "X",
+      "outward_normal": [
+        -1,
+        0,
+        0
+      ],
+      "cad_mm": [
+        -10.5,
+        58.5,
+        30.0
+      ],
+      "height_level": "H"
+    },
+    "P4_Y_L": {
+      "kind": "side",
+      "block": "P4",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        1,
+        0
+      ],
+      "cad_mm": [
+        1.5,
+        70.5,
+        12.0
+      ],
+      "height_level": "L"
+    },
+    "P4_Y_H": {
+      "kind": "side",
+      "block": "P4",
+      "face_axis": "Y",
+      "outward_normal": [
+        0,
+        1,
+        0
+      ],
+      "cad_mm": [
+        1.5,
+        70.5,
+        30.0
+      ],
+      "height_level": "H"
+    }
+  },
+  "side_target_levels_mm": [
+    12,
+    30
+  ],
+  "side_target_count": 16,
+  "top_target_count": 4,
+  "pattern_width_mm": 16,
+  "material_depth_mm": 0.8,
+  "id_dots": [
+    {
+      "block": "P1",
+      "face": "X",
+      "center_mm": [
+        -10.5,
+        -17.5,
+        21.0
+      ]
+    },
+    {
+      "block": "P1",
+      "face": "Y",
+      "center_mm": [
+        21.5,
+        -49.5,
+        21.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "X",
+      "center_mm": [
+        109.5,
+        -17.5,
+        19.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "X",
+      "center_mm": [
+        109.5,
+        -17.5,
+        23.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "Y",
+      "center_mm": [
+        77.5,
+        -49.5,
+        19.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "Y",
+      "center_mm": [
+        77.5,
+        -49.5,
+        23.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "X",
+      "center_mm": [
+        109.5,
+        38.5,
+        17.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "X",
+      "center_mm": [
+        109.5,
+        38.5,
+        21.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "X",
+      "center_mm": [
+        109.5,
+        38.5,
+        25.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "Y",
+      "center_mm": [
+        77.5,
+        70.5,
+        17.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "Y",
+      "center_mm": [
+        77.5,
+        70.5,
+        21.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "Y",
+      "center_mm": [
+        77.5,
+        70.5,
+        25.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "X",
+      "center_mm": [
+        -10.5,
+        38.5,
+        15.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "X",
+      "center_mm": [
+        -10.5,
+        38.5,
+        19.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "X",
+      "center_mm": [
+        -10.5,
+        38.5,
+        23.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "X",
+      "center_mm": [
+        -10.5,
+        38.5,
+        27.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "Y",
+      "center_mm": [
+        21.5,
+        70.5,
+        15.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "Y",
+      "center_mm": [
+        21.5,
+        70.5,
+        19.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "Y",
+      "center_mm": [
+        21.5,
+        70.5,
+        23.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "Y",
+      "center_mm": [
+        21.5,
+        70.5,
+        27.0
+      ]
+    },
+    {
+      "block": "P1",
+      "face": "top",
+      "center_mm": [
+        1.5,
+        -23.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "top",
+      "center_mm": [
+        95.5,
+        -23.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P2",
+      "face": "top",
+      "center_mm": [
+        99.5,
+        -23.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "top",
+      "center_mm": [
+        93.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "top",
+      "center_mm": [
+        97.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P3",
+      "face": "top",
+      "center_mm": [
+        101.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "top",
+      "center_mm": [
+        -4.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "top",
+      "center_mm": [
+        -0.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "top",
+      "center_mm": [
+        3.5,
+        44.5,
+        40.0
+      ]
+    },
+    {
+      "block": "P4",
+      "face": "top",
+      "center_mm": [
+        7.5,
+        44.5,
+        40.0
+      ]
+    }
+  ],
+  "registration_note": "Different face/height labels are DIFFERENT physical points. Use CAD-known 2D-3D correspondences per camera or joint reprojection with calibrated stereo extrinsics. Triangulate ONLY identical labels visible in both views. Visibility and observability need actual camera validation.",
+  "bearing_origin_z_mm": null,
+  "mounting_boss": {
+    "diameter_mm": 73.8,
+    "height_mm": 5.0,
+    "axis_xy_mm": [
+      49.5,
+      10.5
+    ],
+    "shoulder_z_mm": -5.0,
+    "entry_chamfer_mm": 0.4,
+    "mating_hole_nominal_mm": 74.0,
+    "mating_plate_approx_thickness_mm": 5.0
+  },
+  "schema_version": 1,
+  "pattern_type": "checker_quadrants",
+  "survey_confirmed": false,
+  "bearing_center_fixture_mm": null,
+  "x_hint_fixture": [
+    1,
+    0,
+    0
+  ],
+  "cad_source": "CAD/coil_array_mount/landmarks_v3_boss/landmarks.json",
+  "cad_source_sha256": "571eda3650d252ae5e6880a0a7e285349b611b85eb57cc79298cd08a58ffd97f",
+  "identity_method": "Operator-assigned named ROI on the current saved image; checker centers do not encode unique IDs",
+  "id_dot_diameter_mm": 2.4,
+  "note": "Nominal CAD only. Confirm printed geometry and measure bearing before world localization. Dots identify a block only; X/Y face and L/H must be assigned explicitly.",
+  "top_id_dots_source": "landmarks_v1/BuildLandmarks.py; preserved geometry but omitted by v2/v3 JSON"
+}

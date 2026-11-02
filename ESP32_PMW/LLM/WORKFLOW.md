@@ -8,7 +8,7 @@
 依次运行 **0 → 1 → 4 → 6 → 7 → 8 → 9**；跳过 2、3、5。
 
 - Block 1：核对 A/B、LED 和静止垂线在两机可见，然后 Close preview。
-- Block 4：Save static reference pair，再 Close preview；联调模式显示带原始像素坐标的两张图，不要求 tag 检测。白线只是已保存的参考，尚未重建 z。
+- Block 4：Save static reference pair，再 Close preview；显示原始像素坐标。默认 holder_checker 另显示四象限交点候选，联调不要求检出或命名成功，可跳过 4B/5。白线只是已保存的参考，尚未重建 z。
 - Block 6：Record，10 秒后自动收尾；审核报告，完整性应 PASS，有 warnings 时如实核查后填说明。
 - Block 7：选择并预览 pattern，填实际 SERIAL_PORT、ROI_A/ROI_B、NOTE；LED ROI 紧贴发光区域，使用保存图像的原始像素坐标。列表只枚举端口，不连接硬件。
 - Block 8：这一格才连接/reset flight。核对后 Record，约 1 秒后 START，结束自动 stop + 2 秒后录；不要在录像中按 ESP reset。保留唯一串口、预录制、暗 ROI、一次 START 与停止逻辑；不按估算温度等待冷却。
@@ -39,8 +39,8 @@
 1. 开 preview，按物理贴纸核对 A/B；如有需要，调焦后再进入标定。
 2. 首次或验证失败：完整 ChArUco 采集/求解。每次独立目录，不跨搬动 append。
 3. 最终位置拍新板子，验证 rig；FAIL 不能进入已标定的正式实验。
-4. 移走板，拍静止装置参考；自动识别 tag36h11，保存有 ID 的 overlay。
-5. CAD tag corners + bearing + 双目垂线求世界坐标，同时验证重投影。
+4. 移走板，拍静止装置参考；默认检测新版 holder 的黑白四象限交点，Block 4B 按当前图命名 ROI。旧纸质标签在 Block 0 选择 apriltag。
+5. 已核验 CAD 对应 + bearing + 双目垂线求世界坐标，同时验证重投影。holder 路径每机至少 4 点，可看不同侧面；详见 [HOLDER_MARKERS.md](HOLDER_MARKERS.md)。
 6. 点 Record 试录 10 s；自动逐帧审核，确认帧率/host skew 等警告。
 7. 选择 pattern，预览曲线，填本机 ESP 端口、两机 LED ROI、实验条件。
 8. 打开正式面板 → 核对 A/B 与场景未动 → Record → START pattern + LED → 到时停止/手动 Stop → 自动验收并导入。
@@ -62,7 +62,11 @@ flight reset 后进入 IDLE，不自动执行 ramp。面板通过已有 CommandL
 
 按用户 2026-10-28 的要求，Block 7B/8 不再按估算温度等待冷却，由操作者判断是否继续。实际驱动时间仍由共享 SerialComm 记账；参数检查、READY、到时停止及 Interrupt 停止路径保留。此 notebook 不烧录固件、不改 GPIO。其他 controller 工作流的 thermal gate 保持原样。更新时若旧 cell 正在等待，先 Interrupt；7B/8 会重新加载各自入口，无需重置 session。
 
-## AprilTag 布局尚缺的实物信息
+## 新版 holder 与旧 AprilTag 布局
+
+2026-11-02 核对最新版 CAD：20 个标记是自定义 2×2 黑白象限，未编码 AprilTag。已增加专用检测与独立的 `holder_layout.json`；完整操作见 [HOLDER_MARKERS.md](HOLDER_MARKERS.md)。默认识别交点，不自动解码小圆点。bearing 实测高度仍未提供，不能仅因检测成功就建立有效世界坐标。
+
+下述 12 张 tag36h11 是旧纸质 AprilTag 路径的约定，不能套用到新版 CAD 棋盘格：
 
 已知：四角 block 的三个面各一张，共 12 张；family tag36h11、ID 1–12；用户转述尺寸 25 mm。已找到 `CAD/coil_array_mount/coil_array_mount_body1.step` 和 `.iges`，STEP 只有一个命名实体，没有 tag ID/旋转和 bearing 基准标注。
 

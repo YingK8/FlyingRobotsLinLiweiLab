@@ -150,3 +150,11 @@ baseline 的 z 中位数与 1.4826×MAD 估计噪声，阈值取 max(min_height_
 - frequency-only pattern 使用 channel_settings_status=firmware_defaults_unrecorded 和 channel_updates=[]；sample_pattern 输出未知 duty/phase 为 NaN。此状态不表示零 duty 或零 phase。只有这一模式可由新实验面板执行；旧四路计划仍为离线输入。
 - raw/host_commands.log 记录 host-send；raw/telemetry.jsonl 为唯一 reader tee；不能改名为 applied_commands。host_start_send_complete_s / host_scheduled_stop_send_complete_s 只是 host 发送完成时刻。
 - export/input_curves.png 与 input_curves.meta.json 可在 pose 前生成，status=inputs_only_not_full_pipeline；不是完整轨迹/起飞报告。
+
+## Holder 棋盘格增量（2026-11-02）
+
+- `config/holder_layout.json` 独立于旧 AprilTag fixture_layout，`pattern_type=checker_quadrants`，`points` 是 20 个完整名称到 CAD xyz/mm 的映射；`surfaces` 记录面法向。默认 `survey_confirmed=false`、`bearing_center_fixture_mm=null`。
+- 当前参考目录的 `holder_regions.json` 保存 `image_sha256.A/B` 和 `regions.A/B`。每个 region 为完整 CAD 名称到 `[x,y,width,height]` 的映射，像素相对于保存原图；图像哈希必须匹配。
+- `holder_detections.json` 保存图像/布局/ROI/算法文件哈希、候选、每个名称的 `status` 和诊断。只有 `status=detected` 才有 `center_px`；missing/ambiguous 不能用于定位。候选 `quality` 不是概率，`automatic_id_decoding=false`、`physical_accuracy_validated=false`。
+- `A_holder_landmarks.png`、`B_holder_landmarks.png` 是派生叠加图，`c#` 仅表示本图候选序号，不是 CAD ID。原始 A.png/B.png 保留。
+- 世界坐标 evidence.method=`custom_holder_checker_plus_stereo_plumb`，保存每机独立 `landmark_labels`、固定 rig 的联合 `fixture_fit`、`T_camera_A_from_fixture`、垂线像素与三角化诊断。两机不同面上的标记不作为同一点配对；原点/重力仍分别来自实测 bearing 和垂线。

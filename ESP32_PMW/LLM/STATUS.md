@@ -1,5 +1,13 @@
 # LLM 工作状态
 
+## 2026-11-02：新版 holder 棋盘格检测与定位
+
+- 核对 v3 CAD：4 个顶面 + 16 个侧面标记是 16×16 mm 四象限图案，不是旧 tag36h11。新增 `holder_detection.py` 自动检测/亚像素细化交点，`holder.py` 输出候选、具名 ROI 结果和叠加图；不自动猜测重复图案的 CAD ID，也未实现小圆点自动解码。
+- `config/holder_layout.json` 保存真实 CAD 的 20 个完整名称/坐标/面法向及源哈希；历史 CAD 不修改。`holder_geometry.py` 固定相机参数，联合拟合两机各自可见的已命名点，允许不同侧面；拒绝缺点、歧义/重复、错图 ROI、退化、背面、差重投影和多解。bearing 仍未知，survey 默认 false；world 原点需实测 bearing，z 仍来自静止垂线。
+- 已接入 CLI `inspect-holder` 和 notebook Block 0/4/4B/5，默认 holder_checker，旧 AprilTag 路径可选。Block 4B 的 ROI 文件绑定当前参考图；WORLD/prepare_run 保留证据哈希检查。用法见 [HOLDER_MARKERS.md](HOLDER_MARKERS.md)。
+- 验证完成：新增 18 项 unittest 自检；完整 `.venv/bin/python -m LLM self-check` 通过。覆盖旋转/透视/模糊/噪声、负例/遮挡/ROI、不同面联合几何、真实合成图经检测到世界坐标的端到端路径。15 个 notebook 代码格编译通过；本次改动 `git diff --check` 通过。
+- CAD 渲染图检出侧视 4/4、斜视 12/12 个可见交点，已检查叠加图；输出位于工作区 `outputs/holder_detection_20261102/`。未打开相机/串口、未驱动线圈。实拍识别率、圆点可辨性、打印尺寸/物理定位精度、实际 notebook 相机流程仍待验证；离线通过不表示已上机验收。
+
 ## 2026-10-30：LED 对时改为双脉冲标记
 
 - LED 编程收进 `lib/SyncLed`：`src/main_*.cpp` 只声明意图（`led().sendStartSignal()` / `sendStopSignal()` / `sendBlink()`），不再直接写 `LED_PIN`。`driveBoot()` 只把引脚交给它一次，库不依赖 `src/constants.h`。
@@ -9,6 +17,17 @@
 - `SYNC_STOP` 只在真正离开驱动状态时发出：IDLE/OFF 里的重复 `stop`（例如 `safe_off.py`）不再多打印一条，否则离线解析会把它当成重复 STOP 而拒绝整次录像。
 - `main_tilt` 原来按**步**闪灯、按**标签变化**打印 `label=`，光学边沿比可关联事件多约 100 倍；改为按标签变化闪一次，并开机保持暗。
 - 未执行烧录或硬件操作：脉冲宽度、两机可见性、LED/驱动/电流延迟仍待台架验收（[START_SYNC.md](START_SYNC.md)）。
+
+## 2026-10-28：flight 默认改为 CCW
+
+- 按用户要求，`src/main_flight.cpp` 的 `SPIN_PHASES` 改用 `PHASES_CCW`，A/B/C/D 的设定相位为 `{0,270,180,90}`，适用于默认初始化和 frequency ramp 编译。
+- `pio run -e flight` 编译通过；本次未烧录，板上方向需刷入后才改变。实际电流相位和实物旋转方向仍须现场观察，显式 phase 指令可覆盖默认值。
+
+## 2026-10-28：190 Hz linear + hold pattern
+
+- 新增 `patterns/rise_2to20Hz_5s_20to190Hz_20s_linear_hold10s.json`：2→20 Hz 用 5 s，20→190 Hz 用 20 s，两段均为 linear，随后保持 190 Hz 10 s，总驱动时长 35 s。现有 schema、ramp 编码、连续性、分段采样和保持段检查通过；未启动硬件，台架表现待验证。
+- 新增 `patterns/rise_2to190Hz_30s_linear_hold10s.json`：30 s 从 2 Hz 匀速升至 190 Hz，再保持 10 s，总驱动时长 40 s。
+- 已通过现有 pattern 校验、ramp 编码与边界/保持段采样检查；仅新增配置，未启动硬件，台架表现待验证。保留用户正在调整的其他 pattern。
 
 ## 2026-10-28：GitHub 同步前验证
 

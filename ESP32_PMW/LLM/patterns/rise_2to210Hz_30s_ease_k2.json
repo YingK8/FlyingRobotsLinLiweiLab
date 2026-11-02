@@ -5,10 +5,10 @@
   "frequency_segments": [
     [
       2.0,
-      210.0,
+      250.0,
       30.0,
-      1,
-      2.0
+      0,
+      1.0
     ]
   ],
   "channel_updates": [],

@@ -623,3 +623,46 @@ ask for: ``override=True``, or ``append=True`` to add to what is there.
 | Solo frames for intrinsics (§16.5a) | `capture.solo_ok`, `calibrate.load_views` |
 | One bag per session, reused not re-shot (§16.5b) | `capture.write_meta`, `capture(..., override=)` |
 | Live-loop counterpart, deliberately different | [§17](../pose/theory.md) (ch. 3) |
+
+## 17. Printed holder checker landmarks
+
+The v3 coil holder has four top and sixteen side targets. Each target consists
+of four flush 8 mm material quadrants, with white on opposite diagonals. The
+intersection is the CAD landmark. These patterns do not encode AprilTag IDs.
+One to four small dots identify the block only; they do not independently encode
+the side face, and occlusion changes the observed count. The implementation uses
+explicit named image regions for identity, bound to the current image hashes.
+
+`LLM/holder_detection.py` seeds image corners and refines them with cornerSubPix.
+A circle around a checker intersection crosses four alternating bright/dark
+sectors. Opposite crossing directions should agree; a simple outer corner, edge,
+or dot generally gives zero or two crossings. Requiring consistent transitions
+on at least two radii rejects those shapes while admitting rotation and moderate
+projective skew. Default radii 3/5/8/12 px and contrast 35/255 are software settings,
+not physical resolution limits. Other checker patterns can pass, so appearance
+alone does not establish the holder or its CAD identity. Missing, occluded and
+ambiguous detections are not filled in.
+
+For camera j and its independently visible labels S_j, the fixture solve minimizes
+
+    sum_j sum_{i in S_j} || project_j(R X_i + t) - u_ji ||^2.
+
+X_i is the named CAD point; project_j includes the fixed camera intrinsics,
+distortion and calibrated stereo extrinsics. `LLM/holder_geometry.py` optimizes
+only the six fixture-pose parameters. S_A and S_B may be disjoint; different side
+labels are never triangulated together. Each camera must supply at least four
+noncollinear points. Both views seed the solve, including alternate planar IPPE
+solutions. Positive depth, front-facing surfaces, residuals (RMS <1 px, maximum
+<3 px), a scaled-Jacobian condition limit of 1e5 and distinct accepted solutions
+(>2 mm landmark displacement or >1 degree rotation) are checked. These are
+conservative software gates, not a proof of identity or physical accuracy.
+Consistent symmetry-related mislabeling remains possible without correct human
+face/block identification.
+
+World origin is the surveyed bearing transformed by this fitted pose. World z
+comes from stereo reconstruction of a stationary plumb line, not CAD z; world x
+is the fitted fixture direction projected perpendicular to gravity. The default
+layout retains an unknown bearing and an unconfirmed survey, so detection can run
+while world localization remains unavailable. CAD render and synthetic-image
+tests establish the implemented correspondence and math only; printed-feature
+precision, lighting, real-camera detection and physical accuracy require bench data.

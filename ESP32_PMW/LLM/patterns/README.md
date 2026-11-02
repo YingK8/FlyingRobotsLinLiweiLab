@@ -6,7 +6,15 @@
 
 每段 `[起始Hz, 结束Hz, 秒, mode, k]`，mode 0=polynomial、1=ease、2=exponential。相邻频率必须连续，时间为整毫秒；总长度受现有 `controller.control.ramp.check` 限制。这里存配置，不新增 ramp 算法。
 
-当前文件是 2026-10-27 从 `ramp.DEFAULT` 复制的历史 preset，不是当前装置的已验证飞行配方。先查看曲线再选择。录制开始不会发送 ramp，必须另点 START。
+`rise_2to190Hz_30s_linear_hold10s.json`：30 s 从 2 Hz 匀速升到 190 Hz，
+再保持 190 Hz 10 s，总驱动时长 40 s。linear 使用 mode=0、k=1；结束由 host 发 stop，
+录像模式再保留 2 s。2026-10-28 按用户要求新增，尚待台架验证。
+
+`rise_2to20Hz_5s_20to190Hz_20s_linear_hold10s.json`：前 5 s 从 2 Hz 匀速升到 20 Hz，
+随后 20 s 匀速升到 190 Hz，再保持 10 s，总驱动时长 35 s；两段升频速度分别为
+3.6 Hz/s 和 8.5 Hz/s。2026-10-28 按用户要求新增，尚待台架验证。
+
+`rise_2to210Hz_30s_ease_k2.json` 最初于 2026-10-27 从 `ramp.DEFAULT` 复制；本地内容可由操作者调整，以实际 JSON 为准。库内 pattern 不代表当前装置的已验证飞行配方。先查看曲线再选择。录制开始不会发送 ramp，必须另点 START。
 
 `alignment_2to5_5to50Hz_hold10s_19p5s.json` 是电流故障对照：来自归档的
 `results/alignment_rate/20260914_droneC_10hzs/050hz/tilt.json`，先用 5 s 从 2 到 5 Hz，

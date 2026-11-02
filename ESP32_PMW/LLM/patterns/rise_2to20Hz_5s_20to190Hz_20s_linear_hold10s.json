@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "rise_2to20Hz_5s_20to190Hz_20s_linear_hold10s",
+  "trigger": "time",
+  "frequency_segments": [
+    [2.0, 20.0, 5.0, 0, 1.0],
+    [20.0, 190.0, 20.0, 0, 1.0],
+    [190.0, 190.0, 10.0, 0, 1.0]
+  ],
+  "channel_updates": [],
+  "channel_settings_status": "firmware_defaults_unrecorded",
+  "note": "Requested 2026-10-28: linear rise from 2 to 20 Hz over 5 s, then from 20 to 190 Hz over 20 s, then hold 190 Hz for 10 s. Total drive duration 35 s; host sends stop at the end. Recording mode retains 2 s post-roll. No feedback or per-channel schedule; not yet bench validated."
+}

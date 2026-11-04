@@ -555,12 +555,15 @@ because macOS does not report exposure and AVFoundation cannot set it on a UVC d
 the blur gate was computed from a number nobody had measured, and on a dim bench auto
 exposure runs up to the full frame period.
 
-`camera/uvc.py` now sets it: UVC Camera Terminal requests (`CT_AE_MODE` to manual,
-`CT_EXPOSURE_TIME_ABSOLUTE` in 100 µs units) sent over libusb, which macOS allows alongside
-its own driver. `capture` sets $\tau = 2$ ms once the streams are open, records it in
-`meta.json`, and returns the cameras to auto on the way out, so a later flight is not shot
-at calibration's exposure. Out of range is refused, not clamped, because the gate uses the
-value asked for.
+`camera/uvc.py` now sets it: UVC Camera Terminal and Processing Unit requests sent over
+libusb, which macOS allows alongside its own driver. Since 2026-11-04 (operator) the cameras
+are **fully manual and stay that way**: `uvc.apply` sets exposure and gain and turns off
+auto exposure, auto white balance and power-line compensation, and nothing in the pipeline
+turns auto back on. (Backlight compensation is a 32-100 weight on auto exposure's metering,
+not a switch, so it is left at its default and acts on nothing.) In the LLM bench the
+settings live in the session (`exposure_s`, `gain`) beside mode and fps, and every step that
+opens the cameras applies them and records the read-back. Out of range is refused, not
+clamped, because the gate uses the value asked for; so is an exposure of a frame or more.
 
 Why 2 ms. The two gates allow a speed of $0.10\,\text{px}/\Delta$ (pair) and
 $0.50\,\text{px}/\tau$ (blur). At $\Delta = 1$ ms the pair gate allows 100 px/s; at

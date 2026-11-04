@@ -155,7 +155,10 @@ def meter(exposure_s, gain, width=640, height=400, fps=210, rotate180=True, indi
     try:
         for k, r in enumerate(apply(exposure_s, gain)):
             print(f"ELP {k}: {r}")
-        n0, t0 = [c.n_grabbed for c in src.sources], time.monotonic()
+        # averaged from 1 s in: the first ~1 s after `apply` runs at 170-195 fps on both
+        # cameras (measured 2026-11-04) and would drag the mean for minutes
+        n0 = t0 = None
+        t_open = time.monotonic()
         best, text = [0.0] * len(idx), ["" for _ in idx]
         while True:
             nw, tw, acc = [c.n_grabbed for c in src.sources], time.monotonic(), []
@@ -171,6 +174,10 @@ def meter(exposure_s, gain, width=640, height=400, fps=210, rotate180=True, indi
                     if sink.show(view) == ord("q"):
                         raise KeyboardInterrupt
             now = time.monotonic()
+            if n0 is None:
+                if now - t_open >= 1.0:
+                    n0, t0 = [c.n_grabbed for c in src.sources], now
+                continue
             for k, c in enumerate(src.sources):
                 win = (c.n_grabbed - nw[k]) / (now - tw)
                 best[k] = max(best[k], win)

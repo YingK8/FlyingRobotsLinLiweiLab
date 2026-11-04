@@ -8,7 +8,7 @@ from uuid import uuid4
 import copy
 from LLM.record.io import init_run, read_json, write_json, sha256, snapshot
 from LLM.record.takes import audit_flight, import_flight
-from LLM.analyse.rig import camera_key, require_verified
+from LLM.analyse.rig import camera_key, require_verified, same_rotation
 
 
 def new_session(root, camera):
@@ -34,7 +34,7 @@ def audit_take(take, session):
             or meta.get('camera_config') != session['camera']):
         raise ValueError('Take belongs to a different session/configuration')
     c = session['camera']
-    if meta.get('mode') != [c['width'], c['height']] or meta.get('rotate180') != c['rotate180']:
+    if meta.get('mode') != [c['width'], c['height']] or not same_rotation(meta.get('rotate180'), c['rotate180']):
         raise ValueError('Recorded dimensions/rotation differ from session')
     report = audit_flight(take, target_fps=c['fps'])
     report['camera'] = copy.deepcopy(meta['camera_config'])

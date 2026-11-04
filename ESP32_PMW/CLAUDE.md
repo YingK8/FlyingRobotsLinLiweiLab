@@ -173,7 +173,7 @@ has the steps. Its docs and notebook text are in Chinese -- keep them that way.
 - Never fabricate a time (no capture times from FPS); never fill an invalid frame from the last.
 - Ramps only via `controller/control/ramp.py`, serial only via `SerialComm`.
 - `Bench.run` / `Bench.drive_without_cameras` skip the thermal gate (see Safety).
-- After a non-trivial change: `.venv/bin/python -m LLM self-check`. Offline checks are not
+- After a non-trivial change: `.venv/bin/python -m LLM.tests.run`. Offline checks are not
   bench validation; say which you ran.
 
 ## Commands

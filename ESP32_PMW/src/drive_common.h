@@ -19,7 +19,14 @@ static const float PHASES_CCW[NUM_CHANNELS] = {0.0f, 270.0f, 180.0f, 90.0f};
 static const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
+// I = SENS * (mV above the boot zero, after CS_DEAD_MV) / 1000. Both from cs_cal, DC into
+// 2.031 ohm, 2.4-4.4 A, P0+P180 pooled (results/cs_cal/README.md, 2026-11-04). Was
+// {15.26, 15.28, 15.57, 15.34} with no dead zone, which read 1.74-1.88x high.
+static const float SENS[NUM_CHANNELS] = {6.87f, 6.81f, 6.68f, 6.53f};
+// The ADC reads ~0 for the first ~110 mV on the CS pin (fit intercept 105-114 mV on all four,
+// i.e. ~0.75 A), so a sample above the zero gets this added back. Below 2.4 A is NOT
+// measured: the knee's shape is assumed sharp. current_sense.cpp applies it per sample.
+static const float CS_DEAD_MV[NUM_CHANNELS] = {109.0f, 105.0f, 110.0f, 114.0f};
 
 // all zero = uncalibrated and the trim stays off; void when the capacitor bank changes
 static const float COIL_F0_HZ[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};

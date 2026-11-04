@@ -24,6 +24,7 @@ from scipy.spatial.transform import Rotation
 
 from controller.camera import identify
 from controller.camera import sources
+from controller.camera import uvc
 
 from controller.calib.calibrate import (MIN_COMMON_CORNERS, MIN_CORNERS, MIN_ORIENT_SPREAD_DEG,
                        MAX_INCIDENCE_DEG, NATIVE_H, NATIVE_W, PAIR_DIR,
@@ -35,8 +36,12 @@ from controller.calib.calibrate import (MIN_COMMON_CORNERS, MIN_CORNERS, MIN_ORI
 # hand sweep injects 1.98 px, and the run that produced it failed at 1.08 px joint RMS.
 MAX_PAIR_ERROR_PX = 0.10   # a fifth of the 0.5 px the whole calibration is allowed
 MAX_BLUR_PX = 0.50         # smear within one exposure, which no amount of sync removes
-EXPOSURE_S = 0.008         # the frame period at the mode's top rate; macOS refuses to
-                           # report exposure through OpenCV
+EXPOSURE_S = 0.002         # set on the cameras over UVC (camera/uvc.py), section 16.4a:
+                           # at 1 ms skew the pair gate binds first (100 px/s), where 2 ms
+                           # blurs 0.2 px. Costs 4x the light of auto; read the frame means
+GAIN = 100                 # the ELP's own default (GET_DEF, 2026-11-04); range 16-255
+AUTO_EXPOSURE_S = 0.008    # exposure_s=None leaves the cameras as they are: assume a full
+                           # frame period, since macOS will not report what auto chose
 
 MIN_KEEP_ROT_DEG = 8.0   # a saved shot must differ from every other by this much in board
 MIN_KEEP_SHIFT_PX = 80.0 # orientation, or this much in where it sits in frame
@@ -66,7 +71,8 @@ FAST_W, FAST_H = 640, 400          # exact 0.5x rescale: 217 fps, same field of 
 
 
 # ---- the bag ------------------------------------------------------------------------
-def write_meta(bag, spec, indices, mode, rotate180, n_pairs, n_solo, skew):
+def write_meta(bag, spec, indices, mode, rotate180, n_pairs, n_solo, skew, exposure_s=None,
+               camera_settings=None):
     """What this bag is, beside the images. Its presence is what marks a bag finished."""
 
     # Which devices shot this, as a set: an index means nothing after the session,
@@ -74,8 +80,10 @@ def write_meta(bag, spec, indices, mode, rotate180, n_pairs, n_solo, skew):
     # different camera has since been swapped in, which is what it is for.
     meta = {"board": spec.summary(), "camera_indices": list(indices),
             "elp_ids": elp_ids_now(), "mode": list(mode),
-            "rotate180": bool(rotate180), "n_pairs": n_pairs, "n_solo": list(n_solo),
-            "skew": skew, "created": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            "rotate180": (bool(rotate180) if isinstance(rotate180, bool)
+                          else sources.rotations(rotate180, len(indices))), "n_pairs": n_pairs, "n_solo": list(n_solo),
+            "skew": skew, "exposure_s": exposure_s,
+            "camera_settings": camera_settings, "created": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     (Path(bag) / "meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
@@ -103,7 +111,8 @@ def read_meta(bag):
 
 
 MIN_KEEP_ROT_DEG = 8.0   # a saved pair must differ from every other saved pair by this much
-MIN_KEEP_SHIFT_PX = 80.0 # ...in board orientation, or this much in where it sits in frame
+MIN_KEEP_SHIFT_PX = 80.0 # ...in board orientation, or this much in where it sits in frame:
+                         # px at 1280 wide, scaled to the frame's width in `_novel`
 INCIDENCE_BANDS = (0.0, 15.0, 30.0, 45.0, 60.0, 75.0)   # how the tilt range is covered
 BAND_FULL = 6            # shots in one band before the shutter asks for a different tilt. A
                          # rotation-blind gate lets the operator slide the board around the
@@ -146,7 +155,7 @@ def _look(spec, frame, prev=None, dt=None):
             motion = float(np.median(shared))
     speed = motion / dt if (dt and not np.isnan(motion)) else float("nan")
     return {"corners": corners, "ids": ids, "n": n_det, "incidence": inc, "rvec": rvec,
-            "motion": motion, "speed": speed, "by_id": here}
+            "motion": motion, "speed": speed, "by_id": here, "width": frame.shape[1]}
 
 
 def _pose_key(look):
@@ -162,7 +171,8 @@ def _novel(look, saved):
     rot = Rotation.from_rotvec(look["rvec"].ravel())
     centre = look["corners"].reshape(-1, 2).mean(axis=0)
     return not any(np.degrees((rot * r.inv()).magnitude()) < MIN_KEEP_ROT_DEG
-                   and np.linalg.norm(centre - c) < MIN_KEEP_SHIFT_PX for r, c, _ in saved)
+                   and np.linalg.norm(centre - c) < MIN_KEEP_SHIFT_PX * look.get("width", NATIVE_W) / NATIVE_W
+                   for r, c, _ in saved)
 
 
 def solo_ok(look, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, spec=SPEC):
@@ -254,8 +264,9 @@ def _overlay(spec, frames, looks, checks, footer):
 
 
 def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NATIVE_H,
-            rotate180=True, max_skew_s=0.002, append=False, auto=True, rate_hz=10.0,
-            exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False, backend=None):
+            rotate180=True, max_skew_s=0.001, append=False, auto=True, rate_hz=10.0,
+            exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False, backend=None,
+            fps=None, gain=GAIN):
     """Live preview that shoots by itself. SPACE pauses and resumes, q quits.
 
     The shutter tries a shot ``rate_hz`` times a second and saves the pair only if it clears
@@ -273,8 +284,13 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     alone, under its own stem, and feeds the intrinsics that the pairs cannot condition.
 
     Skew is handled where it is cheapest: `sources.StereoCamera` re-reads until the two
-    frames land inside ``max_skew_s``. On this bench 2 ms yields 16 pairs/s at 1.02 ms
-    median against 7.71 ms unfiltered, still above ``rate_hz``.
+    frames land inside ``max_skew_s``. 1 ms (operator's choice, 2026-11-04) yields ~1.8
+    pairs/s at 0.80 ms median; 2 ms gave 16 pairs/s at 1.02 ms. A resting board waits.
+
+    ``exposure_s`` and ``gain`` are SET on every ELP over UVC once the streams are open, with
+    every automatic function off (`camera/uvc.apply`, section 16.4a), and left that way:
+    nothing switches back to auto (operator, 2026-11-04). The read-back goes into
+    `meta.json`. ``exposure_s=None`` leaves the cameras as they are.
     """
 
     spec = spec or SPEC
@@ -293,10 +309,10 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     for tag in tags:
         (out_dir / tag).mkdir(parents=True, exist_ok=True)
 
-    src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height,
-                               grayscale=True, rotate180=rotate180, backend=backend) if len(idx) == 1 else
+    src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height, fps=fps, grayscale=True,
+                               rotate180=sources.rotations(rotate180, 1)[0], backend=backend) if len(idx) == 1 else
            sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s,
-                               width=width, height=height, grayscale=True,
+                               width=width, height=height, fps=fps, grayscale=True,
                                rotate180=rotate180, backend=backend))
 
     for cam, i in zip(getattr(src, "sources", [src]), idx):
@@ -308,6 +324,16 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
                 f"{width}x{height}. That is not an ELP -- run camera/identify.py to "
                 f"see what is connected, or pass indices=None to resolve them here."
             )
+
+    settings = None
+    if exposure_s:
+        try:
+            settings = uvc.apply(exposure_s, gain)
+        except Exception:
+            src.close()
+            raise
+        print("camera settings (manual, UVC): " + "; ".join(map(str, settings)))
+    gate_exposure_s = exposure_s or AUTO_EXPOSURE_S
 
     old = [f for tag in tags for f in (out_dir / tag).glob("*.png")]
     n = len(list((out_dir / tags[0]).glob("pair_*.png"))) if append else 0
@@ -335,16 +361,18 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             if not np.isfinite(skew_s):
                 skew_s = max_skew_s
 
+            if t_prev is None:   # the light check CLAUDE.md asks for: healthy ~59/82, max 235
+                print("frame mean/max: " + ", ".join(f"{f.mean():.0f}/{f.max()}" for f in frames))
             dt, t_prev = (t - t_prev if t_prev else None), t
             looks = [_look(spec, f, prev[k], dt) for k, f in enumerate(frames)]
             prev = [lk["by_id"] for lk in looks]
-            ok, checks = gates(spec, looks, skew_s, saved, exposure_s, max_blur_px)
+            ok, checks = gates(spec, looks, skew_s, saved, gate_exposure_s, max_blur_px)
 
             due = auto and (t - t_try) >= period
             if due:
                 t_try = t
             keep = [k for k, lk in enumerate(looks)
-                    if due and not ok and solo_ok(lk, solo[k], exposure_s, max_blur_px, spec)]
+                    if due and not ok and solo_ok(lk, solo[k], gate_exposure_s, max_blur_px, spec)]
             if (due and ok) or keep:
                 # Clearing happens on the first saved shot, not when the window opens:
                 # opening the preview to look at an expensive set must not destroy it. The
@@ -405,7 +433,7 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
                  + ",".join(f"incidence_{tag.lower()}_deg" for tag in tags) + "\n")
         for r in rows:
             fh.write(",".join(f"{x:.4f}" if isinstance(x, float) else str(x) for x in r) + "\n")
-    write_meta(out_dir, spec, idx, (width, height), rotate180, n, m, stats)
+    write_meta(out_dir, spec, idx, (width, height), rotate180, n, m, stats, exposure_s, settings)
     print(f"\n{n} pair(s) in {out_dir}, plus "
           + ", ".join(f"{c} solo for {tag}" for tag, c in zip(tags, m)))
     if rows:

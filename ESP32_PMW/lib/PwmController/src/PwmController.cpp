@@ -424,9 +424,10 @@ void PwmController::run() {
 
 void PwmController::enableCurrentSense(const gpio_num_t *adcPins,
                                          const float *sensPerVolt,
-                                         float overcurrentTripA) {
+                                         float overcurrentTripA,
+                                         const float *deadMv) {
     if (!adcPins || !sensPerVolt) return;
-    if (!_sense) _sense = new CurrentSense(adcPins, sensPerVolt);
+    if (!_sense) _sense = new CurrentSense(adcPins, sensPerVolt, deadMv);
     // coils must be off here: this captures the floating zero offset.
     _sense->seed();
     _overcurrentTripA = overcurrentTripA;

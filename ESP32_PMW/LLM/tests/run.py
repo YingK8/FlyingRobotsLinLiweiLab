@@ -1,4 +1,4 @@
-"""One offline entrypoint using the repository's self-check convention."""
+"""Every LLM offline check: `.venv/bin/python -m LLM.tests.run`. No camera, serial or coil drive."""
 import unittest
 
 
@@ -35,3 +35,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+    print("All offline checks passed")

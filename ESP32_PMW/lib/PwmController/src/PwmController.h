@@ -49,7 +49,8 @@ public:
 
 
   void enableCurrentSense(const gpio_num_t *adcPins, const float *sensPerVolt,
-                          float overcurrentTripA = 0.0f);
+                          float overcurrentTripA = 0.0f,
+                          const float *deadMv = nullptr);
 
   void enableCurrentBalance(const BalanceConfig &cfg = BalanceConfig(),
                             float startDuty = 50.0f);

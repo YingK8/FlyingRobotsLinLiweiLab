@@ -5,29 +5,40 @@
 
 `../pico/PROGRESS.md` 5 got K ~ 25 000 against a datasheet 4670-10110 by comparing AC CS
 readings with the PSU's DC average. Here the bridge is held in DC (`F0` on `-e servo`), so
-CS mirrors one steady high-side current, and the current is read across the load in the
-same scope block as CS. Both legs are measured -- `P<ch>,0` holds one high side on,
-`P<ch>,180` the other -- because each high-side switch has its own sense mirror and AC
-drive uses both, half a cycle each.
+CS mirrors one steady high-side current, and the current is read across the load by the
+scope. Both legs are measured -- `P<ch>,0` holds one high side on, `P<ch>,180` the other --
+because each high-side switch has its own sense mirror and AC drive uses both.
+
+TWO PROBES (since 2026-11-03): the scope sees only the load; V_CS is the ESP32's own ADC
+reading with the firmware's model undone, `raw_volts` (volts above the zero it seeds at boot,
+before CS_DEAD_MV). That calibrates the path the firmware actually uses: the fit is
+I = g * (V + dead), so `g` -> SENS and `-off` -> CS_DEAD_MV in `drive_common.h`.
+Cost: the reading is the 50 ms-filtered value printed at 2 Hz (`CurrentSense`), so each
+pulse keeps the LAST line, >= 0.5 s (10 tau) into the 1 s pulse. Older four-probe runs
+(scope CS, `v_mate`) still analyse: the columns `analyse` reads are the same.
 
 SETUP, per channel X
   * coil X and its series cap OUT; the load straight across OUTA_X / OUTB_X.
   * EN (header pin 2) jumpered to GND on the other three bridges: the ESP32 has no EN pin,
     so this is the only way to disable them. Check unpowered that EN reaches its rail
     through a resistor (> 1 kohm), not a direct tie, before grounding it.
-  * scope X -> CS_X, scope MATE[X] -> the board-mate's CS (A<->C, B<->D share a board and
-    its ground, the likeliest place for an anomaly), the other two -> OUTA_X / OUTB_X,
-    single-ended. EVERY ground clip on PGND at bridge X: the scope ground is USB ground,
-    and a clip on an OUT node shorts that leg. The load voltage is the DIFFERENCE of the
-    two because GND1/PGND1 have been measured ~400 mV apart.
+  * scope A -> OUTA_X, scope B -> OUTB_X, probe TIPS on the two ends of the load,
+    single-ended. BOTH ground clips on PGND at bridge X, NEVER on the other end of the load:
+    the clips are one node inside the scope, tied to USB ground = the Mac chassis, so a clip
+    on an OUT node shorts that leg (2026-11-03: V_load 0 V, 0.2 A, the B/D CS dragged by
+    amps). The load voltage is the DIFFERENCE A - B because GND1/PGND1 have been measured
+    ~400 mV apart.
+  * ONE bench supply, into the J49 of the board under test only. The ESP32 runs off the
+    Mac's USB and nothing else: a PSU-powered splitter on its USB shorted into the Mac's
+    case on 2026-11-03.
   * PSU OFF until `record` reports the ESP32 idle (opening/closing the port resets it, and
     the carrier pins float until `driveBoot()`); then on at 0 V, limit 10 A, raised slowly.
     CV, not CC: CC would pull the bus under the VNH5019's ~5.5 V UVLO at
     low setpoints, and a setpoint is worth nothing when the scope measures the current.
   * `pio run -e servo -t upload`. Kill: `safe_off.py` (servo now hears `stop`) or GPIO14.
 
-    uv run python controller/control/cs_cal.py record --ch A        # volts only
-    uv run python controller/control/cs_cal.py analyse results/cs_cal/* \
+    uv run python controller/control/cs_cal.py record --ch A --port /dev/cu.usbserial-0001
+    uv run python controller/control/cs_cal.py analyse results/cs_cal/2026-* \
         --rs A=2532,B=2530,C=2542,D=2540 --rload 2.031              # ohms go in here
     uv run python controller/control/cs_cal.py          # self-check, no hardware
 """
@@ -53,7 +64,6 @@ ROOT = HERE.parents[1]
 OUT_DIR = ROOT / "results" / "cs_cal"
 
 CH = "ABCD"
-MATE = {"A": "C", "C": "A", "B": "D", "D": "B"}
 
 #: The PicoScope 7 app bundles libps5000a; no separate PicoSDK install on this Mac.
 PICO_LIB = "/Applications/PicoScope 7 T&M.app/Contents/Resources"
@@ -68,18 +78,33 @@ SETTLE_S = 0.1
 #: ~13 W average at 16 V into 2 ohm; keeps the resistor's R near its cold reading.
 REST_S = 10 * PULSE_S
 
-#: The VNH5019 drives CS to V_SENSEH (~5 V) on a fault; real readings sit far below.
-FAULT_V = 3.5
-#: Anomaly thresholds on the idle channels. Guesses: neither noise floor is measured.
-ANOM_V = 0.02   # scope, board-mate CS over its zero
+#: The VNH5019 drives CS to V_SENSEH (~5 V) on a fault. The ESP32 ADC (11 dB) tops out
+#: near 3.1 V, so a fault reads as a pinned ~3 V. Guess: no fault has been logged this way.
+FAULT_V = 2.8
+#: Anomaly threshold on the idle channels. Guess: the noise floor is not measured.
 ANOM_A = 0.2    # ESP32 telemetry, any idle channel over its zero
+#: Below this the bridge did not drive: 2026-11-03 read |V_load| < 20 mV with a scope ground
+#: on an OUT node. Any real point here is > 1 V (6 V into ~2 ohm).
+NO_DRIVE_V = 0.5
 
 
-def firmware_sens():
-    """`SENS` from `src/drive_common.h`, so telemetry amps convert back without a 2nd copy."""
+def firmware_array(name):
+    """A per-channel array from `src/drive_common.h` (SENS, CS_DEAD_MV), so telemetry amps
+    convert back without a 2nd copy."""
     text = (ROOT / "src" / "drive_common.h").read_text()
-    m = re.search(r"SENS\[NUM_CHANNELS\]\s*=\s*\{([^}]*)\}", text)
+    m = re.search(rf"\b{name}\[NUM_CHANNELS\]\s*=\s*\{{([^}}]*)\}}", text)
     return [float(v.strip().rstrip("f")) for v in m.group(1).split(",")]
+
+
+#: current_sense.cpp's DEAD_THRESH_MV: a sample this far above the zero gets CS_DEAD_MV added.
+DEAD_THRESH_MV = 5.0
+
+
+def raw_volts(amps, sens, dead_mv):
+    """Undo current_sense.cpp at DC: telemetry amps -> CS volts above the boot zero, as the
+    ADC saw them. Inverse of I = sens * (V + dead) for V above the threshold."""
+    v = amps / sens
+    return v - dead_mv / 1000 if v * 1000 > dead_mv + DEAD_THRESH_MV else v
 
 
 class Scope:
@@ -144,6 +169,22 @@ def _hold(comm, seconds):
     return lines
 
 
+def boot(comm, attempts=3):
+    """Reset until the board reports idle. A reset is sometimes silent -- 0 bytes, not even
+    the ROM's boot noise -- and the next one boots fine (2026-10-30, and 2 of 3 back-to-back
+    runs on 2026-11-03; cause not found). The PSU is off throughout, so a retry is free."""
+    for n in range(1, attempts + 1):
+        before = comm.rx_bytes
+        comm.reset_device()
+        try:
+            return wait_idle(comm, timeout_s=3.0)
+        except RuntimeError:
+            print(f"  reset {n}/{attempts}: {comm.rx_bytes - before} bytes, no idle line"
+                  f"{' -- retrying' if n < attempts else ''}")
+    raise RuntimeError(f"no idle telemetry after {attempts} resets -- leave the PSU OFF; "
+                       f"check the port is not open elsewhere, replug the USB cable")
+
+
 def wait_idle(comm, timeout_s=5.0):
     """Block until telemetry shows every carrier at 0: the reset from opening the port is over."""
     end = time.monotonic() + timeout_s
@@ -172,43 +213,53 @@ def is_fault(v_cs, overflowed, lines):
     return v_cs > FAULT_V or bool(overflowed) or any("trip=1" in l for l in lines)
 
 
-FIELDS = ["ch", "pol", "v_set", "v_cs", "std_cs", "v_mate", "v_p", "v_n", "v_load",
+FIELDS = ["ch", "pol", "v_set", "v_cs", "v_p", "v_n", "v_load",
           "esp_A", "esp_B", "esp_C", "esp_D", "fault", "anomaly"]
+
+
+def point(x, pol, v_set, v_p, v_n, overflowed, lines, sens, dead):
+    """One points.csv row. V_CS is channel x's telemetry amps with the firmware model undone;
+    no telemetry line taken at the commanded duty means no reading: the row is a fault."""
+    i = CH.index(x)
+    esp = esp_amps(lines, 0.0 if pol == "zero" else 100.0, i)
+    v_cs = raw_volts(esp[i], sens[i], dead[i]) if esp else float("nan")
+    row = dict(ch=x, pol=pol, v_set=v_set, v_cs=v_cs, v_p=v_p, v_n=v_n, v_load=v_p - v_n,
+               fault=int(esp is None or is_fault(v_cs, overflowed, lines)), anomaly=0)
+    for k, c in enumerate(CH):
+        row[f"esp_{c}"] = esp[k] if esp else ""
+    return row
 
 
 def record(args):
     x = args.ch
-    i, mate = CH.index(x), MATE[x]
-    spare = [c for c in CH if c not in (x, mate)]
-    vp, vn = args.vp or spare[0], args.vn or spare[1]
-    if len({x, mate, vp, vn}) != 4:
-        sys.exit(f"scope channels must be distinct: cs={x} mate={mate} vp={vp} vn={vn}")
+    i = CH.index(x)
+    vp, vn = args.vp, args.vn
+    if vp == vn:
+        sys.exit(f"--vp and --vn must be different scope inputs, got {vp}")
     lo, hi, step = (float(v) for v in args.volts.split(":"))
     volts = np.arange(lo, hi + step / 2, step)
+    sens, dead = firmware_array("SENS"), firmware_array("CS_DEAD_MV")
 
     out = OUT_DIR / f"{datetime.now():%Y-%m-%d_%H%M%S}_{x}"
     out.mkdir(parents=True)
-    print(f"cs={x} mate={mate} vp={vp} vn={vn} -> {out}")
+    print(f"ch={x}: scope {vp} -> OUTA_{x}, {vn} -> OUTB_{x}, CS from ESP32 telemetry -> {out}")
 
-    scope = Scope({x: "5V", mate: "5V", vp: "20V", vn: "20V"})
+    scope = Scope({vp: "20V", vn: "20V"})
     # opening the port resets the ESP32, and its carrier pins float until driveBoot():
     # the PSU stays off until the board reports idle (incident 2026-10-30)
     input("PSU OUTPUT OFF? Enter to open the port ")
     comm = SerialComm(args.port, raw_log_path=out / "serial.jsonl")
     raw = {}
     f = (out / "points.csv").open("w", newline="")
-    f.write(f"# ch={x} mate={mate} vp={vp} vn={vn} "
-            f"fs={scope.fs:.0f} sens={','.join(map(str, firmware_sens()))}\n")
+    f.write(f"# ch={x} cs=esp vp={vp} vn={vn} "
+            f"fs={scope.fs:.0f} sens={','.join(map(str, sens))} dead={','.join(map(str, dead))}\n")
     w = csv.DictWriter(f, FIELDS)
     w.writeheader()
     try:
-        # an explicit EN pulse: a bare port open did not always reset a hung board
-        # (2026-10-30: three runs got 0 bytes until esptool's RTS reset revived it)
-        comm.reset_device()
-        wait_idle(comm)
+        boot(comm)
         comm.handle_serial_comm("S")
         comm.handle_serial_comm("F0")  # DC: the phase now picks a leg, it does not rotate
-        input(f"ESP32 up, all carriers 0. PSU ON now: CV, limit 10 A, start at 0 V and raise "
+        input(f"ESP32 up, all carriers 0. PSU ON now: CV, limit ~6 A, start at 0 V and raise "
               f"slowly to {volts[0]:.2f} V. Enter ")
         for n, v in enumerate(volts):
             if n:
@@ -230,28 +281,22 @@ def record(args):
                     comm.handle_serial_comm("S")
                     comm.note_external_drive(False)
 
-                m = {c: float(blk[c].mean()) for c in blk}
-                esp = esp_amps(lines, 0.0 if pol == "zero" else 100.0, i)
-                row = dict(ch=x, pol=pol, v_set=v, v_cs=m[x], std_cs=float(blk[x].std()),
-                           v_mate=m[mate], v_p=m[vp], v_n=m[vn],
-                           v_load=m[vp] - m[vn],
-                           fault=int(is_fault(m[x], ovf, lines)), anomaly=0)
-                for k, c in enumerate(CH):
-                    row[f"esp_{c}"] = esp[k] if esp else ""
+                row = point(x, pol, v, float(blk[vp].mean()), float(blk[vn].mean()),
+                            ovf, lines, sens, dead)
                 if pol == "zero":
                     zero = row
-                else:
-                    idle_esp = [] if not (esp and zero["esp_A"] != "") else [
-                        esp[k] - zero[f"esp_{c}"] for k, c in enumerate(CH) if k != i]
-                    row["anomaly"] = int(abs(row["v_mate"] - zero["v_mate"]) > ANOM_V
-                                         or any(abs(d) > ANOM_A for d in idle_esp))
+                elif row["esp_A"] != "" and zero["esp_A"] != "":
+                    row["anomaly"] = int(any(abs(row[f"esp_{c}"] - zero[f"esp_{c}"]) > ANOM_A
+                                             for c in CH if c != x))
                 w.writerow(row)
                 f.flush()
-                raw[f"{v:.2f}V_{pol}"] = np.stack([blk[c] for c in (x, mate, vp, vn)])
+                raw[f"{v:.2f}V_{pol}"] = np.stack([blk[vp], blk[vn]])
+                no_drive = pol != "zero" and abs(row["v_load"]) < NO_DRIVE_V
                 print(f"  {v:5.2f} V {str(pol):>4}: V_load={row['v_load']:6.3f} V  "
-                      f"CS={row['v_cs'] * 1e3:7.1f} mV  mate={row['v_mate'] * 1e3:6.1f} mV"
+                      f"CS={row['v_cs'] * 1e3:7.1f} mV  I_esp={row[f'esp_{x}']}"
                       f"{'  FAULT' if row['fault'] else ''}"
-                      f"{'  ANOMALY' if row['anomaly'] else ''}")
+                      f"{'  ANOMALY' if row['anomaly'] else ''}"
+                      f"{'  NO DRIVE -- check scope grounds / EN / VM' if no_drive else ''}")
                 if pol != "zero":
                     _hold(comm, REST_S)
     finally:
@@ -267,7 +312,7 @@ def record(args):
         finally:
             scope.close()
             f.close()
-            # rows (x, mate, vp, vn) per capture
+            # rows (vp, vn) per capture
             np.savez(out / "blocks.npz", **raw)
 
 
@@ -300,7 +345,7 @@ def analyse(dirs, png, rs_by_ch, rload_by_ch):
     import matplotlib.pyplot as plt
     fig, axs = plt.subplots(2, 2, figsize=(11, 8))
     print(f"{'ch':>2} {'pol':>4} {'n':>2} {'K':>8} {'g A/V':>7} {'off mV':>7} {'zero mV':>8}"
-          f" {'R2':>8} {'res mA':>7} {'TS dev':>7} {'SENS fix':>9}  flags")
+          f" {'R2':>8} {'res mA':>7} {'TS dev':>7} {'SENS':>6} {'DEAD mV':>7}  flags")
     for d in dirs:
         meta, rows = read_points(Path(d) / "points.csv")
         x = meta["ch"]
@@ -308,10 +353,11 @@ def analyse(dirs, png, rs_by_ch, rload_by_ch):
             sys.exit(f"{d}: channel {x} needs --rs and --rload")
         rs, rload = rs_by_ch[x], rload_by_ch[x]
         for r in rows:
-            r["i_load"] = float(r["v_load"]) / rload
-        sens = [float(s) for s in meta["sens"].split(",")]
+            # magnitude: with two probes V_load = A - B flips sign with the leg (P0 negative,
+            # P180 positive), and the sense mirror reports |I| on either leg
+            r["i_load"] = abs(float(r["v_load"])) / rload
         ax = axs.flat[CH.index(x)]
-        zero = [float(r["v_cs"]) for r in rows if r["pol"] == "zero"]
+        zero = [float(r["v_cs"]) for r in rows if r["pol"] == "zero" and r["fault"] == "0"]
         for pol, colour in (("0", "C0"), ("180", "C3")):
             pts = [r for r in rows if r["pol"] == pol]
             good = [r for r in pts if r["fault"] == "0"]
@@ -324,21 +370,18 @@ def analyse(dirs, png, rs_by_ch, rload_by_ch):
                 print(f"{x:>2} {pol:>4} {len(good):>2}  too few unfaulted points")
                 continue
             r = fit(I, V, rs)
-            # SENS converts ESP32 ADC volts to amps; scale it by what the load says
-            esp = [(float(p["i_load"]), float(p[f"esp_{x}"])) for p in good
-                   if p[f"esp_{x}"] not in ("", None) and float(p[f"esp_{x}"]) > 0.5]
-            fix = sens[CH.index(x)] * np.median([a / b for a, b in esp]) if esp else np.nan
             flags = " ".join(f for f, on in (
                 ("OUTLIERS", abs(r["ts_dev"]) > 0.01),
                 ("ANOMALY", any(p["anomaly"] != "0" for p in pts)),
                 (f"{len(bad)}FAULT", bad)) if on)
             print(f"{x:>2} {pol:>4} {len(good):>2} {r['K']:8.0f} {r['g']:7.3f} "
-                  f"{r['off'] * 1e3:7.1f} {np.mean(zero) * 1e3:8.1f} {r['r2']:8.5f} "
-                  f"{r['resid_mA']:7.1f} {r['ts_dev']:+7.2%} {fix:9.3f}  {flags}")
+                  f"{r['off'] * 1e3:7.1f} {np.mean(zero) * 1e3 if zero else np.nan:8.1f} {r['r2']:8.5f} "
+                  f"{r['resid_mA']:7.1f} {r['ts_dev']:+7.2%} {r['g']:6.2f} {-r['off'] * 1e3:7.0f}  {flags}")
             ax.plot(I, V * 1e3, "o", color=colour, label=f"P{pol}: K={r['K']:.0f}")
             span = np.linspace(0, I.max(), 2)
             ax.plot(span, (r["off"] + span / r["g"]) * 1e3, "-", color=colour, lw=1)
-        ax.axhline(np.mean(zero) * 1e3, color="0.6", ls=":", label="drive off")
+        if zero:
+            ax.axhline(np.mean(zero) * 1e3, color="0.6", ls=":", label="drive off")
         ax.set(title=f"{x}  (R_s={rs:.0f} ohm)", xlabel="I_load [A]", ylabel="V_CS [mV]")
         ax.legend()
     fig.tight_layout()
@@ -369,6 +412,22 @@ def _self_check():
     assert esp_amps([line, stale], 100.0, 0) == (6.10, 0.01, 0.00, 0.02)
     assert esp_amps([stale], 100.0, 0) is None
 
+    sens = [15.0, 15.0, 15.0, 15.0]
+    dead = [0.0] * 4
+    row = point("A", 0, 6.0, 3.1, 0.1, [], [line], sens, dead)
+    assert row["v_load"] == 3.0 and abs(row["v_cs"] - 6.10 / 15.0) < 1e-12 and not row["fault"]
+    assert point("A", 0, 6.0, 3.1, 0.1, [], [stale], sens, dead)["fault"]   # no reading at 100%
+    assert point("A", "zero", 6.0, 0.1, 0.1, [], [stale], sens, dead)["v_cs"] == 0.0
+
+    # raw_volts inverts current_sense.cpp: raw 300 mV -> filtered 410 -> 6.87*0.41 A
+    assert abs(raw_volts(6.87 * 0.410, 6.87, 110.0) - 0.300) < 1e-12
+    assert raw_volts(0.0, 6.87, 110.0) == 0.0                        # idle: nothing added
+    assert abs(raw_volts(6.87 * 0.002, 6.87, 110.0) - 0.002) < 1e-12  # under the threshold
+    # the fit recovers the firmware constants: I = g*(V + dead)
+    I = np.linspace(2.4, 4.4, 9)
+    r = fit(I, I / 6.87 - 0.110, 2532.0)
+    assert abs(r["g"] - 6.87) < 1e-9 and abs(r["off"] + 0.110) < 1e-9
+
     assert per_channel("2.0") == dict.fromkeys(CH, 2.0)
     assert per_channel("A=2532, C=2542") == {"A": 2532.0, "C": 2542.0}
 
@@ -382,7 +441,16 @@ def _self_check():
     except RuntimeError:
         pass
 
-    assert len(firmware_sens()) == 4
+    class _Boot(_Fake):
+        resets = 0
+        rx_bytes = 0
+        def reset_device(self):
+            _Boot.resets += 1
+            if _Boot.resets == 2: self.lines = [stale]   # silent once, then boots
+    boot(_Boot([]), attempts=3)
+    assert _Boot.resets == 2
+
+    assert len(firmware_array("SENS")) == len(firmware_array("CS_DEAD_MV")) == 4
     print("cs_cal self-check OK")
 
 
@@ -395,8 +463,8 @@ if __name__ == "__main__":
     r = sub.add_parser("record")
     r.add_argument("--ch", required=True, choices=list(CH))
     r.add_argument("--volts", default="6:10:0.5", help="PSU sweep lo:hi:step, V")
-    r.add_argument("--vp", choices=list(CH), help="scope channel on OUTA_X")
-    r.add_argument("--vn", choices=list(CH), help="scope channel on OUTB_X")
+    r.add_argument("--vp", choices=list(CH), default="A", help="scope input on OUTA_X")
+    r.add_argument("--vn", choices=list(CH), default="B", help="scope input on OUTB_X")
     r.add_argument("--port")
     a = sub.add_parser("analyse")
     a.add_argument("dirs", nargs="+")

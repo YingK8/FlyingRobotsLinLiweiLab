@@ -7,6 +7,7 @@ The printable board, and the ruler bar that proves the print was not scaled.
 pitch as ``--square-mm``.
 
     python sheet.py                  # writes assets/charuco_<board>.pdf
+    python -m controller.calib.sheet 10x10_letter_apriltag   # a named board from BOARDS
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from controller.calib.calibrate import HERE, SPEC, make_spec
+from controller.calib.calibrate import BOARDS, HERE, SPEC, make_spec
 
 PAGES = {"letter": (215.9, 279.4), "a4": (210.0, 297.0)}
 
@@ -34,6 +35,11 @@ def make_board(spec=None, path=None, page="letter"):
           f"{spec.square_mm} mm asked for -- rasterising at a whole number of pixels per "
           f"square quantises it)")
     print(f"  board is {spec.cols * actual:.1f} x {spec.rows * actual:.1f} mm")
+    side = (PAGES[page][0] - spec.cols * actual) / 2
+    if side < PRINTER_EDGE_MM:
+        print(f"  !! {side:.1f} mm side margin: most printers leave ~{PRINTER_EDGE_MM:g} mm "
+              f"unprinted, which cuts the outer markers. Print borderless, or check the edge "
+              f"squares after printing.")
     # Simulated into a 1280x800 frame, all corners survive down to about 14 px of marker
     # and then fall off a cliff. A small board sets a working distance, not a preference.
     for f_px in (900, 1200, 2765):
@@ -44,7 +50,8 @@ def make_board(spec=None, path=None, page="letter"):
     return path
 
 # ---- printing -----------------------------------------------------------------------
-PAGES = {"letter": (215.9, 279.4), "a4": (210.0, 297.0)}
+#: A typical non-borderless printer margin. Guess, not measured on our printer.
+PRINTER_EDGE_MM = 4.0
 
 
 def generate_pdf(spec, path, page="letter", dpi=600, margin_mm=12.0):
@@ -56,7 +63,11 @@ def generate_pdf(spec, path, page="letter", dpi=600, margin_mm=12.0):
     actual_square_mm = square_px * 25.4 / dpi
     board_w, board_h = spec.cols * square_px, spec.rows * square_px
     page_w, page_h = mm2px(page_mm[0]), mm2px(page_mm[1])
-    if board_w > page_w - 2 * mm2px(margin_mm) or board_h > page_h - 2 * mm2px(margin_mm):
+    # A board as wide as the page is allowed (side margin 0). The top margin is dropped
+    # when keeping it would leave no room under the board for the ~73 mm ruler block.
+    if margin_mm + 14.0 + spec.rows * actual_square_mm + 73.0 > page_mm[1]:
+        margin_mm = 0.0
+    if board_w > page_w or mm2px(margin_mm + 14.0) + board_h > page_h:
         raise ValueError(f"board {board_w}x{board_h} px does not fit {page_w}x{page_h} px")
 
     page_img = np.full((page_h, page_w), 255, np.uint8)
@@ -82,22 +93,26 @@ def generate_pdf(spec, path, page="letter", dpi=600, margin_mm=12.0):
             cv2.line(page_img, (cx + sx_ * gap, cy), (cx + sx_ * (gap + arm), cy), 0,
                      max(1, int(3 * s)))
 
-    bar_y, bar_len = y0 + board_h + mm2px(18.0), mm2px(100.0)
+    # The ruler block wants ~73 mm under the board; squeeze its spacing (not the 100 mm bar)
+    # when the board leaves less, so a full-width board still carries its scale bar.
+    room_mm = page_mm[1] - (y0 + board_h) * 25.4 / dpi - PRINTER_EDGE_MM
+    k = min(1.0, room_mm / 73.0)
+    bar_y, bar_len = y0 + board_h + mm2px(18.0 * k), mm2px(100.0)
     bar_x = (page_w - bar_len) // 2
     cv2.line(page_img, (bar_x, bar_y), (bar_x + bar_len, bar_y), 0, max(1, int(6 * s)))
     for mm in range(0, 101, 10):
         tick = mm2px(6.0 if mm % 50 else 10.0)
         x = bar_x + mm2px(float(mm))
         cv2.line(page_img, (x, bar_y), (x, bar_y + tick), 0, max(1, int(6 * s)))
-    text("0", bar_x - mm2px(2.0), bar_y + mm2px(18.0), 1.4)
-    text("100 mm", bar_x + bar_len - mm2px(12.0), bar_y + mm2px(18.0), 1.4)
+    text("0", bar_x - mm2px(2.0), bar_y + mm2px(max(18.0 * k, 14.0)), 1.4)
+    text("100 mm", bar_x + bar_len - mm2px(12.0), bar_y + mm2px(max(18.0 * k, 14.0)), 1.4)
 
     for i, line in enumerate([
             "Print at 100% / actual size -- no 'fit to page', no scaling.",
             "Then measure this bar. If it is not 100.0 mm, the print is scaled:",
             "measure one square with calipers and set SQUARE_MM in this notebook.",
             "Mount on glass or foam board. Paper curl is a systematic bias."]):
-        text(line, bar_x, bar_y + mm2px(30.0 + 7.0 * i), 1.15, 3)
+        text(line, bar_x, bar_y + mm2px(max(30.0 * k, 20.0) + 7.0 * k * i), 1.15 * max(k, .75), 3)
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,4 +121,7 @@ def generate_pdf(spec, path, page="letter", dpi=600, margin_mm=12.0):
 
 
 if __name__ == "__main__":
-    make_board(make_spec(float(sys.argv[1])) if len(sys.argv) > 1 else SPEC)
+    # `sheet.py` -> SPEC; `sheet.py 10x10_letter_apriltag` -> a named board; `sheet.py 5.95`
+    # -> SPEC's layout at that measured pitch
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    make_board(BOARDS[arg] if arg in BOARDS else make_spec(float(arg)) if arg else SPEC)

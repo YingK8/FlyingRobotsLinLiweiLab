@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from controller.calib.rig import StereoRig
+from controller.camera.sources import rotations
 from LLM.record.takes import load_flight
 
 
@@ -46,7 +47,7 @@ def _validated_rig(path, capture, preprocessing_confirmed):
     if np.linalg.norm(rig.a.position - rig.b.position) < 1e-6:
         raise ValueError("Stereo baseline is zero")
     rotation_known = "rotate180" in data and "rotate180" in capture["metadata"]
-    if rotation_known and data["rotate180"] != capture["metadata"]["rotate180"]:
+    if rotation_known and rotations(data["rotate180"], 2) != rotations(capture["metadata"]["rotate180"], 2):
         raise ValueError("Recording rotation does not match calibration")
     if not rotation_known and not preprocessing_confirmed:
         raise ValueError("Calibration/recording lack matching rotate180 metadata; confirm camera A/B order, rotation and crop with preprocessing_confirmed=True")

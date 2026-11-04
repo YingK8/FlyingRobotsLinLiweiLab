@@ -2,13 +2,13 @@
 
 运行 `record_experiment.ipynb`：导入、设置各一格，之后每一步一格（可单独重跑）。
 
-1. **准备**（不驱动线圈）：`Bench(...)` → `preview_cameras` → 标定（`collect_charuco_frames` → `calibrate_intrinsics` → `calibrate_extrinsics`，或 `use_calibration(path)`）→ `verify_calibration` → `photograph_reference` →（给了 `PLUMB` 时）`find_holder_marks` + `locate_fixture` → `record`（试录）。
+1. **准备**（不驱动线圈）：`Bench(...)` → `preview_cameras`（对准、对焦、补光）→ 标定（`collect_charuco_frames` → `calibrate_intrinsics` → `calibrate_extrinsics`，或 `use_calibration(path)`）→ `verify_calibration` → `photograph_reference` →（给了 `PLUMB` 时）`find_holder_marks` + `locate_fixture` → `record`（试录）。
 2. **实验**（会驱动线圈）：`show_ramp(RAMP)` → `run(RAMP, note=...)` → `analyse()`。
 
 每一步都是 `Bench`（`bench.py`）的一个方法，可单独重跑。另有 `check_serial()`（只握手）和 `drive_without_cameras(RAMP)`（无录像驱动）。
 
 只有标定已验证 **且** 装置已定位时，`run()` 才做 **正式实验**；否则做 **sync check**（视频 + 电流 + LED，无几何）。
-自检：`.venv/bin/python -m LLM self-check`（离线，不碰硬件）。
+自检：`.venv/bin/python -m LLM.tests.run`（离线，不碰硬件）。
 
 ## 目录
 

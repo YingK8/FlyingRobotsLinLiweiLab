@@ -17,14 +17,26 @@ BOARD = BOARDS["9x6_letter"].with_square_mm(16.52)
 
 
 class Bench:
-    def __init__(self, cameras=(1, 0), serial_port=None, *, width=1280, height=800, fps=120,
-                 upside_down=True, backend="auto", codec="auto", board=BOARD,
-                 runs=PROJECT / "LLM/runs"):
-        from LLM.record.experiment import new_session
-        self.camera = dict(indices=tuple(cameras), width=width, height=height, fps=fps,
-                           rotate180=upside_down, backend=backend, codec=codec)
+    def __init__(self, cameras=(1, 0), serial_port=None, *, width=640, height=400, fps=210,
+                 exposure_ms=2.0, gain=100, upside_down=True, backend="auto", codec="auto",
+                 board=BOARD, runs=PROJECT / "LLM/runs"):
+        """One set of camera settings for every step that opens the cameras: mode, fps,
+        exposure and gain, all manual over UVC with every automatic function off
+        (camera/uvc.apply), and never switched back to auto. upside_down: one bool for
+        both cameras, or (A, B)."""
+        if not 0 < exposure_ms < 1e3 / fps:   # longer than a frame and the rate drops
+            raise ValueError(f"exposure {exposure_ms} ms must be under one frame "
+                             f"({1e3 / fps:.2f} ms at {fps} fps)")
         self.serial_port, self.board, self.runs = serial_port, board, Path(runs)
-        self.session = new_session(self.runs / "sessions", self.camera)
+        self._new_session(dict(indices=tuple(cameras), width=width, height=height, fps=fps,
+                               rotate180=upside_down, backend=backend, codec=codec,
+                               exposure_s=exposure_ms / 1e3, gain=gain))
+
+    def _new_session(self, camera):
+        """Sessions are immutable: a new camera setting is a new session, and everything
+        verified under the old one is void."""
+        from LLM.record.experiment import new_session
+        self.session = new_session(self.runs / "sessions", camera)
         self.camera = self.session["camera"]
         self.folder = Path(self.session["directory"])
         self.calibration = self.verification = self.world = None
@@ -34,16 +46,32 @@ class Bench:
         print("Session:", self.folder)
 
     # ---- cameras ----------------------------------------------------------------------
-    def preview_cameras(self):
-        """Live view: cover one lens to confirm A/B, set focus. Don't touch lenses after."""
-        from LLM.record.panel import run_panel
-        return run_panel(self.session, output_root=self.folder / "preview_takes", max_seconds=10)
+    def preview_cameras(self, rotate180=None, scale=1.0):
+        """Live A | B inline in the notebook at the session's own mode, fps, exposure and
+        gain, nothing recorded: confirm A/B, aim, focus, light. Shows each camera's grab
+        rate (average, and best 0.5 s as max) and brightness.
+
+        rotate180: (A, B) 180-degree flips, or one bool; None keeps the session's. A change
+            starts a NEW session (sessions are immutable), so calibrate in the new
+            orientation or load a calibration shot in it.
+        scale: display size only. Interrupt the kernel to stop. Rotation in software is
+        180 deg only; any other angle is the camera itself."""
+        from controller.camera import uvc
+        from controller.camera.sources import rotations
+        if rotate180 is not None and rotations(rotate180, 2) != rotations(self.camera["rotate180"], 2):
+            self._new_session(dict(self.camera, rotate180=rotations(rotate180, 2)))
+            print(f"rotation (A, B) = {tuple(rotations(rotate180, 2))}: new session, "
+                  f"calibration cleared")
+        c = self.camera
+        uvc.meter(c["exposure_s"], c["gain"], width=c["width"], height=c["height"],
+                  fps=c["fps"], rotate180=c["rotate180"], indices=c["indices"],
+                  backend=c["backend"], scale=scale)
 
     # ---- calibration ------------------------------------------------------------------
     def collect_charuco_frames(self, folder=None):
         """Auto-shutter capture of still board poses seen by both cameras (q to finish)."""
-        if (self.camera["width"], self.camera["height"]) != (1280, 800):
-            raise ValueError("Full calibration captures at 1280x800; build the bench in that mode")
+        # Calibrated in the bench's own mode, the one it records in: intrinsics are never
+        # rescaled, and fixed_rig refuses a calibration from another mode.
         bag = Path(folder) if folder else self.folder / f"calibration_{uuid4().hex[:8]}" / "images"
         self._capture(bag)
         self._calibration_bag = bag
@@ -107,7 +135,8 @@ class Bench:
         from controller.calib.capture import capture
         c = self.camera
         capture(bag, indices=c["indices"], spec=self.board, width=c["width"], height=c["height"],
-                rotate180=c["rotate180"], backend=c["backend"])
+                rotate180=c["rotate180"], backend=c["backend"], fps=c["fps"],
+                exposure_s=c["exposure_s"], gain=c["gain"])
 
     # ---- scene ------------------------------------------------------------------------
     def photograph_reference(self):

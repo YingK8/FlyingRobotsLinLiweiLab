@@ -9,21 +9,33 @@ import numpy as np
 from scipy.optimize import least_squares
 from controller.calib.calibrate import CharucoSpec, detect
 from controller.calib.rig import StereoRig
+from controller.camera.sources import rotations
 from LLM.record.io import read_json, write_json, sha256
 from LLM.analyse.world import build_world_frame
 from LLM.analyse.pose import _point
 
 
 def camera_key(camera):
-    return {k: list(camera[k]) if k == 'indices' else camera[k]
-            for k in ('indices', 'width', 'height', 'fps', 'rotate180', 'backend', 'codec')}
+    key = {k: list(camera[k]) if k == 'indices' else camera[k]
+           for k in ('indices', 'width', 'height', 'fps', 'rotate180', 'backend', 'codec')}
+    if not isinstance(key['rotate180'], bool):          # per camera: (A, B) -> [A, B]
+        key['rotate180'] = rotations(key['rotate180'], 2)
+    for k in ('exposure_s', 'gain'):    # manual UVC settings, since 2026-11-04; older
+        if k in camera:                 # sessions have none and must still compare equal
+            key[k] = camera[k]
+    return key
+
+
+def same_rotation(a, b):
+    """A one-flag and a per-camera setting agree when every camera ends up the same."""
+    return a is not None and b is not None and rotations(a, 2) == rotations(b, 2)
 
 
 def fixed_rig(path, camera):
     data = read_json(path)
     if data.get('image_size') != [camera['width'], camera['height']]:
         raise ValueError('Camera mode differs from calibration')
-    if data.get('rotate180') != camera['rotate180']:
+    if not same_rotation(data.get('rotate180'), camera['rotate180']):
         raise ValueError('Image rotation differs from calibration')
     rig = StereoRig.load(path)
     if len(rig.cameras) != 2 or not np.allclose(rig.a.T_world_cam, np.eye(4)):
@@ -75,7 +87,7 @@ def verify_bag(bag, calibration, camera, *, session_id, rms_limit=1.0):
     bag = Path(bag)
     rig, data = fixed_rig(calibration, camera)
     meta = read_json(bag / 'meta.json')
-    if meta.get('camera_indices') != list(camera['indices']) or meta.get('rotate180') != camera['rotate180']:
+    if meta.get('camera_indices') != list(camera['indices']) or not same_rotation(meta.get('rotate180'), camera['rotate180']):
         raise ValueError('Check bag was captured with different A/B mapping or rotation')
     board = meta['board']
     spec = CharucoSpec(*board['squares'], board['square_mm'], board['marker_mm'], board['dictionary'])

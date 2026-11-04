@@ -256,7 +256,7 @@ void setup() {
   driveBoot(false);
   ctl.begin();
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
-  ctl.enableCurrentSense(ADC_PINS, SENS,   0.0f);
+  ctl.enableCurrentSense(ADC_PINS, SENS, 0.0f, CS_DEAD_MV);
   // trim stays off unless every table entry is positive
   ctl.setPhaseTrim(COIL_F0_HZ, COIL_Q);
   Serial.printf("[flight] phase trim %s\n",

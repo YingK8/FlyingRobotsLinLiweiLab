@@ -521,6 +521,10 @@ The knee is at 2 ms: a $7.6\times$ improvement for a rate a keypress cannot perc
 it the yield collapses, because the acceptance probability is $\approx \Delta_{\max}/T$ and
 the offset must drift into the window rather than being drawn afresh.
 
+`capture` defaults to **1 ms** since 2026-11-04, by the operator's choice: ~1.8 pairs/s is
+slow for a sweep and costs nothing for a resting board (§16.4), which is what the gates
+demand anyway.
+
 This is why rejection sampling is a **calibration-only** technique. It costs re-reads, and
 §17 of ch. 3 explains why the live loop cannot pay them.
 
@@ -542,6 +546,39 @@ only reason it ever moved is that a hand held it. A correction for self-inflicte
 machinery that somebody must maintain, test and understand forever. A block of wood is
 free. The general lesson: when an error is a product of two terms and one of them is a
 choice, set it to zero rather than modelling it.
+
+### 16.4a Exposure: the blur term is set, not assumed
+
+$v\Delta$ is the pair term and $v\tau$ the blur term. Until 2026-11-04 the cameras ran on
+their own auto exposure and `EXPOSURE_S` was a guess at $\tau$ (8 ms, one frame period),
+because macOS does not report exposure and AVFoundation cannot set it on a UVC device. So
+the blur gate was computed from a number nobody had measured, and on a dim bench auto
+exposure runs up to the full frame period.
+
+`camera/uvc.py` now sets it: UVC Camera Terminal requests (`CT_AE_MODE` to manual,
+`CT_EXPOSURE_TIME_ABSOLUTE` in 100 µs units) sent over libusb, which macOS allows alongside
+its own driver. `capture` sets $\tau = 2$ ms once the streams are open, records it in
+`meta.json`, and returns the cameras to auto on the way out, so a later flight is not shot
+at calibration's exposure. Out of range is refused, not clamped, because the gate uses the
+value asked for.
+
+Why 2 ms. The two gates allow a speed of $0.10\,\text{px}/\Delta$ (pair) and
+$0.50\,\text{px}/\tau$ (blur). At $\Delta = 1$ ms the pair gate allows 100 px/s; at
+$\tau = 2$ ms the blur gate allows 250 px/s, so the pair gate binds first and the blur at
+that speed is 0.2 px. At 8 ms the blur gate bound first, at 62 px/s. A shorter $\tau$ buys
+nothing further and costs light: 2 ms is a quarter of 8 ms. Read the frame mean/max that
+`capture` prints first (§22.8 of ch. 3: a healthy scene is ~59/82, max 235).
+
+Higher frame rate is not the same lever. At $1280\times800$ the sensor is already at its
+top rate (~120 fps), and §16.1 shows that a faster consumer does not move the skew. The
+faster mode, $640\times400$, is §16.6's rejected trade.
+
+**Measured 2026-11-04**, both ELPs streaming $1280\times800$, camera B (A was dark on
+every setting, auto included: covered or unlit, not exposure). Frame mean 84 on auto, 4 at
+2 ms, 12 at 8 ms, 85 back on auto; read-back 2.00 ms on both. Auto holds 119 fps, so it
+cannot be exposing past one frame period: its ~7× over manual 8 ms is **gain**. So at this
+bench's light, 2 ms is ~20× darker than what auto delivers, mean 4 against the ~20 at which
+detection fails. A short $\tau$ needs either that light back or the gain auto was using.
 
 ### 16.5 The gates
 
@@ -608,6 +645,15 @@ ask for: ``override=True``, or ``append=True`` to add to what is there.
 * **$640\times400$ to halve the skew.** It works: 2.39 ms median, and 46% of pairs already
   under 2 ms. But corners are then twice as coarse in millimetres, and the trade is bad once
   the board rests and $\Delta$ multiplies by zero anyway.
+  **Reversed for the LLM bench, 2026-11-04 (operator):** it now records at
+  $640\times400$ @ 210 fps, and a calibration must be shot in the mode it is used in
+  (intrinsics are never rescaled), so `Bench` calibrates there too. The trade above was
+  against calibrating a $1280\times800$ recording; it does not apply when the recording
+  itself is $640\times400$. Measured that day: 210.4 fps on both cameras at 2 ms manual and
+  on auto. At $f_x \approx 1375$ px the 12.4 mm markers reach the 14 px detection floor at
+  ~1.2 m, so the board works inside that. `MIN_KEEP_SHIFT_PX` now scales with frame width.
+  Exposure: the blur gate stays looser than the pair gate (100 px/s at 1 ms skew) for any
+  $\tau \le 5$ ms, so anything up to the 4.76 ms frame period costs no shots, only blur.
 * **Recording continuously and choosing afterwards.** Correct, and about 270 lines including
   a lossless codec, a writer thread and a timestamp sidecar. §16.4 is why it is gone.
 
@@ -618,6 +664,7 @@ ask for: ``override=True``, or ``append=True`` to add to what is there.
 | Skew distribution over one frame period (§16.1) | `sources.StereoCamera.last_skew`, `skew_stats` |
 | Rejection sampling and its yield (§16.3) | `sources.StereoCamera.read`, `max_skew_s` |
 | Pair-consistency and blur limits (§16.2) | `MAX_PAIR_ERROR_PX`, `MAX_BLUR_PX`, `EXPOSURE_S` |
+| Exposure set over UVC, restored to auto (§16.4a) | `camera/uvc.py`, `capture(exposure_s=)` |
 | The gate set (§16.5) | `capture.gates`, drawn by `_overlay` |
 | The refusing shutter (§16.5) | `capture.capture` |
 | Solo frames for intrinsics (§16.5a) | `capture.solo_ok`, `calibrate.load_views` |

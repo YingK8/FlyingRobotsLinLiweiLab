@@ -143,6 +143,12 @@ BOARDS = {
     ),
     "4x12_6mm": CharucoSpec(4, 12, 6.0113, 4.5, "DICT_4X4_100", "4x12_6mm"),
     "9x6_letter": CharucoSpec(9, 6, 16.667, 12.5, "DICT_4X4_100", "9x6_letter"),
+    # Letter width less a printable margin: 10 x 20.32 = 203.2 mm (0.8 in squares, exactly
+    # 480 px at 600 dpi, so rasterising does not move the pitch), 6.35 mm each side -- clear
+    # of a ~4 mm printer edge and the crop marks. 36h11 AprilTags (587 ids, 50 used).
+    # Nominal until the print is measured.
+    "10x10_letter_apriltag": CharucoSpec(10, 10, 20.32, 15.0, "DICT_APRILTAG_36h11",
+                                         "10x10_letter_apriltag"),
 }
 
 

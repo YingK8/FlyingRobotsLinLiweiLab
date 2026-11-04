@@ -359,18 +359,31 @@ class StereoCamera(Capture):
             s.close()
 
 
+def rotations(rotate180, n):
+    """``rotate180`` as one flag per camera. A single bool is the old form -- every camera the
+    same -- and stays valid in sessions, bags and calibrations written before 2026-11-04.
+    Compare two settings through this, never directly: ``True`` and ``[True, True]`` agree."""
+    if isinstance(rotate180, (list, tuple)):
+        if len(rotate180) != n:
+            raise ValueError(f"rotate180 has {len(rotate180)} entries for {n} camera(s)")
+        return [bool(r) for r in rotate180]
+    return [bool(rotate180)] * n
+
+
 def open_stereo(specs, max_skew_s=None, **kw):
     """
-    Build a `StereoCamera` from two CLI-friendly source strings.
+    Build a `StereoCamera` from two CLI-friendly source strings. ``rotate180`` may be one
+    flag for all, or one per source (`rotations`).
     """
 
     specs = list(specs)
     if len(specs) < 2 or len(set(specs)) != len(specs):
         raise ValueError("stereo requires at least two distinct sources")
+    rot = rotations(kw.pop("rotate180", False), len(specs))
     opened = []
     try:
-        for spec in specs:
-            opened.append(open_source(spec, **kw))
+        for spec, r in zip(specs, rot):
+            opened.append(open_source(spec, rotate180=r, **kw))
         return StereoCamera(opened, max_skew_s=max_skew_s)
     except BaseException:
         for camera in opened:
@@ -420,7 +433,7 @@ class Sink:
         self.period = 1.0 / hz if hz else 0.0
         self.quality = int(quality)
         self._last = 0.0
-        self._w = None
+        self._h = None
 
     def open(self):
         """
@@ -430,12 +443,13 @@ class Sink:
         never appears.
         """
 
-        if self.inline and self._w is None:
-            import ipywidgets as W
+        if self.inline and self._h is None:
             from IPython.display import display
 
-            self._w = W.Image(format="jpeg")
-            display(self._w)
+            # A replaceable display output, not an ipywidgets Image: VS Code's renderer
+            # failed to load @jupyter-widgets/controls (ipywidgets 8.1.8, 2026-11-04), and
+            # an updated display needs no widget manager in any frontend.
+            self._h = display(f"{self.title}: waiting for frames...", display_id=True)
         return self
 
     def due(self):
@@ -452,11 +466,13 @@ class Sink:
         if not self.inline:
             cv2.imshow(self.title, view)
             return cv2.waitKey(1) & 0xFF
-        if self._w is None:
+        if self._h is None:
             self.open()
         ok, buf = cv2.imencode(".jpg", view, [cv2.IMWRITE_JPEG_QUALITY, self.quality])
         if ok:
-            self._w.value = buf.tobytes()
+            from IPython.display import Image
+
+            self._h.update(Image(data=buf.tobytes(), format="jpeg"))
         return -1
 
     def close(self):

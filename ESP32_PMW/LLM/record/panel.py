@@ -85,6 +85,10 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
         options = {k: camera[k] for k in ('width','height','fps','rotate180','backend')}
         src = sources.open_stereo([f'camera:{i}' for i in camera['indices']], grayscale=True, max_skew_s=None, **options)
         cleanup.callback(src.close)
+        settings = None
+        if camera.get('exposure_s'):     # all manual, never back to auto (camera/uvc.py)
+            from controller.camera import uvc
+            settings = uvc.apply(camera['exposure_s'], camera['gain'])
         def finalize():
             if writer is not None:
                 if error: writer.meta['capture_error'] = error
@@ -102,7 +106,8 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
         meta = {'session_id': session['session_id'], 'camera_config': camera_key(camera),
                 'camera_indices': camera['indices'], 'rotate180': camera['rotate180'],
                 'requested': {k: camera[k] for k in ('width','height','fps')},
-                'cameras': [c.actual for c in src.sources], 'note': 'LLM browser panel',
+                'cameras': [c.actual for c in src.sources], 'camera_settings': settings,
+                'note': 'LLM browser panel',
                 'mode_kind': 'flight_frequency_open_loop' if driven else 'camera_only'}
         try:
             while True:

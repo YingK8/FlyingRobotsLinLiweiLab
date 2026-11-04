@@ -11,7 +11,7 @@ void setup() {
   ctl.begin();
   ctl.initCarrierPWM(CARRIER_PINS, PWM_FREQ, CARRIER_ZERO);
   // balance stays off: a bad sense reading sets the asymmetry this sweep measures
-  ctl.enableCurrentSense(ADC_PINS, SENS);
+  ctl.enableCurrentSense(ADC_PINS, SENS, 0.0f, CS_DEAD_MV);
 
   seq.loadFromJsonFile("/tilt.json");
   seq.start();

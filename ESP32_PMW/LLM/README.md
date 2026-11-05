@@ -41,7 +41,7 @@
 - **每个 run 只有一次 START**：重拍就是新的 `run()`。录像中不要按 ESP reset。
 
 ## 安全
-- 没有任何东西会自动停线圈。停机手段：面板 Stop、Interrupt、`safe_off.py`、GPIO14、关电源。
+- 录像运行到 ramp 时长会由主机发送 stop；Stop 或 Interrupt 也会请求停止并等待 OFF 回应。USB 断开、进程强杀或主机失效时不能保证停机，独立停机手段仍包括 GPIO14 和关电源。
 - `run()` 和 `drive_without_cameras()` 不按温度模型等待冷却（操作者决定，2026-10-28），驱动时长仍记账。
 - ESP 每次 reset（烧录、打开串口）时保持线圈电源关闭。
 
@@ -74,4 +74,42 @@ NaN 表示未观测，不是零。
 ## 待办
 - `holder_layout.json` 的 bearing 实测位置未填（`survey_confirmed=false`）；holder 检测只在 CAD 渲染图上验证过，实拍识别率与定位精度待测。
 - `fixture_layout.json`（旧 AprilTag）仍缺 CAD tag 角点和 bearing。
-- 还没有双脉冲固件的实录：`find_led`、光学延迟、LED 可见性都未经台架验证。
+- 光学对时与几何有效性按每次 run 的处理报告判断；完成录像不代表完成同步验证。
+
+## 本机 notebook：1280×800 @ 120 fps 与 axis_pose
+
+2026-11-04 合入 `fc87a76` 后，本机 notebook 恢复 A/B=(1,0)、1280×800、120 fps、两机默认不旋转（可在预览格修改）。本机默认自动曝光（EXPOSURE_MS=None），每个相机入口显式切回自动；填写毫秒数才启用新版手动曝光/增益，实际帧率以试录源时间为准。`Bench` 库默认值未改，notebook 显式传入本机设置。
+
+发布的 notebook 默认 `SESSION_ID=None`、`CALIBRATION=None`，不依赖本机实验目录；需要恢复时显式填写自己的 session 和标定路径。先遮挡镜头核对 A/B，保持镜头/对焦、成像模式和双目相对几何一致；标定复用以误差证据和适用范围判断。整体移动刚性双目装置时，相对于实验台/重力的坐标关系仍需更新。`PLUMB=None` 时可先录 sync check 并尝试 axis_pose。
+
+顺序：导入/设置 → 0 建立 bench → 1 预览 → 2 加载或重标 → 3 验证 → 4 参考照片 → 6 试录 → 可选 6A 空背景 → 7 ramp → 8 录像实验 → 9 LED/电流分析 → 可选 9A axis_pose。暂不做 world 时跳过 5。填写本次 NOTE；试录有 warnings 时检查并填写本次 WARNING_REVIEW。逐格运行，不要 Run All。
+
+axis_pose 适配层保留在 `LLM/axis_pose.py`，导入已改为 `record/`、`analyse/`；核心 `controller.pose.axis_pose` 不变。6A 只打开相机；9A 只处理已保存录像，默认均关闭。9A 填两机 robot ROI、空背景及确认项后设 RUN_AXIS_POSE=True，先检查 500 帧，再将 AXIS_MAX_FRAMES=None 处理全片。新建 bench 清空背景选择。
+
+## 实验性 axis_pose diagnostics（2026-11-02）
+
+`processed/axis_pose_trials/<timestamp_uuid>/` 每次运行创建新目录；不替换 `pose_camera.csv`、`pose.csv` 或正式 report。
+
+- `axis_pose.csv`：一行对应一对实际编码帧，保留 `frame_index`、`encoded_frame_index`、`t_source_a_s` / `t_source_b_s`；`elapsed_capture_s` 从第一对保存帧的平均 host 时间开始，不是 LED START 时间。
+- `x_est_mm,y_est_mm,z_est_mm` 是 camera A 坐标下的区域质心位置代理；`nx_est,ny_est,nz_est` 为同一坐标下的候选单位轴。`angle_to_reference_deg` 相对显式给定的 `reference_axis_camera`，不能叫重力倾角。正负号／分支来自参考和连续性，`axis_sign_observed=false`。
+- `axis_estimate_valid` / `position_estimate_valid` 只表示通过本次算法门限；`position_valid=false`、`orientation_valid=false`、`physical_accuracy_validated=false`。不伪造轴端点，不交给 takeoff 或正式 world 转换。缺失／拒绝帧的估计值为 NaN。
+- `reason`、每机 `a_reason/b_reason`、`a_area_px/b_area_px`、`ray_gap_mm`、`stereo_skew_s`、`reference_reset` 记录诊断；失败或时间缺口后重置选支参考，绝不把旧轴写成当前观测。
+- `metadata.json` 保存算法／输入哈希、ROI、背景模式、时间／角度门限、显式参考、处理帧数与接受数；`inputs/` 保存本次 rig 和空背景快照。门限沿用核心或工程起点，不是实物精度。
+- `curves.png` 和 `overlays.jpg` 供人工检查；叠加图保留源帧编号和源时间，绿色为 mask、黄色为区域短主轴。最多均匀抽取 6 对图像，不能替代全视频检查。
+- notebook Block 6A 只在显式开关下打开相机保存背景；9A 只读完成的录像，兼容 `sync_check`。两格均默认关闭，不驱动硬件。无背景时需显式 `background_mode='threshold'`，适用性需按实拍确认。
+
+## 单次无录像试转：2→210 Hz
+
+`ease_to_210Hz` 是明确的 2→210 Hz、30 s EASE（k=2），没有末端保持；主机到时发送 stop。运行 `bench.drive_without_cameras('ease_to_210Hz', confirm_start=True)`，不需要相机、标定、ROI 或试录。关闭其他串口使用者；先关线圈电源运行该格，收到 READY 后按提示开电源、输入 START，才会发送 ramp。其他输入取消；Interrupt 尝试 stop。此等待是操作者的启动选择，不是温度模型冷却 gate，驱动时间仍记账。USB 断开或进程强杀仍不能保证停止。
+
+旧 `rise_2to210Hz_30s_ease_k2.json` 在合并前提交 ed7fcb2 中的内容其实为 2→250 Hz / 30 s / linear，因此本次没有直接复用该历史文件。新文件已校验实际编码为 `seq=ramp:2:210:30000:1:2`；未上机验证。
+
+## Block 8 自动录像与频率输出
+
+运行 Block 8 会加载当前 panel 代码，等待 READY 后开始录像；录像约 5 秒后发送 LED 标记和 ramp，每次运行生成新的 run。Interrupt 请求 stop、等待 OFF 并保存已录视频，重复运行无需重建 bench。设置格修改 RAMP 或 NOTE 后需重新执行该格。
+
+每秒输出一次 ESP 回报频率；超过 2 秒无新频率时标为陈旧回报。RAMP/HOLD 阶段由主机时间和计划估计，不能当成固件实际执行确认。频率回报不是 robot 转速。
+
+LED 识别前导码目前会阻塞主循环约 0.8 秒；可能在保存帧时间戳中产生间隔，必须以 `frames.csv` 检查，不将固定 120 FPS 播放速度当作实际采样时钟。
+
+离线检查：`.venv/bin/python -m LLM.tests.run`。录像、标定原图、上传打包与本机备份保留在忽略目录中；提交 notebook 时移除输出和个人 session 绑定。

@@ -48,7 +48,7 @@ def check_bench_flow():
     calls = []
 
     def fake_panel(session, *, output_root, run=None, **kw):
-        calls.append(("panel", Path(output_root).name, run is not None, kw.get("roi_a")))
+        calls.append(("panel", Path(output_root).name, run is not None, kw.get("roi_a"), kw.get("auto_start")))
         return {"take": str(output_root) + "/take", "reference_pair": str(output_root) + "/ref"}
 
     with tempfile.TemporaryDirectory() as tmp, \
@@ -72,18 +72,52 @@ def check_bench_flow():
         assert bench.verify_calibration() == {"passed": True}
         bench.photograph_reference()
         bench.record()
-        report = bench.run("alignment_50Hz", note="n")
+        report = bench.run("alignment_50Hz", note="n", auto_start=True)
         assert report == {"imported": str(Path(tmp) / "run")}
         assert (Path(tmp) / "run/ramp.json").exists()
         out = bench.analyse()
         assert out["rois"] == (None, None), "no LED ROI given -> found during analyse"
     assert [c[0] for c in calls] == ["capture", "panel", "panel", "sync_run", "panel"], calls
     assert calls[-1][2] is True and calls[-1][3] is None, "the run panel opens serial, ROI optional"
+    assert calls[-1][4] is True, "Block 8 automatic start must reach the recording panel"
+
+
+def check_exposure_modes():
+    from controller.camera import uvc
+    from LLM.bench import Bench
+    from LLM.record.io import read_json
+    with patch.object(uvc, "apply", return_value=[{"mode": "manual"}]) as manual, \
+            patch.object(uvc, "set_auto", return_value=[{"exposure_mode": "auto"}]) as auto:
+        assert uvc.configure(None, 100) is None  # legacy None leaves device controls alone
+        manual.assert_not_called(); auto.assert_not_called()
+        assert uvc.configure(None, 100, auto_exposure=True)[0]["exposure_mode"] == "auto"
+        auto.assert_called_once(); manual.assert_not_called()
+        uvc.configure(.004, 100)
+        manual.assert_called_once_with(.004, 100)
+        try:
+            uvc.configure(.004, 100, auto_exposure=True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("conflicting auto/manual settings must be refused")
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch.object(uvc, "meter") as preview, \
+            patch("controller.calib.capture.capture") as capture:
+        bench = Bench(width=1280, height=800, fps=120, exposure_ms=None, runs=Path(tmp))
+        bench.preview_cameras()
+        bench.collect_charuco_frames()
+        for call in (preview.call_args, capture.call_args):
+            assert call.kwargs["auto_exposure"] is True and call.kwargs["fps"] == 120
+        assert preview.call_args.args[0] is None and capture.call_args.kwargs["exposure_s"] is None
+        camera = read_json(bench.folder / "session.json")["camera"]
+        assert camera["auto_exposure"] is True and camera["exposure_s"] is None
+        assert camera["rotate180"] is True
 
 
 def run():
     check_find_led()
     check_bench_flow()
+    check_exposure_modes()
     print("bench: OK")
 
 

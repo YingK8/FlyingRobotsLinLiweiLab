@@ -21,3 +21,7 @@ __pycache__/
 # Flight recordings: 628 MB of mp4 and counting, one dir per take. Kept on disk, out of
 # git. `results/README.md` says what a run dir holds.
 results/flights/
+
+# Local experiment archives and upload/analysis artifacts (shared through Drive).
+/backup/
+/outputs/

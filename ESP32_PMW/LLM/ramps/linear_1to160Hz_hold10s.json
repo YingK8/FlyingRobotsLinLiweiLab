@@ -1,0 +1,7 @@
+{
+  "note": "1 to 160 Hz linearly in 20 s, then hold 160 Hz for 10 s (30 s total).",
+  "segments": [
+    {"from_hz": 1.0, "to_hz": 160.0, "seconds": 20.0, "shape": "linear"},
+    {"from_hz": 160.0, "to_hz": 160.0, "seconds": 10.0, "shape": "linear"}
+  ]
+}

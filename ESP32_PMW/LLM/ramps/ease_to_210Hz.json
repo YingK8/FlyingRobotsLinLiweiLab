@@ -1,0 +1,6 @@
+{
+  "note": "Explicit 2 to 210 Hz, 30 s EASE k=2 for the operator's drive-only flight attempt (2026-11-04). No hold: host sends stop at 30 s. This is a commanded frequency, not measured rotor speed or a guarantee of takeoff.",
+  "segments": [
+    {"from_hz": 2.0, "to_hz": 210.0, "seconds": 30.0, "shape": "ease", "k": 2.0}
+  ]
+}

@@ -19,24 +19,43 @@ BOARD = BOARDS["9x6_letter"].with_square_mm(16.52)
 class Bench:
     def __init__(self, cameras=(1, 0), serial_port=None, *, width=640, height=400, fps=210,
                  exposure_ms=2.0, gain=100, upside_down=True, backend="auto", codec="auto",
-                 board=BOARD, runs=PROJECT / "LLM/runs"):
+                 board=BOARD, runs=PROJECT / "LLM/runs", resume_session=None):
         """One set of camera settings for every step that opens the cameras: mode, fps,
-        exposure and gain, all manual over UVC with every automatic function off
-        (camera/uvc.apply), and never switched back to auto. upside_down: one bool for
-        both cameras, or (A, B)."""
-        if not 0 < exposure_ms < 1e3 / fps:   # longer than a frame and the rate drops
+        exposure and gain. A numeric exposure selects manual UVC controls;
+        exposure_ms=None explicitly restores camera auto exposure at every capture
+        entry point (operator request, 2026-11-04). upside_down: one bool or (A, B)."""
+        if exposure_ms is not None and not 0 < exposure_ms < 1e3 / fps:
             raise ValueError(f"exposure {exposure_ms} ms must be under one frame "
                              f"({1e3 / fps:.2f} ms at {fps} fps)")
         self.serial_port, self.board, self.runs = serial_port, board, Path(runs)
-        self._new_session(dict(indices=tuple(cameras), width=width, height=height, fps=fps,
+        camera = dict(indices=tuple(cameras), width=width, height=height, fps=fps,
                                rotate180=upside_down, backend=backend, codec=codec,
-                               exposure_s=exposure_ms / 1e3, gain=gain))
+                               exposure_s=None if exposure_ms is None else exposure_ms / 1e3,
+                               auto_exposure=exposure_ms is None, gain=gain)
+        if resume_session is None:
+            self._new_session(camera)
+        else:
+            from LLM.analyse.rig import camera_key, same_rotation
+            from LLM.record.io import read_json
+            folder = (self.runs / "sessions" / resume_session).resolve()
+            session = read_json(folder / "session.json")
+            if folder != Path(session["directory"]) or folder.name != session["session_id"]:
+                raise ValueError("Saved session ID or directory mismatch")
+            expected = camera_key(camera)
+            if same_rotation(expected["rotate180"], session["camera"]["rotate180"]):
+                expected["rotate180"] = session["camera"]["rotate180"]
+            if expected != session["camera"]:
+                raise ValueError("Camera settings differ from the saved session; choose a new session")
+            self._load_session(session)
 
     def _new_session(self, camera):
         """Sessions are immutable: a new camera setting is a new session, and everything
         verified under the old one is void."""
         from LLM.record.experiment import new_session
-        self.session = new_session(self.runs / "sessions", camera)
+        self._load_session(new_session(self.runs / "sessions", camera))
+
+    def _load_session(self, session):
+        self.session = session
         self.camera = self.session["camera"]
         self.folder = Path(self.session["directory"])
         self.calibration = self.verification = self.world = None
@@ -65,7 +84,7 @@ class Bench:
         c = self.camera
         uvc.meter(c["exposure_s"], c["gain"], width=c["width"], height=c["height"],
                   fps=c["fps"], rotate180=c["rotate180"], indices=c["indices"],
-                  backend=c["backend"], scale=scale)
+                  backend=c["backend"], scale=scale, auto_exposure=c.get("auto_exposure", False))
 
     # ---- calibration ------------------------------------------------------------------
     def collect_charuco_frames(self, folder=None):
@@ -136,7 +155,7 @@ class Bench:
         c = self.camera
         capture(bag, indices=c["indices"], spec=self.board, width=c["width"], height=c["height"],
                 rotate180=c["rotate180"], backend=c["backend"], fps=c["fps"],
-                exposure_s=c["exposure_s"], gain=c["gain"])
+                exposure_s=c["exposure_s"], gain=c["gain"], auto_exposure=c.get("auto_exposure", False))
 
     # ---- scene ------------------------------------------------------------------------
     def photograph_reference(self):
@@ -215,13 +234,15 @@ class Bench:
         from LLM.record.serial_check import check
         return check(self._port(), self.runs / "serial_checks") == 0
 
-    def drive_without_cameras(self, ramp):
-        """Drive a ramp with no video (power/current debugging). ENERGISES THE COILS."""
+    def drive_without_cameras(self, ramp, *, confirm_start=False):
+        """ENERGISES THE COILS, without video. confirm_start waits for START after reset."""
         from LLM.record.drive_only import drive_ramp
         from LLM.record.ramps import ramp_path
-        return drive_ramp(ramp_path(ramp), self._port(), output_root=self.runs / "drive_only")
+        return drive_ramp(ramp_path(ramp), self._port(), output_root=self.runs / "drive_only",
+                          confirm_start=confirm_start)
 
-    def run(self, ramp, *, note, warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30):
+    def run(self, ramp, *, note, warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30,
+            auto_start=False):
         """Record -> START (LED + drive) -> automatic stop -> import. ENERGISES THE COILS.
 
         `ramp` is a name in LLM/ramps (or a path). Call analyse() afterwards.
@@ -253,7 +274,7 @@ class Bench:
         print("Ramp:", label(segments))
         result = run_panel(self.session, output_root=run / "raw/captures", run=run,
                            ramp_path=run / "ramp.json", serial_port=port, roi_a=led_a, roi_b=led_b,
-                           max_seconds=duration_s(segments) + extra_seconds)
+                           max_seconds=duration_s(segments) + extra_seconds, auto_start=auto_start)
         if result["take"] is None:
             raise ValueError("Preview only, nothing recorded; call run() again for a new run")
         report = finish_take(result["take"], self.session, run)

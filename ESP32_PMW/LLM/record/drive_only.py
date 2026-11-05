@@ -17,10 +17,11 @@ from controller.control import ramp
 from controller.control.hover_controller_runner import CommandLink
 
 
-def drive_ramp(ramp_path, serial_port, *, output_root):
+def drive_ramp(ramp_path, serial_port, *, output_root, confirm_start=False):
     """Reset flight, require READY, execute once, then stop. No camera/ROI needed.
 
-    Calling this function starts real drive after READY; cooldown is operator-managed.
+    Starts real drive after READY, or after an explicit START input when confirm_start=True.
+    This lets the operator keep coil power off during reset. Cooldown is operator-managed.
     Interrupt and errors attempt stop; USB loss/process death cannot guarantee it.
     LED still follows flight firmware START, but no optical timing is measured.
     """
@@ -40,7 +41,9 @@ def drive_ramp(ramp_path, serial_port, *, output_root):
                    start_acknowledged=False, stop_sent=False, stop_acknowledged=False)
     write_json(folder/'result.json', summary)
     print(f'Ramp {Path(ramp_path).stem}: {ramp.label(segments)}, {duration:g} s of drive', flush=True)
-    print(f'Logs: {folder}\nNo cameras. START follows READY; Interrupt requests STOP.', flush=True)
+    print(f'Logs: {folder}\nNo cameras. '
+          + ('Waits for typed START after READY. ' if confirm_start else 'START follows READY. ')
+          + 'Interrupt requests STOP.', flush=True)
     owner = None
     started = False
 
@@ -65,6 +68,15 @@ def drive_ramp(ramp_path, serial_port, *, output_root):
                             takeoff_cmd=ramp.seq_lines(segments),
                             raw_log_path=folder/'telemetry.jsonl', require_ready=True)
         owner.on_line = receive
+        if confirm_start:
+            summary['status'] = 'waiting_for_start'
+            write_json(folder/'result.json', summary)
+            answer = input('READY. Coil power may now be enabled. Type START to drive once '
+                           '(anything else cancels): ')
+            if answer.strip() != 'START':
+                summary['status'] = 'cancelled'
+                return folder
+            owner.drain()
         print('READY received. Sending the ramp now.', flush=True)
         started = True
         t0 = time.monotonic()

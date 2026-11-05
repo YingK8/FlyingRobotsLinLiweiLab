@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -239,34 +240,44 @@ def gates(spec, looks, skew_s, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLU
     return all(ok for _, ok, _ in checks), checks
 
 
-def _overlay(spec, frames, looks, checks, footer):
+def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_heading=None):
     """The live view: one annotated panel per camera, side by side, and the gate strip."""
 
     panels = []
-    for frame, look, tag in zip(frames, looks, "AB"):
-        panel = annotate(frame, spec, look["corners"], look["ids"])
-        cv2.putText(panel, f"{tag}  {look['n']}/{spec.n_corners} corners  "
-                    f"incidence {look['incidence']:5.1f} deg  "
-                    f"{look['speed']:6.1f} px/s", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 0)
-                    if look["n"] >= MIN_CORNERS else (0, 0, 255), 2, cv2.LINE_AA)
+    for k, (frame, tag) in enumerate(zip(frames, "AB")):
+        scale = min(1.0, max_width / frame.shape[1]) if max_width else 1.0
+        if scale < 1:
+            frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        look = looks[k]
+        corners = look["corners"]
+        panel = annotate(frame, spec, corners * scale if corners is not None else None, look["ids"])
+        label = f"{tag}  {look['n']}/{spec.n_corners} corners"
+        if np.isfinite(look["incidence"]):
+            label += f"  incidence {look['incidence']:.0f} deg"
+        if np.isfinite(look["speed"]):
+            label += f"  {look['speed']:.0f} px/s"
+        color = (0, 200, 0) if look["n"] >= fit_corners(spec) else (0, 0, 255)
+        cv2.putText(panel, label, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 1, cv2.LINE_AA)
         panels.append(panel)
     view = np.hstack(panels)
 
+    if check_heading:
+        cv2.putText(view, check_heading, (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.53,
+                    (255, 255, 255), 1, cv2.LINE_AA)
     for i, (name, ok, detail) in enumerate(checks):
         cv2.putText(view, f"{'OK ' if ok else '.. '}{name:16s}{detail}",
                     (10, 66 + 26 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                     (0, 200, 0) if ok else (0, 0, 255), 2, cv2.LINE_AA)
-    ready = all(ok for _, ok, _ in checks)
-    cv2.putText(view, footer, (10, view.shape[0] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+    ready = not check_heading and bool(checks) and all(ok for _, ok, _ in checks)
+    cv2.putText(view, footer, (8, view.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.58,
                 (0, 200, 0) if ready else (255, 255, 255), 2, cv2.LINE_AA)
     return view
 
 
 def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NATIVE_H,
-            rotate180=True, max_skew_s=0.001, append=False, auto=True, rate_hz=10.0,
+            rotate180=True, max_skew_s=0.002, append=False, auto=True, rate_hz=10.0,
             exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False, backend=None,
-            fps=None, gain=GAIN):
+            fps=None, gain=GAIN, auto_exposure=False):
     """Live preview that shoots by itself. SPACE pauses and resumes, q quits.
 
     The shutter tries a shot ``rate_hz`` times a second and saves the pair only if it clears
@@ -284,13 +295,13 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     alone, under its own stem, and feeds the intrinsics that the pairs cannot condition.
 
     Skew is handled where it is cheapest: `sources.StereoCamera` re-reads until the two
-    frames land inside ``max_skew_s``. 1 ms (operator's choice, 2026-11-04) yields ~1.8
-    pairs/s at 0.80 ms median; 2 ms gave 16 pairs/s at 1.02 ms. A resting board waits.
+    frames land inside the target window (2 ms by default), or returns the closest
+    pair after bounded retries. The shutter uses that pair's actual skew.
 
     ``exposure_s`` and ``gain`` are SET on every ELP over UVC once the streams are open, with
-    every automatic function off (`camera/uvc.apply`, section 16.4a), and left that way:
-    nothing switches back to auto (operator, 2026-11-04). The read-back goes into
-    `meta.json`. ``exposure_s=None`` leaves the cameras as they are.
+    every automatic function off (`camera/uvc.apply`, section 16.4a), and left that way.
+    The read-back goes into `meta.json`. ``exposure_s=None`` leaves the cameras as
+    they are unless ``auto_exposure=True`` explicitly restores auto exposure.
     """
 
     spec = spec or SPEC
@@ -326,14 +337,16 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             )
 
     settings = None
-    if exposure_s:
+    if exposure_s or auto_exposure:
         try:
-            settings = uvc.apply(exposure_s, gain)
+            settings = uvc.configure(exposure_s, gain, auto_exposure=auto_exposure)
         except Exception:
             src.close()
             raise
-        print("camera settings (manual, UVC): " + "; ".join(map(str, settings)))
-    gate_exposure_s = exposure_s or AUTO_EXPOSURE_S
+        print("camera settings (UVC): " + "; ".join(map(str, settings)))
+    # Auto exposure is not measured per frame. Use at least a requested frame period
+    # for the still-board blur gate; never present this bound as an exposure reading.
+    gate_exposure_s = exposure_s or max(AUTO_EXPOSURE_S, 1.0 / fps if fps else 0.0)
 
     old = [f for tag in tags for f in (out_dir / tag).glob("*.png")]
     n = len(list((out_dir / tags[0]).glob("pair_*.png"))) if append else 0
@@ -344,14 +357,35 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     saved, solo, rows = [], [[] for _ in idx], []
     prev, t_prev, t_try = [None] * len(idx), None, 0.0
     period = 1.0 / rate_hz if rate_hz else 0.0
-    print(f"{'auto' if auto else 'paused'}: SPACE pauses and resumes, q quits")
     # Renders in the output cell under Jupyter, where a HighGUI window never opens.
     # Opened on the main thread; see sources.Sink.open.
-    sink = sources.Sink("calibration capture").open()
+    sink = sources.Sink("calibration capture", hz=20).open()
+    preview_width = 480 if sink.inline else None
+    checks = []
+    last_detection = None
+
+    def show_position(frames):
+        if sink.due():
+            # Detect on the displayed frames. Preview observations never enter motion
+            # history, shutter gates, saved images, or the final verification report.
+            live_looks = [_look(spec, frame) for frame in frames]
+            heading = ("Awaiting first shutter check" if last_detection is None else
+                       f"Last shutter check ({time.monotonic() - last_detection:.1f}s ago)")
+            footer = f"saved {n} pair   live corners | matching A/B   interrupt = stop"
+            sink.show(_overlay(spec, frames, live_looks, checks, footer, preview_width, check_heading=heading))
+
+    # Also render while the stereo reader searches for a synchronised pair. Only
+    # the reader's returned pair goes to the shutter below.
+    live_stereo = sink.inline and len(idx) > 1
+    if live_stereo:
+        target = f"配对目标 {max_skew_s * 1000:g} ms" if max_skew_s is not None else "无配对时间限制"
+        print(f"实时角点预览 · 每路 {min(width, preview_width)} px · {target} · Interrupt 结束", flush=True)
+    elif not sink.inline:
+        print(f"{'auto' if auto else 'paused'}: SPACE pauses and resumes, q quits")
     try:
       try:
         while True:
-            item = src.read()
+            item = src.read(on_skew_retry=show_position) if live_stereo else src.read()
             if item is None:
                 print("source ended")
                 break
@@ -367,6 +401,7 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             looks = [_look(spec, f, prev[k], dt) for k, f in enumerate(frames)]
             prev = [lk["by_id"] for lk in looks]
             ok, checks = gates(spec, looks, skew_s, saved, gate_exposure_s, max_blur_px)
+            last_detection = time.monotonic()
 
             due = auto and (t - t_try) >= period
             if due:
@@ -411,7 +446,11 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             footer += ("   interrupt = stop" if sink.inline else
                        "   SPACE = pause, q = quit" if auto else
                        "   SPACE = resume, q = quit")
-            key = sink.show(_overlay(spec, frames, looks, checks, footer))
+            # After a long retry burst the best pair can be older than the live
+            # image already displayed. Use it for the shutter, not for playback.
+            fresh_view = not live_stereo or time.monotonic() - t < 0.15
+            key = (sink.show(_overlay(spec, frames, looks, checks, footer, preview_width))
+                   if fresh_view and sink.due() else -1)
             if key == ord("q"):
                 break
             if key == ord(" "):

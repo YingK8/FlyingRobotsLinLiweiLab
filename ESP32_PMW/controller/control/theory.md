@@ -4823,8 +4823,24 @@ and C=180 remain fixed. Both `src/drive_common.h` and JsonPwmSequencer's
 `direction`/`setDirection` mapping use this convention. Explicit JSON
 `initial_phase` or runtime phase commands still override it.
 
-`main_flight` continues to select CW; selecting CCW is a separate operator
-choice. GPIO assignments, duty, frequency ramps and historical experiment
+`main_flight` selects CCW at the operator's request on 2026-10-28, using
+`SPIN_PHASES=PHASES_CCW` for initialization and ramp compilation. GPIO assignments, duty, frequency ramps and historical experiment
 snapshots are unchanged. Existing firmware must be reflashed to use these
 tables. These are commanded signal phases, not measured current phases or
 a verified physical rotation direction from a specified viewing side.
+
+
+### Drive-only operator START after READY (2026-11-04)
+
+The local 2-to-210 Hz flight attempt uses an explicit 30 s EASE k=2 ramp, with
+no hold. The old file named rise_2to210Hz_30s_ease_k2.json at ed7fcb2 actually
+contained a 250 Hz linear endpoint; the new ramp was validated from its values
+and encoded command, not inferred from its name.
+
+Optional confirm_start=True in LLM.record.drive_only waits for the exact START
+input after CommandLink has reset flight and received READY. This permits coil
+power to stay off during reset and be enabled before the ramp begins. Only then
+is the ramp timer started. Cancellation or interruption enters the same stop /
+close / log finalization path without sending a ramp. This is an operator start
+step, not a modeled cooldown gate or a hardware interlock; disconnect and process
+death have the existing limitations. Tests use fake serial links only.

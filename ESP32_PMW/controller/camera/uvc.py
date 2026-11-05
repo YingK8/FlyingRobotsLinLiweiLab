@@ -15,11 +15,12 @@ The ELP's automatic functions (from its descriptors, 2026-11-04): auto exposure,
 balance, backlight compensation, power-line (anti-flicker) compensation. `apply` turns off
 exposure, white balance and power-line auto (backlight only weights auto exposure's
 metering, so manual exposure leaves it nothing to do) and sets exposure and gain; everything else it has (brightness, contrast, gamma,
-sharpness...) is a fixed value already. Nothing in the pipeline turns auto back on (operator,
-2026-11-04): the cameras stay as `apply` left them until replugged.
+sharpness...) is a fixed value already. Manual sessions keep these settings. The local
+LLM notebook explicitly opts into auto exposure (operator, 2026-11-04); configure()
+restores it at each camera entry point. See calib/theory.md, "Local 120 fps session".
 
     apply(0.002, gain=100)   # every connected ELP: all manual; returns the read-back
-    set_auto()               # by hand only: the camera's own auto exposure
+    set_auto()               # explicitly select the camera's own auto exposure
 
     uv run python controller/camera/uvc.py               # self-check, no hardware
     uv run python controller/camera/uvc.py --set 2 100   # exposure ms, gain
@@ -129,13 +130,29 @@ def apply(exposure_s, gain):
 
 
 def set_auto():
-    """The camera's own auto exposure. By hand only: no pipeline step calls this."""
+    """Explicitly restore the camera's own auto exposure; return mode read-back."""
+    got = []
     for dev, ifc, ct, pu in _devices():
         _set(dev, ifc, ct, CT_AE_MODE, AE_APERTURE_PRIORITY, 1)
+        got.append(dict(exposure_mode="auto", ae_mode=_get(dev, ifc, ct, GET_CUR, CT_AE_MODE, 1)))
+    return got
+
+
+def configure(exposure_s, gain, *, auto_exposure=False):
+    """Explicit auto overrides a prior manual session; None alone leaves controls alone.
+
+    Auto does not impose a fixed gain/exposure or change white balance/anti-flicker.
+    Numeric exposure retains the upstream fully manual behaviour.
+    """
+    if auto_exposure:
+        if exposure_s is not None:
+            raise ValueError("Choose auto exposure OR a fixed exposure, not both")
+        return set_auto()
+    return apply(exposure_s, gain) if exposure_s is not None else None
 
 
 def meter(exposure_s, gain, width=640, height=400, fps=210, rotate180=True, indices=None,
-          backend=None, scale=1.0):
+          backend=None, scale=1.0, auto_exposure=False):
     """Live A | B at the given mode and fps, all camera settings manual (`apply`), until q,
     Ctrl-C or a kernel interrupt. For aiming, focusing and lighting: the same frames
     `calib.capture` and a recording get. Per camera, on the image and twice a second in
@@ -153,17 +170,28 @@ def meter(exposure_s, gain, width=640, height=400, fps=210, rotate180=True, indi
                               backend=backend)
     sink = sources.Sink("A | B   (q = quit)").open()
     try:
-        for k, r in enumerate(apply(exposure_s, gain)):
+        for k, r in enumerate(configure(exposure_s, gain, auto_exposure=auto_exposure) or []):
             print(f"ELP {k}: {r}")
         # averaged from 1 s in: the first ~1 s after `apply` runs at 170-195 fps on both
         # cameras (measured 2026-11-04) and would drag the mean for minutes
         n0 = t0 = None
         t_open = time.monotonic()
+        consecutive_timeouts = 0
         best, text = [0.0] * len(idx), ["" for _ in idx]
         while True:
             nw, tw, acc = [c.n_grabbed for c in src.sources], time.monotonic(), []
             while time.monotonic() - tw < 0.5:
-                acc.append(src.read()[1])
+                pair = src.read()
+                if pair is None:
+                    consecutive_timeouts += 1
+                    counts = ", ".join(f"{tag} (设备 {i}) {cam.n_grabbed} 帧"
+                                       for tag, i, cam in zip("AB", idx, src.sources))
+                    if consecutive_timeouts >= 3:
+                        raise TimeoutError(f"连续 3 次未收到双机画面。本次预览累计收到：{counts}")
+                    print(f"等待双机画面，正在重试。本次预览累计收到：{counts}", flush=True)
+                    continue
+                consecutive_timeouts = 0
+                acc.append(pair[1])
                 if sink.due():
                     frames = [cv2.cvtColor(f, cv2.COLOR_GRAY2BGR) for f in acc[-1]]
                     for f, s in zip(frames, text):
@@ -174,6 +202,8 @@ def meter(exposure_s, gain, width=640, height=400, fps=210, rotate180=True, indi
                     if sink.show(view) == ord("q"):
                         raise KeyboardInterrupt
             now = time.monotonic()
+            if not acc:
+                continue
             if n0 is None:
                 if now - t_open >= 1.0:
                     n0, t0 = [c.n_grabbed for c in src.sources], now

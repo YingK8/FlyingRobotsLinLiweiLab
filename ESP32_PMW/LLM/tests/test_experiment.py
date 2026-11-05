@@ -50,6 +50,8 @@ class WorkflowTests(unittest.TestCase):
             with self.assertRaises(ValueError):prepare_sync_run(root,session,{},ref,**kw)
             with self.assertRaises(ValueError):prepare_sync_run(root,session,trial,None,**kw)
             run=prepare_sync_run(root,session,trial,ref,**kw)
+            next_run=prepare_sync_run(root,session,trial,ref,**kw)
+            self.assertNotEqual(run,next_run,'Repeating Block 8 must preserve the previous recording')
             manifest=json.loads((run/'manifest.json').read_text())
             self.assertEqual(manifest['geometry_status'],'not_assessed')
             self.assertFalse((run/'calibration/world_frame.json').exists())
@@ -167,10 +169,34 @@ class WorkflowTests(unittest.TestCase):
             evidence.write_bytes(b'changed')
             with self.assertRaises(ValueError): require_verified(report,path,CAM,'s')
 
+    def test_live_frequency_uses_reported_values_and_marks_stale_data(self):
+        from LLM.record.panel import _FrequencyDisplay, _planned_phase
+        display = _FrequencyDisplay()
+        self.assertIn('等待 ESP', display.text(0))
+        with patch('LLM.record.panel.time.monotonic', return_value=10):
+            display.receive('t=1000 freq=0.0')
+        self.assertIn('0.0 Hz', display.text(10))
+        with patch('LLM.record.panel.time.monotonic', return_value=11):
+            display.receive('t=2000 freq=37.5')
+        display.receive('freq=150', sent=True)
+        display.receive('!freq=163.00 rejected')
+        display.receive('state=2')
+        self.assertIn('37.5 Hz', display.text(12))
+        self.assertIn('3.0s 未更新', display.text(14))
+        planned = [(1,20,5,0,1),(20,150,15,0,1),(150,150,5,0,1)]
+        self.assertEqual(_planned_phase(planned,5), '计划阶段 2：RAMP')
+        self.assertEqual(_planned_phase(planned,20), '计划阶段 3：HOLD')
+        self.assertEqual(_planned_phase(planned,25), '计划结束')
+
     def test_panel_stop_priority_and_exception_cleanup(self):
         from LLM.record.panel import run_panel
-        for fails in (False,True):
+        for mode in ('manual', 'manual_failure', 'automatic', 'cancel_countdown',
+                     'interrupt_countdown', 'interrupt_drive', 'stop_unconfirmed',
+                     'stop_error', 'bright_led', 'no_ready'):
             events=[];handles={};clock=[0.]
+            automatic = not mode.startswith('manual')
+            start_times = []
+            writers = []
             class Handle:
                 def __init__(self): self.value=True;self.disabled=False
                 def on_click(self,callback):self.callback=callback
@@ -190,45 +216,95 @@ class WorkflowTests(unittest.TestCase):
                 n=0
                 def read(self):
                     self.n+=1;clock[0]+=.1;self.last_stamps=(clock[0],clock[0])
-                    if self.n==1:handles['Record'].callback(None)
-                    if self.n==5:handles['START ramp + LED'].callback(None)
-                    if self.n==6:
-                        if fails:raise OSError('fake camera failure')
+                    if not automatic and self.n==1:handles['Record'].callback(None)
+                    if not automatic and self.n==5:handles['START ramp + LED'].callback(None)
+                    if automatic and self.n==3:handles['START ramp + LED'].callback(None)
+                    if mode=='cancel_countdown' and self.n==50:handles['Stop / finish'].callback(None)
+                    if mode=='interrupt_countdown' and self.n==30:raise KeyboardInterrupt
+                    if mode in ('interrupt_drive', 'stop_unconfirmed', 'stop_error') and self.n==55:raise KeyboardInterrupt
+                    if not automatic and self.n==6:
+                        if mode=='manual_failure':raise OSError('fake camera failure')
                         # STOP and START together must not permit another START.
                         handles['Stop / finish'].callback(None);handles['START ramp + LED'].callback(None)
-                    return clock[0],[np.zeros((64,80),np.uint8)]*2
+                    return clock[0],[np.full((64,80),255 if mode=='bright_led' else 0,np.uint8)]*2
                 def close(self):events.append('camera_closed')
             class Writer:
                 errors=dropped=0;n=0
-                def __init__(self,out,**kw):self.dir=Path(out)/'take';self.meta=kw['meta']
+                def __init__(self,out,**kw):
+                    self.dir=Path(out)/'take';self.meta=kw['meta'];events.append('record');writers.append(self)
                 def add(self,*a):self.n+=1
                 def close(self):events.append('writer_closed');return self.dir
             class Link:
                 capture_first=None;capture_last=None;sync_sent=False
-                def __init__(self,*a,**kw):events.append('link_open')
+                state=None
+                def __init__(self,*a,**kw):
+                    events.append('link_open')
+                    if mode=='no_ready':raise ValueError('no READY')
                 def note_capture(self,t):
                     if self.capture_first is None:self.capture_first=t
                     self.capture_last=t
                 def sync_can_start(self):return not self.sync_sent and self.capture_first is not None and self.capture_last-self.capture_first>=.25
-                def drain(self):pass
-                def send_takeoff(self):self.sync_sent=True;events.append('START')
+                def drain(self):
+                    self.on_line('t=1000 freq=37.5')
+                def send_takeoff(self):
+                    self.sync_sent=True;events.append('START');start_times.append(clock[0]-self.capture_first)
+                def stop(self,timeout_s):
+                    if timeout_s == 0:
+                        events.append('timed_stop')
+                        return False
+                    events.append('stop')
+                    if mode=='stop_error':raise OSError('fake serial disconnected')
+                    return mode!='stop_unconfirmed'
                 def send(self,cmd):events.append(cmd)
                 def close(self):events.append('link_closed')
             with tempfile.TemporaryDirectory() as tmp:
-                root=Path(tmp);s=new_session(root/'sessions',dict(CAM,width=80,height=64))
+                root=Path(tmp);s=new_session(root/'sessions',dict(CAM,width=80,height=64,
+                                                               exposure_s=None,auto_exposure=True,gain=100))
                 run=root/'run';(run/'raw').mkdir(parents=True);write_json(run/'manifest.json',{'camera_session':s})
                 pattern=root/'p.json';write_json(pattern,{'segments':[{'from_hz':2,'to_hz':50,'seconds':1,'shape':'linear'}]})
-                with patch('LLM.record.panel._check_loopback'),patch('viser.ViserServer',Server),patch('LLM.record.panel.sources.open_stereo',return_value=Source()), \
+                with patch('builtins.print') as output, \
+                     patch('LLM.record.panel._check_loopback'),patch('viser.ViserServer',Server),patch('LLM.record.panel.sources.open_stereo',return_value=Source()), \
                      patch('LLM.record.panel.FlightWriter',Writer),patch('LLM.record.panel.time.monotonic',side_effect=lambda:clock[0]), \
                      patch('controller.control.hover_controller_runner.CommandLink',Link), \
+                     patch('controller.camera.uvc.configure',
+                           side_effect=lambda exposure, gain, **kw: events.append(('exposure',exposure,kw))) as configure, \
                      patch('controller.control.hover_controller_runner._thermal_gate',
                            side_effect=AssertionError('LLM must not wait on thermal model')):
                     args=dict(output_root=root/'takes',max_seconds=10,run=run,ramp_path=pattern,
                               serial_port='FAKE',roi_a=[0,0,5,5],roi_b=[0,0,5,5])
-                    if fails:
+                    args['auto_start']=automatic
+                    if mode=='manual_failure':
                         with self.assertRaisesRegex(OSError,'fake'):run_panel(s,**args)
-                    else:run_panel(s,**args)
-                self.assertEqual(events.count('START'),1)
+                    elif mode=='bright_led':
+                        with self.assertRaisesRegex(RuntimeError,'START cancelled'):run_panel(s,**args)
+                    elif mode=='no_ready':
+                        with self.assertRaisesRegex(ValueError,'no READY'):run_panel(s,**args)
+                    else:
+                        result=run_panel(s,**args)
+                        self.assertTrue(result['drive_stop_attempted'])
+                        self.assertEqual(result['drive_stop_acknowledged'],mode not in ('stop_unconfirmed','stop_error'))
+                        self.assertIsNotNone(result['take'])
+                        self.assertEqual(writers[-1].meta['drive_stop_acknowledged'],result['drive_stop_acknowledged'])
+                        if mode=='stop_error':self.assertIn('fake serial',result['drive_stop_error'])
+                    configure.assert_called_once_with(None,100,auto_exposure=True)
+                    if mode=='automatic':
+                        frequency_lines = [str(c.args[0]) for c in output.call_args_list
+                                           if c.args and 'ESP 回报频率' in str(c.args[0])]
+                        self.assertTrue(any('RAMP' in line and '37.5 Hz' in line for line in frequency_lines))
+                        self.assertTrue(any('STOP 已发送' in line for line in frequency_lines))
+                        self.assertLess(len(frequency_lines),15)  # throttle output, not one line per frame
+                self.assertEqual(events.count('START'),int(mode in ('manual','manual_failure','automatic',
+                                                                   'interrupt_drive','stop_unconfirmed','stop_error')))
+                if mode=='automatic':
+                    self.assertGreaterEqual(start_times[0],5)
+                    self.assertLess(start_times[0],5.11)
+                    self.assertEqual(events.count('timed_stop'),1)
+                if mode=='no_ready':
+                    self.assertNotIn('record',events)
+                    self.assertIn('camera_closed',events)
+                    continue
+                self.assertLess(events.index(('exposure',None,{'auto_exposure':True})),events.index('link_open'))
+                self.assertLess(events.index('stop'),events.index('link_closed'))
                 self.assertLess(events.index('stop'),events.index('writer_closed'))
                 for e in ('link_closed','camera_closed','server_closed'):self.assertIn(e,events)
 

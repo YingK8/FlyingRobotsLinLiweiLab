@@ -716,3 +716,28 @@ layout retains an unknown bearing and an unconfirmed survey, so detection can ru
 while world localization remains unavailable. CAD render and synthetic-image
 tests establish the implemented correspondence and math only; printed-feature
 precision, lighting, real-camera detection and physical accuracy require bench data.
+
+
+### Local 120 fps session (2026-11-04)
+
+The local operator restored the LLM notebook to 1280x800 at a requested 120 fps,
+A/B=(1,0), and 180-degree rotation of both images. The existing setup_002 rig
+matches those metadata, but remains a candidate requiring fresh verification.
+
+Frame rate and exposure are separate controls: a 120 fps frame period is about
+8.33 ms; it permits a longer exposure than 210 fps without establishing the
+actual sensor exposure or delivered rate. At the operator's request,
+Bench(exposure_ms=None) now explicitly selects auto exposure. The frozen camera
+configuration carries auto_exposure=true through preview, calibration, reference,
+trial and driven recording, including the optional empty background panel.
+uvc.configure restores the camera AE mode at each entry point so a previous
+manual session is not silently inherited; it does not impose gain or change
+white balance/anti-flicker. Numeric exposure retains the upstream manual path.
+Bare exposure_s=None in older capture calls still leaves controls unchanged.
+
+Auto exposure is not measured per frame. The calibration motion-blur gate uses
+at least the requested frame period as a conservative estimate, not as a measured
+exposure. Actual frame rate and failures require a trial recording. Empty-scene
+axis_pose subtraction may be affected by auto-exposure changes when the robot
+is returned; inspect overlays and choose explicit threshold or fixed exposure
+if needed. This integration was checked offline only; no camera was opened.

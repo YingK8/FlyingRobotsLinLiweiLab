@@ -6,6 +6,7 @@ ramp.seq_lines and SerialComm; cooldown is operator-managed. No custom seq encod
 from contextlib import ExitStack
 from pathlib import Path
 import copy
+import math
 import threading
 import time
 import cv2
@@ -23,14 +24,48 @@ def _check_loopback():
         probe.bind(('127.0.0.1', 0))
 
 
+class _FrequencyDisplay:
+    """Observe the existing serial reader; never open another serial connection."""
+
+    def __init__(self):
+        self.freq = self.received_at = None
+
+    def receive(self, line, sent=False):
+        if sent:
+            return
+        from controller.control.link import parse_telemetry
+        freq = parse_telemetry(line).freq
+        if freq is not None and math.isfinite(freq):
+            self.freq, self.received_at = freq, time.monotonic()
+
+    def text(self, now):
+        if self.received_at is None:
+            return '频率：等待 ESP 回报'
+        age = max(0.0, now - self.received_at)
+        if age > 2:
+            return f'频率回报已 {age:.1f}s 未更新；上次 {self.freq:.1f} Hz'
+        return f'ESP 回报频率：{self.freq:.1f} Hz（{age:.1f}s 前）'
+
+
+def _planned_phase(planned, elapsed):
+    """Host-time phase label only; frequency itself comes from telemetry."""
+    for i, (f0, f1, seconds, *_rest) in enumerate(planned, 1):
+        if elapsed < seconds:
+            return f'计划阶段 {i}：' + ('HOLD' if f0 == f1 else 'RAMP')
+        elapsed -= seconds
+    return '计划结束'
+
+
 def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
-              serial_port=None, roi_a=None, roi_b=None, port=8088):
+              serial_port=None, roi_a=None, roi_b=None, port=8088, auto_start=False):
     """Preview -> Record -> optional flight START -> Stop/finalize, one take per call.
 
     Without `run`: CAMERA ONLY, never imports a serial controller. With `run`:
     caller must have prepared a measured experiment or explicit sync check; opens/reset flight at launch,
-    then waits for a separate START click after pre-roll and dark-LED validation.
-    Recording Stop, duration end, Interrupt and errors also send firmware stop.
+    Manual mode waits for Record and START. In auto mode launching the cell arms
+    one take: READY, record, five seconds of pre-roll, then a single START.
+    Recording Stop, duration end, Interrupt and errors send firmware stop and
+    briefly wait for OFF before closing serial and finalising the recording.
     This is not an autonomous hover controller and has no live pose feedback.
     """
     if threading.current_thread() is not threading.main_thread():
@@ -38,6 +73,9 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
     if not np.isfinite(max_seconds) or max_seconds <= 0: raise ValueError('Finite recording duration required')
     session = copy.deepcopy(session); camera = session['camera']; driven = run is not None
     planned = None
+    preroll = 5.0
+    if auto_start and not driven:
+        raise ValueError('Automatic START requires a prepared flight run')
     if driven:
         from LLM.record.ramps import load_ramp
         from controller.control import ramp
@@ -50,6 +88,8 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
         if (run/'raw/telemetry.jsonl').exists() or any((run/'raw/captures').glob('*/meta.json')):
             raise ValueError('One START attempt per run; prepare a new run')
         duration = ramp.duration_s(planned)
+        if auto_start and max_seconds <= preroll + duration + 2:
+            raise ValueError('Automatic START needs room for 5 s pre-roll, ramp and 2 s post-roll')
         if max_seconds < duration + 3: raise ValueError('Recording cap must allow ramp plus pre/post roll (at least 3 s)')
         if (roi_a is None) != (roi_b is None):
             raise ValueError('Give LED ROIs for both cameras or neither (neither: found after the run)')
@@ -65,6 +105,9 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
     events = {k: threading.Event() for k in ('record', 'start', 'stop', 'close', 'snapshot')}
     writer = link = None
     take = None; record_t = drive_t = stop_t = None; error = None; last_ui = 0
+    frequency = _FrequencyDisplay()
+    last_frequency_print = float('-inf')
+    last_phase = None
     result = {'take': None, 'reference_pair': None, 'drive_start_sent': False}
     with ExitStack() as cleanup:
         server = viser.ViserServer(host='127.0.0.1', port=port, label='LLM experiment')
@@ -76,19 +119,21 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                         if driven and manifest.get('experiment_mode') == 'sync_check' else
                         'A/B labels correct; camera, fixture and focus unchanged since verification'
                         if driven else 'A/B labels correct; camera settings checked for this capture')
-        physical = server.gui.add_checkbox(confirmation, False)
+        physical = None if auto_start else server.gui.add_checkbox(confirmation, False)
+        countdown = None
         buttons = {}
         for key, label in [('snapshot','Save static reference pair'), ('record','Record'),
                            ('start','START ramp + LED'), ('stop','Stop / finish'), ('close','Close preview')]:
-            buttons[key] = server.gui.add_button(label, disabled=key=='start')
+            buttons[key] = server.gui.add_button(label, disabled=key=='start' or (auto_start and key in ('record','snapshot')))
             buttons[key].on_click(lambda _, e=events[key]: e.set())
         options = {k: camera[k] for k in ('width','height','fps','rotate180','backend')}
         src = sources.open_stereo([f'camera:{i}' for i in camera['indices']], grayscale=True, max_skew_s=None, **options)
         cleanup.callback(src.close)
         settings = None
-        if camera.get('exposure_s'):     # all manual, never back to auto (camera/uvc.py)
+        if camera.get('exposure_s') or camera.get('auto_exposure'):
             from controller.camera import uvc
-            settings = uvc.apply(camera['exposure_s'], camera['gain'])
+            settings = uvc.configure(camera.get('exposure_s'), camera.get('gain', 100),
+                                     auto_exposure=camera.get('auto_exposure', False))
         def finalize():
             if writer is not None:
                 if error: writer.meta['capture_error'] = error
@@ -102,7 +147,24 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                                raw_log_path=run/'raw/telemetry.jsonl', sync_start=True)
             cleanup.callback(link.close)
             # Registered last: stop drive BEFORE encoder finalisation/camera release.
-            cleanup.callback(lambda: link.send('stop'))
+            def stop_drive():
+                result['drive_stop_attempted'] = True
+                try:
+                    result['drive_stop_acknowledged'] = bool(link.stop(timeout_s=1.0))
+                except BaseException as exc:
+                    result['drive_stop_acknowledged'] = False
+                    result['drive_stop_error'] = str(exc) or type(exc).__name__
+                if writer is not None:
+                    writer.meta.update({k: v for k, v in result.items() if k.startswith('drive_')})
+                if result['drive_stop_acknowledged']:
+                    print('STOP · 固件已回应 OFF，正在保存录像。', flush=True)
+                else:
+                    detail = result.get('drive_stop_error', '未收到 OFF 回应')
+                    print(f'STOP 未确认：{detail}。请关闭线圈电源；正在保存已有录像。', flush=True)
+            cleanup.callback(stop_drive)
+            link.on_line = frequency.receive
+            if auto_start:
+                print('READY · 可以打开线圈电源。双机开始录像后倒计时 5 秒。', flush=True)
         meta = {'session_id': session['session_id'], 'camera_config': camera_key(camera),
                 'camera_indices': camera['indices'], 'rotate180': camera['rotate180'],
                 'requested': {k: camera[k] for k in ('width','height','fps')},
@@ -131,12 +193,15 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                                                        'times': list(src.last_stamps)})
                         result['reference_pair'] = str(folder)
                         print('Reference saved:', folder)
-                if events['record'].is_set():
+                if writer is None and (auto_start or events['record'].is_set()):
                     events['record'].clear()
-                    if writer is None and physical.value:
-                        meta['operator_scene_unchanged'] = True
+                    if auto_start or physical.value:
+                        if auto_start:
+                            meta['auto_start_preroll_s'] = preroll
+                        else:
+                            meta['operator_scene_unchanged'] = True
                         writer = FlightWriter(output_root, fps=camera['fps'], meta=meta, codec=camera['codec'])
-                        take = writer.dir; record_t = now
+                        take = writer.dir; record_t = now = time.monotonic()
                 if writer is not None:
                     writer.add(t, frames, src.last_stamps, src.last_skew)
                     if writer.errors or writer.dropped: raise OSError('Encoder errors/queue drops; stopping attempt')
@@ -148,28 +213,53 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                     # No ROI: the dark check is skipped; find_led + decode_markers check the pulse later.
                     dark = roi_a is None or all(float(np.mean(f[y:y+h,x:x+w])) < 80
                                                 for f,(x,y,w,h) in zip(frames,(roi_a,roi_b)))
-                    if events['start'].is_set():
+                    auto_due = False
+                    if auto_start and drive_t is None:
+                        remaining = max(0, math.ceil(preroll - (now - record_t)))
+                        if remaining != countdown and remaining > 0:
+                            print(f'正在录像 · {remaining} 秒后启动 ramp + LED', flush=True)
+                        countdown = remaining
+                        auto_due = remaining == 0
+                    if auto_due or (not auto_start and events['start'].is_set()):
                         events['start'].clear()
-                        if (writer is not None and link.sync_can_start() and dark and physical.value
-                                and max_seconds-(now-record_t) >= duration+2):
+                        if events['stop'].is_set() or events['close'].is_set():
+                            break
+                        if (writer is not None and link.sync_can_start() and dark and (auto_start or physical.value)
+                                and max_seconds-(now-record_t) >= duration+2 and drive_t is None):
                             link.send_takeoff(); drive_t = time.monotonic(); result['drive_start_sent'] = True
                             writer.meta['host_start_send_complete_s'] = drive_t
+                        elif auto_due:
+                            raise RuntimeError('Automatic START cancelled at 5 s: check recorded pre-roll, LED state and remaining recording time.')
                     if drive_t is not None and stop_t is None and now-drive_t >= duration:
                         link.stop(timeout_s=0); stop_t = time.monotonic()
                         writer.meta['host_scheduled_stop_send_complete_s'] = stop_t
                     if stop_t is not None and link.state == OFF:
                         result['drive_stop_acknowledged'] = True
                     if stop_t is not None and now-stop_t >= 2: break
+                    # Refresh after send_takeoff's LED preamble; do not use the
+                    # pre-command timestamp for phase or telemetry age.
+                    report_now = time.monotonic()
+                    phase = ('STOP 已发送 · 后录' if stop_t is not None else
+                             _planned_phase(planned, max(0.0, report_now-drive_t))
+                             if drive_t is not None else '等待启动')
+                    if report_now-last_frequency_print >= 1 or phase != last_phase:
+                        print(f'录像 {report_now-record_t:.1f}s · {phase} · {frequency.text(report_now)}'
+                              if record_t is not None else f'预览 · {frequency.text(report_now)}', flush=True)
+                        last_frequency_print, last_phase = report_now, phase
                 if now-last_ui >= .2:
                     last_ui = now
                     for handle, frame in zip(views, frames):
                         thumb = cv2.resize(frame, (640, round(640*camera['height']/camera['width'])))
                         handle.image = cv2.cvtColor(thumb, cv2.COLOR_GRAY2RGB) if thumb.ndim==2 else cv2.cvtColor(thumb,cv2.COLOR_BGR2RGB)
-                    buttons['record'].disabled = writer is not None or not physical.value
-                    buttons['start'].disabled = not (link is not None and writer is not None and link.sync_can_start() and dark and physical.value
+                    buttons['record'].disabled = auto_start or writer is not None or not physical.value
+                    buttons['start'].disabled = auto_start or not (link is not None and writer is not None and link.sync_can_start() and dark and physical.value
                         and max_seconds-(now-record_t) >= duration+2)
-                    buttons['snapshot'].disabled = writer is not None
+                    buttons['snapshot'].disabled = auto_start or writer is not None
                     state = 'PREVIEW' if writer is None else f'RECORDING {now-record_t:.1f}s — {writer.n} pairs'
+                    if auto_start and drive_t is None:
+                        state += f' · START in {countdown} s'
+                    if driven:
+                        state += f' · {phase} · {frequency.text(time.monotonic())}'
                     status.content = f'**{state}**\n\n' + ((f'LED dark in both ROIs: {dark}' if roi_a is not None else 'LED ROI: found after the run') + f'; START sent: {result["drive_start_sent"]}. Do not press ESP reset.' if driven else 'Camera only. No serial connection or drive.')
         except KeyboardInterrupt:
             print('Interrupted: stopping drive and finalising recording.')

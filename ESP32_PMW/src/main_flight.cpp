@@ -8,7 +8,7 @@ static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 
 static const float MIX_GAIN = 0.6f;
 
-#define SPIN_PHASES PHASES_CW
+#define SPIN_PHASES PHASES_CCW
 
 static PwmController ctl(PWM_PINS, SPIN_PHASES, INITIAL_DUTY, NUM_CHANNELS);
 static PwmSequencer seq(&ctl);

@@ -308,7 +308,7 @@ class StereoCamera(Capture):
 
     MAX_SKEW_RETRIES = 200
 
-    def read(self):
+    def read(self, *, on_skew_retry=None):
         # Rejection sampling on phase, bounded rather than recursive: two free-running
         # cameras hold a slowly drifting offset, so a `max_skew_s` tighter than that offset
         # is unsatisfiable for seconds at a time. Looping gives up and returns the best pair
@@ -332,6 +332,8 @@ class StereoCamera(Capture):
             if self.max_skew_s is None or skew <= self.max_skew_s:
                 break
             self.n_skew_dropped += 1
+            if on_skew_retry is not None:
+                on_skew_retry([frame for _, frame in items])
         skew, stamps, items = best
 
         self.last_skew = skew

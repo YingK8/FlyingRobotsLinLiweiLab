@@ -20,7 +20,7 @@ def camera_key(camera):
            for k in ('indices', 'width', 'height', 'fps', 'rotate180', 'backend', 'codec')}
     if not isinstance(key['rotate180'], bool):          # per camera: (A, B) -> [A, B]
         key['rotate180'] = rotations(key['rotate180'], 2)
-    for k in ('exposure_s', 'gain'):    # manual UVC settings, since 2026-11-04; older
+    for k in ('exposure_s', 'gain', 'auto_exposure'):    # UVC settings; older
         if k in camera:                 # sessions have none and must still compare equal
             key[k] = camera[k]
     return key

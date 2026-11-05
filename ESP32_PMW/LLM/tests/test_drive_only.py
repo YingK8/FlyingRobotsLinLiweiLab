@@ -81,25 +81,38 @@ class DriveOnlyTests(unittest.TestCase):
                     closed.append(True)
             def sleep(seconds):
                 now[0] += seconds
+            def confirm(prompt):
+                self.assertEqual(commands, [], 'nothing may drive before START')
+                now[0] += 20  # operator waiting must not consume the ramp duration
+                if mode == 'confirm_interrupt':
+                    raise KeyboardInterrupt()
+                return 'START' if mode == 'confirm_ok' else 'cancel'
             with patch.object(drive_only, 'CommandLink', Link), \
+                    patch('builtins.input', side_effect=confirm), \
                     patch('controller.control.hover_controller_runner._thermal_gate',
                           side_effect=AssertionError('LLM must not wait on thermal model')) as gate, \
                     patch.object(drive_only.time, 'monotonic', side_effect=lambda: now[0]), \
                     patch.object(drive_only.time, 'sleep', side_effect=sleep):
-                if mode in ('ok', 'stop_failure'):
-                    drive_only.drive_ramp(root/'input.json', 'fake', output_root=root/'out')
+                opts = dict(output_root=root/'out', confirm_start=mode.startswith('confirm_'))
+                if mode in ('ok', 'stop_failure', 'confirm_ok', 'confirm_cancel'):
+                    drive_only.drive_ramp(root/'input.json', 'fake', **opts)
                 else:
                     with self.assertRaises((RuntimeError, ValueError, KeyboardInterrupt)):
-                        drive_only.drive_ramp(root/'input.json', 'fake', output_root=root/'out')
+                        drive_only.drive_ramp(root/'input.json', 'fake', **opts)
                 gate.assert_not_called()
             summary = json.loads(next((root/'out').glob('*/result.json')).read_text())
             if mode == 'no_ready':
                 self.assertEqual(commands, [])
+            elif mode in ('confirm_cancel', 'confirm_interrupt'):
+                self.assertEqual(commands, ['stop'])
+                self.assertEqual(closed, [True])
+                self.assertFalse(summary['start_acknowledged'])
+                self.assertEqual(summary['status'], 'cancelled' if mode == 'confirm_cancel' else 'interrupted')
             else:
                 self.assertEqual(commands, ramp.seq_lines(((2, 10, 3, ramp.EASE, 2),)) + ['stop'])
                 self.assertEqual(closed, [True])
-            if mode == 'ok':
-                self.assertGreaterEqual(now[0], 3)
+            if mode in ('ok', 'confirm_ok'):
+                self.assertGreaterEqual(now[0], 23 if mode == 'confirm_ok' else 3)
                 self.assertTrue(summary['start_acknowledged'] and summary['stop_acknowledged'])
             if mode == 'no_ack':
                 self.assertLess(now[0], 3)
@@ -114,3 +127,6 @@ class DriveOnlyTests(unittest.TestCase):
     def test_firmware_rejection_stops(self): self.exercise('reject')
     def test_interrupt_stops(self): self.exercise('interrupt')
     def test_failed_stop_still_closes(self): self.exercise('stop_failure')
+    def test_wait_for_start_then_full_duration(self): self.exercise('confirm_ok')
+    def test_cancel_before_start_sends_no_ramp(self): self.exercise('confirm_cancel')
+    def test_interrupt_at_prompt_sends_no_ramp(self): self.exercise('confirm_interrupt')

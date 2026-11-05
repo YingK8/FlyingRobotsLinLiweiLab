@@ -121,6 +121,132 @@ BAND_FULL = 6            # shots in one band before the shutter asks for a diffe
                          # spread against the 20 deg `calibrate_intrinsics` wants, and more
                          # frames cannot fix a spread problem.
 
+# The pose guide (theory.md 16.5c): face-on plus eight tilts, per camera. The textbook set
+# (face-on + 40 deg four ways) scores 35.8 deg of spread against MIN_ORIENT_SPREAD_DEG;
+# 35 deg is a guess that keeps that margin while leaving room under MAX_INCIDENCE_DEG for
+# the other camera, 90 deg round the rig, to still see the board.
+GUIDE_TILT_DEG = 35.0
+GUIDE_HIT_DEG = 12.0     # a saved pose this close to a target fills it; a guess, ~half the
+                         # 45 deg azimuth step projected at 35 deg of tilt
+
+
+def _guide_targets(tilt_deg=GUIDE_TILT_DEG):
+    """``[(hint, normal)]``: face-on, then the eight compass tilts, in camera coordinates.
+
+    `board_normal` is in the +z hemisphere, so a normal with +x has the screen-right edge
+    nearer the camera (+y: the bottom edge) -- `test_guide_targets` holds that sign.
+    """
+    a = np.radians(tilt_deg)
+    out = [("face-on", np.array([0.0, 0.0, 1.0]))]
+    for phi in np.radians(np.arange(0, 360, 45)):
+        n = np.array([np.sin(a) * np.cos(phi), np.sin(a) * np.sin(phi), np.cos(a)])
+        edges = [e for e, v in (("right", n[0]), ("left", -n[0]), ("bottom", n[1]), ("top", -n[1]))
+                 if v > 1e-6]
+        out.append(("+".join(edges) + f" edge nearer, {tilt_deg:.0f} deg", n))
+    return out
+
+
+GUIDE_TARGETS = _guide_targets()
+
+
+def _angle_deg(u, v):
+    return float(np.degrees(np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))))
+
+
+def open_targets(saved, targets=GUIDE_TARGETS, hit_deg=GUIDE_HIT_DEG):
+    """The guide targets no saved pose of this camera is within ``hit_deg`` of."""
+
+    have = [board_normal(r.as_rotvec()) for r, _, _ in saved]
+    return [t for t in targets if not any(_angle_deg(t[1], h) < hit_deg for h in have)]
+
+
+def next_target(look, saved, targets=GUIDE_TARGETS, hit_deg=GUIDE_HIT_DEG):
+    """The guide target this camera should fill next, nearest the current pose; None once
+    every target has a saved pose. ``saved`` is this camera's `_pose_key` list."""
+
+    open_ = open_targets(saved, targets, hit_deg)
+    if not open_ or look.get("rvec") is None:
+        return open_[0] if open_ else None
+    now = board_normal(look["rvec"])
+    return min(open_, key=lambda t: _angle_deg(t[1], now))
+
+
+def guide_quads(spec, look, normal, K):
+    """``(now, target)`` board outlines in pixels: the current pose, and the same board
+    turned about its centre so its normal is ``normal``. Rough K, so a direction to tilt,
+    not a measurement."""
+
+    R = Rotation.from_rotvec(np.ravel(look["rvec"]))
+    cur = board_normal(look["rvec"])
+    delta = Rotation.align_vectors([normal], [cur])[0]
+    w, h = spec.cols * spec.square_mm, spec.rows * spec.square_mm
+    outline = np.array([[0, 0, 0], [w, 0, 0], [w, h, 0], [0, h, 0]], dtype=np.float64)
+    centre = R.apply([w / 2, h / 2, 0]) + np.ravel(look["tvec"])
+
+    def project(rot, t):
+        pts, _ = cv2.projectPoints(outline, rot.as_rotvec(), t, K, np.zeros(5))
+        return pts.reshape(-1, 2)
+
+    R_t = delta * R
+    return project(R, np.ravel(look["tvec"])), project(R_t, centre - R_t.apply([w / 2, h / 2, 0]))
+
+
+# ---- pair mode (theory.md 16.5d) ------------------------------------------------------
+PAIR_TILTS_DEG = (0.0, 15.0, 30.0)  # rings round the bisector; the outer one survives only
+                                    # where it keeps both cameras under the incidence cap
+PAIR_MARGIN_DEG = 3.0               # targets sit this far under MAX_INCIDENCE_DEG, so a hand
+                                    # a few degrees off still clears `not edge-on`
+
+
+def rel_rotation(looks, last=None):
+    """Camera B -> camera A rotation from this frame if both cameras posed it, else ``last``.
+    Rough K on both sides, so good to a few degrees: enough to aim a guide, nothing more."""
+
+    if len(looks) < 2 or any(lk.get("rvec") is None for lk in looks[:2]):
+        return last
+    R_a = Rotation.from_rotvec(np.ravel(looks[0]["rvec"]))
+    R_b = Rotation.from_rotvec(np.ravel(looks[1]["rvec"]))
+    return R_a * R_b.inv()
+
+
+def pair_targets(R_ab, tilts=PAIR_TILTS_DEG, max_inc=MAX_INCIDENCE_DEG - PAIR_MARGIN_DEG):
+    """``[(hint, normal)]`` in camera A's frame: the bisector of the two optical axes (the
+    one normal both cameras see equally steeply), then rings round it, keeping only the
+    normals BOTH cameras see under ``max_inc``. On a rig 99 deg apart the bisector is
+    ~50 deg from each, so the ring survives across the baseline and not along it."""
+
+    z = np.array([0.0, 0.0, 1.0])
+    zb = R_ab.apply(z)                        # B's optical axis, in A's frame
+    b = (z + zb) / np.linalg.norm(z + zb)
+    u = np.cross(z, zb)
+    u = u / np.linalg.norm(u) if np.linalg.norm(u) > 1e-9 else np.array([1.0, 0.0, 0.0])
+    v = np.cross(b, u)
+    out = []
+    for t in np.radians(tilts):
+        for phi in (np.radians(np.arange(0, 360, 45)) if t else [0.0]):
+            n = np.cos(t) * b + np.sin(t) * (np.cos(phi) * u + np.sin(phi) * v)
+            inc = [np.degrees(np.arccos(min(1.0, abs(float(n @ ax))))) for ax in (z, zb)]
+            if max(inc) <= max_inc:
+                out.append((f"pair {np.degrees(t):.0f} deg off the bisector", n))
+    return out
+
+
+def in_camera(normal, k, R_ab):
+    """A target normal (A's frame) in camera ``k``'s frame, in its +z hemisphere."""
+
+    n = normal if k == 0 else R_ab.inv().apply(normal)
+    return n if n[2] >= 0 else -n
+
+
+def turn_words(now, want):
+    """Which screen edges to bring nearer to go from normal ``now`` to ``want`` (same frame
+    convention as `_guide_targets`: +x on the normal = right edge nearer)."""
+
+    d = np.asarray(want) - np.asarray(now)
+    edges = [e for e, v in (("right", d[0]), ("left", -d[0]), ("bottom", d[1]), ("top", -d[1]))
+             if v > 0.05]
+    return ("+".join(edges) + " edge nearer") if edges else "hold"
+
 
 def _rough_K(shape):
     """A made-up focal length, enough for an angle. Nothing metric may be read off it."""
@@ -140,11 +266,11 @@ def _look(spec, frame, prev=None, dt=None):
 
     corners, ids = detect(spec, frame)
     n_det = 0 if ids is None else len(ids)
-    inc, rvec = float("nan"), None
+    inc, rvec, tvec = float("nan"), None, None
     if n_det >= MIN_CORNERS:
         got = solve_board_pose(spec, corners, ids, _rough_K(frame.shape), np.zeros(5))
         if got is not None:
-            rvec = got[0]
+            rvec, tvec = got
             inc = board_incidence_deg(rvec)
 
     here = (None if ids is None else
@@ -156,7 +282,7 @@ def _look(spec, frame, prev=None, dt=None):
             motion = float(np.median(shared))
     speed = motion / dt if (dt and not np.isnan(motion)) else float("nan")
     return {"corners": corners, "ids": ids, "n": n_det, "incidence": inc, "rvec": rvec,
-            "motion": motion, "speed": speed, "by_id": here, "width": frame.shape[1]}
+            "tvec": tvec, "motion": motion, "speed": speed, "by_id": here, "width": frame.shape[1]}
 
 
 def _pose_key(look):
@@ -192,14 +318,21 @@ def solo_ok(look, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, spec=SP
             and _novel(look, saved))
 
 
-def gates(spec, looks, skew_s, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX):
+def gates(spec, looks, skew_s, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX,
+          variety=None):
     """Whether this pair is worth saving, and the name of the first thing wrong with it.
 
     Every gate is a physical quantity rather than a preference -- `theory.md` section 16.5.
     Returns ``(ok, [(name, passed, detail), ...])``; the list drives the overlay, so the
     operator sees which gate is holding the shutter rather than guessing.
+
+    ``variety``: camera A's whole saved set (pairs + solos), which is what its intrinsics
+    are fitted from, so what `tilt variety` measures spread over. Defaults to ``saved``.
+    Measured over the pairs alone it capped pairs at ~6 a session on a rig whose every
+    pair lands in one band (theory.md 16.5d).
     """
 
+    variety = saved if variety is None else variety
     speed = max([lk["speed"] for lk in looks], default=float("nan"))
     shared = (len(np.intersect1d(looks[0]["ids"], looks[1]["ids"]))
               if len(looks) > 1 and all(lk["ids"] is not None for lk in looks) else
@@ -213,38 +346,76 @@ def gates(spec, looks, skew_s, saved, exposure_s=EXPOSURE_S, max_blur_px=MAX_BLU
         counts = np.zeros(len(INCIDENCE_BANDS), dtype=int)
         for _, _, saved_inc in saved:
             counts[int(np.searchsorted(INCIDENCE_BANDS, saved_inc, side="right") - 1)] += 1
-        spread = (orientation_spread_deg([board_normal(r.as_rotvec()) for r, _, _ in saved])
-                  if len(saved) > 1 else 0.0)
+        spread = (orientation_spread_deg([board_normal(r.as_rotvec()) for r, _, _ in variety])
+                  if len(variety) > 1 else 0.0)
         # Once the spread is there, stop steering -- coverage of position matters too.
         band_ok = spread >= MIN_ORIENT_SPREAD_DEG or counts[band] < BAND_FULL
-        band_detail = (f"{int(INCIDENCE_BANDS[band])}-"
-                       f"{int(INCIDENCE_BANDS[band + 1]) if band + 1 < len(INCIDENCE_BANDS) else int(MAX_INCIDENCE_DEG)}"
-                       f" deg has {counts[band]}, spread {spread:.1f}/{MIN_ORIENT_SPREAD_DEG:.0f}")
+        span = (f"{int(INCIDENCE_BANDS[band])}-"
+                f"{int(INCIDENCE_BANDS[band + 1]) if band + 1 < len(INCIDENCE_BANDS) else int(MAX_INCIDENCE_DEG)}")
+        band_detail = (f"A has {counts[band]}/{BAND_FULL} pairs at {span} deg tilt, "
+                       f"A's variety {spread:.0f}/{MIN_ORIENT_SPREAD_DEG:.0f} deg"
+                       + ("" if band_ok else " -> tilt to another angle"))
 
+    def per_cam(fmt):
+        return " / ".join(f"{t} {fmt(lk)}" for t, lk in zip("AB", looks))
+
+    steep = [t for t, lk in zip("AB", looks) if not lk["incidence"] <= MAX_INCIDENCE_DEG]
+    still_pair = not (speed * skew_s > MAX_PAIR_ERROR_PX)
+    still_blur = not (speed * exposure_s > max_blur_px)
+    # Names are the gate's identity (tests, theory.md 16.5); details say what to DO.
     checks = [
         ("board in view", all(lk["n"] >= fit_corners(spec) for lk in looks),
-         "/".join(str(lk["n"]) for lk in looks) + f" of {spec.n_corners}, "
-         f"need {fit_corners(spec)}"),
+         per_cam(lambda lk: lk["n"]) + f" corners, need {fit_corners(spec)} each"),
         ("board posed", all(lk["rvec"] is not None for lk in looks),
-         "/".join("y" if lk["rvec"] is not None else "n" for lk in looks)),
-        ("shared corners", shared >= MIN_COMMON_CORNERS, f"{shared}"),
-        ("tilt usable", all(lk["incidence"] <= MAX_INCIDENCE_DEG for lk in looks),
-         "/".join(f"{lk['incidence']:.0f}" for lk in looks) + f" of {MAX_INCIDENCE_DEG:.0f} deg"),
-        ("still (pair)", not (speed * skew_s > MAX_PAIR_ERROR_PX),
-         f"{speed * skew_s:.2f} px" if np.isfinite(speed) else "unknown"),
-        ("still (blur)", not (speed * exposure_s > max_blur_px),
-         f"{speed * exposure_s:.2f} px" if np.isfinite(speed) else "unknown"),
-        ("new pose", novel, "yes" if novel else "duplicate"),
-        ("tilt spread", band_ok, band_detail),
+         per_cam(lambda lk: "ok" if lk["rvec"] is not None else "no pose")),
+        ("shared corners", shared >= MIN_COMMON_CORNERS,
+         f"{shared} seen by both, need {MIN_COMMON_CORNERS}"
+         + ("" if shared >= MIN_COMMON_CORNERS else " -> face the board between A and B")),
+        ("not edge-on", not steep,
+         per_cam(lambda lk: f"{lk['incidence']:.0f}") + f" deg from face-on, max {MAX_INCIDENCE_DEG:.0f}"
+         + (f" -> turn the board toward {'+'.join(steep)}" if steep else "")),
+        ("still (pair)", still_pair,
+         (f"{speed * skew_s:.2f} of {MAX_PAIR_ERROR_PX} px" if np.isfinite(speed) else "unknown")
+         + ("" if still_pair else " -> hold still")),
+        ("still (blur)", still_blur,
+         (f"{speed * exposure_s:.2f} of {max_blur_px} px" if np.isfinite(speed) else "unknown")
+         + ("" if still_blur else " -> hold still")),
+        ("new pose", novel, "yes" if novel else
+         f"already saved -> turn {MIN_KEEP_ROT_DEG:.0f}+ deg or move {MIN_KEEP_SHIFT_PX:.0f}+ px"),
+        ("tilt variety", band_ok, band_detail),
     ]
     return all(ok for _, ok, _ in checks), checks
 
 
-def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_heading=None):
-    """The live view: one annotated panel per camera, side by side, and the gate strip."""
+def _text(img, s, org, scale, color, thickness=1):
+    """Text on a black box, legible over the black-and-white board. A box, not an outline:
+    OpenCV 5 spaces glyphs by stroke weight, so a thicker black copy does not line up."""
+    (w, h), base = cv2.getTextSize(s, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    cv2.rectangle(img, (org[0] - 2, org[1] - h - 3), (org[0] + w + 2, org[1] + base), (0, 0, 0), -1)
+    cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
 
+
+def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_heading=None,
+             saved=None, pairs=None, pair_R=None):
+    """The live view: one annotated panel per camera, side by side, and the gate strip.
+
+    With ``saved`` (per camera `_pose_key` lists) each panel also carries the pose guide:
+    the board outline now (yellow), where to turn it (cyan), and the hint in words. With
+    ``pairs`` (the saved pairs, camera A's keys) it guides pairs first -- both panels, one
+    target, from ``pair_R`` (`rel_rotation`) -- then each camera alone (theory.md 16.5d)."""
+
+    p_targets = pair_targets(pair_R) if pair_R is not None else []
+    p_open = open_targets(pairs, p_targets) if pairs is not None else []
+    pair_mode = pairs is not None and (pair_R is None or bool(p_open))
+    p_next = next_target(looks[0], pairs, p_targets) if pair_mode and pair_R is not None else None
+
+    # Guide ONE camera at a time, the one with more targets open (ties: A). Two guides on
+    # a rig 90 deg round ask for opposite tilts and neither is satisfiable (theory.md 16.5c).
+    lead = (max(range(len(frames)), key=lambda k: (len(open_targets(saved[k])), -k))
+            if saved is not None else None)
     panels = []
     for k, (frame, tag) in enumerate(zip(frames, "AB")):
+        K = _rough_K(frame.shape)
         scale = min(1.0, max_width / frame.shape[1]) if max_width else 1.0
         if scale < 1:
             frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
@@ -258,6 +429,34 @@ def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_headi
             label += f"  {look['speed']:.0f} px/s"
         color = (0, 200, 0) if look["n"] >= fit_corners(spec) else (0, 0, 255)
         cv2.putText(panel, label, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 1, cv2.LINE_AA)
+        if pair_mode:
+            done = f"pair {len(p_targets) - len(p_open)}/{len(p_targets)}" if p_targets else "pairs first"
+            if p_next is None:
+                hint = f"{tag} pairs first: show the board to both A and B"
+            elif look["rvec"] is None:
+                hint = f"{tag} {done}: board not seen"
+            else:
+                want, cur = in_camera(p_next[1], k, pair_R), board_normal(look["rvec"])
+                now, ghost = guide_quads(spec, look, want, K)
+                for quad, c in ((now, (0, 220, 255)), (ghost, (255, 255, 0))):
+                    cv2.polylines(panel, [np.int32(quad * scale)], True, c, 2, cv2.LINE_AA)
+                hint = f"{tag} {done}: {turn_words(cur, want)} ({_angle_deg(want, cur):.0f} deg off)"
+            _text(panel, hint, (8, panel.shape[0] - 40), 0.5, (255, 255, 0))
+        elif saved is not None:
+            target = next_target(look, saved[k])
+            done = len(GUIDE_TARGETS) - len(open_targets(saved[k]))
+            if target is None:
+                hint = f"{tag} angles covered: move the board to empty parts of the frame"
+            elif k != lead:
+                hint = f"{tag} {done}/{len(GUIDE_TARGETS)} angles: follow {'AB'[lead]} for now"
+            else:
+                hint = f"{tag} {done}/{len(GUIDE_TARGETS)} angles, next: {target[0]}"
+                if look["rvec"] is not None:
+                    now, want = guide_quads(spec, look, target[1], K)
+                    for quad, c in ((now, (0, 220, 255)), (want, (255, 255, 0))):
+                        cv2.polylines(panel, [np.int32(quad * scale)], True, c, 2, cv2.LINE_AA)
+                    hint += f"  ({_angle_deg(target[1], board_normal(look['rvec'])):.0f} deg off)"
+            _text(panel, hint, (8, panel.shape[0] - 40), 0.5, (255, 255, 0))
         panels.append(panel)
     view = np.hstack(panels)
 
@@ -265,9 +464,8 @@ def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_headi
         cv2.putText(view, check_heading, (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.53,
                     (255, 255, 255), 1, cv2.LINE_AA)
     for i, (name, ok, detail) in enumerate(checks):
-        cv2.putText(view, f"{'OK ' if ok else '.. '}{name:16s}{detail}",
-                    (10, 66 + 26 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0, 200, 0) if ok else (0, 0, 255), 2, cv2.LINE_AA)
+        _text(view, f"{'OK ' if ok else '.. '}{name:16s}{detail}", (10, 66 + 22 * i), 0.5,
+              (0, 200, 0) if ok else (0, 0, 255))
     ready = not check_heading and bool(checks) and all(ok for _, ok, _ in checks)
     cv2.putText(view, footer, (8, view.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.58,
                 (0, 200, 0) if ready else (255, 255, 255), 2, cv2.LINE_AA)
@@ -363,6 +561,7 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     preview_width = 480 if sink.inline else None
     checks = []
     last_detection = None
+    pair_R = None   # B -> A, from the last frame both cameras posed; aims the pair guide
 
     def show_position(frames):
         if sink.due():
@@ -372,7 +571,9 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             heading = ("Awaiting first shutter check" if last_detection is None else
                        f"Last shutter check ({time.monotonic() - last_detection:.1f}s ago)")
             footer = f"saved {n} pair   live corners | matching A/B   interrupt = stop"
-            sink.show(_overlay(spec, frames, live_looks, checks, footer, preview_width, check_heading=heading))
+            sink.show(_overlay(spec, frames, live_looks, checks, footer, preview_width,
+                                  check_heading=heading, saved=solo, pairs=saved,
+                                  pair_R=rel_rotation(live_looks, pair_R)))
 
     # Also render while the stereo reader searches for a synchronised pair. Only
     # the reader's returned pair goes to the shutter below.
@@ -400,7 +601,9 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             dt, t_prev = (t - t_prev if t_prev else None), t
             looks = [_look(spec, f, prev[k], dt) for k, f in enumerate(frames)]
             prev = [lk["by_id"] for lk in looks]
-            ok, checks = gates(spec, looks, skew_s, saved, gate_exposure_s, max_blur_px)
+            ok, checks = gates(spec, looks, skew_s, saved, gate_exposure_s, max_blur_px,
+                               variety=solo[0])
+            pair_R = rel_rotation(looks, pair_R)
             last_detection = time.monotonic()
 
             due = auto and (t - t_try) >= period
@@ -449,7 +652,8 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
             # After a long retry burst the best pair can be older than the live
             # image already displayed. Use it for the shutter, not for playback.
             fresh_view = not live_stereo or time.monotonic() - t < 0.15
-            key = (sink.show(_overlay(spec, frames, looks, checks, footer, preview_width))
+            key = (sink.show(_overlay(spec, frames, looks, checks, footer, preview_width, saved=solo,
+                                    pairs=saved, pair_R=pair_R))
                    if fresh_view and sink.due() else -1)
             if key == ord("q"):
                 break

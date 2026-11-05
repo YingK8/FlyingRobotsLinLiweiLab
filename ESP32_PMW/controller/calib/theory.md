@@ -489,6 +489,32 @@ skew distribution. Only the sensor's own rate $T$ moves it. Measurement rather t
 assumption: at a 13 fps write rate the median skew was 4.5 ms, and at 25 fps it did not
 change within noise.
 
+### 16.1a The skew the gate reads is an arrival skew, and arrival jitters by ~T/3
+
+The stamp on every frame is `time.monotonic()` when the grab thread's `cap.read()`
+returns (`camera/sources.py`, `_grab_loop`), so it is the **arrival** time: the shutter
+plus USB transfer, the driver and scheduling. Measured 2026-11-05 over 6 s at
+$1280\times800$/120 with both ELPs: frame intervals median 8.18 ms but p5-p95 2.6-14.6 ms,
+and the residual against a fitted constant-rate clock has std **2.35 / 2.47 ms**, max
+**4.1 ms**. That is half a frame period. The sensors themselves keep good time; the
+host's view of them does not.
+
+Two consequences:
+
+- The `still (pair)` gate multiplies speed by this arrival skew, so a pair logged at
+  1 ms can be several ms apart at the shutters. The 0.1 px guarantee of 16.2 holds only
+  for a board still enough that the true offset does not matter. **Not yet corrected in
+  the gate.** It is the reason to calibrate off a stand.
+- Interpolating the other camera's corners to this camera's stamp, which is the obvious
+  fix and correct in principle, inherits the same error: $v\,\sigma_t$ with
+  $\sigma_t \approx 2.4$ ms is the error it was meant to remove. Interpolation needs a
+  shutter-side time first. Two candidates, neither yet measured: the AVFoundation
+  presentation timestamp, which `controller/native/src/capture_avf.mm` already reads and
+  discards on the way to Python, and a clock fit to the arrival stamps, since the sensor
+  period is crystal-steady. Given either at $\sigma_t \lesssim 0.2$ ms, linear
+  interpolation between two bracketing frames costs $a T^2/8$, about 0.01 px for a
+  hand's acceleration. A hardware trigger makes the question go away.
+
 ### 16.2 What skew costs
 
 A board moving at $v$ (px/s in the image) breaks the one-position assumption by
@@ -638,6 +664,67 @@ That default is not convenience. The shutter clears the old set on its first new
 which fires seconds after the window opens and long before the operator can tell the run is
 going badly -- and it destroyed a 26-pair set that way. Re-shooting is now something you
 ask for: ``override=True``, or ``append=True`` to add to what is there.
+
+### 16.5c The pose guide: say where to go, not only what was wrong
+
+The gates named what blocked the shutter -- `new pose: duplicate`, `tilt spread: 0-15 deg
+has 6` -- but not which way to turn the board, and an operator told only "no" wanders.
+(2026-11-05, operator report: "too much rejections without directions".) So every gate
+line now ends in the action that clears it (`-> turn the board toward B`, `-> hold still`),
+two were renamed for what they test (`tilt usable` -> `not edge-on`, `tilt spread` ->
+`tilt variety`), and the guided panel draws a target.
+
+The targets are fixed: face-on, plus a tilt of `GUIDE_TILT_DEG` = 35 deg toward each of the
+eight compass directions, as board normals in that camera's frame. A target is filled once
+a shot saved for *that camera* (pair or solo) has its normal within `GUIDE_HIT_DEG` = 12 deg
+of it. The guide shows the unfilled target nearest the current pose, so the next move is the
+smallest one. The board's current outline is drawn in yellow; the cyan outline is the same
+board turned about its centre to the target normal. Both come from `_rough_K`, so they show
+a direction, not a measurement. The hint names the edges that go nearer the camera *on
+screen*: `board_normal` is in the +z hemisphere, so $n_x > 0$ means the right edge is
+nearer. `test_guide_targets` holds that sign.
+
+Why these numbers. Nine targets clear `MIN_VIEWS` = 8. The four-way textbook set at 40 deg
+scores 35.8 deg of spread against the 25 deg gate (section 14.3b), and 35 deg is a guess
+that keeps margin against that while leaving room under `MAX_INCIDENCE_DEG` for the other
+camera. Neither number has been checked against a real capture yet.
+
+**One camera is guided at a time** (after pairs, 16.5d). The first version guided both, and on this rig
+(90 deg apart in azimuth) the two asked for opposite tilts that no single board pose
+satisfies -- operator report, same day. Now the camera with more targets open leads (ties:
+A) and the other panel reads `follow A for now`; its solo shots still accumulate while the
+lead is followed, and it takes over when the lead runs out of targets.
+
+What the guide does not do. It steers orientation only, not where the board sits in the
+frame, and not toward poses both cameras share: pairs still come from facing the board
+between A and B, which the `shared corners` line says when it blocks. It gates nothing;
+the shutter decides exactly as before.
+
+### 16.5d Pair mode, and the variety gate that capped pairs
+
+**The geometry.** On the LLM rig the optical axes are 99.4 deg apart (calibration of
+2026-11-05, baseline 519 mm, ~340 mm range). A board both cameras see is therefore at least
+~50 deg from each, the bisector, and every one of the 13 pairs saved that day sat at 44-60
+deg in both. The 60 deg incidence cap leaves ~10 deg of play, and none of it along the
+baseline: lean 15 deg toward A and B passes 60.
+
+**Pair mode.** The guide now does pairs first, in both panels at once, with one target.
+`rel_rotation` takes B -> A from any frame both cameras posed (rough K, a few degrees).
+`pair_targets` builds the bisector plus 15 and 30 deg rings round it, and keeps only the
+normals both cameras see under `MAX_INCIDENCE_DEG - PAIR_MARGIN_DEG`. On this rig that is
+five: the bisector, then +/-15 and +/-30 deg across the baseline. Each panel draws the same
+target in its own frame (`in_camera`) and names the edges to bring nearer. Once every pair
+target is filled the guide drops to the per-camera mode of 16.5c. Rolling the board in its
+own plane does not move its normal, so the targets cannot ask for it, but `new pose`
+counts it: roll for extra pairs once the targets are done.
+
+**The variety gate was the cap.** `tilt variety` refuses a seventh pair in a 15 deg band
+until the set's orientation spread reaches 25 deg. It measured that spread over the
+*pairs*. When every pair lands in the 45-60 band and the pairs can only spread across the
+baseline, that is a permanent stop at about six: the two rounds that day saved exactly 6
+and 7. The spread exists for camera A's intrinsics, which are fitted from pairs and solos
+together (16.5a), so it is now measured over that whole set (`gates(..., variety=solo[0])`).
+The solos supply the spread, and the band stops binding once they have.
 
 ### 16.6 What does not work
 

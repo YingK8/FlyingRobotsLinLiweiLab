@@ -24,8 +24,9 @@ from controller.calib.calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, SPEC,
                        fit_corners,
                        detect, intrinsics_from_dir, pair_views, refine_extrinsic,
                        seed_extrinsic, solve_board_pose)
-from controller.calib.capture import (_look, _pose_key, _rough_K, capture, gates,
-                     read_meta, solo_ok, write_meta)
+from controller.calib.capture import (GUIDE_TARGETS, _look, _pose_key, _rough_K, capture,
+                     gates, guide_quads, in_camera, next_target, pair_targets, read_meta,
+                     rel_rotation, solo_ok, write_meta)
 from controller.calib.rig import StereoRig
 from controller.camera import sources
 from controller.calib.zeroing import frame_from_normal
@@ -148,6 +149,69 @@ def test_solo_keeps_unpaired():
     assert not solo_ok(_fake_look([0.0, 0.9, 0.0], (200, 400), n=6), saved), "too few"
 
 
+def test_guide_targets():
+    """The pose guide points the right way, fills targets, and draws the board where it is."""
+
+    K = _rough_K((800, 1280))
+    a = np.radians(30)                       # turned about camera y: board x gains -z
+    look = _fake_look([0.0, a, 0.0], (600, 400))
+    look["tvec"] = np.array([-50.0, -50.0, 400.0])
+    w = SPEC.cols * SPEC.square_mm
+    R = Rotation.from_rotvec(look["rvec"])
+    assert (R.apply([w, 0, 0]) + look["tvec"])[2] < look["tvec"][2], "right edge is nearer"
+    hint, normal = next_target(look, [])
+    assert hint.startswith("right edge nearer"), hint
+    from controller.calib.calibrate import board_normal
+    now, same = guide_quads(SPEC, look, board_normal(look["rvec"]), K)
+    assert np.abs(now - same).max() < 1e-6, "already there: the ghost is the board"
+    face_on = GUIDE_TARGETS[0][1]
+    now, want = guide_quads(SPEC, look, face_on, K)
+    assert np.allclose(now.mean(0), want.mean(0), atol=15), "turned about its centre"
+    saved = []
+    for _, n in GUIDE_TARGETS:              # one saved shot per target fills them all
+        r = Rotation.align_vectors([n], [[0, 0, 1]])[0]
+        saved.append((r, np.zeros(2), 0.0))
+        assert next_target(look, saved) is None or not np.allclose(next_target(look, saved)[1], n)
+    assert next_target(look, saved) is None
+    assert next_target({"rvec": None}, []) == GUIDE_TARGETS[0], "no board: start face-on"
+
+
+def test_pair_guide():
+    """Pair targets keep both cameras under the cap; B->A is recovered; variety sees solos."""
+
+    from controller.calib.calibrate import MAX_INCIDENCE_DEG, board_incidence_deg
+    R_ab = Rotation.from_euler("y", 99.4, degrees=True)   # the LLM rig, 2026-11-05
+    zb = R_ab.apply([0, 0, 1])
+    targets = pair_targets(R_ab)
+    assert len(targets) >= 3, len(targets)
+    for _, n in targets:
+        for ax in ([0, 0, 1], zb):
+            assert np.degrees(np.arccos(abs(n @ ax))) <= MAX_INCIDENCE_DEG - 3 + 1e-9
+    assert abs(np.degrees(np.arccos(targets[0][1][2])) - 99.4 / 2) < 1e-6, "bisector first"
+    # Along the baseline nothing survives: a 15 deg lean toward A or B passes 60 in the other.
+    inc = lambda n, ax: np.degrees(np.arccos(abs(n @ ax)))
+    assert all(abs(inc(n, [0, 0, 1]) - inc(n, zb)) < 15 for _, n in targets), "no baseline lean"
+    # B->A from one frame both cameras posed, and the target lands in B's +z hemisphere.
+    R_a = Rotation.from_euler("xy", [10, 30], degrees=True)
+    looks = [{"rvec": R_a.as_rotvec()}, {"rvec": (R_ab.inv() * R_a).as_rotvec()}]
+    got = rel_rotation(looks)
+    assert (got * R_ab.inv()).magnitude() < 1e-9
+    assert rel_rotation([looks[0], {"rvec": None}], got) is got, "keeps the last estimate"
+    nb = in_camera(targets[0][1], 1, R_ab)
+    assert nb[2] > 0 and abs(np.degrees(np.arccos(nb[2])) - 99.4 / 2) < 1e-6
+    # Six pairs in one band block it -- unless A's whole set (solos too) already varies.
+    lk = _fake_look([0.0, 0.6, 0.0], (600, 400))
+    lk.update(ids=np.arange(lk["n"]), tvec=np.array([0, 0, 400.0]))
+    lk["incidence"] = board_incidence_deg(lk["rvec"])
+    six = [(Rotation.from_rotvec([0.0, 0.6 + 0.01 * i, 0.0]), np.zeros(2), lk["incidence"])
+           for i in range(6)]
+    wide = six + [(Rotation.from_euler("xy", [a, b], degrees=True), np.zeros(2), 30.0)
+                  for a, b in ((40, 0), (-40, 0), (0, -40), (0, 40))]
+    variety = lambda **kw: dict((n, ok) for n, ok, _ in gates(SPEC, [lk, lk], 0.0, six, **kw)[1])["tilt variety"]
+    assert not variety(), "pairs alone: the band is full"
+    assert variety(variety=wide), "A's solos supply the spread"
+
+
 def test_bag_reuse():
     """A finished bag is reused, not re-shot -- no camera is opened."""
 
@@ -262,7 +326,7 @@ def self_test():
     """Everything that runs without a camera: the synthetic round trip, and this file."""
 
     for fn in (test_units_are_mm, test_marker_scales_with_square, test_solo_keeps_unpaired,
-               test_bag_reuse, test_mixed_hemisphere_is_refused, test_exact, test_noise, test_disjoint_ids):
+               test_guide_targets, test_pair_guide, test_bag_reuse, test_mixed_hemisphere_is_refused, test_exact, test_noise, test_disjoint_ids):
         print(f"{fn.__name__}: {fn.__doc__.splitlines()[0]}")
         fn()
         print("  ok\n")

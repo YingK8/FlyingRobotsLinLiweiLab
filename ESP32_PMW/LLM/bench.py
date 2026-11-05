@@ -11,9 +11,11 @@ from controller.calib.calibrate import BOARDS
 PROJECT = Path(__file__).resolve().parents[1]
 FIXTURE_LAYOUT = PROJECT / "LLM/analyse/fixture_layout.json"   # old paper AprilTags
 HOLDER_LAYOUT = PROJECT / "LLM/analyse/holder_layout.json"     # v3 CAD checker marks (default)
-#: The printed 9x6 letter board at its caliper-measured pitch, 16.52 mm (marker scales to
-#: 12.39 mm). The value setup_002 was calibrated with; re-measure if you reprint.
-BOARD = BOARDS["9x6_letter"].with_square_mm(16.52)
+#: The 10x10 letter AprilTag (36h11) board. 20.32 mm is the NOMINAL pitch: measure the
+#: print with calipers and pass it to .with_square_mm() -- a scale error is invisible to
+#: every reprojection gate (calib/theory.md 14.4). setup_002 was calibrated with the 9x6
+#: letter board at a measured 16.52 mm: BOARDS["9x6_letter"].with_square_mm(16.52).
+BOARD = BOARDS["10x10_letter_apriltag"]
 
 
 class Bench:

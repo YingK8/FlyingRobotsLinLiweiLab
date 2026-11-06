@@ -41,7 +41,6 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 
@@ -299,7 +298,7 @@ class CommandLink:
 
     def __init__(self, port: str | None, dry_run: bool, log_path: str,
                  takeoff_cmd: list | None = None, raw_log_path=None, sync_start=False,
-                 require_ready=False):
+                 require_ready=False, code_preamble=True):
         # The sequencer profile: seq=clear / seq=ramp:... / seq=go. `PwmSequencer` takes
         # arbitrary ramp tasks, so a profile is data the host sends, not a shape compiled
         # into firmware behind a reflash -- and since 2026-08-31 it is the ONLY way to
@@ -313,6 +312,10 @@ class CommandLink:
         self.on_line = None
         self.dry = dry_run
         self.sync_start = sync_start
+        # False: no `led=code` word before START. The LLM bench syncs on the host clock
+        # instead (LLM/analyse/start.synchronize_host, 2026-11-05); the word also cost a
+        # 0.8 s gap in the recording, because send_takeoff waits it out.
+        self.code_preamble = code_preamble
         self.sync_ready = False
         self.sync_sent = False
         self.capture_first = self.capture_last = None
@@ -379,8 +382,9 @@ class CommandLink:
         if not self.sync_can_start():
             raise ValueError("START requires ready firmware and at least 0.25 s of recorded pre-roll; use a new run after START")
         if self.sync_start:
-            from controller.pose.scene import CODE_BIT_S
             self.sync_sent = True  # one attempt per recording, including rejected/lost commands
+        if self.sync_start and self.code_preamble:
+            from controller.pose.scene import CODE_BIT_S
             self.send("led=code")
             time.sleep(10 * CODE_BIT_S)  # start bit + 7 slots + dark slot; seq=go would cut it short
         for c in self.takeoff_cmd:

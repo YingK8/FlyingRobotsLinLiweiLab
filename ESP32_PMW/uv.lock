@@ -35,6 +35,23 @@ wheels = [
 ]
 
 [[package]]
+name = "cascadio"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/59/e8e6cc3f2fa07a4cbd36829d5e3fdefeb6ec0c9ef8e48303ff0f0378507f/cascadio-0.1.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:32b6f4f2a749e99c54609a1afcf03b8e522344d84c42b69d221eaff783946f30", size = 22268234, upload-time = "2026-07-28T21:13:04.713Z" },
+    { url = "https://files.pythonhosted.org/packages/94/72/c1c0bbddf983e7beab00bb674b969bcc650650011ef156b17f993f469a8b/cascadio-0.1.1-cp312-abi3-macosx_11_0_x86_64.whl", hash = "sha256:18303485bd19dc156dce54340a5327a3971a751490833e0c4db89eae120b4a7d", size = 24480742, upload-time = "2026-07-28T21:13:06.997Z" },
+    { url = "https://files.pythonhosted.org/packages/72/f7/c7ca466cfa90ea959c16fda3812f77f472a021abf54e1f09c981235260c1/cascadio-0.1.1-cp312-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:88c0cc218f29942a98c806c4377b93c1ef57154221813cf95a1e0f352e95b96f", size = 27011399, upload-time = "2026-07-28T21:13:09.364Z" },
+    { url = "https://files.pythonhosted.org/packages/93/d1/163c6847b40650cbb2347407c7f8e79f7e735d7e4a8bca785833b2d28d17/cascadio-0.1.1-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9f17efee8ac97483984eedee315d3637f5f28375af524005bd62035d8d2546c6", size = 28350060, upload-time = "2026-07-28T21:13:11.66Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/8c/3c2968a30f8f49edb24834eb7d93016b1f7f99ff2b6a063e07767dffed13/cascadio-0.1.1-cp312-abi3-win_amd64.whl", hash = "sha256:b89abd140fb84e27914535d116ffac2bd98bbf14f59436f2cbca0fdda6bf8b86", size = 16900144, upload-time = "2026-07-28T21:13:14.134Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/c4/81039e23ec3a9c8833e8767a818a1e5fa31080c5432138e37459ffbc215a/cascadio-0.1.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:88c0e48944874691ff0706ce87f597202b4f740e693831f11d538e0b3345caca", size = 22271661, upload-time = "2026-07-28T21:13:16.523Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/af/f10155c3a1cceeb1aefb06defe309152d25f9534c1590cb213f8ba3042ce/cascadio-0.1.1-cp314-cp314t-macosx_11_0_x86_64.whl", hash = "sha256:638c3bdb28bd7b422fe5d7b36e48673108fb079efa241b8e15563275eed38a7a", size = 24484676, upload-time = "2026-07-28T21:13:18.553Z" },
+    { url = "https://files.pythonhosted.org/packages/37/ac/b199ecbfefcff12aae8aafc18c8efb13add6010ee0a4533b298fb6a81053/cascadio-0.1.1-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:123d48b21dea0a593f8d14f607f2bfc5fe33e3041faba6f8810fae332d82bfb9", size = 27019677, upload-time = "2026-07-28T21:13:20.882Z" },
+    { url = "https://files.pythonhosted.org/packages/20/7d/0999f4d36f256ab40efd8f3f12a83be4fee6af7598c1f3fa63866676d167/cascadio-0.1.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a6d255983ae2d9c03a6cd97c2379b1e844e9c291a3e541b7cfbe7798d86be498", size = 28357752, upload-time = "2026-07-28T21:13:22.973Z" },
+    { url = "https://files.pythonhosted.org/packages/86/be/bc1eabf81a968b3e5c24ef62077d8047a04ac5468886292065c5a8d770ee/cascadio-0.1.1-cp314-cp314t-win_amd64.whl", hash = "sha256:8d4bbaed4381fa4e38ba873dc68342a30bdf905eb3c94dc026bca60516d84c11", size = 17388867, upload-time = "2026-07-28T21:13:25.608Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.7.22"
 source = { registry = "https://pypi.org/simple" }
@@ -392,6 +409,7 @@ name = "esp32-pmw-tools"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cascadio" },
     { name = "ipykernel" },
     { name = "ipywidgets" },
     { name = "matplotlib" },
@@ -416,6 +434,7 @@ native = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cascadio", specifier = ">=0.1.1" },
     { name = "esp32-pmw-native", marker = "extra == 'native'", editable = "controller/native" },
     { name = "ipykernel", specifier = ">=6.29" },
     { name = "ipywidgets", specifier = ">=8.1" },

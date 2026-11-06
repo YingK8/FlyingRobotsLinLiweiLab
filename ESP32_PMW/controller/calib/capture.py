@@ -14,7 +14,6 @@ re-shooting it. Overwriting an hour of board-waving must be asked for: ``overrid
 from __future__ import annotations
 
 import json
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -475,8 +474,11 @@ def _overlay(spec, frames, looks, checks, footer, max_width=None, *, check_headi
 def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NATIVE_H,
             rotate180=True, max_skew_s=0.002, append=False, auto=True, rate_hz=10.0,
             exposure_s=EXPOSURE_S, max_blur_px=MAX_BLUR_PX, override=False, backend=None,
-            fps=None, gain=GAIN, auto_exposure=False):
+            fps=None, gain=GAIN, auto_exposure=False, src=None, sink=None):
     """Live preview that shoots by itself. SPACE pauses and resumes, q quits.
+
+    ``src``/``sink``: an already-open stereo source and a display to draw on (the viser
+    app's). The caller keeps ownership of ``src``; ``sink.show`` returning ``q`` ends it.
 
     The shutter tries a shot ``rate_hz`` times a second and saves the pair only if it clears
     every gate in `gates`. There is nothing to press and nothing to time: place the board,
@@ -518,7 +520,10 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     for tag in tags:
         (out_dir / tag).mkdir(parents=True, exist_ok=True)
 
-    src = (sources.open_source(f"camera:{idx[0]}", width=width, height=height, fps=fps, grayscale=True,
+    owns_src = src is None
+    if not owns_src:
+        caller_skew, src.max_skew_s = src.max_skew_s, max_skew_s
+    src = src or (sources.open_source(f"camera:{idx[0]}", width=width, height=height, fps=fps, grayscale=True,
                                rotate180=sources.rotations(rotate180, 1)[0], backend=backend) if len(idx) == 1 else
            sources.open_stereo([f"camera:{i}" for i in idx], max_skew_s=max_skew_s,
                                width=width, height=height, fps=fps, grayscale=True,
@@ -527,7 +532,8 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     for cam, i in zip(getattr(src, "sources", [src]), idx):
         got = cam.actual
         if (got["width"], got["height"]) != (width, height):
-            src.close()
+            if owns_src:
+                src.close()
             raise OSError(
                 f"camera index {i} delivered {got['width']}x{got['height']}, not "
                 f"{width}x{height}. That is not an ELP -- run camera/identify.py to "
@@ -539,7 +545,8 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
         try:
             settings = uvc.configure(exposure_s, gain, auto_exposure=auto_exposure)
         except Exception:
-            src.close()
+            if owns_src:
+                src.close()
             raise
         print("camera settings (UVC): " + "; ".join(map(str, settings)))
     # Auto exposure is not measured per frame. Use at least a requested frame period
@@ -557,7 +564,7 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     period = 1.0 / rate_hz if rate_hz else 0.0
     # Renders in the output cell under Jupyter, where a HighGUI window never opens.
     # Opened on the main thread; see sources.Sink.open.
-    sink = sources.Sink("calibration capture", hz=20).open()
+    sink = (sink or sources.Sink("calibration capture", hz=20)).open()
     preview_width = 480 if sink.inline else None
     checks = []
     last_detection = None
@@ -667,7 +674,10 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
     finally:
         sink.close()
         stats = src.skew_stats() if hasattr(src, "skew_stats") else {}
-        src.close()
+        if owns_src:
+            src.close()
+        else:
+            src.max_skew_s = caller_skew
 
     with open(out_dir / "pairs.csv", "w") as fh:
         for k, v in stats.items():

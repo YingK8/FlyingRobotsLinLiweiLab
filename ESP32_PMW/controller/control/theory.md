@@ -4705,6 +4705,60 @@ ON-OFF-ON at 30 ms within max(25 %, two frame periods), which is under 17 ms eve
 120 fps. A `101` in the word is 80/80 ms and is refused. 80 ms is also 9.6 frames at
 120 fps, so slot-centre sampling has margin on both sides.
 
+### Evaluated, not built: a periodic preamble instead of the word (2026-11-05)
+
+Proposal: before START, blink the LED as a square wave at one fixed frequency `f_p`, `N`
+cycles, well under the camera Nyquist and away from 60 Hz.
+
+**The interferer is flicker at 120 Hz, not 60.** Mains-lit lamps flicker at twice the mains
+frequency, plus harmonics. Sampled at 120 fps, 120 Hz aliases to |120 - fps|, about 1 Hz
+at the measured 119 fps, so it appears as a slow drift. At 210 fps, 120/240/360 Hz land
+on 90/30/60 Hz. So the band to avoid is roughly 0-2, 30, 60 and 90 Hz, not just 60 Hz.
+
+**Upper bound from sampling, not Nyquist.** A square wave whose edges are to be timed
+wants >= ~6 frames per half period, so `f_p` <= fps/12, about 10 Hz at 120 fps.
+
+**Candidate: half period 55 ms (9.09 Hz), N = 9 (~1 s).**
+- That is 6.6 frames per half period at 120 fps and 11.6 at 210, so edges walk across the
+  frame phase instead of locking to it. This is the same non-multiple rule the 30 ms
+  pulse follows.
+- It is also ~1 s, about the time the word's blocking send already costs.
+
+**What it would buy (predicted, unmeasured):**
+1. *Locating by lock-in.* Correlate every pixel with `f_p` over the burst. Robot motion,
+   reflections, auto-exposure drift and flicker are not narrowband at `f_p`, so they drop
+   out. No absolute threshold is needed: `detect_led_trace` needs the ROI mean to reach
+   160, which a dim LED never does. Amplitude SNR gains about sqrt(frames), roughly 11x
+   at 120 fps.
+2. *Sub-frame timing.* Fitting the known waveform's phase over 2N = 18 dithered edges
+   gives about 2.4 ms / sqrt(18) = 0.6 ms rms at 120 fps (0.3 ms at 210). One START edge
+   gives about 2.4 ms rms (a uniform one-frame bracket). That is about 4x better.
+3. *Identity.* The frequency itself is the ID, and a second LED could use a second
+   frequency.
+
+**What it costs:**
+1. *Phase ambiguity.* The phase is known only modulo one period (110 ms). Host receive
+   stamps bound the offset far tighter than that, so they can pick the cycle without
+   becoming the clock. Ending the burst with the existing 30 ms START frames it
+   optically as well.
+2. *Firmware work.* A new `SyncLed` signal and an IDLE-only `led=` command (reflash), plus
+   a host fit that is a new anchor type for `fit_clock`.
+3. *Real frame times.* The fit needs per-frame source times from `frames.csv`, never an
+   index times 1/fps. A dropped frame then costs one sample instead of mis-timing all
+   the rest (`dropped` must still be 0).
+
+**Against the word's burst argument above:** a lock-in degrades gracefully under burst
+loss. A smeared or dropped run of frames lowers its SNR; it never flips a decode.
+
+**Recommendation:**
+- Replace the 7-bit word, which only *locates*, with the preamble, and make the
+  preamble's fitted phase the primary clock.
+- Keep START/STOP as the event markers and their edges as a cross-check.
+
+**Acceptance test:** record the LED in both cameras at 120 and 210 fps. Each camera fits
+its own offset, so the scatter of the A-B offset difference across takes measures each
+method's timing noise, with no external reference needed.
+
 ### Host side
 
 Python `RunConfig.sync_start=True` requires recorded cameras and `telemetry_path`.

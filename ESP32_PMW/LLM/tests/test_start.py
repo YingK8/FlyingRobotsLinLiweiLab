@@ -57,7 +57,25 @@ class Port:
         self.sent.append(value)
 
 
+def check_serial_offset():
+    """The host-clock sync's ESP->host offset is the lower envelope of a positive lag."""
+    import numpy as np
+    from LLM.analyse.start import serial_offset
+    rng = np.random.default_rng(1)
+    true = 1234.5678
+    rows = [{"line": f"t={ms} freq=0.0 |", "host_receive_s": true + ms / 1e3 + 0.0013 + rng.exponential(0.004)}
+            for ms in range(1000, 29000, 500)]
+    offset, n, _ = serial_offset(rows)
+    assert n == len(rows) and abs(offset - (true + 0.0013)) < 0.001, offset - true
+    try:
+        serial_offset(rows[:3])
+        raise AssertionError("too few lines must be refused")
+    except ValueError:
+        pass
+
+
 def run():
+    check_serial_offset()
     with tempfile.TemporaryDirectory(prefix="llm-start-") as directory:
         root = Path(directory)
         path = root / "raw.jsonl"

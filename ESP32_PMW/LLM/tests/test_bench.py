@@ -61,9 +61,9 @@ def check_bench_flow():
             patch.object(experiment, "postprocess", lambda run, a, b, **k: {"run": run, "rois": (a, b)}):
         (Path(tmp) / "run").mkdir()
         bench = Bench((1, 0), "fake-port", runs=Path(tmp))
-        for step in ("run", "analyse", "verify_calibration"):
+        for step in ("analyse", "verify_calibration"):  # a sync run needs no trial or reference
             try:
-                getattr(bench, step)("x", note="n") if step == "run" else getattr(bench, step)()
+                getattr(bench, step)()
             except ValueError:
                 pass
             else:

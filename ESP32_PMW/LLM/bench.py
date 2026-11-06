@@ -152,12 +152,13 @@ class Bench:
         self.verification = report
         return report
 
-    def _capture(self, bag):
+    def _capture(self, bag, **kw):
+        """kw: `capture`'s src/sink, for the viser app's open cameras and display."""
         from controller.calib.capture import capture
         c = self.camera
         capture(bag, indices=c["indices"], spec=self.board, width=c["width"], height=c["height"],
                 rotate180=c["rotate180"], backend=c["backend"], fps=c["fps"],
-                exposure_s=c["exposure_s"], gain=c["gain"], auto_exposure=c.get("auto_exposure", False))
+                exposure_s=c["exposure_s"], gain=c["gain"], auto_exposure=c.get("auto_exposure", False), **kw)
 
     # ---- scene ------------------------------------------------------------------------
     def photograph_reference(self):
@@ -243,15 +244,15 @@ class Bench:
         return drive_ramp(ramp_path(ramp), self._port(), output_root=self.runs / "drive_only",
                           confirm_start=confirm_start)
 
-    def run(self, ramp, *, note, warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30,
-            auto_start=False):
+    def run(self, ramp, *, note="", warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30,
+            auto_start=False, server=None, src=None, preview=None, led_code=True):
         """Record -> START (LED + drive) -> automatic stop -> import. ENERGISES THE COILS.
 
         `ramp` is a name in LLM/ramps (or a path). Call analyse() afterwards.
 
-        Measured run when the calibration is verified and the fixture located; otherwise
-        a sync check (video + CS + LED, no geometry). LED ROIs [x,y,w,h] are optional:
-        without them they are found from the START pulse during analyse().
+        Measured run when the calibration is verified and the fixture located; otherwise a sync check (video + CS + LED, no geometry), which needs no
+        trial or reference. LED ROIs [x,y,w,h] are optional: without them they are found
+        from the START pulse during analyse(). server/src: the viser app's, reused.
         """
         from LLM.record.experiment import finish_take, prepare_run, prepare_sync_run
         from LLM.record.panel import run_panel
@@ -259,14 +260,10 @@ class Bench:
         from LLM.record.ramps import load_ramp, ramp_path
         from controller.control.ramp import duration_s, label
         port = self._port()
-        if self.trial is None:
-            raise ValueError("record() a trial first")
         if self.verification and self.world:
             run = prepare_run(self.runs, self.session, self.calibration, self.verification, self.world,
                               self.trial, note=note, warning_review=warnings_reviewed)
         else:
-            if self.reference_pair is None:
-                raise ValueError("photograph_reference() first")
             print("No verified calibration + fixture: recording a sync check (no geometry).")
             run = prepare_sync_run(self.runs, self.session, self.trial, self.reference_pair,
                                    note=note, warning_review=warnings_reviewed)
@@ -276,19 +273,21 @@ class Bench:
         print("Ramp:", label(segments))
         result = run_panel(self.session, output_root=run / "raw/captures", run=run,
                            ramp_path=run / "ramp.json", serial_port=port, roi_a=led_a, roi_b=led_b,
-                           max_seconds=duration_s(segments) + extra_seconds, auto_start=auto_start)
+                           max_seconds=duration_s(segments) + extra_seconds, auto_start=auto_start,
+                           server=server, src=src, preview=preview, led_code=led_code)
         if result["take"] is None:
             raise ValueError("Preview only, nothing recorded; call run() again for a new run")
         report = finish_take(result["take"], self.session, run)
         print("Run:", run)
         return report
 
-    def analyse(self, annotations=None):
-        """LED START/STOP alignment -> export/input_curves.png; pose/takeoff with annotations."""
+    def analyse(self, annotations=None, sync="host"):
+        """Clock alignment -> export/input_curves.png; pose/takeoff with annotations.
+        sync="host" (default, no LED; operator 2026-11-05) or "led" (START/STOP markers)."""
         from LLM.record.experiment import postprocess
         if self.last_run is None:
             raise ValueError("run() first")
-        return postprocess(self.last_run, *self.leds, annotations=annotations)
+        return postprocess(self.last_run, *self.leds, annotations=annotations, sync=sync)
 
     def _port(self):
         if not self.serial_port:

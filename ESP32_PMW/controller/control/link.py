@@ -327,7 +327,7 @@ def demo():
         """
 
         c = SerialComm.__new__(SerialComm)      # no port, no open()
-        c.ser, c._rxbuf = _FakePort(chunks), ""
+        c.ser, c._rxbuf, c.rx_bytes = _FakePort(chunks), "", 0   # what __init__ would set
         out = []
         while True:
             while (ln := c.handle_serial_comm()) is not None:

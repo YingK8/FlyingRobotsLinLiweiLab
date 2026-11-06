@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from LLM.record.io import invalidate_report, sha256, write_json
+from LLM.record.io import invalidate_report, read_json, sha256, write_json
 from LLM.analyse.pipeline import add_clock, synchronize
 from LLM.record.telemetry import parse_log
 
@@ -121,6 +121,67 @@ def find_led(video_path, times, start_host_s, on_s, gap_s, before_s=1.0, after_s
         if len(trace["transitions"]) == 3 and [m["kind"] for m in markers] == ["start"]:
             return [x0, y0, x1 - x0, y1 - y0]
     raise ValueError(f"{video_path}: no blinking spot decodes the START pulse pair; pass the LED ROI by hand")
+
+
+#: Host receipt of a camera frame minus the moment the LED changed, measured on two
+#: 2026-11-05 takes (sync_check_..._201924, _202040; 1280x800 @ 120 fps, auto exposure)
+#: against the serial-envelope clock below: 8 LED edges, 16-28 ms, mean 22 ms. It holds
+#: only for that mode and that estimator; under auto exposure it moves with exposure.
+CAMERA_LATENCY_S = 0.022
+
+
+def serial_offset(rows):
+    """host_monotonic - device_clock, from telemetry lines ``t=<ms>``: their host receipt
+    is late by a positive, jittery USB + polling delay, so the lower envelope (2nd
+    percentile) is the offset. ~1 ms, measured the same way CAMERA_LATENCY_S was."""
+    lag = [row["host_receive_s"] - int(m.group(1)) / 1e3 for row in rows
+           if (m := re.match(r"t=(\d+) ", row["line"]))]
+    if len(lag) < 5:
+        raise ValueError(f"{len(lag)} telemetry lines; the host-clock sync needs >= 5")
+    return float(np.percentile(lag, 2)), len(lag), float(np.median(lag) - np.percentile(lag, 2))
+
+
+def synchronize_host(run, camera_latency_s=CAMERA_LATENCY_S):
+    """All three clocks onto experiment time (t = 0 at the device START) with no LED.
+
+    The ESP32 is mapped to the host through its telemetry stamps (`serial_offset`); the
+    cameras are already on the host clock, less CAMERA_LATENCY_S. Writes the same
+    processed/sync.json the LED path does. Expected error ~4 ms after the latency
+    correction (the spread it was measured with), drift unmeasured; never an optical
+    association -- the operator chose this over the LED on 2026-11-05.
+    """
+    from LLM.analyse.led import fit_clock
+    run = Path(run)
+    invalidate_report(run, "Host-clock sync changed or failed; rerun sync then process.")
+    (run / "processed/sync.json").unlink(missing_ok=True)
+    rows = [json.loads(raw) for raw in (run / "raw/telemetry.jsonl").read_text().splitlines()]
+    events = read_start(run / "raw/telemetry.jsonl")
+    start, stop = events["start"], events["stop"]
+    offset, n_lines, median_lag = serial_offset(rows)
+    reference_s = (start["led0_us"] + start["led1_us"]) / 2e6
+    host_at_start = reference_s + offset
+    clocks = {f"camera_{tag}": fit_clock([host_at_start + camera_latency_s], [0.0], f"camera_{tag}")
+              for tag in "AB"}
+    clocks["esp"] = fit_clock([reference_s], [0.0], "esp")
+    clocks["esp"]["evidence"] = (f"raw/telemetry.jsonl line {start['raw_line_number']}: START GPIO-call midpoint")
+    result = {"schema_version": 1, "method": "host_clock", "clocks": clocks,
+              "association": ("host monotonic clock: ESP32 via the lower envelope of telemetry receipt "
+                              f"({n_lines} lines, median lag {median_lag * 1e3:.1f} ms above it); cameras via "
+                              f"frame receipt minus {camera_latency_s * 1e3:.0f} ms (CAMERA_LATENCY_S)"),
+              "serial_offset_s": offset, "camera_latency_s": camera_latency_s,
+              "expected_error_s": 0.004, "hardware_sync_validated": False,
+              "led_config": read_json(run / "config.json").get("led"),
+              "input_sha256": {name: sha256(run / name) for name in
+                               ("raw/camera/frames.csv", "raw/camera/A/A.mp4", "raw/camera/B/B.mp4",
+                                "raw/telemetry.jsonl")},
+              "device_start": start | {"led_reference_device_s": reference_s,
+                                       "drive_apply_interval_t_s": [start[k] / 1e6 - reference_s
+                                                                    for k in ("drive0_us", "drive1_us")],
+                                       "measurement_kind": "software_call_brackets_not_measured_current_onset"}}
+    if stop is not None:
+        result["device_stop"] = stop | {"stop_reference_device_t_s": (stop["t0_us"] + stop["t1_us"]) / 2e6 - reference_s}
+    write_json(run / "processed/sync.json", result)
+    return result
 
 
 def synchronize_start(run, roi_a=None, roi_b=None):

@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from LLM.analyse.holder import DEFAULT_LAYOUT, inspect_holder, load_holder_layout, make_holder_regions
+from LLM.analyse.holder import inspect_holder, load_holder_layout, make_holder_regions
 from LLM.record.io import read_json, sha256, write_json
 
 

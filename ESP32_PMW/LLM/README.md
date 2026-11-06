@@ -15,6 +15,7 @@
 | 位置 | 内容 |
 |---|---|
 | `record_experiment.ipynb` | 主 notebook：准备、实验两格 |
+| `viser_app.ipynb` / `app.py` | 同一流程的 viser 界面：两格启动，每步一个按钮（未满足前置时变灰）；标定用留出帧自检，平台由 10 s 静止画面拟合、绳为 z 轴，运行中不更新；含 LED 测试、录像实验、丢弃/继续、回放 |
 | `bench.py` | `Bench`：把下面各模块按实验顺序串起来 |
 | `record/` | 实验前与实验中：`experiment`（session/run 准备、导入、后处理）、`panel`（浏览器录制面板）、`takes`（录像校验/导入）、`ramps`（读取/校验 ramp 文件）、`telemetry`（串口日志解析）、`drive_only`、`serial_check`、`io`（run 目录/JSON/哈希） |
 | `analyse/` | 实验后：`led`（LED 边沿与标记解码）、`start`（START/STOP 关联、`find_led`）、`rig`（标定验证、装置定位）、`pose`（双目三角化）、`world`（重力坐标）、`pipeline`（导出）、`takeoff`（起飞事件）、`spinup`（转子是否转起来）、`holder*`（holder 四象限标记检测与定位，见 `HOLDER_MARKERS.md`）、`holder_layout.json`（v3 CAD 20 点）、`coil_base.step`（底座 CAD，与标记同坐标系待核对）、`fixture_layout.json`（旧纸质 AprilTag） |

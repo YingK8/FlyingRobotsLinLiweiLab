@@ -55,35 +55,41 @@ def check_trial(report, session, warning_review=''):
         raise ValueError('Review trial warnings and enter a concrete explanation first')
 
 
-def prepare_sync_run(root, session, trial, reference_pair, *, note, warning_review):
-    """Prepare an inputs-only bench capture; no geometry acceptance is implied."""
-    check_trial(trial, session, warning_review)
-    if not note.strip(): raise ValueError('Describe this synchronization check')
-    if reference_pair is None: raise ValueError('Save a static reference pair in Block 4 first')
-    reference = Path(reference_pair)
-    meta = read_json(reference/'meta.json')
-    if meta.get('session_id') != session['session_id'] or meta.get('camera') != session['camera']:
-        raise ValueError('Reference pair belongs to a different session/configuration')
-    import cv2
-    for tag in 'AB':
-        frame = cv2.imread(str(reference/f'{tag}.png'))
-        if frame is None or frame.shape[:2] != (session['camera']['height'], session['camera']['width']):
-            raise ValueError('Reference image missing or wrong dimensions')
+def prepare_sync_run(root, session, trial=None, reference_pair=None, *, note='', warning_review=''):
+    """Prepare an inputs-only bench capture; no geometry acceptance is implied.
+
+    Trial audit and static reference are kept as evidence when given; nothing
+    downstream (sync, input curves) reads them, so neither is required."""
+    if trial is not None:
+        check_trial(trial, session, warning_review)
+    if reference_pair is not None:
+        reference = Path(reference_pair)
+        meta = read_json(reference/'meta.json')
+        if meta.get('session_id') != session['session_id'] or meta.get('camera') != session['camera']:
+            raise ValueError('Reference pair belongs to a different session/configuration')
+        import cv2
+        for tag in 'AB':
+            frame = cv2.imread(str(reference/f'{tag}.png'))
+            if frame is None or frame.shape[:2] != (session['camera']['height'], session['camera']['width']):
+                raise ValueError('Reference image missing or wrong dimensions')
     run = init_run(Path(root) / ('sync_check_' + datetime.now().strftime('%Y%m%d_%H%M%S_') + uuid4().hex[:6]))
-    for name in ('A.png', 'B.png', 'meta.json'):
-        snapshot(reference/name, run/'raw/static_reference'/name)
-    write_json(run/'raw/trial_audit.json', trial)
+    if reference_pair is not None:
+        for name in ('A.png', 'B.png', 'meta.json'):
+            snapshot(reference/name, run/'raw/static_reference'/name)
+    if trial is not None:
+        write_json(run/'raw/trial_audit.json', trial)
     manifest = read_json(run/'manifest.json')
     manifest.update(camera_session=copy.deepcopy(session), operator_warning_review=warning_review,
                     experiment_mode='sync_check', geometry_status='not_assessed',
-                    plumb_status='reference_images_only_not_reconstructed')
+                    plumb_status='reference_images_only_not_reconstructed' if reference_pair else 'none')
     manifest['initial_conditions']['notes'] = note
     write_json(run/'manifest.json', manifest)
     return run
 
 
-def prepare_run(root, session, calibration, verification, world, trial, *, note, warning_review):
-    check_trial(trial, session, warning_review)
+def prepare_run(root, session, calibration, verification, world, trial=None, *, note='', warning_review=''):
+    if trial is not None:
+        check_trial(trial, session, warning_review)
     require_verified(verification, calibration, session['camera'], session['session_id'])
     evidence = world.get('evidence', {})
     if (evidence.get('session_id') != session['session_id'] or evidence.get('camera') != session['camera']
@@ -91,12 +97,12 @@ def prepare_run(root, session, calibration, verification, world, trial, *, note,
         raise ValueError('Localize fixture + gravity for this session before a measured experiment')
     for p, digest in evidence['input_sha256'].items():
         if sha256(p) != digest: raise ValueError('Fixture reference changed')
-    if not note.strip(): raise ValueError('Describe robot, bearing, coil setup and experimental condition')
     run = init_run(Path(root) / (datetime.now().strftime('experiment_%Y%m%d_%H%M%S_') + uuid4().hex[:6]))
     snapshot(calibration, run/'calibration/stereo_rig.json')
     write_json(run/'calibration/world_frame.json', world)
     write_json(run/'calibration/verification.json', verification)
-    write_json(run/'raw/trial_audit.json', trial)
+    if trial is not None:
+        write_json(run/'raw/trial_audit.json', trial)
     # Keep portable source evidence, not just paths into another machine's session.
     for category, sources in [('fixture', evidence['input_sha256']), ('verification', verification['input_sha256'])]:
         index = []
@@ -120,9 +126,12 @@ def finish_take(take, session, run=None):
     return report
 
 
-def postprocess(run, roi_a=None, roi_b=None, *, annotations=None):
-    """Explicit prerequisites, no synthetic stand-ins for missing measurements."""
-    from LLM.analyse.start import synchronize_start
+def postprocess(run, roi_a=None, roi_b=None, *, annotations=None, sync='led'):
+    """Explicit prerequisites, no synthetic stand-ins for missing measurements.
+
+    sync: 'led' (START/STOP markers in the video) or 'host' (host clock, no LED;
+    `start.synchronize_host`)."""
+    from LLM.analyse.start import synchronize_host, synchronize_start
     from LLM.analyse.pipeline import process_run
     run = Path(run)
     sync_only = read_json(run/'manifest.json').get('experiment_mode') == 'sync_check'
@@ -132,13 +141,14 @@ def postprocess(run, roi_a=None, roi_b=None, *, annotations=None):
     if not (run/'raw/telemetry.jsonl').exists(): raise ValueError('Missing flight START/current log')
     for name in ('overview.png', 'input_curves.png', 'input_curves.meta.json'):
         (run/'export'/name).unlink(missing_ok=True)
-    sync = synchronize_start(run, roi_a, roi_b)
+    sync = synchronize_host(run) if sync == 'host' else synchronize_start(run, roi_a, roi_b)
     input_curves(run, sync)
     if sync_only:
         return {'status': 'sync_check_inputs_only', 'sync': str(run/'processed/sync.json'),
                 'input_curves': str(run/'export/input_curves.png'),
                 'geometry_status': 'not_assessed', 'hardware_sync_validated': False,
-                'drive_apply_interval_t_s': sync['device_start']['drive_apply_interval_t_s']}
+                'drive_apply_interval_t_s': sync['device_start']['drive_apply_interval_t_s'],
+                'sync_method': sync.get('method', 'led')}
     if annotations is None:
         return {'status': 'needs_pose_annotations', 'sync': str(run/'processed/sync.json'),
                 'input_curves': str(run/'export/input_curves.png'),
@@ -187,13 +197,24 @@ def input_curves(run, sync):
         axes[1].text(.03,.5,'No parseable CS samples',transform=axes[1].transAxes)
     axes[0].set_ylabel('Frequency (Hz)'); axes[1].set_ylabel('Filtered CS (A)')
     import pandas as pd
-    for ch in 'AB':
-        led = pd.read_csv(run/f'processed/led_{ch}.csv')
-        axes[2].plot(map_times(led.source_time_s, sync['clocks'][f'camera_{ch}']),
-                     led.brightness, label=f'Camera {ch} LED')
-    axes[2].axhline(sync['led_config']['threshold'], color='gray', linestyle='--', label='Detection threshold')
-    axes[2].set_ylabel('LED brightness (0–255)')
-    axes[2].set_xlabel('LED-aligned time (s); alignment does not prove simultaneous current onset')
+    if sync.get('method') == 'host_clock':      # no LED: show what the alignment rests on
+        import numpy as np
+        from LLM.record.takes import load_flight
+        flight = load_flight(run)
+        for ch in 'AB':
+            t = map_times(np.asarray(flight[f'times_{ch.lower()}'], float), sync['clocks'][f'camera_{ch}'])
+            axes[2].plot(t[1:], np.diff(t) * 1e3, '.', ms=2, label=f'Camera {ch} frame interval')
+        axes[2].set_ylabel('Frame interval (ms)')
+        axes[2].set_xlabel(f"Host-clock time (s), camera latency {sync['camera_latency_s']*1e3:.0f} ms subtracted; "
+                           f"expected error ~{sync['expected_error_s']*1e3:.0f} ms")
+    else:
+        for ch in 'AB':
+            led = pd.read_csv(run/f'processed/led_{ch}.csv')
+            axes[2].plot(map_times(led.source_time_s, sync['clocks'][f'camera_{ch}']),
+                         led.brightness, label=f'Camera {ch} LED')
+        axes[2].axhline(sync['led_config']['threshold'], color='gray', linestyle='--', label='Detection threshold')
+        axes[2].set_ylabel('LED brightness (0–255)')
+        axes[2].set_xlabel('LED-aligned time (s); alignment does not prove simultaneous current onset')
     for ax in axes:
         ax.grid(alpha=.2); ax.axvline(0,color='gray',linestyle=':')
         if ax.get_legend_handles_labels()[0]: ax.legend()

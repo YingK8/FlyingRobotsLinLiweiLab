@@ -1,8 +1,8 @@
 """Fixed-stereo pose of named checker centers on the custom coil holder.
 
 Each camera keeps its own 2D/3D correspondences, including disjoint side faces.
-Only the plumb endpoints are triangulated. Labels come from reviewed image ROIs,
-not from the appearance of the identical checker targets.
+Only the plumb endpoints are triangulated. Labels come from reviewed image ROIs, or
+from `match_holder`, which names unlabelled candidates by their 3D fit to the CAD.
 """
 from pathlib import Path
 
@@ -61,6 +61,193 @@ def _pose_starts(rig, objects, pixels):
                 if np.isfinite(seed).all():
                     starts.append(seed)
     return starts
+
+
+def _project(cam, xyz):
+    local = (np.asarray(xyz, float) - cam.position) @ cam.R
+    return cv2.projectPoints(local, np.zeros(3), np.zeros(3), cam.K, cam.dist)[0].reshape(-1, 2)
+
+
+def _dot_evidence(rig, images, dots, T):
+    """Mean (dot - surrounding ring) brightness at the projected white ID dots."""
+    world = dots @ T[:3, :3].T + T[:3, 3]
+    out = []
+    for cam, img in zip(rig.cameras, images):
+        h, w = img.shape[:2]
+        for u, v in np.rint(_project(cam, world)).astype(int):
+            if 4 <= u < w - 4 and 4 <= v < h - 4:
+                patch = img[v - 4:v + 5, u - 4:u + 5].astype(float)
+                out.append(patch[3:6, 3:6].mean() - np.median(np.r_[patch[0], patch[-1], patch[:, 0], patch[:, -1]]))
+    return float(np.mean(out)) if out else -np.inf
+
+
+def _label(rig, layout, cand, T, tol_px):
+    """{'A': {label: uv}, 'B': ...}: each CAD point posed by T, on a face turned toward
+    the camera (as `fit_holder` requires), names the candidate within `tol_px` of it."""
+    labels, surfaces = list(layout['points']), layout.get('surfaces', {})
+    world = np.array([layout['points'][k] for k in labels], float) @ T[:3, :3].T + T[:3, 3]
+    observations = {'A': {}, 'B': {}}
+    for tag, cam, c in zip('AB', rig.cameras, cand):
+        if not len(c):
+            continue
+        for label, p, xyz in zip(labels, _project(cam, world), world):
+            n = surfaces.get(label, {})
+            n = n.get('normal', n.get('outward_normal'))
+            if n is not None and np.dot(T[:3, :3] @ n, cam.position - xyz) <= 0:
+                continue
+            d = np.linalg.norm(c - p, axis=1)
+            if d.min() < tol_px:
+                observations[tag][label] = c[int(np.argmin(d))]
+    return observations
+
+
+def match_holder(rig, cand_a, cand_b, layout, up, *, images=None, epipolar_px=2.0,
+                 reproject_px=3.0, coarse_px=8.0, yaw_step_deg=3.0, min_named=6):
+    """Name unlabelled checker centres by fitting the CAD points, z held on `up`.
+
+    The detector finds the targets but cannot tell them apart (`identity_method`).
+    Candidates paired across the views (epipolar, mutual best) and triangulated are
+    the anchors: each anchor x CAD point x yaw (CAD +Z on the plumb `up`, so 4 DOF)
+    poses the holder, and the pose is scored by projecting ALL CAD points into BOTH
+    views and counting single-view candidates within `coarse_px`. One anchor is
+    enough. Scoring in 3D needed >= 3 triangulated points, and on 2026-11-05 camera B
+    found only 5 candidates against A's 11 (its auto exposure brightened under a new
+    black cloth), 2 triangulated, and the fit refused. `coarse_px` covers the yaw step
+    at ~70 mm from the anchor; a level holder to ~2 deg is assumed (a guess).
+
+    The four posts sit on a 96 mm square, so the targets are 4-fold symmetric about the
+    boss axis and yaw ties at 90 deg steps. Each tied pose is refined by `fit_holder`
+    and the white ID dots (1-4 per post, `layout['id_dots']`) break the tie: with
+    ``images`` the pose whose projected dots are brightest against their ring wins.
+    Without images, or if the dots do not separate them, ``info['ambiguous']`` is True
+    and the yaw is not to be trusted (z and the boss-axis origin are unaffected).
+    Returns ``({'A': {label: uv}, 'B': ...}, info)``.
+    """
+    from scipy.spatial import cKDTree
+    cand = [np.asarray(c, float).reshape(-1, 2) for c in (cand_a, cand_b)]
+    empty = {'A': {}, 'B': {}}
+    if min(len(c) for c in cand) < 1:
+        return empty, dict(n3d=0, ambiguous=True)
+    a, b = rig.cameras
+    norm = [cv2.undistortPoints(c.reshape(-1, 1, 2), cam.K, cam.dist).reshape(-1, 2)
+            for c, cam in zip(cand, rig.cameras)]
+    R = a.R.T @ b.R                     # B -> A rotation, camera A at the origin
+    t = a.R.T @ (b.position - a.position)
+    E = np.array([[0, -t[2], t[1]], [t[2], 0, -t[0]], [-t[1], t[0], 0]]) @ R
+    xa, xb = (np.c_[n, np.ones(len(n))] for n in norm)
+    lines = xb @ E.T                    # epipolar lines in A, one per B candidate
+    dist = np.abs(xa @ lines.T) / np.linalg.norm(lines[:, :2], axis=1) * a.K[0, 0]
+    size = rig.meta.get('image_size', [1e9, 1e9])
+    P = []
+    for i in range(len(cand[0])):
+        j = int(np.argmin(dist[i]))
+        if dist[i, j] < epipolar_px and int(np.argmin(dist[:, j])) == i:
+            xyz = _point(cand[0][i], cand[1][j], rig, size, reproject_px, 1)[0]
+            if xyz is not None:
+                P.append(xyz)
+    if not P:
+        return empty, dict(n3d=0, ambiguous=True)
+    P = np.array(P)
+    labels = list(layout['points'])
+    Q = np.array([layout['points'][k] for k in labels], float)
+    surf = layout.get('surfaces', {})
+    N = np.array([(surf.get(k, {}).get('normal') or surf.get(k, {}).get('outward_normal') or [np.nan] * 3)
+                  for k in labels], float)
+    trees = [cKDTree(c) for c in cand]
+    z = np.asarray(up, float) / np.linalg.norm(up)
+    x = np.cross(z, [1.0, 0, 0] if abs(z[0]) < .9 else [0, 1.0, 0]); x /= np.linalg.norm(x)
+    R0 = np.c_[x, np.cross(z, x), z]   # CAD z -> up
+    hypotheses = []
+    for yaw in np.radians(np.arange(0, 360, yaw_step_deg)):
+        c, s_ = np.cos(yaw), np.sin(yaw)
+        Rq = R0 @ np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])
+        Qr, Nr = Q @ Rq.T, N @ Rq.T
+        shifts = (P[:, None, :] - Qr[None, :, :]).reshape(-1, 3)        # every anchor x CAD point
+        X = Qr[None] + shifts[:, None]                                    # (S, points, 3)
+        score, cost = np.zeros(len(shifts)), np.zeros(len(shifts))
+        for cam, tree in zip(rig.cameras, trees):
+            local = (X - cam.position) @ cam.R
+            facing = np.einsum('spk,pk->sp', cam.position - X, Nr)
+            ok = (local[..., 2] > 0) & ~(facing <= 0)                     # NaN normal: no face test
+            uv = cv2.projectPoints(local.reshape(-1, 3), np.zeros(3), np.zeros(3), cam.K, cam.dist)[0]
+            d, _ = tree.query(uv.reshape(-1, 2), distance_upper_bound=coarse_px)
+            hit = ok & np.isfinite(d.reshape(ok.shape))
+            score += hit.sum(1)
+            cost += np.where(hit, d.reshape(ok.shape), 0).sum(1)
+        k = int(np.lexsort((cost, -score))[0])
+        hypotheses.append((int(score[k]), float(cost[k]), np.degrees(yaw), np.r_[np.c_[Rq, shifts[k]], [[0, 0, 0, 1]]]))
+    top = max(h[0] for h in hypotheses)
+    if top < min_named:
+        return empty, dict(n3d=len(P), score=top, ambiguous=True)
+    tied = []                           # best of each distinct yaw that reaches the top score
+    for h in sorted((h for h in hypotheses if h[0] == top), key=lambda h: h[1]):
+        if all(abs((h[2] - g[0] + 180) % 360 - 180) > 10 for g in tied):   # tied: (yaw, T, obs)
+            obs = _label(rig, layout, cand, h[3], coarse_px)
+            try:                        # refine on its own labels before reading the dots
+                T = fit_holder(rig, layout, obs)[0]
+                obs = _label(rig, layout, cand, T, reproject_px)
+            except ValueError:
+                T = h[3]
+            tied.append((h[2], T, obs))
+    dots = np.array([d['center_mm'] for d in layout.get('id_dots', [])], float).reshape(-1, 3)
+    evidence = ([_dot_evidence(rig, images, dots, T) for _, T, _ in tied]
+                if images is not None and len(dots) and len(tied) > 1 else [0.0])
+    order = np.argsort(evidence)[::-1]
+    # guess: a 10-grey-level lead is a white dot against a dark face, not noise
+    ambiguous = len(tied) > 1 and (len(evidence) < 2 or evidence[order[0]] - evidence[order[1]] < 10)
+    return tied[int(order[0])][2], dict(n3d=len(P), score=top, tied_yaws_deg=[round(y) for y, _, _ in tied],
+                                        dot_evidence=[round(e, 1) for e in evidence], ambiguous=ambiguous)
+
+
+def thin_lines(gray, cam, n=8, max_tilt_deg=40.0, min_px=120, ridge_grey=25):
+    """The `n` longest thin bright straight lines within `max_tilt_deg` of image-vertical.
+
+    A 9 px white top-hat keeps ridges a few px wide (the rope) and drops broad bright
+    areas (windows, walls), which is what defeated `scene.segment_scene`'s whole-frame
+    Otsu on the 2026-11-05 bench: it picked a checker column in A and a cable in B.
+    40 deg covers a rolled camera -- the rope leans ~21 deg in B's image there -- and
+    is a guess, as are `min_px` and `ridge_grey`. Each line is returned as image
+    endpoints plus the undistorted ``(centroid, unit_dir)`` `disc_pose.mast_plane` takes.
+    """
+    ridge = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)))
+    segments = cv2.HoughLinesP(((ridge > ridge_grey) * 255).astype(np.uint8), 1, np.pi / 360, 80,
+                               minLineLength=min_px, maxLineGap=8)
+    out = []
+    for x1, y1, x2, y2 in (segments.reshape(-1, 4) if segments is not None else []):
+        d = np.array([x2 - x1, y2 - y1], float)
+        if np.degrees(np.arccos(abs(d[1]) / np.linalg.norm(d))) > max_tilt_deg:
+            continue
+        p = cv2.undistortPoints(np.array([[x1, y1], [x2, y2]], float).reshape(-1, 1, 2),
+                                cam.K, cam.dist, P=cam.K).reshape(-1, 2)
+        out.append(dict(length_px=float(np.linalg.norm(d)), ends=[[int(x1), int(y1)], [int(x2), int(y2)]],
+                        line=(p.mean(0), (p[1] - p[0]) / np.linalg.norm(p[1] - p[0]))))
+    return sorted(out, key=lambda o: -o['length_px'])[:n]
+
+
+def find_rope_and_holder(rig, images, cands, layout):
+    """The rope and a level holder confirm each other: every A x B thin-line pair
+    proposes an `up`, and the one along which `match_holder` names the most targets wins.
+
+    Any truly vertical line gives the same `up` (a holder edge would too), so the winner
+    is the rope only in the sense that it is the longest vertical pair; it is drawn for
+    the operator to check. Returns ``(up, (line_a, line_b), observations, info)``.
+    """
+    from controller.pose.disc_pose import mast_direction
+    lines = [thin_lines(img, cam) for img, cam in zip(images, rig.cameras)]
+    image_up = rig.a.R @ [0.0, -1.0, 0.0]      # sign only: camera A is roughly upright
+    best = None
+    for la in lines[0]:
+        for lb in lines[1]:
+            up = mast_direction([la['line'], lb['line']], rig.cameras, up=image_up)
+            if up is None:
+                continue
+            obs, info = match_holder(rig, *cands, layout, up, images=images)
+            key = (info.get('score', 0), sum(map(len, obs.values())))
+            if best is None or key > best[0]:
+                best = (key, up, (la, lb), obs, info)
+    if best is None:
+        return None, None, {'A': {}, 'B': {}}, dict(lines=[len(l) for l in lines], ambiguous=True)
+    return best[1], best[2], best[3], best[4] | dict(lines=[len(l) for l in lines])
 
 
 def fit_holder(rig, layout, observations):

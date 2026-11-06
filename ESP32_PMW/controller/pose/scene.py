@@ -148,19 +148,26 @@ def read_code(trace, times):
     return [int(level[np.argmin(np.abs(times - t))]) for t in slot_centres]
 
 
-def locate_led(frames, times, pad_px=6, thresh=40):
+def locate_led(frames, times, pad_px=6, thresh=40, max_regions=8):
+    """The LED as ``(cx, cy, r)``: the first changing region, largest first, whose
+    brightness decodes the word to `LED_ID`; None if none does.
+
+    Largest-only failed on the 2026-11-05 bench: camera A's biggest changing region
+    during the word was something else, and the LED was never tried. The decode is
+    the identity test, so trying the next regions cannot mistake a distractor for it.
+    """
     frames = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if f.ndim == 3 else f for f in frames]
     counts, changes = blink_mask(frames, thresh)
-    region = largest_component((counts > 0).astype(np.uint8))
-    if not region.any():
-        return None
-    trace = [float(f[region > 0].mean()) for f in frames]
-    bits = read_code(trace, times)
-    if bits is None or hamming_decode(bits)[0] != LED_ID:
-        return None
-    lit = (np.any(changes, axis=0) & (region > 0)).astype(np.uint8)
-    (cx, cy), r = cv2.minEnclosingCircle(cv2.findNonZero(lit))
-    return cx, cy, r + pad_px
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((counts > 0).astype(np.uint8))
+    for label in (1 + np.argsort(-stats[1:, cv2.CC_STAT_AREA]))[:max_regions]:
+        region = labels == label
+        bits = read_code([float(f[region].mean()) for f in frames], times)
+        if bits is None or hamming_decode(bits)[0] != LED_ID:
+            continue
+        lit = (np.any(changes, axis=0) & region).astype(np.uint8)
+        (cx, cy), r = cv2.minEnclosingCircle(cv2.findNonZero(lit))
+        return cx, cy, r + pad_px
+    return None
 
 
 def _self_check():
@@ -211,6 +218,8 @@ def _self_check():
         frame = np.full((400, 640), 20, np.uint8)
         if on:
             cv2.circle(frame, (500, 300), 8, 250, -1)
+        if np.random.default_rng(len(frames)).random() < .5:   # a bigger flicker that is not ours
+            cv2.rectangle(frame, (60, 60), (160, 160), 230, -1)
         frames.append(frame)
     cx, cy, r = locate_led(frames, times)
     assert np.hypot(cx - 500, cy - 300) < 1.5 and 8 < r < 20

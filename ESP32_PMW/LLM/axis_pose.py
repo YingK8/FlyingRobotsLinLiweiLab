@@ -14,7 +14,7 @@ import pandas as pd
 
 from controller.pose import axis_pose as core
 from LLM.record.takes import load_flight, _capture_dir
-from LLM.record.io import read_json, write_json, sha256, snapshot
+from LLM.record.io import write_json, sha256, snapshot
 from LLM.analyse.pose import _validated_rig
 
 
@@ -66,13 +66,15 @@ def run_axis_pose(run_dir, calibration_path, *, robot_rois, background_paths=Non
                   background_mode='difference', background_confirmed=False,
                   preprocessing_confirmed=False, reference_axis_camera=(0., -1., 0.),
                   threshold=core.THRESH, max_skew_s=.01, max_gap_s=.05,
-                  max_step_deg=20., max_frames=None, progress=None):
+                  max_step_deg=20., max_frames=None, progress=None, show=None, show_every=10):
     """Write a new trial containing CSV, curves, overlays and input snapshots.
 
     Works with measured or sync_check runs, or an imported FlightWriter take.
     No hardware, no world-frame claim, no takeoff, and no promotion of experimental
     axes to orientation_valid. Reference is an explicit camera-A direction, not
     gravity. After rejection/gaps continuity resets to that reference.
+    ``show(panel)``: every ``show_every``-th frame's A|B segmentation overlay (the
+    same drawing as overlays.jpg), for a live view while it runs.
     """
     run, calibration_path = Path(run_dir).resolve(), Path(calibration_path).resolve()
     limits = np.asarray([threshold, max_skew_s, max_gap_s, max_step_deg], float)
@@ -173,10 +175,14 @@ def run_axis_pose(run_dir, calibration_path, *, robot_rois, background_paths=Non
             if not row['axis_estimate_valid']:
                 last_axis = last_t = None
             output.append(row)
-            if k in preview_indices:
-                panels.append(np.hstack([_overlay(f, mask, m, rois[tag],
+            if k in preview_indices or (show is not None and k % show_every == 0):
+                panel = np.hstack([_overlay(f, mask, m, rois[tag],
                     f'{tag} frame={row["frame_index"]} t={row["elapsed_capture_s"]:.3f}s {row["reason"]}')
-                    for tag, f, mask, m in zip('AB', frames, masks, views)]))
+                    for tag, f, mask, m in zip('AB', frames, masks, views)])
+                if k in preview_indices:
+                    panels.append(panel)
+                if show is not None and k % show_every == 0:
+                    show(panel)
             if progress is not None and (k % 250 == 0 or k+1 == n):
                 progress(k+1, n)
         if max_frames is None and any(d.read()[0] for d in decoders):

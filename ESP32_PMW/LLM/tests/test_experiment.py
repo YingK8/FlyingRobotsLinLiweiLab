@@ -32,7 +32,7 @@ def pixels(rig, xyz):
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_sync_check_requires_current_trial_and_reference_without_geometry(self):
+    def test_sync_check_checks_given_trial_and_reference_without_geometry(self):
         from LLM.record.experiment import prepare_sync_run, prepare_run, postprocess
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
@@ -48,7 +48,8 @@ class WorkflowTests(unittest.TestCase):
             write_json(ref/'meta.json',reference_meta)
             kw=dict(note='synthetic sync test',warning_review='synthetic capture warnings reviewed')
             with self.assertRaises(ValueError):prepare_sync_run(root,session,{},ref,**kw)
-            with self.assertRaises(ValueError):prepare_sync_run(root,session,trial,None,**kw)
+            bare=prepare_sync_run(root,session)  # trial, reference and note are optional
+            self.assertFalse((bare/'raw/static_reference').exists() or (bare/'raw/trial_audit.json').exists())
             run=prepare_sync_run(root,session,trial,ref,**kw)
             next_run=prepare_sync_run(root,session,trial,ref,**kw)
             self.assertNotEqual(run,next_run,'Repeating Block 8 must preserve the previous recording')

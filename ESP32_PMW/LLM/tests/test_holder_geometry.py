@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from controller.calib.rig import Camera, StereoRig, look_at
-from LLM.analyse.holder_geometry import fit_holder, localize_holder
+from LLM.analyse.holder_geometry import fit_holder, localize_holder, match_holder
 from LLM.record.io import sha256, write_json
 from LLM.analyse.rig import camera_key
 
@@ -222,6 +222,37 @@ class HolderGeometryTests(unittest.TestCase):
             cv2.imwrite(str(args[0] / 'B.png'), np.zeros((400, 640), np.uint8))
             with self.assertRaisesRegex(ValueError, 'dimensions'):
                 localize_holder(*args, session_id='test')
+
+    def test_unlabelled_candidates_are_named_and_dots_break_the_symmetry(self):
+        import json
+        rig, layout, _, truth = scene()
+        layout['id_dots'] = json.loads((Path(__file__).parents[1] / 'analyse/holder_layout.json').read_text())['id_dots']
+        labels = list(layout['points'])
+        X = np.array([layout['points'][k] for k in labels]) @ truth[:3, :3].T + truth[:3, 3]
+        dots = np.array([d['center_mm'] for d in layout['id_dots']]) @ truth[:3, :3].T + truth[:3, 3]
+        rng = np.random.default_rng(0)
+        cands, images = [], []
+        for cam in rig.cameras:
+            uv = project(cam, X)
+            keep = rng.random(len(uv)) > .3       # 30 % missed, 10 outliers, 0.1 px noise
+            cands.append(rng.permutation(np.r_[uv[keep] + rng.normal(0, .1, (keep.sum(), 2)),
+                                               rng.uniform([0, 0], [1280, 800], (10, 2))]))
+            image = np.full((800, 1280), 40, np.uint8)
+            for u, v in np.rint(project(cam, dots)).astype(int):
+                cv2.circle(image, (u, v), 2, 230, -1)
+            images.append(image)
+        up = truth[:3, :3] @ [0, 0, 1]
+        _, info = match_holder(rig, *cands, layout, up)
+        self.assertTrue(info['ambiguous'], 'without the dots a 96 mm square ties at 90 deg')
+        self.assertEqual(len(info['tied_yaws_deg']), 4)
+        observations, info = match_holder(rig, *cands, layout, up, images=images)
+        self.assertFalse(info['ambiguous'])
+        for tag, cam in zip('AB', rig.cameras):
+            for label, uv in observations[tag].items():
+                self.assertLess(np.linalg.norm(uv - project(cam, [X[labels.index(label)]])[0]), 1, (tag, label))
+        T, _ = fit_holder(rig, layout, observations)
+        self.assertLess(np.abs(T[:3, 3] - truth[:3, 3]).max(), .5)
+        self.assertLess(np.degrees(np.arccos(np.clip((np.trace(T[:3, :3].T @ truth[:3, :3]) - 1) / 2, -1, 1))), .2)
 
 
 def run():

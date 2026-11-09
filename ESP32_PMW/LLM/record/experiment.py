@@ -212,7 +212,9 @@ def input_curves(run, sync):
             led = pd.read_csv(run/f'processed/led_{ch}.csv')
             axes[2].plot(map_times(led.source_time_s, sync['clocks'][f'camera_{ch}']),
                          led.brightness, label=f'Camera {ch} LED')
-        axes[2].axhline(sync['led_config']['threshold'], color='gray', linestyle='--', label='Detection threshold')
+        for ch in 'AB':         # per camera: auto thresholds come from each trace
+            axes[2].axhline(sync['led'][ch]['config']['threshold'], color='gray', linestyle='--',
+                            label='Detection threshold' if ch == 'A' else None)
         axes[2].set_ylabel('LED brightness (0–255)')
         axes[2].set_xlabel('LED-aligned time (s); alignment does not prove simultaneous current onset')
     for ax in axes:

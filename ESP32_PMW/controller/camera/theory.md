@@ -284,3 +284,35 @@ separate: warnings do not disappear behind PASS. The 10% rate, three-period gap,
 accuracy limits. The offline suite covers mocked Windows dispatch, failed pair opening,
 codec fallback, late encoder errors, Interrupt cleanup, and real synthetic codec round
 trips. No Windows camera, USB topology or physical timing result is implied.
+
+### 1.8.1 The encoder was a software H.264, at 5 cores (2026-11-06)
+
+Every LLM run on 2026-11-06 stopped with "Encoder errors/queue drops", a few seconds into
+recording. `meta.json`'s `queue_trace` showed a steady deficit, not a stall. The deepest
+queue grew at a constant rate until the 64-pair bound.
+
+**Cause.** `cv2.VideoWriter(path, fourcc('avc1'), ...)` with no backend selects OpenCV's
+bundled **FFmpeg**, which is a *software* H.264 encoder (`getBackendName()` returns `FFMPEG`).
+The test was live, cameras only, with no app, at 1280x800@120 and two streams. FFmpeg
+pushed the process to **516-580 % CPU** and dropped 521 pairs in one 10 s window.
+`cv2.CAP_AVFOUNDATION` with the same fourcc is Apple's hardware encoder. It held **~90 %**,
+the queue stayed at most 2 pairs deep, and it dropped nothing. The order was AVF, FFmpeg,
+AVF, FFmpeg with 5 s rests, so the drift below cannot have produced the difference. A 20 s
+take through `FlightWriter` itself afterwards: 119 pairs/s, 0 drops, queue never above 0.
+The AVFoundation files decode every written row, seek correctly, and spend ~7 kB/frame
+against FFmpeg's 2-3 kB, so the hardware path also keeps more detail.
+
+**Negative results, kept because they looked like fixes.** Offline benches, which feed
+frames as fast as the encoder takes them, never showed the problem. FFmpeg alone encoded
+154-212 pairs/s there. One thread per camera plus gray writers measured +20 % offline, and
+the next live run was *worse*: the queue filled in 2 s against 5 s before. A software
+encoder at 5 cores is at the mercy of whatever else runs: capture, the viser preview, VS
+Code. Consecutive live FFmpeg runs slowed from ~113 to ~48 pairs/s. The 2026-11-05 takes
+that survived did so with ~2 % margin. MJPEG costs ~6 ms CPU per frame, more than either.
+A bigger queue only delays the drop: at a 10 % deficit a 50 s take needs ~600 pairs, about
+1.2 GB. **Only a live run measures an encoder.**
+
+`FlightWriter` now opens AVFoundation first on macOS and records `writer_backend` in
+`meta.json`. It keeps one queue and thread per camera, which costs nothing, and lets one
+camera's blocking `write` wait without stalling the other. It enqueues a pair to all queues
+or to none, so frame *i* of each mp4 stays the same pair.

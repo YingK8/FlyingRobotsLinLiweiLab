@@ -122,15 +122,19 @@ class FlightWriter:
             raise ValueError("video fps must be positive and finite")
         if codec not in ("auto", "avc1", "mp4v"):
             raise ValueError("codec must be auto, avc1 or mp4v")
-        self.codec_request, self.codec = codec, None
+        self.codec_request, self.codec, self.backend = codec, None, None
         self._finish = threading.Event()
         self._closed = False
         self.dir = new_flight(out_dir, tags, take_suffix((meta or {}).get("note")))
         self.tags, self.fps, self.meta = tags, float(fps), dict(meta or {})
         self.n, self.dropped, self.errors = 0, 0, 0
+        # (pair, deepest queue) every 12th pair: a drop then says whether the encoder fell
+        # steadily behind or stalled once. 2026-11-06 it was steady: +1 per ~10 pairs.
+        self.queue_trace = []
         self._t_first = self._t_last = None      # for fps_measured, see close()
         self.writers, self.size = None, None
-        self._released = False   # set by the encoder thread once it finalises
+        self._released = False   # set by close() once every encoder thread finalised
+        self._gray = False       # gray writers: set from the first frame, see _open_writers
         # Header up front, rows as they land: see the class docstring.
         self._csv = open(self.dir / "frames.csv", "w", buffering=1)
         # `written` is 0 for a frame the queue dropped: its row is kept (the capture time is
@@ -139,51 +143,63 @@ class FlightWriter:
         # seconds of error by the cut (2026-09-13). `read_index` drops the unwritten rows.
         self._csv.write("index,t_capture,skew_s,"
                         + ",".join(f"t_{t.lower()}" for t in self.tags) + ",written\n")
-        self._work = queue.Queue(maxsize=QUEUE_DEPTH)
-        self._thread = threading.Thread(target=self._run, name="encode", daemon=True)
-        self._thread.start()
+        # One encoder thread per camera: the two mp4s are independent, and AVFoundation's
+        # write blocks while its input is not ready. The fix for the 2026-11-06 drops was
+        # the backend, not this (see _open_writers and camera/theory.md 1.8.1).
+        self._work = [queue.Queue(maxsize=QUEUE_DEPTH) for _ in tags]
+        self._done = [False] * len(tags)
+        self._threads = [threading.Thread(target=self._run, args=(i,), name=f"encode-{tag}", daemon=True)
+                         for i, tag in enumerate(tags)]
+        for th in self._threads:
+            th.start()
 
-    def _run(self):
+    def _run(self, i):
+        work = self._work[i]
         try:
             while True:
                 try:
-                    job = self._work.get(timeout=0.1)
+                    w, f = work.get(timeout=0.1)
                 except queue.Empty:
                     if self._finish.is_set():
                         break
                     continue
                 try:
-                    for w, f in job:
-                        # BGR works with the Windows MP4 encoders as well as macOS.
-                        w.write(cv2.cvtColor(f, cv2.COLOR_GRAY2BGR) if f.ndim == 2 else f)
+                    w.write(f if self._gray or f.ndim == 3 else cv2.cvtColor(f, cv2.COLOR_GRAY2BGR))
                 except Exception as e:
                     self.errors += 1
                     if self.errors == 1:
                         print(f"encoder error (take requires validation): {e}")
                 finally:
-                    self._work.task_done()
+                    work.task_done()
         finally:
-            # Only this thread releases writers, after its queue has drained.
-            for w in self.writers or []:
+            # Only this thread releases its writer, after its queue has drained.
+            if self.writers is not None:
                 try:
-                    w.release()
+                    self.writers[i].release()
                 except Exception:
                     self.errors += 1
-            self._released = True
+            self._done[i] = True
 
     def _open_writers(self, size):
         candidates = (["mp4v", "avc1"] if sys.platform == "win32" else ["avc1", "mp4v"])
         if self.codec_request != "auto":
             candidates = [self.codec_request]
+        # macOS: avc1 through AVFoundation, i.e. Apple's hardware encoder, first. OpenCV's
+        # default for avc1 is its bundled FFmpeg, a SOFTWARE H.264 encoder: live, cameras
+        # only, two 1280x800@120 streams cost the process 516-580% CPU and dropped 521
+        # pairs in 10 s; AVFoundation cost ~90%, max queue 2, 0 drops, alternated
+        # A/B/A/B (2026-11-06, camera/theory.md 1.8.1). FFmpeg's avc1 is no fallback for
+        # it -- it is the encoder that failed -- so a failed AVFoundation falls to mp4v.
         paths = [self.dir / tag / f"{tag}.mp4" for tag in self.tags]
         for codec in candidates:
+            api = cv2.CAP_AVFOUNDATION if codec == "avc1" and sys.platform == "darwin" else cv2.CAP_ANY
             writers = []
             try:
                 for path in paths:
-                    writers.append(cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*codec),
-                                                   self.fps, size, True))
+                    writers.append(cv2.VideoWriter(str(path), api, cv2.VideoWriter_fourcc(*codec),
+                                                   self.fps, size, not self._gray))
                 if all(w.isOpened() for w in writers):
-                    self.codec = codec
+                    self.codec, self.backend = codec, str(writers[0].getBackendName())
                     return writers
             except cv2.error:
                 pass
@@ -207,11 +223,20 @@ class FlightWriter:
             raise ValueError("frame dimensions changed during recording")
         if self.writers is None:
             self.size = [w, h]
+            # Gray straight to the writer on macOS (it reads back as BGR, as before);
+            # elsewhere BGR, which the Windows MP4 encoders are known to take.
+            self._gray = frames[0].ndim == 2 and sys.platform == "darwin"
             self.writers = self._open_writers((w, h))
         written = 1
-        try:
-            self._work.put_nowait(list(zip(self.writers, [f.copy() for f in frames])))
-        except queue.Full:
+        depth = max(q.qsize() for q in self._work)
+        if self.n % 12 == 0:
+            self.queue_trace.append((self.n, depth))
+        # All or none, so frame i of every mp4 stays the same pair. This thread is the only
+        # producer, so a queue with room now still has room at put_nowait.
+        if depth < QUEUE_DEPTH:
+            for q, wr, f in zip(self._work, self.writers, frames):
+                q.put_nowait((wr, f.copy()))
+        else:
             self.dropped += 1
             written = 0
         if self._t_first is None:
@@ -237,15 +262,19 @@ class FlightWriter:
         metadata = {**self.meta, "mode": self.size, "fps": self.fps,
                     "fps_semantics": "constant_rate_playback_only",
                     "timestamp_semantics": "host_read_completion_not_exposure",
-                    "codec": self.codec, "fps_measured": round(self.measured_fps(), 2),
+                    "codec": self.codec, "writer_backend": self.backend, "fps_measured": round(self.measured_fps(), 2),
                     "n_frames": self.n, "dropped": self.dropped,
                     "encoder_errors": self.errors, "encoder_finalized": False,
+                    "queue_depth_max": QUEUE_DEPTH, "queue_trace": self.queue_trace,
                     "skew": stats or {}, "created": datetime.now().isoformat(timespec="seconds")}
         path = self.dir / "meta.json"
         path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         self._finish.set()
-        self._thread.join(timeout=60.0)
-        if self._thread.is_alive() or not self._released:
+        deadline = time.monotonic() + 60.0
+        for th in self._threads:
+            th.join(timeout=max(0.0, deadline - time.monotonic()))
+        self._released = all(self._done) and not any(th.is_alive() for th in self._threads)
+        if not self._released:
             # Do not race release() against a still-running native encoder.
             raise RuntimeError(f"encoder did not finalise; incomplete take: {self.dir}")
         metadata.update(encoder_errors=self.errors, encoder_finalized=True)

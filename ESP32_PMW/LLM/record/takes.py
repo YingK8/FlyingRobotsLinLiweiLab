@@ -24,7 +24,20 @@ def _capture_dir(path):
     return path / "raw" / "camera" if (path / "raw" / "camera").is_dir() else path
 
 
+# Content-addressed: the frame count and size are a function of the file's bytes, so a
+# take, its staging copy and its imported copy decode once between them, not five times
+# (2026-11-06: ~4 s per decode, ~20 s greyed after every stop). Changed bytes, new hash.
+_DECODED = {}
+
+
 def _decode_info(path):
+    digest = _sha256(Path(path))
+    if digest not in _DECODED:
+        _DECODED[digest] = _decode_all(path)
+    return _DECODED[digest]
+
+
+def _decode_all(path):
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise ValueError(f"Cannot decode video: {path}")

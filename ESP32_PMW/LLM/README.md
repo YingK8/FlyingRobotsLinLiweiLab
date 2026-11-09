@@ -15,7 +15,7 @@
 | 位置 | 内容 |
 |---|---|
 | `record_experiment.ipynb` | 主 notebook：准备、实验两格 |
-| `viser_app.ipynb` / `app.py` | 同一流程的 viser 界面：两格启动，每步一个按钮（未满足前置时变灰）；标定用留出帧自检，平台由 10 s 静止画面拟合、绳为 z 轴，运行中不更新；含 LED 测试、录像实验、丢弃/继续、回放 |
+| `viser_app.ipynb` / `app.py` | 同一流程的 viser 界面：两格启动，每步一个按钮（未满足前置时变灰）；「Fit setup + load intrinsics」加载已存标定（设置格 `CALIBRATION='latest'`）并由 10 s 静止画面拟合平台（绳为 z 轴，运行中不更新）和 LED；需重标时点 Calibrate（用留出帧自检）；另有 LED 测试、录像实验、丢弃/继续、回放 |
 | `bench.py` | `Bench`：把下面各模块按实验顺序串起来 |
 | `record/` | 实验前与实验中：`experiment`（session/run 准备、导入、后处理）、`panel`（浏览器录制面板）、`takes`（录像校验/导入）、`ramps`（读取/校验 ramp 文件）、`telemetry`（串口日志解析）、`drive_only`、`serial_check`、`io`（run 目录/JSON/哈希） |
 | `analyse/` | 实验后：`led`（LED 边沿与标记解码）、`start`（START/STOP 关联、`find_led`）、`rig`（标定验证、装置定位）、`pose`（双目三角化）、`world`（重力坐标）、`pipeline`（导出）、`takeoff`（起飞事件）、`spinup`（转子是否转起来）、`holder*`（holder 四象限标记检测与定位，见 `HOLDER_MARKERS.md`）、`holder_layout.json`（v3 CAD 20 点）、`coil_base.step`（底座 CAD，与标记同坐标系待核对）、`fixture_layout.json`（旧纸质 AprilTag） |
@@ -37,6 +37,12 @@
 - **STOP**：停止时发出镜像标记（灭-亮-灭）和 `SYNC_STOP v=2`。
 - **分析**：`analyse()` 在 START 附近找两机中的 LED（`start.find_led`），解出两种标记，
   把相机 A、相机 B 和 ESP 映射到同一实验时钟，t=0 在 LED。有 STOP 标记时还能测出时钟漂移。
+- **Test LED（viser）**：IDLE 下发送 `led=code`（不驱动线圈），用 `scene.locate_led` 在两机中解出 LED ID 并保存 ROI；之后的运行用它检查 START 前 LED 是否灭，`analyse()` 默认用 LED 对时（`sync="host"` 仅作标记解不出时的后备）。
+- **E-STOP（viser 顶部红色按钮）**：运行中在下一帧结束运行（发送 `stop`、等待 OFF、保存录像，capture meta 记录 `drive_estop`）；空闲时用 `safe_off` 发送 `stop` 并以遥测确认电流和 duty 为零。锁定，直到点「Clear E-stop」才能再次运行。
+- **提前结束录像（「Stop recording early」，E-STOP 下方）**：只在运行中可用。与 E-STOP 同一路径：立即发送 `stop`，START 之后再录 2 秒（STOP LED 标记要录进视频，否则 LED 同步会拒绝这段录像），然后保存；但不锁定，无需 Clear。停止后，录像检查、导入和 LED 同步在后台线程进行（约 10 秒，同一视频只解码一次），按钮立即可用：可以马上写备注；Discard / Playback / Pose 会等后台完成再执行，后台未完成时点 Continue 会在完成后自动保留。
+- **线圈供电**：每次运行后按遥测判断各线圈是否有电流（峰值 ≥ 0.1 A），写入 `annotations/coil_power.json`，未供电线圈的有效 duty 记为 0；界面会立即警告。
+- **运行参数（viser「Run parameters」）**：最高频率、平均 ramp 速率（ramp 时长 = (最高频率-1)/速率，速度不变）、保持时间、四个线圈 duty；每项可选 fixed / random（[min,max] 均匀；duty 为指数分布）/ step（每次保留的运行后 ±step，丢弃的运行重复同一值，超出范围则停止而不截断）。ramp 在 ESP reset 前生成并校验；完整设计和种子记录在 `run_parameters.json` 的 `design`。
+- **随机 duty**：每次运行在 START 前为四个线圈各自独立抽取 duty（100 - Exp(15)，低于 30% 重抽，`DUTY_DIST`），ramp 上升时四个线圈都是 100%（`seq=go` 前发送 `duty=100:100:100:100`），计划频率到达「Duty switch」（默认 200 Hz，最高不超过最高频率）时主机再发送 `duty=A:B:C:D`，capture meta 记录 `host_duty_switch_send_complete_s`；按计划频率切换，不是检测到起飞；种子、分布、抽取值、ramp、相机、标定、时间锚点、git 版本都写入 `raw/run_parameters.json`（START 前写入，不覆盖）。设备实际施加的 duty 在 `processed/current.csv` 的 `duty_applied_*_pct`；`export/package/` 汇总全部参数，`LLM/runs/runs_index.csv` 每次运行一行。
 - **局限**：视频时间是主机读取完成时间，不是曝光时刻；LED 到电流的延迟未测。
   CS 约 2 Hz，记录在 `raw/telemetry.jsonl`。计划、主机发送、设备执行、实测四者分开保存。
 - **每个 run 只有一次 START**：重拍就是新的 `run()`。录像中不要按 ESP reset。

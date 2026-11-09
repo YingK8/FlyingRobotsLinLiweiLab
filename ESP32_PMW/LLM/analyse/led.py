@@ -57,19 +57,35 @@ def _runs_held_for(levels, times, minimum_duration_s):
     return runs
 
 
+AUTO_MIN_CONTRAST = 6.0   # grey levels; the 2026-11-06 START spanned 14 (19 -> 33). A guess.
+
+
 def detect_led_trace(brightness, source_times_s, config=None):
     """Level transitions from ROI means; `min_on_s` defaults to one measured frame."""
-    settings = {"threshold": 160., "low_threshold": 80., "min_on_s": None,
+    settings = {"threshold": None, "low_threshold": None, "min_on_s": None,   # None: auto
                 "timing_kind": "host_capture_receipt"}
     if config:
         unknown = set(config) - set(settings)
         if unknown:
             raise ValueError(f"unknown LED config fields: {sorted(unknown)}")
         settings.update(config)
+    values = _vector(brightness, "brightness")
+    if (settings["threshold"] is None) != (settings["low_threshold"] is None):
+        raise ValueError("give both LED thresholds, or neither for auto")
+    if settings["threshold"] is None:
+        # Auto: hysteresis at 35 % / 65 % between this trace's own dark and lit levels.
+        # The absolute 160/80 assumed an ROI hugging a saturated LED; Test LED's ROI holds
+        # the LED plus margin, and on 2026-11-06 a clean START (4 frames on, 3 off, on)
+        # read 19 -> 33 and was "not detected". A trace spanning fewer than
+        # AUTO_MIN_CONTRAST grey levels is flat: thresholds no sample can cross.
+        lo, hi = np.percentile(values, [1, 99]) if len(values) else (0.0, 0.0)
+        flat = hi - lo < AUTO_MIN_CONTRAST
+        settings["low_threshold"] = 254.0 if flat else float(lo + .35 * (hi - lo))
+        settings["threshold"] = 255.0 if flat else float(lo + .65 * (hi - lo))
+        settings["threshold_mode"] = "auto"
     low_threshold, high_threshold = float(settings["low_threshold"]), float(settings["threshold"])
     if not np.isfinite([low_threshold, high_threshold]).all() or not 0 <= low_threshold < high_threshold <= 255:
         raise ValueError("LED thresholds must satisfy 0 <= low_threshold < threshold <= 255")
-    values = _vector(brightness, "brightness")
     times = _vector(source_times_s, "source_times_s", increasing=True)
     if len(values) != len(times):
         raise ValueError("brightness and timestamps must have exactly the same length")

@@ -4700,6 +4700,17 @@ Both cameras must decode it. The ROI is the enclosing circle of the changed pixe
 padding. This is the payload use the section above allows: the word answers *where* and
 *is it ours*, and the 30 ms START/STOP edges still answer *when*.
 
+**Correction made the identity test a coin toss (2026-11-06).** Decoding with one-bit
+correction accepts 8 of the 128 seven-bit words. The reader also thresholded any varying
+trace at its midpoint and took its first rise. So pure noise decoded to `LED_ID` in 32 of
+500 trials. With up to 8 regions tried, about 40% of LED-free scenes "found" the LED. On
+the bench, 7 Test LED presses gave 7 different places. B's ROI sat on background at mean
+196 with the LED off, and the run's dark-before-START check correctly refused it twice.
+`read_code` now needs a framed word: a lit start slot, a dark slot after, and every lit
+slot centre above every dark one by half the trace's range. `locate_led` accepts the exact
+word only. Noise now frames a word in fewer than 1% of trials, before the exact-match
+filter. A camera that cannot see the LED now reports "not found" instead of a place.
+
 **80 ms is chosen so the word cannot be read as a marker.** `decode_markers` accepts an
 ON-OFF-ON at 30 ms within max(25 %, two frame periods), which is under 17 ms even at
 120 fps. A `101` in the word is 80/80 ms and is refused. 80 ms is also 9.6 frames at
@@ -4759,6 +4770,49 @@ loss. A smeared or dropped run of frames lowers its SNR; it never flips a decode
 its own offset, so the scatter of the A-B offset difference across takes measures each
 method's timing noise, with no external reference needed.
 
+### Is there a deterministic trigger? Not over USB (2026-11-06)
+
+The ESP32 side is already deterministic: every START/STOP edge is bracketed by
+`esp_timer` to a microsecond. All of the error is on the camera side. The ELP boards
+(32E4:9281) are USB-only, as the operator confirmed 2026-11-06. UVC has no request that
+starts an exposure, so the sensors free-run on their own crystals and no software can
+trigger them. A deterministic trigger needs a wire: the OV9281's FSIN (trigger in) driven
+by the ESP32 from a new pin (free, non-strapping: 4, 13, 16, 17, 21, 27), or its STROBE
+(exposure out) timestamped by the ESP32. Either requires the ELP trigger-variant board or
+a pad on the sensor. Until then the LED is the only optical anchor, and the camera clock is
+whatever can be recovered from the frames.
+
+**What the arrival stamps hold.** Measured offline on the four 2026-11-05 `sync_check`
+takes in `LLM/runs/` (`raw/camera/frames.csv`, 1280x800, ~3200 rows each, Python
+`sources.StereoCamera` capture):
+
+- **The sensors run at 125.00 fps, not 120.** The method: maximise phase coherence
+  $|\overline{e^{2\pi i t/T}}|$ over $T \in [1/160, 1/100]$ s. Every camera on every take
+  peaks at $T = 8.000$ ms, within 15 ppm, and A and B differ by 7-15 ppm.
+  `meta.json`'s ~114 fps is the *consumer* missing ~9 % of frames (3199 rows plus ~300
+  multi-period gaps is about 125 x 28 s). It is not the sensor's rate.
+- **The phase is recoverable; per-frame times are not.** The histogram of arrival phase
+  mod $T$ has a sharp leading edge, about 0.25 ms wide, at the minimum delay. That edge is
+  the shutter clock, and it is stable across a take: the lower envelope drifts
+  0.1-0.5 ms in 400-frame windows. But the delay tail runs past a whole period (no phase
+  bin is empty), so 116-179 frames per take land in a neighbouring slot under any
+  nearest-slot assignment. Rounding inter-arrival gaps to whole periods accumulates those
+  errors to 15-30 ms rms. That is a negative result: do not rebuild it.
+- **Stereo shutter offset is a per-take constant.** B - A mod $T$ was -3.72, -3.86, +3.64
+  and +0.14 ms, against logged median skews of 4.1-5.6 ms. A new take draws a new
+  offset; within a take it holds.
+
+**Where the tail comes from is not established.** The likely source is host scheduling of
+the Python grab thread: the stamp is `time.monotonic()` after `cap.read()` returns, behind
+the GIL and the encoder. The native capture stamps inside the AVFoundation callback and
+also reads `CMSampleBufferGetPresentationTimeStamp`, then discards it
+(`controller/native/src/capture_avf.mm`). The next measurement is either of these on the
+same LED: does `cv2.CAP_PROP_POS_MSEC` return a real PTS from OpenCV 5's AVFoundation
+camera backend, or does the native callback stamp have a tail shorter than $T$? Either
+makes per-frame shutter times exact (slot = floor from the leading edge). Both need the
+cameras attached; neither has been run. The constant arrival latency remains, and only an
+optical anchor measures it (`CAMERA_LATENCY_S`, and the preamble above).
+
 ### Host side
 
 Python `RunConfig.sync_start=True` requires recorded cameras and `telemetry_path`.
@@ -4777,6 +4831,16 @@ both call intervals and the log hash, and never substitutes host-send time. A `v
 a bare rising edge -- is refused rather than degraded to one anchor. See
 `LLM/README.md` for capture and bench acceptance. Full per-update device-applied
 schedules and true current magnitude/phase remain separate work.
+
+**The LLM app syncs on the LED again (operator, 2026-11-06).** The host-clock default of
+2026-11-05 rests on `CAMERA_LATENCY_S`, a constant fitted on two takes. The arrival tail
+above shows that constant cannot be trusted per frame. The LED is the one event that both
+camera clocks and the ESP32 clock observe. The word is not sent inside a run, because
+`send_takeoff` sleeps through it and the recorder drops those frames. A separate **Test LED**
+step sends `led=code` from IDLE, runs `scene.locate_led` on both cameras and keeps the
+ROIs. The run then uses them for the dark-before-START check, and `synchronize_start`
+uses them for decoding. Without them, `find_led` searches the START window as before.
+`Bench.analyse(sync="host")` remains the fallback for a take whose markers do not decode.
 
 ### Tilt: the LED that could not be associated with anything
 
@@ -4898,3 +4962,61 @@ is the ramp timer started. Cancellation or interruption enters the same stop /
 close / log finalization path without sending a ramp. This is an operator start
 step, not a modeled cooldown gate or a hardware interlock; disconnect and process
 death have the existing limitations. Tests use fake serial links only.
+
+## LLM bench: per-run randomised coil duty (2026-11-06)
+
+**Why randomise.** Bench runs differ in ways nobody controls or records well: coil
+temperature, where the rotor sat, lighting, the order of runs in a session. If the
+operator picks the drive, any of these can line up with the choice and pass for its
+effect. A recorded random draw assigns each run's drive instead. Each of these factors is
+then independent of the drive in expectation, and an analysis across runs can
+average over them.
+
+**What is drawn.** One duty per channel per run, all four independent, sent as
+`duty=A:B:C:D` in IDLE just before `seq=go`. `duty=` is a per-channel multiplier on the
+carrier duty the ramp commands (`collective * duty/100` in `applyMixer`). It persists
+through the ramp, and the ESP reset at the next run's link clears it. The distribution
+is d = 100 - X, with X ~ Exponential(mean 15 points), redrawn below 30 %. Most runs stay
+near the drive that is known to fly, and a tail reaches weak channels. Under this
+distribution, P(d < 85) = 37 % and P(d < 70) = 13.5 %. **Scale and floor are defaults
+chosen 2026-11-06, not tuned.** They are `DUTY_DIST` in `viser_app.ipynb`
+(`Bench.duty_dist`).
+
+**What is recorded, and kept apart.** `raw/run_parameters.json` is written before START
+and never overwritten. It holds the seed, the generator, the distribution, the four
+draws and the exact command, along with the ramp, camera, calibration and world-frame
+hashes, the LED ROIs, a UTC to `time.monotonic` anchor, the git commit and the
+software versions. Those are the *planned and host-sent* values. The *device-applied*
+duty is the telemetry `duty[%]` field, now parsed into `processed/current.csv`
+`duty_applied_*_pct`. The *measured* current is `current_*_A`. `export/package/setup.md`
+tabulates planned against applied. `LLM/runs/runs_index.csv`, rebuilt from the folders
+at every analysis, carries one row per run for analysis across runs.
+
+**First reading of the applied field: unpowered coils.** In every driven run on 2026-11-06
+from 19:06, including the first randomised one at 19:42, the device applied duty to all four
+channels, yet A and C read 0 A (peak <= 0.02 A) against 2.2-2.5 A on B and D. The operator
+confirmed that A and C were not powered. On 2026-11-05 all four drew 1.7-2.6 A. A
+commanded duty is therefore not even a command to a field unless the coil has supply.
+Each driven run now gets `annotations/coil_power.json`, a post-hoc correction kept beside
+the raw record. It holds the measured powered flag per coil (peak |I| >= 0.1 A while the
+device reports f > 5 Hz) and the **effective** duty: the planned duty on a powered coil,
+0 on an unpowered one. `runs_index.csv` carries `coil_powered_*` and
+`duty_effective_*_pct`, and analysis should use the effective column. `Bench.analyse`
+writes the file for every new run, and the app warns at once when a coil drew nothing.
+
+**Run design in the viser app (2026-11-06).** The app's *Run parameters* panel sets every
+run's takeoff instead of a named ramp file. The parameters are top frequency, mean ramp
+rate, hold, and duty per coil. Each has a mode:
+- *fixed*.
+- *random*: uniform in [min, max]. Duty uses the exponential above, with min as its floor.
+- *step*: ±step after each **kept** run. A discarded run repeats its value, and stepping
+  past [min, max] is refused rather than clamped.
+
+The ramp is a cubic from 1 Hz at the given mean rate, so its duration is (top - 1)/rate.
+That keeps the ramp velocity the same whatever the top. The hold follows the cubic.
+`LLM/record/design.py` plans the run, and the ramp file is generated and validated
+(55 s cap) *before* the ESP resets. The whole design is recorded in
+`run_parameters.json` `design`: each parameter's mode, rule, range, step, value this run,
+and the seed. `runs_index.csv` gains one value column and one mode column per parameter.
+Mixing *step* with *random* gives a sweep with the other factors randomised. Mixing it
+with *fixed* gives a plain sweep, which is still confounded with session order.

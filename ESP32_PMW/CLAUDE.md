@@ -158,7 +158,9 @@ is a guessed trim with more code.
 
 **`duty=A:B:C:D` is a drive path too.** Per-channel carrier ceilings that replace the az/mag
 mixer while set (`duty=off` clears). It exists for `controller/control/tilt_servo.py`, which
-needs four independent amplitudes; `link._note_drive` counts it. It scales `collective`, so
+needs four independent amplitudes, and the LLM bench sends one randomised draw per run
+(`LLM/record/randomise.py`, recorded in `raw/run_parameters.json`) -- mid-ramp, once the PLANNED frequency
+reaches `duty_switch_hz` (default 200 Hz), all coils 100 % below it; `link._note_drive` counts it. It scales `collective`, so
 `throttle=` and the landing ramp behave the same either way.
 
 ## LLM/: recorded experiments

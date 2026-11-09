@@ -312,9 +312,9 @@ class CommandLink:
         self.on_line = None
         self.dry = dry_run
         self.sync_start = sync_start
-        # False: no `led=code` word before START. The LLM bench syncs on the host clock
-        # instead (LLM/analyse/start.synchronize_host, 2026-11-05); the word also cost a
-        # 0.8 s gap in the recording, because send_takeoff waits it out.
+        # False: no `led=code` word before START. It costs a 0.8 s gap in the recording,
+        # because send_takeoff waits it out; the LLM app locates the LED with a separate
+        # Test LED step instead and still syncs on the START/STOP markers.
         self.code_preamble = code_preamble
         self.sync_ready = False
         self.sync_sent = False

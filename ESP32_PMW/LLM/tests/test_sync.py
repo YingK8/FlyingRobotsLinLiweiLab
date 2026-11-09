@@ -39,6 +39,14 @@ def test_edges():
     _reject(lambda: detect_led_trace([0, 200], [0, 1], {"min_on_frames": 1.5}))
     _reject(lambda: detect_led_trace([0, 200], [0, 1], {"min_on_s": 0}))
     _reject(lambda: detect_led_trace([0, 200], [0, 1], {"low_threshold": 200}))
+    _reject(lambda: detect_led_trace([0, 200], [0, 1], {"low_threshold": 200, "threshold": 160}))
+    # Auto thresholds: the 2026-11-06 START as recorded (ROI mean 19 -> 33) is detected
+    # with its on-off-on, and a flat trace is not stretched into edges.
+    start = [19] * 10 + [33, 33, 32, 29, 19, 19, 19] + [32] * 20
+    auto = detect_led_trace(start, np.arange(len(start)) / 120)
+    assert [t["level"] for t in auto["transitions"]] == [True, False, True], auto["transitions"]
+    assert auto["config"]["threshold_mode"] == "auto"
+    assert not detect_led_trace([19, 20, 21, 19, 22, 20], np.arange(6) / 120)["transitions"]
 
 
 def _marker_trace(on_ms=30, gap_ms=30, fps=120.0, stop_frame=None, glint=False, hold_gap=None):

@@ -110,8 +110,8 @@ def find_led(video_path, times, start_host_s, on_s, gap_s, before_s=1.0, after_s
     count, _, stats, _ = cv2.connectedComponentsWithStats((toggles >= 3).astype(np.uint8))
     window_times = times[first:first + len(frames)]
     for label in 1 + np.argsort(-stats[1:, cv2.CC_STAT_AREA]):
-        # No padding: `detect_led_trace` thresholds the ROI MEAN at an absolute 160, so
-        # dark margin around the LED would hide it from the sync that reuses this box.
+        # No padding: tight boxes keep the most contrast in the ROI mean, though
+        # `detect_led_trace` now sets its thresholds from the trace (2026-11-06).
         x0, y0, w, h = map(int, stats[label, :4])
         x1, y1 = x0 + w, y0 + h
         trace = detect_led_trace([float(f[y0:y1, x0:x1].mean()) for f in frames], window_times)

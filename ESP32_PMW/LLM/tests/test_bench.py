@@ -1,4 +1,5 @@
 """No hardware: Bench step order/state hand-off, and find_led on a synthetic START pulse."""
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -48,7 +49,8 @@ def check_bench_flow():
     calls = []
 
     def fake_panel(session, *, output_root, run=None, **kw):
-        calls.append(("panel", Path(output_root).name, run is not None, kw.get("roi_a"), kw.get("auto_start")))
+        calls.append(("panel", Path(output_root).name, run is not None, kw.get("roi_a"), kw.get("auto_start"),
+                      list(kw.get("pre_commands") or [])))
         return {"take": str(output_root) + "/take", "reference_pair": str(output_root) + "/ref"}
 
     with tempfile.TemporaryDirectory() as tmp, \
@@ -75,6 +77,9 @@ def check_bench_flow():
         report = bench.run("alignment_50Hz", note="n", auto_start=True)
         assert report == {"imported": str(Path(tmp) / "run")}
         assert (Path(tmp) / "run/ramp.json").exists()
+        params = json.loads((Path(tmp) / "run/raw/run_parameters.json").read_text())
+        assert params["duty"]["mode"] == "random" and params["duty"]["seed"] is not None
+        assert calls[-1][5] == [params["duty"]["command"]], "the drawn duty must be what the panel sends"
         out = bench.analyse()
         assert out["rois"] == (None, None), "no LED ROI given -> found during analyse"
     assert [c[0] for c in calls] == ["capture", "panel", "panel", "sync_run", "panel"], calls

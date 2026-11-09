@@ -85,7 +85,8 @@ def run_while(fn, pump):
 
 def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
               serial_port=None, roi_a=None, roi_b=None, port=8088, auto_start=False,
-              server=None, src=None, preview=None, led_code=True):
+              server=None, src=None, preview=None, led_code=True, pre_commands=(), stop_event=None,
+              finish_event=None, duty_switch=None):
     """Preview -> Record -> optional flight START -> Stop/finalize, one take per call.
 
     Without `run`: CAMERA ONLY, never imports a serial controller. With `run`:
@@ -97,6 +98,16 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
     This is not an autonomous hover controller and has no live pose feedback.
     ``server``/``src``: reuse the viser app's server and open stereo source; the
     widgets go in a "Run" folder removed on exit and neither is closed here.
+    ``stop_event``: an outside E-STOP (threading.Event, set from a GUI thread). Checked
+    with Stop at every frame and just before START; takes Stop's path -- firmware `stop`
+    at once, the 2 s post-roll if START was sent, save the recording -- and records
+    `drive_estop` in the capture meta.
+    ``finish_event``: an outside Stop / finish (the app's "Stop recording early"): the
+    same path, not latched and not an E-STOP. Used as this panel's own Stop event.
+    ``pre_commands``: sent in IDLE just before the ramp's seq= lines (e.g. the run's
+    randomised `duty=`, recorded in raw/run_parameters.json by the caller).
+    ``duty_switch``: (hz, command) -- the command is sent once, mid-ramp, when the
+    PLANNED frequency (host clock since START) reaches hz; stamped in the capture meta.
     ``preview(frames)``: also handed every displayed pair, so the caller's own
     preview stays live -- including through the ESP reset + READY wait.
     """
@@ -135,12 +146,30 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
     _check_loopback()
     import viser
     events = {k: threading.Event() for k in ('record', 'start', 'stop', 'close', 'snapshot')}
+    if finish_event is not None:
+        events['stop'] = finish_event
     writer = link = None
     record_t = drive_t = stop_t = None; error = None; last_ui = 0
     frequency = _FrequencyDisplay()
     last_frequency_print = float('-inf')
     last_phase = None
     result = {'take': None, 'reference_pair': None, 'drive_start_sent': False}
+    estop = stop_event if stop_event is not None else threading.Event()
+
+    def halted():
+        return events['stop'].is_set() or events['close'].is_set() or estop.is_set()
+
+    def end_now():
+        """After a Stop/E-STOP: True to leave the loop now. Once START is sent, `stop` goes
+        out at once but the take records the 2 s post-roll, as a scheduled stop does: the
+        STOP LED marker is in it, else LED sync refuses the take as truncated (2026-11-06)."""
+        nonlocal stop_t
+        if events['close'].is_set() or drive_t is None or writer is None:
+            return True
+        if stop_t is None:
+            link.stop(timeout_s=0); stop_t = time.monotonic()
+            writer.meta['host_early_stop_send_complete_s'] = stop_t
+        return False
     with ExitStack() as cleanup:
         if server is None:
             server = viser.ViserServer(host='127.0.0.1', port=port, label='LLM experiment')
@@ -198,13 +227,14 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                 show(list(item[1]))
         if driven:
             link = run_while(lambda: CommandLink(serial_port, False, str(run/'raw/host_commands.log'),
-                                                 takeoff_cmd=ramp.seq_lines(planned),
+                                                 takeoff_cmd=[*pre_commands, *ramp.seq_lines(planned)],
                                                  raw_log_path=run/'raw/telemetry.jsonl', sync_start=True,
                                                  code_preamble=led_code), pump)
             cleanup.callback(link.close)
             # Registered last: stop drive BEFORE encoder finalisation/camera release.
             def stop_drive():
                 result['drive_stop_attempted'] = True
+                result['drive_estop'] = estop.is_set()
                 try:
                     result['drive_stop_acknowledged'] = bool(link.stop(timeout_s=1.0))
                 except BaseException as exc:
@@ -230,10 +260,10 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
         try:
             while True:
                 # Stop wins over START/record if both arrive before a loop iteration.
-                if events['stop'].is_set() or events['close'].is_set(): break
+                if halted() and end_now(): break
                 item = src.read()
                 if item is None: raise OSError('Camera stream ended')
-                if events['stop'].is_set() or events['close'].is_set(): break
+                if halted() and end_now(): break
                 t, frames = item; frames = list(frames)
                 if any(f.shape[:2] != (camera['height'],camera['width']) for f in frames):
                     raise ValueError('Camera delivered a different image mode')
@@ -278,7 +308,7 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                         auto_due = remaining == 0
                     if auto_due or (not auto_start and events['start'].is_set()):
                         events['start'].clear()
-                        if events['stop'].is_set() or events['close'].is_set():
+                        if halted():
                             break
                         if (writer is not None and link.sync_can_start() and dark and (auto_start or physical.value)
                                 and max_seconds-(now-record_t) >= duration+2 and drive_t is None):
@@ -286,6 +316,11 @@ def run_panel(session, *, output_root, max_seconds=15, run=None, ramp_path=None,
                             writer.meta['host_start_send_complete_s'] = drive_t
                         elif auto_due:
                             raise RuntimeError('Automatic START cancelled at 5 s: check recorded pre-roll, LED state and remaining recording time.')
+                    if (duty_switch and drive_t is not None and stop_t is None and 'host_duty_switch_send_complete_s' not in writer.meta
+                            and ramp.frequency_at(planned, min(max(0.0, now-drive_t), duration)) >= duty_switch[0]):
+                        link.send(duty_switch[1])
+                        writer.meta.update(host_duty_switch_send_complete_s=time.monotonic(),
+                                           duty_switch_planned_hz=duty_switch[0], duty_switch_command=duty_switch[1])
                     if drive_t is not None and stop_t is None and now-drive_t >= duration:
                         link.stop(timeout_s=0); stop_t = time.monotonic()
                         writer.meta['host_scheduled_stop_send_complete_s'] = stop_t

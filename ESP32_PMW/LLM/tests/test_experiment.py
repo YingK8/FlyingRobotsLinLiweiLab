@@ -193,8 +193,10 @@ class WorkflowTests(unittest.TestCase):
         from LLM.record.panel import run_panel
         for mode in ('manual', 'manual_failure', 'automatic', 'cancel_countdown',
                      'interrupt_countdown', 'interrupt_drive', 'stop_unconfirmed',
-                     'stop_error', 'bright_led', 'no_ready'):
+                     'stop_error', 'bright_led', 'no_ready', 'estop_drive', 'estop_countdown', 'finish_drive'):
             events=[];handles={};clock=[0.]
+            import threading
+            estop, finish = threading.Event(), threading.Event()
             automatic = not mode.startswith('manual')
             start_times = []
             writers = []
@@ -222,6 +224,9 @@ class WorkflowTests(unittest.TestCase):
                     if automatic and self.n==3:handles['START ramp + LED'].callback(None)
                     if mode=='cancel_countdown' and self.n==50:handles['Stop / finish'].callback(None)
                     if mode=='interrupt_countdown' and self.n==30:raise KeyboardInterrupt
+                    if mode=='estop_countdown' and self.n==30:estop.set()
+                    if mode=='estop_drive' and self.n==55:estop.set()
+                    if mode=='finish_drive' and self.n==55:finish.set()
                     if mode in ('interrupt_drive', 'stop_unconfirmed', 'stop_error') and self.n==55:raise KeyboardInterrupt
                     if not automatic and self.n==6:
                         if mode=='manual_failure':raise OSError('fake camera failure')
@@ -274,6 +279,8 @@ class WorkflowTests(unittest.TestCase):
                     args=dict(output_root=root/'takes',max_seconds=10,run=run,ramp_path=pattern,
                               serial_port='FAKE',roi_a=[0,0,5,5],roi_b=[0,0,5,5])
                     args['auto_start']=automatic
+                    args['stop_event'],args['finish_event']=estop,finish
+                    args['duty_switch']=(26.0,'duty=50.0:60.0:70.0:80.0')   # mid-ramp of 2->50 Hz in 1 s
                     if mode=='manual_failure':
                         with self.assertRaisesRegex(OSError,'fake'):run_panel(s,**args)
                     elif mode=='bright_led':
@@ -287,15 +294,28 @@ class WorkflowTests(unittest.TestCase):
                         self.assertIsNotNone(result['take'])
                         self.assertEqual(writers[-1].meta['drive_stop_acknowledged'],result['drive_stop_acknowledged'])
                         if mode=='stop_error':self.assertIn('fake serial',result['drive_stop_error'])
+                        self.assertEqual(result['drive_estop'], mode.startswith('estop'))
+                        if mode in ('estop_drive', 'finish_drive'):   # stop at once, then the 2 s post-roll
+                            self.assertEqual(events.count('timed_stop'),1)
+                            m=writers[-1].meta
+                            self.assertAlmostEqual(clock[0]-m['host_early_stop_send_complete_s'],2.0,delta=.25)
+                        if mode.startswith('estop'):
+                            self.assertIn('stop', events)          # firmware stop sent, take saved
+                            self.assertTrue(writers[-1].meta['drive_estop'])
                     configure.assert_called_once_with(None,100,auto_exposure=True)
                     if mode=='automatic':
+                        self.assertEqual(events.count('duty=50.0:60.0:70.0:80.0'),1)
+                        self.assertLess(events.index('START'),events.index('duty=50.0:60.0:70.0:80.0'))
+                        self.assertLess(events.index('duty=50.0:60.0:70.0:80.0'),events.index('timed_stop'))
+                        self.assertEqual(writers[-1].meta['duty_switch_planned_hz'],26.0)
                         frequency_lines = [str(c.args[0]) for c in output.call_args_list
                                            if c.args and 'ESP 回报频率' in str(c.args[0])]
                         self.assertTrue(any('RAMP' in line and '37.5 Hz' in line for line in frequency_lines))
                         self.assertTrue(any('STOP 已发送' in line for line in frequency_lines))
                         self.assertLess(len(frequency_lines),15)  # throttle output, not one line per frame
                 self.assertEqual(events.count('START'),int(mode in ('manual','manual_failure','automatic',
-                                                                   'interrupt_drive','stop_unconfirmed','stop_error')))
+                                                                   'interrupt_drive','stop_unconfirmed','stop_error',
+                                                                   'estop_drive','finish_drive')))
                 if mode=='automatic':
                     self.assertGreaterEqual(start_times[0],5)
                     self.assertLess(start_times[0],5.11)

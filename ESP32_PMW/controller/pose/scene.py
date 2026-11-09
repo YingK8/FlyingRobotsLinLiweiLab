@@ -135,38 +135,62 @@ def blink_mask(frames, thresh=40):
     return np.sum(changes, axis=0).astype(np.int32), changes
 
 
-def read_code(trace, times):
+def read_code(trace, times, min_contrast=0.5):
+    """The 7 word slots after the first rise that frames a clean word, else None.
+
+    A rise frames a word only if its start slot is lit, the slot after the word is dark,
+    and every lit slot centre clears every dark one by `min_contrast` of the trace's
+    range. Thresholding any varying trace at its midpoint and taking the first rise
+    read a word out of every flickering region: on the 2026-11-06 bench, 7 Test LED
+    presses put the "LED" in 7 different places, B's on bright background (mean 196
+    with the LED off), which then failed the run's dark-before-START check."""
     trace, times = np.asarray(trace, float), np.asarray(times, float)
-    level = trace > (trace.min() + trace.max()) / 2
-    rises = np.flatnonzero(~level[:-1] & level[1:]) + 1
-    if not len(rises):
+    lo, hi = trace.min(), trace.max()
+    if hi <= lo:
         return None
-    t_start = (times[rises[0] - 1] + times[rises[0]]) / 2
-    slot_centres = t_start + CODE_BIT_S * (np.arange(1, 8) + 0.5)
-    if slot_centres[-1] > times[-1]:
-        return None
-    return [int(level[np.argmin(np.abs(times - t))]) for t in slot_centres]
+    mid = (lo + hi) / 2
+    level = trace > mid
+    for rise in np.flatnonzero(~level[:-1] & level[1:]) + 1:
+        t_start = (times[rise - 1] + times[rise]) / 2
+        centres = t_start + CODE_BIT_S * (np.arange(9) + 0.5)     # start, 7 bits, dark
+        if centres[-1] > times[-1]:
+            return None
+        v = trace[[np.argmin(np.abs(times - t)) for t in centres]]
+        lit = v > mid
+        if not lit[0] or lit[-1] or v[lit].min() - v[~lit].max() < min_contrast * (hi - lo):
+            continue
+        return [int(b) for b in lit[1:8]]
+    return None
 
 
-def locate_led(frames, times, pad_px=6, thresh=40, max_regions=8):
+def locate_led(frames, times, pad_px=6, thresh=40, max_regions=200):
     """The LED as ``(cx, cy, r)``: the first changing region, largest first, whose
     brightness decodes the word to `LED_ID`; None if none does.
 
     Largest-only failed on the 2026-11-05 bench: camera A's biggest changing region
     during the word was something else, and the LED was never tried. The decode is
-    the identity test, so trying the next regions cannot mistake a distractor for it.
+    the identity test -- framed, high-contrast and uncorrected (`read_code`) -- so
+    trying the next regions does not mistake a distractor for it.
     """
     frames = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) if f.ndim == 3 else f for f in frames]
     counts, changes = blink_mask(frames, thresh)
     n, labels, stats, _ = cv2.connectedComponentsWithStats((counts > 0).astype(np.uint8))
+    stack, changed = np.stack(frames), np.any(changes, axis=0)
+    # 8 regions was too few: with auto-exposure the large changing regions are scene
+    # patches, and a small, clear LED was never tried (2026-11-06, "very clear" and not
+    # found). The framed exact word makes 200 safe: noise frames a word 0.25% of the
+    # time and is then the exact word 1 in 128, so ~0.4% per LED-free scene.
     for label in (1 + np.argsort(-stats[1:, cv2.CC_STAT_AREA]))[:max_regions]:
-        region = labels == label
-        bits = read_code([float(f[region].mean()) for f in frames], times)
-        if bits is None or hamming_decode(bits)[0] != LED_ID:
+        x, y, w, h = stats[label, :4]
+        region = labels[y:y + h, x:x + w] == label
+        bits = read_code(stack[:, y:y + h, x:x + w][:, region].mean(axis=1), times)
+        # Exact word only: correcting one bit accepts 8 of 128 words, and with 8
+        # regions tried a flickering scene passed ~40% of the time.
+        if bits is None or hamming_decode(bits) != (LED_ID, None):
             continue
-        lit = (np.any(changes, axis=0) & region).astype(np.uint8)
+        lit = (changed[y:y + h, x:x + w] & region).astype(np.uint8)
         (cx, cy), r = cv2.minEnclosingCircle(cv2.findNonZero(lit))
-        return cx, cy, r + pad_px
+        return cx + x, cy + y, r + pad_px
     return None
 
 
@@ -223,6 +247,22 @@ def _self_check():
         frames.append(frame)
     cx, cy, r = locate_led(frames, times)
     assert np.hypot(cx - 500, cy - 300) < 1.5 and 8 < r < 20
+    # A small LED behind 12 larger flickering patches (auto-exposure-like) is still found.
+    crowd = [f.copy() for f in frames]
+    for j, f in enumerate(crowd):
+        for q in range(12):
+            if np.random.default_rng(1000 * j + q).random() < .5:
+                cv2.rectangle(f, (20 + 50 * q, 200), (55 + 50 * q, 240), 230, -1)
+    cx, cy, r = locate_led(crowd, times)
+    assert np.hypot(cx - 500, cy - 300) < 1.5, (cx, cy)
+    # No LED, only flicker: nothing. Then a drifting, noisy trace is not a word.
+    dark = [f.copy() for f in frames]
+    for f in dark:
+        cv2.circle(f, (500, 300), 12, 20, -1)
+    assert locate_led(dark, times) is None
+    rng = np.random.default_rng(1)
+    misses = sum(read_code(rng.normal(size=len(times)), times) is not None for _ in range(500))
+    assert misses < 5, f"noise read as a framed word {misses}/500 times"
     print("scene: ok")
 
 

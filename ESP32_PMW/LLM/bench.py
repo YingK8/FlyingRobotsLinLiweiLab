@@ -63,6 +63,8 @@ class Bench:
         self.calibration = self.verification = self.world = None
         self.reference_pair = self.trial = self.last_run = None
         self.leds = (None, None)
+        from LLM.record.randomise import DEFAULT
+        self.duty_dist = dict(DEFAULT)     # per-run coil duty distribution, see record/randomise.py
         self._calibration_bag = self._views = self._intrinsics = None
         print("Session:", self.folder)
 
@@ -245,13 +247,16 @@ class Bench:
                           confirm_start=confirm_start)
 
     def run(self, ramp, *, note="", warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30,
-            auto_start=False, server=None, src=None, preview=None, led_code=True):
+            auto_start=False, server=None, src=None, preview=None, led_code=True, duty="random", design=None,
+            stop_event=None, finish_event=None, duty_switch_hz=None, finish=True):
         """Record -> START (LED + drive) -> automatic stop -> import. ENERGISES THE COILS.
 
         `ramp` is a name in LLM/ramps (or a path). Call analyse() afterwards.
 
         Measured run when the calibration is verified and the fixture located; otherwise a sync check (video + CS + LED, no geometry), which needs no
-        trial or reference. LED ROIs [x,y,w,h] are optional: without them they are found
+        trial or reference. finish=False returns the take path without the audit + import
+        (`experiment.finish_take`), for a caller that runs it off the main thread. duty_switch_hz: all coils 100 % until the planned frequency
+        reaches it (capped at the ramp's top), then `duty`. LED ROIs [x,y,w,h] are optional: without them they are found
         from the START pulse during analyse(). server/src: the viser app's, reused.
         """
         from LLM.record.experiment import finish_take, prepare_run, prepare_sync_run
@@ -269,25 +274,63 @@ class Bench:
                                    note=note, warning_review=warnings_reviewed)
         self.last_run, self.leds = run, (led_a, led_b)
         snapshot(ramp_path(ramp), run / "ramp.json")
+        # duty: "random" (default; per-channel draw, `randomise.DEFAULT` unless
+        # self.duty_dist), four explicit percentages, or None (unrandomised 100 %).
+        # raw/run_parameters.json records it with everything else BEFORE START.
+        from LLM.record.randomise import duty_command, write_parameters
         segments = load_ramp(run / "ramp.json")
+        if duty_switch_hz is not None and float(duty_switch_hz) <= segments[0][0]:
+            duty_switch_hz = None               # at/below the ramp start: the duty from START
+        if duty_switch_hz is not None:
+            duty_switch_hz = min(float(duty_switch_hz), max(s[1] for s in segments))
+        duty_cmd = write_parameters(run, duty=duty, dist=self.duty_dist, ramp=str(ramp), camera=self.camera,
+                                    calibration=self.calibration, world=self.world,
+                                    leds=None if led_a is None else [led_a, led_b], note=note, design=design,
+                                    switch_hz=duty_switch_hz)
+        pre, switch = ([duty_cmd] if duty_cmd else []), None
+        if duty_cmd and duty_switch_hz is not None:
+            pre, switch = [duty_command([100.0] * 4)], (duty_switch_hz, duty_cmd)
+        print("Duty:", duty_cmd or "none (100 %)", f"from {duty_switch_hz:g} Hz, 100 % below" if switch else "")
         print("Ramp:", label(segments))
         result = run_panel(self.session, output_root=run / "raw/captures", run=run,
                            ramp_path=run / "ramp.json", serial_port=port, roi_a=led_a, roi_b=led_b,
                            max_seconds=duration_s(segments) + extra_seconds, auto_start=auto_start,
-                           server=server, src=src, preview=preview, led_code=led_code)
+                           server=server, src=src, preview=preview, led_code=led_code,
+                           pre_commands=pre, duty_switch=switch, stop_event=stop_event,
+                           finish_event=finish_event)
         if result["take"] is None:
             raise ValueError("Preview only, nothing recorded; call run() again for a new run")
+        if not finish:
+            return result["take"]
         report = finish_take(result["take"], self.session, run)
         print("Run:", run)
         return report
 
-    def analyse(self, annotations=None, sync="host"):
+    def analyse(self, annotations=None, sync="led", run=None, leds=None):
         """Clock alignment -> export/input_curves.png; pose/takeoff with annotations.
-        sync="host" (default, no LED; operator 2026-11-05) or "led" (START/STOP markers)."""
+        sync="led" (default, START/STOP markers; operator 2026-11-06) or "host" (host
+        clock less an assumed camera latency, no LED). run/leds: default last_run/leds."""
         from LLM.record.experiment import postprocess
-        if self.last_run is None:
+        run, leds = run or self.last_run, leds or self.leds
+        if run is None:
             raise ValueError("run() first")
-        return postprocess(self.last_run, *self.leds, annotations=annotations, sync=sync)
+        out = postprocess(run, *leds, annotations=annotations, sync=sync)
+        from LLM.analyse.package import annotate_coil_power
+        try:                               # which coils drew current; effective duty
+            power = annotate_coil_power(run, source="measured after the run (Bench.analyse)")
+            out["unpowered_coils"] = [] if power is None else [c for c, v in power["coils"].items() if not v["powered"]]
+        except (OSError, ValueError, KeyError) as exc:
+            out["coil_power_error"] = f"{type(exc).__name__}: {exc}"
+        if self.calibration is not None:   # export/package: videos, frames.csv, setup.md/json
+            from LLM.analyse.package import package
+            try:                           # the sync stands; a failed export is reported, not fatal
+                out["package"] = str(package(run, self.calibration, self.world,
+                                             leds=list(leds), verified=bool(self.verification)))
+            except (OSError, ValueError, KeyError) as exc:
+                out["package_error"] = f"{type(exc).__name__}: {exc}"
+        from LLM.analyse.package import index_runs
+        out["runs_index"] = str(index_runs(self.runs))      # one row per run, rebuilt
+        return out
 
     def _port(self):
         if not self.serial_port:

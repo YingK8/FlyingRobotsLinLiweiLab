@@ -49,7 +49,16 @@ def _sample(line):
     if len(frequencies) > 1:
         raise ValueError("current sample contains multiple frequency fields")
     frequency = _finite_number(frequencies[0]) if frequencies else None
-    return device_s, frequency, values
+    # The carrier duty the device APPLIED, per channel (optional: older firmware lines lack
+    # it). Not current, and not what the host sent: see record/randomise.py.
+    duty = {}
+    sections = re.findall(r"duty\[%\]:\s*([^|]*)", line)
+    if len(sections) == 1:
+        for token in sections[0].split():
+            match = re.fullmatch(r"([A-D])=(.+)", token)
+            if match is not None:
+                duty[match[1]] = _finite_number(match[2])
+    return device_s, frequency, values, duty
 
 
 def parse_log(path):
@@ -83,7 +92,7 @@ def parse_log(path):
         if "I[A]" not in line:
             continue
         try:
-            device_s, frequency, values = _sample(line)
+            device_s, frequency, values, duty = _sample(line)
         except ValueError as exc:
             errors.append({"line": line_no, "reason": str(exc)})
             continue
@@ -95,8 +104,9 @@ def parse_log(path):
                "measurement_kind": "filtered_current_sense_estimate",
                "raw_line_number": line_no}
         row.update({f"current_{c}_A": value for c, value in values.items()})
+        row.update({f"duty_applied_{c}_pct": duty.get(c, math.nan) for c in "ABCD"})
         rows.append(row)
-    columns = ["t_device_s", "host_receive_s", "frequency_reported_hz", "measurement_kind", "raw_line_number"] + [f"current_{c}_A" for c in "ABCD"]
+    columns = ["t_device_s", "host_receive_s", "frequency_reported_hz", "measurement_kind", "raw_line_number"] + [f"current_{c}_A" for c in "ABCD"] + [f"duty_applied_{c}_pct" for c in "ABCD"]
     result = pd.DataFrame(rows, columns=columns)
     result.attrs["parse_errors"] = errors
     return result

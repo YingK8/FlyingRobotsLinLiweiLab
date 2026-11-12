@@ -27,6 +27,7 @@ field while you move it.
 | 6 | `link.py` | `SerialComm`: the host half of the firmware link |
 | 6b | `takeoff_report.py` | per-attempt takeoff metrics: liftoff knee, capture verdict, L/C refit. Section 18 |
 | 6c | `robust_cert.py` | exact gain/phase margins of the shipped gains, over mass and COM. Section 20 |
+| 6d | `mount_model.py` | the robot on the takeoff stand: critical speed vs support depth, release envelope. Section 26 |
 | 7 | `ai/design/spatial_model.py` | the 3-D plant: multi-coil field, spin axis, gradient force. Section 12 |
 | 8 | `ai/design/spatial_mpc.py` | MPC over that plant, on the 5-DOF pose. Section 13 |
 | 9 | `ai/design/simulate_spatial.py` | closed loop and the real-time viewer (`--live`) |
@@ -3562,6 +3563,10 @@ a plausible value is three orders too small to matter). Evaluated:
 | 160 Hz (design point) | 0.0086 deg | 532 mm |
 | 210 Hz (ramp target) | 0.0050 deg | 918 mm |
 
+(26.7: the denominator should be $\kappa_t + (I_s - I_t)\omega^2$, because the body-fixed torque
+turns *forward*. That makes every entry 3.9x larger, 83 mm instead of 329, and the conclusion
+stands. 26.2: on the stand the same offset is the largest load the robot sees.)
+
 **A COM offset is ruled out.** Producing the measured 4.6 deg would take a 329 mm offset on a
 robot a few millimetres across -- wrong by two and a half orders of magnitude. A generous
 1 mm offset buys 0.014 deg, which is below the pose estimator's own scatter.
@@ -5078,6 +5083,304 @@ aliased. They cannot give coning at this capture mode, and the design-B campaign
 
 A stale cross-reference while here: 25.8 cites "20.7" for the 9.6:1 circular:linear figure, and
 20.7 contains no such number; `alignment_rate.py` repeats it.
+
+**26.1 corrects the candidate cause above.** A lab-frame field asymmetry cannot drive a 1x cone
+on a synchronous rotor. The 1x line is body-fixed.
+
+---
+
+## 26. The takeoff stand: what a seated robot feels, and a stand that cannot resonate
+
+Every model before this section starts the robot free, or holds it with a floor in $z$ alone
+(`z_track.py`). The stand is where the uncontrolled parameters live. They are the clearance,
+the contact stiffness and friction, the depth to which the rod is pushed in, and a printed
+rotor that is not concentric. The operator reports exactly what such parameters produce:
+the takeoff frequency cannot be adjusted, and the alignment does not repeat.
+
+The question was whether to model the contact in full or to design it out. **The answer is
+to design it out.** A friction contact through a clearance is a hybrid system, with
+stick/slip, impacts and Painlevé-type indeterminacy. Its parameters change every time the
+robot is put on the stand. A guarantee computed from that model would hold for the
+parameters of one insertion. What *is* worth having is the small model in
+`mount_model.py`, used only to rank designs. It needs four transverse states, a penalty
+contact with a deadband, and the two body-fixed imbalances.
+
+Inertias, mass and $\kappa_t$ are the CAD rim robot's (sections 3, 11). The alignment-rate
+robots of 24-25 (designs A/B/C) are different bodies with no measured inertia. Where their
+data is used below, it tests the *shape* of a prediction, never its numbers.
+
+### 26.1 Every disturbance announces itself by its lab-frame frequency
+
+$\mathbf m(\theta)$ and $\mathbf B(\theta)$ are both first harmonics of the drive phase (12.1,
+12.5). On a synchronous rotor $\theta_r = \theta_f - \delta$, so every product of the two
+($\boldsymbol\tau = \mathbf m\times\mathbf B$, $\mathbf F = \nabla(\mathbf m\cdot\mathbf B)$)
+contains **only DC and $2f$**. A lab-frame field defect, of whatever shape, therefore cannot
+appear at $1\times$. **Anything at $1\times$ is body-fixed.**
+
+| source | lab-frame line | effect while seated |
+|---|---|---|
+| field-plane tilt $\alpha$ (amplitude/phase mismatch, coil placement) | 0 | steady moment $\kappa_t\alpha$: the rotor leans to a FIXED azimuth |
+| field ellipticity (phase error) | $2f$ | axial torque ripple, small transverse ripple |
+| COM offset $e$ from the rod axis | $1\times$ | rotating radial load $m e\omega^2$ |
+| principal axis tilted $\gamma$ from the rod (bent or crooked rod) | $1\times$ | rotating moment |
+| magnet moment with an axial component | $1\times$ | body-fixed torque |
+
+The measurements sort exactly this way. The lean is a $0\times$ effect: fixed at ~146 deg with
+concentration 0.97 (18.15), against a field dipole at 151 deg (18.18). The cone is a
+$1\times$ effect: it sits at exactly 1.00x drive (25.7, pose 20.7). The user's suspicion was
+that uneven fields make the robot precess in the stand. **It is half right.** The field
+asymmetry produces the static lean. The periodic off-axis moment at the bottom of the robot
+comes from the rotor's own non-concentricity.
+
+### 26.2 The stand turns a harmless imbalance into the largest load on the robot
+
+20.3 rules out a COM offset *in flight*, and that stands: a free body spins about its
+principal axis through its COM. On the stand the rod cannot do that, so the stand must
+supply $m e\omega^2$ (W = 0.82 mN):
+
+| f | $F/W$ at $e$ = 20 um | $F/W$ at $e$ = 50 um |
+|---|---|---|
+| 50 Hz | 0.20 | 0.50 |
+| 100 Hz | 0.80 | 2.0 |
+| 126 Hz | 1.3 | 3.2 |
+
+The print-plus-glue tolerance is not measured. It is guessed at 20 um, and the CAD magnets
+even interpenetrate by 0.094 mm (section 3). At that guess the bearing carries a rotating
+load comparable to the robot's weight from ~100 Hz. Near liftoff the seat load
+$N = W(1-(f/f_h)^2)$ goes to zero, and the rotating load is still there. This is a
+mechanism for the stand loosening that needs no field defect at all.
+
+**MEASURED, and inconclusive: is there a release kick?** If the rotor leaves a rigid guide
+with its COM still orbiting, it carries about $(e-c)\omega$ sideways. That would be ~13 mm/s
+at 20 um and 100 Hz, in a random direction (18.13's departure azimuths were random).
+`mount_model.py --kick` reads the 2026-08-29..09-01 takeoff CSVs (recovered from git,
+`bad8b64^`). It reports the lateral and vertical speed where the robot first holds above
+1, 2, 3 and 4 mm, and drops pose flips: z jumps of more than 2 mm, which put the robot below
+the pad. 12 runs clear 1 mm. Three of them read 42-88 mm/s from 2 mm up, and all three have
+8 or more flips in the run (`132937` has 131), so they are excluded. The other nine read:
+
+| height | lateral speed | vertical speed |
+|---|---|---|
+| 1 mm | 1-3 mm/s (one 12, one 9) | 1-7 mm/s |
+| 2 mm | 4-13 mm/s | 6-14 mm/s |
+| 3 mm | 11-12 mm/s | 13-14 mm/s |
+
+At 1 mm the rod is still inside the bearing stack, so ~0 lateral speed is guaranteed and
+says nothing. The rod is free only after it has risen its whole insertion depth, which has
+never been surveyed (`holder_layout.json`: `bearing_origin_z_mm: null`). At 2-3 mm the
+speeds fit a 20 um kick and fit a guided climb just as well. Two things are settled:
+
+* **18.14's 68 mm/s at liftoff is withdrawn as evidence of anything.** That run
+  (`20260901_082621`) has 25 pose flips. Its lateral "velocity" is a pose branch switching.
+* **The climb-out is steep.** Lateral speed runs 0.4-1.0 of vertical, a path 20-45 deg off
+  the datum. A 3 deg lean gives 0.05. Either the robot is already free by ~2 mm and something
+  pushes it sideways, or the stereo lateral axis is biased against the vertical (pose
+  20.4-20.6 measures a 7-15 deg disagreement between views). This data cannot decide which.
+
+### 26.3 The support distance decides whether a critical speed exists at all
+
+Pivot the rotor at a point a distance $l$ below its COM, on the rod's geometric axis. With
+$\chi$ the principal-axis tilt and $u = e^{i\theta}$, the contact point is
+$P = r - e u - l(\chi - \gamma u)$. The tilt equation in the sign convention for which a
+torque-free top nutates *forward* at $I_s\omega/I_t$ is
+$I_t\ddot\chi - iI_s\omega\dot\chi = \tau$. A lateral force $F$ at $P$ contributes
+$\tau = -lF$, and the seat load contributes $-N(P-r)$. Holding $P = 0$ (a rigid pivot) and
+looking for the $1\times$ response $\chi = Xu$:
+
+$$\boxed{\ \big[(I_s - I_t - m l^2)\,\omega^2 + \kappa_t - N l\big]\,X
+\;=\; (l m\omega^2 + N)(e - l\gamma)\ }$$
+
+The bracket is the whole story. The rotor is oblate about its COM ($I_s > I_t$), so with the
+support at the COM the bracket is positive at every speed: **no forward synchronous critical
+exists, for any imbalance.** Moving the support down adds $ml^2$ to the transverse inertia.
+Past
+
+$$l_{crit} = \sqrt{(I_s - I_t)/m} = 3.98\ \text{mm}$$
+
+the rotor is *prolate about its support*, and a critical appears wherever the bracket
+crosses zero:
+
+| $l$ (mm) | 3.9 | 4.0 | 4.1 | 4.2 | 4.3 | 4.5 | 5.0 | 6.0 | 7.0 |
+|---|---|---|---|---|---|---|---|---|---|
+| critical (Hz) | none | 194 | 84 | 61 | 50 | 38 | 26 | 17 | 13 |
+
+**Just above 4 mm the critical sweeps the whole operating band for a few tenths of a
+millimetre of depth.** The rod runs 7.4 mm past the rim (`flyingrobot_rod2.STL`). The COM is
+near the rim plane, and the contact depth is not surveyed, so the stand puts $l$ in exactly
+this range. Two further effects move the critical. It goes as $\sqrt{\kappa_t}$, and
+$\kappa_t$ goes with coil current, which rises toward resonance: at $l$ = 4.3 mm, halving or
+doubling $\kappa_t$ moves it from 50 to 32 or 73 Hz. And the depth changes with every
+insertion. **A critical speed whose position is set by an uncontrolled insertion depth is a
+sufficient explanation of a takeoff that does not repeat.** The geometric guarantee is the
+inequality $l < l_{crit}$, with margin. Nothing about $e$, $\gamma$, $\mu$ or $c$ enters it.
+
+**MEASURED: design A's cone has a resonance, but not a linear one.** `--cone` fits the
+pre-cut $1\times$ cone of the normal-tilt takes (radial 10-25 deg, the 24.6 band) with a
+forced linear resonance in log amplitude, and with a no-resonance alternative:
+
+| | design A (n = 72) | design B (n = 61) | design C (n = 19) |
+|---|---|---|---|
+| rms log residual, resonance | 0.49 | 0.23 | 0.89 |
+| rms log residual, none | 0.80 | 0.26 | 0.89 |
+
+Only design A needs a resonance. Its linear fit fails in a specific way. The data rise slowly
+over 20-50 Hz (1.4, 2.9, 5.2, 8.7 deg) and collapse abruptly over 50-70 Hz, and **where they
+collapse depends on the session**. At 60 Hz the 2026-09-09 21h takes read 5.7-8.2 deg, and
+the 2026-09-10 00h takes read 1.7-2.0. Takes in the 24.6 large-tilt state (35-43 deg) read
+1.2-3.0 deg at 50-60 Hz: the cone is suppressed while the rod is held over at a large angle.
+A slow rise, a jump down whose position moves with the setup, and suppression when the
+contact is pressed over are what a critical in a clearance contact looks like when swept
+upward. A linear model cannot produce them. B and C show no peak, only a $1/f^2$ fall to a
+0.6-0.9 deg floor. That is consistent with the $1\times$ forced response before gyroscopic
+stiffening takes over, settling onto the body's own $\gamma$ (26.4). It is not proof. These are different bodies, so this
+supports the *mechanism* and not the takeoff robot's numbers. The table also reproduces the
+mechanism. At $l$ = 4.3 mm with 10 um clearance it gives a 65 deg cone at 50 Hz, against
+1.4 deg at 5 mm, where the critical has moved down to 26 Hz.
+
+### 26.4 A stand that is concentric by construction: supercritical self-centring
+
+Above its critical speed a rotor on a *soft* lateral support spins about its own COM: the
+heavy side turns inward (Jeffcott, de Laval). It is then centred by its mass
+distribution, not by the precision of the stand. The window for the stand's lateral
+stiffness $k$ is two decades wide:
+
+* $k \gg 0.054$ N/m, the gradient anti-trap of 12.6. Friction alone cannot hold the robot
+  laterally, because friction vanishes with $N$ at liftoff.
+* $k \ll m\omega^2$ = 8 N/m at 50 Hz and 33 N/m at 100 Hz, for supercritical running.
+
+So $k \approx$ 0.5-2 N/m, a translational natural frequency of 12-25 Hz. It is crossed early
+in the ramp, where $me\omega^2$ is small. `mount_model.py`'s design table (1.5 s holds,
+$e$ = 20 um, $\gamma$ = 1 deg, $\alpha$ = 1.5 deg toward 151 deg):
+
+| stand | 1x cone, 20 / 50 / 90 Hz (deg) | peak contact force / W, 20 / 50 / 90 Hz |
+|---|---|---|
+| current: rigid, $l$ = 5 mm, $c$ = 10 um | 3.5 / 1.4 / 0.9 | 4.6 / 2.0 / 3.6 |
+| same, rod 0.7 mm shallower ($l$ = 4.3 mm) | 2.5 / **65** / 4.3 | 3.0 / **53** / 12 |
+| rigid support near the COM ($l$ = 2 mm) | 1.1 / 1.2 / 1.2 | 0.4 / 0.4 / 2.7 |
+| compliant pivot ($l$ = 2 mm, $k$ = 1 N/m, $c$ = 0) | 0.8 / 1.0 / 1.0 | 0.1 / 0.2 / 0.3 |
+
+The compliant pivot settles to a cone equal to $\gamma$. That residue is the geometric axis
+circling the principal one, which a camera always sees, and which 20.3 shows does nothing in
+flight. Its contact load is ten times below the rigid stand's. The usual mechanical form is
+a cone in the hub on a hard pin, the exact-constraint element (Slocum 1992; the
+watch/compass cap-jewel pivot): three translations fixed at the apex, independent of size or
+tolerance, with tilt free. The pin goes on a whisker or flexure of about 1 N/m, and the cone
+is placed within $l_{crit}$ of the COM. In rotor-stator contact the levers the literature
+names are low $\mu$, more damping, or no clearance contact at all (Black 1968; Childs &
+Bhattacharya, *J. Vib. Acoust.* 2007). A pivot is the third.
+
+### 26.5 Three proposed fixes that do not work, and one that does
+
+**A DC solenoid under the stand cannot hold the robot down.** Over a revolution
+$\langle\mathbf m\rangle = 0$, so $\langle\nabla(\mathbf m\cdot\mathbf B_{dc})\rangle =
+\nabla(\langle\mathbf m\rangle\cdot\mathbf B_{dc}) = 0$, wherever the coil is
+(`dc_coil_mean_force`: $|\langle F\rangle|/W = 1.6\times10^{-12}$). What it *does* add is
+$\mathbf m\times\mathbf B_{dc}$: a horizontal torque turning at $1\times$, of size
+$B_{dc}/B_{drive}$ times $\tau_{max}$, about 22 % per mT against 4.5 mT of drive. That
+drives exactly the $1\times$ cone of 26.1. A mean force needs an axial magnetisation error,
+and its sign is whatever the build happened to be. The drivers' series capacitors also block
+DC (17).
+
+**No rotation mode cancels a field-plane tilt.** The cos δ part of the tilt torque makes a
+free rotor precess about the field axis $\hat n$, and the sin δ (drag) part aligns it.
+Aligned with $\hat n$ is already the attractor. Reversing the spin reverses the precession
+but not the equilibrium. What the stand does is stop the alignment from happening before
+release. Reversal is worth one run as a *measurement*. With a friction contact, the lean
+azimuth sits $\arcsin\mu_{eff}$ from the field azimuth on the spin side, so reversal moves it
+by $2\arcsin\mu_{eff}$. The 5 deg between 18.15 (146) and 18.18 (151) would then mean
+$\mu_{eff} \approx 0.09$. That is a prediction, not a reading.
+
+**Amplitude and phase trim reaches the $0\times$ lean and nothing else.** The array commands
+its field axis at rank 3 (12.7), and the mixer and `setPhaseOffset` exist. The trim cannot
+touch the $1\times$ terms, which are what load the stand. It also needs the field measured
+at the robot's position. 15.8 records that no field has been measured in this repo, and the
+writeup's coils have solid iron cores, which no model here includes. Three analog Halls
+(DRV5055, 20 kHz bandwidth) on a cube at the robot's position would give $\mathbf u$ and
+$\mathbf v$ directly. A triaxial search coil on the existing `probe=` lock-in would too.
+
+**The one that does: a ferrite bead under the magnet.** A soft magnetic body attracts the
+magnet through its induced moment, whatever the orientation of $\mathbf m$. On the axis the
+force is steady, downward and axisymmetric, so it adds no tilt torque and it centres. For
+an Ø1 mm bead below $m$ = 3.6e-3 A m², with the robot magnet's own field $\mu_0 m/(4\pi d^3)$
+and $F \approx m_{ind}\,3B/d$, the order of magnitude is:
+
+| centre gap | 2.5 mm | 3 mm |
+|---|---|---|
+| hold-down | ~1 W | ~0.3 W |
+
+It goes as $d^{-7}$ and as $m^2$, so it is uncertain to the factor that 9's $m_{dip}$ is. The
+bead perturbs the drive field at the robot by about 1 %. **A gap screw then becomes the
+tunable takeoff threshold** that the operator asked for, and it releases sharply once lift
+wins. Use ferrite: steel adds eddy drag at 100 Hz. Hysteresis drag in the ferrite is
+unquantified.
+
+### 26.6 What a "guaranteed" takeoff can mean here
+
+Certifying every perturbed path *through* the contact is not available, because that is the
+hybrid system of the introduction. What can be certified is the hand-over. Fix the release
+state set by the stand's design, then show that the flight controller absorbs every state
+in it. `release_envelope` does this for the shipped lateral loop (`hover_controller.json`,
+via `robust_cert.axis_loop`):
+
+| | mag_max = 1 |
+|---|---|
+| release speed, certified (largest saturation-free invariant ellipsoid) | 48.5 mm/s |
+| release speed, saturated loop still converges (exact for the linear model, not a certificate) | 449 mm/s |
+| steady thrust tilt the integrator can hold, $\arcsin(k_{lat}\,\text{mag\_max})$ | **2.87 deg** |
+
+The kick of 26.2 is inside the certified ellipsoid with nearly a factor of four in hand, even at a
+generous 20 um. **The binding condition is the tilt.** The robot leans 3.08 deg by 105 Hz
+(18.15), and the whole lateral authority holds 2.87. After release the rotor aligns to the
+field axis $\hat n$, not to the stand, so the steady part of this condition is a condition
+on the *field*. Two conditions together are what can be guaranteed:
+
+1. $l < l_{crit}$ with margin (26.3): no critical speed during the ramp, whatever $e$,
+   $\gamma$, $c$, $\mu$ or the depth of insertion;
+2. $|\alpha| < \arcsin(k_{lat}\,\text{mag\_max})$ at the robot's position: a condition on the
+   field trim of 26.5, and so on the field measurement.
+
+$k_{lat}$ is still a seed (19.14), so 2.87 deg scales with it.
+
+### 26.7 What this does not settle
+
+* **The current robot's inertia and the axial position of its COM** are CAD values and
+  unmeasured. $l_{crit}$ goes as $\sqrt{I_s - I_t}$, so the 3.98 mm depends on them. A
+  knife-edge balance on the rod finds the COM height in a minute.
+* **The insertion depth and the contact stiffness** are guesses. The table ranks designs; it
+  does not predict a run.
+* **One contact point stands in for a bearing stack.** A stack is two contacts and a
+  moment-carrying span, which adds unknowns and no data to fit them.
+* **The sin δ cross term of 11.2** is left out of the model, because its sign has not been
+  checked on the rig.
+* **20.3 has a sign error.** Its tilt block forces the body-fixed torque *backward*, which
+  gives $\kappa_t - (I_s+I_t)\omega^2$. Forward forcing gives $\kappa_t + (I_s - I_t)\omega^2$.
+  The coning per mm of COM offset is 3.9x larger than 20.3's table (0.055 deg/mm at 126 Hz),
+  and the offset needed for 4.6 deg is 83 mm, not 329 mm. The conclusion is unchanged.
+  `robust_cert.coning_from_com` carries the same denominator.
+* **The climb-out slope of 26.2** (20-45 deg off the datum) is unexplained.
+
+### 26.8 Correspondence with the implementation
+
+| quantity | where |
+|---|---|
+| $l_{crit}$, critical vs $l$ | `mount_model.l_crit`, `critical_hz` |
+| rigid-pivot and linear-spring $1\times$ response | `rigid_pivot_cone`, `spring_response` |
+| seated simulation with clearance, friction, imbalance, field tilt | `simulate`, `steady_cone`, `DESIGNS` |
+| DC coil mean force and $1\times$ torque | `dc_coil_mean_force` |
+| release envelope of the shipped lateral loop | `release_envelope` |
+| T1 climb-out speeds, T1b cone resonance fit | `release_kick` (`--kick DIR`), `cone_resonance_fit` (`--cone CSV`) |
+| outputs | `results/mount/` |
+
+`_self_check` asserts these properties:
+* with no support, the COM never moves;
+* an undamped torque-free spin conserves $|\dot\chi|$. The gyroscopic term is applied as an
+  exact rotation. Explicit Euler on it grew a 1 N/m pivot to 1e22 deg in 1.5 s, which looked
+  exactly like a whirl;
+* the simulation holds the closed-form linear steady state to 2 % at 12, 30 and 80 Hz;
+* a stiff spring tends to the rigid pivot;
+* the critical exists only above $l_{crit}$;
+* the DC coil's mean force vanishes;
+* the release ellipsoid is invariant and saturation-free.
 
 ## Appendix A: Correspondence with the MATLAB implementation
 

@@ -1,0 +1,48 @@
+self-check ok: l_crit = 3.98 mm, DC coil <F>/W = 1.6e-12, 1x torque = 26.90 tau_max
+
+release envelope at mag_max = 1, k_lat = 0.05 (a seed, 19.14):
+  release speed: certified 48.5 mm/s, saturated-loop 448.9 mm/s;  steady tilt held: 2.87 deg
+
+rigid-pivot critical speed vs support distance l (kappa = 11.3's 2.45e-5):
+  3.9mm:none  4.0mm:194Hz  4.1mm:84Hz  4.2mm:61Hz  4.3mm:50Hz  4.5mm:38Hz  5.0mm:26Hz  6.0mm:17Hz  7.0mm:13Hz
+
+rigid-pivot 1x geometric cone (deg) vs l, e = 20 um, gamma = 1 deg:
+  l = 2.0 mm: 20:1.08  40:1.11  50:1.12  60:1.13  80:1.13  100:1.14
+  l = 3.5 mm: 20:1.48  40:2.10  50:2.34  60:2.53  80:2.77  100:2.92
+  l = 4.3 mm: 20:2.16  40:11.05  50:346.72  60:15.78  80:7.56  100:5.97
+  l = 5.0 mm: 20:4.38  40:2.80  50:1.96  60:1.64  80:1.38  100:1.28
+  l = 7.0 mm: 20:1.36  40:0.42  50:0.35  60:0.31  80:0.28  100:0.26
+
+design table (simulated, 1.5 s hold): f, 1x cone deg, peak contact force / W
+  current stand (l=5 mm, rigid, c=10 um)       20 Hz    3.53    4.56
+  current stand (l=5 mm, rigid, c=10 um)       30 Hz    3.52    6.53
+  current stand (l=5 mm, rigid, c=10 um)       40 Hz    2.20    4.56
+  current stand (l=5 mm, rigid, c=10 um)       50 Hz    1.42    2.04
+  current stand (l=5 mm, rigid, c=10 um)       60 Hz    1.16    2.17
+  current stand (l=5 mm, rigid, c=10 um)       70 Hz    1.04    2.52
+  current stand (l=5 mm, rigid, c=10 um)       80 Hz    0.93    2.99
+  current stand (l=5 mm, rigid, c=10 um)       90 Hz    0.87    3.59
+  same, rod 1 mm shallower (l=4.3 mm)          20 Hz    2.47    2.95
+  same, rod 1 mm shallower (l=4.3 mm)          30 Hz    4.83    3.95
+  same, rod 1 mm shallower (l=4.3 mm)          40 Hz   12.19   10.08
+  same, rod 1 mm shallower (l=4.3 mm)          50 Hz   65.22   53.27
+  same, rod 1 mm shallower (l=4.3 mm)          60 Hz    8.49   14.00
+  same, rod 1 mm shallower (l=4.3 mm)          70 Hz    6.34   11.84
+  same, rod 1 mm shallower (l=4.3 mm)          80 Hz    5.08   11.61
+  same, rod 1 mm shallower (l=4.3 mm)          90 Hz    4.30   12.20
+  support near COM (l=2 mm)                    20 Hz    1.09    0.38
+  support near COM (l=2 mm)                    30 Hz    1.16    0.12
+  support near COM (l=2 mm)                    40 Hz    1.18    0.22
+  support near COM (l=2 mm)                    50 Hz    1.19    0.35
+  support near COM (l=2 mm)                    60 Hz    1.21    0.53
+  support near COM (l=2 mm)                    70 Hz    1.22    0.88
+  support near COM (l=2 mm)                    80 Hz    1.22    1.67
+  support near COM (l=2 mm)                    90 Hz    1.23    2.70
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       20 Hz    0.81    0.12
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       30 Hz    0.97    0.12
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       40 Hz    0.98    0.17
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       50 Hz    0.98    0.20
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       60 Hz    0.99    0.24
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       70 Hz    0.99    0.27
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       80 Hz    0.99    0.30
+  compliant pivot (l=2 mm, k=1 N/m, c=0)       90 Hz    1.00    0.33

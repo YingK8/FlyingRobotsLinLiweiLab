@@ -2,6 +2,8 @@
 #include "drive_common.h"
 #include "frame_link.h"
 #include "constants.h"
+#include "VectorField.h"
+#include "SerialComm.h"
 
 static const float SPINUP_THROTTLE = 100.0f;
 static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
@@ -34,6 +36,11 @@ static float magSet = 0.0f;
 // `duty=` replaces the tilt mixer while set; `throttle=` still scales it
 static bool dutySet = false;
 static float dutyPct[NUM_CHANNELS] = {100.0f, 100.0f, 100.0f, 100.0f};
+
+static VectorField vectorField(SPIN_PHASES);
+static bool vectorFieldActive = false;
+static float vectorFieldDuty[NUM_CHANNELS];
+static double targetPoint[3], targetOrientation[4], targetFieldTesla;
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -206,11 +213,58 @@ static bool cmdProbe(const String &arg) {
   return true;
 }
 
+static bool applyVectorField(const double point[3], const double orientation[4], double fieldTesla) {
+  const CoilSettings settings = vectorField.settingsFor(point, orientation, fieldTesla, ctl.getFrequency());
+  if (!(settings.fieldFraction > 0.0f)) { Serial.println("!vec refused (q=0, freq=0 or singular)"); return false; }
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    vectorFieldDuty[i] = settings.dutyPercent[i];
+    ctl.setPhase(i, settings.phaseDegrees[i]);
+  }
+  for (int i = 0; i < 3; i++) targetPoint[i] = point[i];
+  for (int i = 0; i < 4; i++) targetOrientation[i] = orientation[i];
+  targetFieldTesla = fieldTesla;
+  vectorFieldActive = true;
+  Serial.printf("vec scale=%.2f duty=%.0f,%.0f,%.0f,%.0f\n", settings.fieldFraction, settings.dutyPercent[0],
+                settings.dutyPercent[1], settings.dutyPercent[2], settings.dutyPercent[3]);
+  return true;
+}
+
+static bool cmdVec(const String &arg) {
+  if (state != FLIGHT) { Serial.printf("!vec state=%d\n", (int)state); return false; }
+  float fields[8] = {0.0f, 0.0f, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+  splitFloats(arg, fields, 8);
+  const double pointMeters[3] = {fields[0] * 1e-3, fields[1] * 1e-3, fields[2] * 1e-3};
+  const double quaternion[4] = {fields[3], fields[4], fields[5], fields[6]};
+  return applyVectorField(pointMeters, quaternion, fields[7] * 1e-3);
+}
+
+static void returnToMixer() {
+  if (!vectorFieldActive) return;
+  vectorFieldActive = false;
+  for (int i = 0; i < NUM_CHANNELS; i++) ctl.setPhase(i, SPIN_PHASES[i]);
+}
+
 static bool cmdFreq(const String &arg) {
   float hz = arg.toFloat();
   if (state != FLIGHT) { Serial.printf("!freq state=%d\n", (int)state); return false; }
   if (hz <= 0.0f) { Serial.printf("!freq=%.2f\n", hz); return false; }
   ctl.setGlobalFrequency(hz);
+  if (vectorFieldActive) applyVectorField(targetPoint, targetOrientation, targetFieldTesla);
+  return true;
+}
+
+// the framer hands over raw lines, so the `*HH` CRC-8 that `hello crc=1` promises is checked here
+static bool stripChecksum(String &line) {
+  line.trim();
+  const int length = line.length();
+  if (length < 3 || line[length - 3] != '*') return true;
+  const bool isHex = isxdigit(line[length - 2]) && isxdigit(line[length - 1]);
+  if (!isHex || SerialComm::checksum(line.c_str(), length - 3) != strtol(line.c_str() + length - 2, nullptr, 16)) {
+    Serial.print("!crc ");
+    Serial.println(line);
+    return false;
+  }
+  line.remove(length - 3);
   return true;
 }
 
@@ -221,6 +275,9 @@ static void dispatch(String cmd) {
   int eq = cmd.indexOf('=');
   const String key = (eq < 0) ? cmd : cmd.substring(0, eq);
   const String arg = (eq < 0) ? String() : cmd.substring(eq + 1);
+
+  if (key == "az" || key == "mag" || key == "hover" || key == "land" || key == "stop" ||
+      key == "duty" || key == "phase") returnToMixer();
 
   bool ok;
   if (key == "throttle")   { collective = clampf(arg.toFloat(), 0.0f, 100.0f); ok = true; }
@@ -240,8 +297,14 @@ static void dispatch(String cmd) {
   else if (key == "duty")   ok = cmdDuty(arg);
   else if (key == "phase")  ok = cmdPhase(arg);
   else if (key == "led")    ok = cmdLed(arg);
+  else if (key == "vec")    ok = cmdVec(arg);
+  else if (key == "hello") {
+    Serial.printf("hello baud=%lu crc=1 fw=%s %s\n", (unsigned long)SERIAL_BAUD, __DATE__, __TIME__);
+    return;
+  }
+  else if (key == "ping")  { Serial.printf("pong=%s us=%lu\n", arg.c_str(), (unsigned long)micros()); return; }
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|phase=|led=code|hover|land|stop|freq=|probe=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|duty=|phase=|led=code|hover|land|stop|freq=|probe=|vec=|hello|ping=)\n",
                   cmd.c_str());
     return;
   }
@@ -268,6 +331,7 @@ void setup() {
 static void applyDrive(const drive_frame::Drive &d) {
   // a frame must never drive the coils from IDLE
   if (state != SPINUP && state != FLIGHT) return;
+  vectorFieldActive = false;
   for (int i = 0; i < NUM_CHANNELS; i++) dutyPct[i] = clampf(d.amp_pct[i], 0.0f, 100.0f);
   dutySet = true;
   for (int i = 0; i < NUM_CHANNELS; i++) phaseDeg[i] = d.phase_deg[i];
@@ -293,7 +357,10 @@ void loop() {
   while (Serial.available()) {
     drive_frame::Got g = framer.feed((uint8_t)Serial.read(), (uint32_t)micros());
     if (g == drive_frame::Got::Frame) applyDrive(framer.drive());
-    else if (g == drive_frame::Got::Line) dispatch(String(framer.line()));
+    else if (g == drive_frame::Got::Line) {
+      String line(framer.line());
+      if (stripChecksum(line)) dispatch(line);
+    }
     else if (g == drive_frame::Got::Overflow)
       Serial.println("! line over 128 chars, truncated");
   }
@@ -307,7 +374,8 @@ void loop() {
       if (seq.isDone()) { state = FLIGHT; Serial.println("state=2 (FLIGHT)"); }
       break;
     case FLIGHT:
-      applyMixer();
+      if (vectorFieldActive) for (int i = 0; i < NUM_CHANNELS; i++) ctl.setCarrierDutyCycle(i, vectorFieldDuty[i]);
+      else applyMixer();
       break;
     case LANDING: {
       static unsigned long lastStep = 0;

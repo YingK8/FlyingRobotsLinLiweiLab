@@ -8,7 +8,7 @@ a two-camera stereo rig.
 | where | what |
 |---|---|
 | `src/main_flight.cpp` | the flight firmware. One `main_*.cpp` per experiment, one PlatformIO env each |
-| `lib/` | firmware libraries (`PwmController`, `SerialComm`, ...) |
+| `lib/` | firmware libraries (`PwmController`, `SerialComm`, `VectorField` -- field orientation at a point -> coil duty + phase, the `vec=` command, `control/theory.md` 28, ...) |
 | `controller/` | the live host pipeline: `camera/` -> `calib/` -> `pose/` -> `control/`, plus `viz/`. A real Python package -- import by full path, `from controller.pose import stereo` |
 | `controller/native/` | `pmw_pose`: the C++ port of everything `StereoPoseEstimator.update` does per frame (`pose/theory.md` 21), plus the live capture and the interleaved tracker (22), plus the control core -- filter, predictor, LQR (`control/theory.md` 27). Built by `uv sync --extra native`; `pose/stereo_native.py` wraps the estimator, `pose/tracker.py` the tracker, and `live_viz._stereo_estimator` picks the native core when it is importable. The Python stays as the reference and `pose/native_parity.py` holds the two together |
 | `pmw_fly` | the standalone controller built from the same objects as `pmw_pose`, opted into with `-DPMW_FLY=ON`. Driven ONLY by `controller/control/fly_native.py`, which owns arming and the thermal stamp -- see Safety |
@@ -202,6 +202,9 @@ uv run python controller/control/z_track.py     # self-checks: run the module
 uv run python controller/control/coil_phase.py  # per-channel current phase; --measure drives
 uv run python controller/report.py results/tilt_sweep/<take>   # the whole offline pipeline
 uv run python LLM/analyse/spinup.py --all       # did the rotor turn on each take?
+uv run python controller/control/link.py --rtt # hello + ping round trip; drives nothing
+c++ -std=c++17 -Ilib/VectorField/src lib/VectorField/src/VectorField.cpp \
+    lib/VectorField/check/self_check.cpp -o /tmp/vf && /tmp/vf   # VectorField self-check
 ```
 
 Self-checks are a `demo()` or `_self_check()` under `if __name__ == "__main__"`, using plain
@@ -225,7 +228,9 @@ command's wire time 2.5 -> 0.31 ms, which was a larger delay than the whole cloc
 
 The host and firmware baud MUST match -- `link.SerialComm.BAUD` and `src/constants.h`'s
 `SERIAL_BAUD`, both 921600. There is no handshake and no ack, so a mismatch is **silent**:
-the firmware never parses a command and the coils hold their last value.
+the firmware never parses a command and the coils hold their last value. `hello` now
+makes it loud (the flight runner refuses without one) and switches on the `*hh` CRC-8;
+`stop`/`land` are never checksummed so the kill works on any firmware (theory.md 19.13).
 
 Two rules that are not optional, both in `controller/control/theory.md` 19.6:
 

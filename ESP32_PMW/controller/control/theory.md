@@ -1023,7 +1023,8 @@ $$\mathbf u = \mathbf B_{ch}\,\mathrm{Re}\,\mathbf z, \qquad
 \mathbf v = -\mathbf B_{ch}\,\mathrm{Im}\,\mathbf z,$$
 
 which is block diagonal: the real parts set $\mathbf u$, the imaginary parts set $\mathbf v$,
-independently. Numerically $\mathbf B_{ch}$ has **rank 3 everywhere in the workspace**, with
+independently. Numerically $\mathbf B_{ch}$ has **rank 3 everywhere in the workspace** (not so: it
+loses rank on a shell at ~21–22 mm, §27.6), with
 singular values $(2.42,\ 2.42,\ 0.36)$ mT/A on axis and condition number 3–7. So the array
 commands the rotation axis, the amplitude and the ellipticity of the local field completely
 and independently. The weak singular direction is the one that tilts the rotation plane,
@@ -5115,3 +5116,194 @@ boundaries: a conservative rule of thumb is to keep the quasi-static demand belo
 $\tau_{max}\sin(\pi/2 - \Delta)$ with a swing allowance $\Delta$ of a few tens of
 degrees, or to shape $\dot f_f$ continuously (higher-order polynomial / exponential
 segments) so little swing energy is injected.
+
+## 27. Commanding the field's orientation at a point: `lib/VectorField`
+
+§12.7 showed that the channel basis inverts. This section turns that into the operator-facing
+command "rotating field about $\hat n$, radius $b$, at $\mathbf r$, at $f$". It covers what §12.7
+left implicit: the derivation in real arithmetic, what the inverse costs and in which direction,
+how amps become carrier duty, and which calibration errors can move the axis.
+
+### 27.1 The inverse as one real linear system
+
+$i_k = I_k\cos(\theta+\varphi_k)$ is nonlinear in $(I_k,\varphi_k)$. It is linear in the
+quadrature pair $x_k = I_k\cos\varphi_k$, $y_k = -I_k\sin\varphi_k$, since
+$i_k = x_k\cos\theta + y_k\sin\theta$. With $B(\mathbf r)\in\mathbb R^{3\times4}$ the
+per-channel field per amp, $\mathbf u = B\mathbf x$ and $\mathbf v = B\mathbf y$. The target
+circle is $\mathbf u = b\hat e_1$, $\mathbf v = b\hat e_2$ with $\hat e_1\times\hat e_2 = \hat n$,
+which fixes axis and sense because $\mathbf u\times\mathbf v = b^2\hat n$ (§12.4). That is
+
+$$\begin{bmatrix}B&0\\0&B\end{bmatrix}\begin{bmatrix}\mathbf x\\\mathbf y\end{bmatrix}
+=\begin{bmatrix}b\hat e_1\\ b\hat e_2\end{bmatrix},$$
+
+six equations in eight unknowns, block-diagonal, so it splits into two 3×4 problems. Each has
+rank 3 and a line of solutions. Ohmic loss is $\tfrac R2(\lVert\mathbf x\rVert^2+\lVert\mathbf y\rVert^2)$.
+Minimising $\tfrac12\lVert\mathbf x\rVert^2$ subject to $B\mathbf x = \mathbf t$ gives
+$\mathbf x = B^\top\boldsymbol\lambda$ with $BB^\top\boldsymbol\lambda = \mathbf t$, so
+
+$$\boxed{\ \mathbf z = \mathbf x - i\mathbf y = P(\mathbf u - i\mathbf v)
+= b\,P(\hat e_1 - i\hat e_2),\qquad P = B^\top(BB^\top)^{-1}\ }$$
+
+This is exact, since $BP = \mathbb 1$. $I_k = |z_k|$ and $\varphi_k = \arg z_k$ are the only
+nonlinear step. The choice of $\hat e_1$ in the plane does not matter: rotating the pair by
+$\beta$ maps $\hat e_1 - i\hat e_2 \to e^{i\beta}(\hat e_1 - i\hat e_2)$, a global phase, i.e. a
+shift of the time origin. $f$ does not appear, because the field is quasi-static. It enters
+only through the coil impedance (§27.3).
+
+### 27.2 What it costs, and in which direction
+
+Write $B = U\Sigma V^\top$, so that $\mathbf x = \sum_j (\mathbf u_j^\top\mathbf t/\sigma_j)\,\mathbf v_j$.
+On the axis the symmetry makes it closed-form. $\mathbf b_{\pm x} = (\mp\beta, 0, \gamma)$ and
+$\mathbf b_{\pm y} = (0,\mp\beta,\gamma)$ give $BB^\top = \mathrm{diag}(2\beta^2, 2\beta^2, 4\gamma^2)$
+and $\sigma = (\sqrt2\beta, \sqrt2\beta, 2\gamma)$. At $z = 20.1$ mm that is (2.42, 2.42, 0.36)
+mT/A, matching §12.7, which the self-check asserts. The right singular vectors are the drive
+patterns:
+
+- **±x and ±y antiphase pairs** make in-plane field.
+- **The common mode $(1,1,1,1)/2$** makes $B_z$.
+- **The null vector $\mathbf w = (1,-1,1,-1)/2$** is a quadrupole with zero field at the point
+  and nonzero gradient. The min-norm solve sets it to zero. It is the knob a future gradient-force
+  (§12.6) controller would use.
+
+The +z axis gives $\mathbf z \propto (-1,\ i,\ 1,\ -i)$ going round A..D: the 90° spin
+progression. Tilting by $\alpha$ toward +x needs $\hat e_1 = (\cos\alpha, 0, -\sin\alpha)$, and so
+adds $-b\sin\alpha/(4\gamma)$ of **in-phase common mode to every channel**, against
+$b\cos\alpha/(2\beta)$ of differential drive. That is $\beta/2\gamma \approx 4.8\times$ more
+current per unit of field, so a 10° tilt already asks for 0.84× as much common mode as
+differential drive. This is why saturation (§27.3) arrives first in tilt.
+
+### 27.3 Amps to duty, and the calibration that matters
+
+The bridge outputs a square of $\pm V$ gated by carrier duty $D$. Its fundamental is
+$\tfrac4\pi DV$, so $I = \tfrac4\pi DV/|Z(f)|$ and
+
+$$D_k = \frac{\pi\,|Z(f)|\,I_k}{4V\,g_k}.$$
+
+$|Z|$ is the series RLC of `constants.COIL_SERIES_*`, with $f_0 \approx 150$ Hz **nominal and
+unmeasured** on the 800 µF bank (§22.3). $g_k$ is a per-channel trim (`VectorField::channelGain`, 1.0 until
+fitted). `VectorField` hands `setPhase` the **current** phase. `setPhaseTrim` subtracts $\arg Z_k$ beneath it
+once `COIL_F0_HZ`/`COIL_Q` are measured, and until then the phase goes out raw (§22).
+
+**Only differences between channels move the axis.** An impedance, gain or phase error common
+to all four channels multiplies every $z_k$ by the same complex number. That scales $b$ and
+shifts the time origin, and $\hat n$ does not move. So the guessed RLC sets only the absolute
+mT. What can rotate the commanded axis are per-channel mismatches: $g_k$ (coil C, §24) and the
+per-channel phase (§27.4).
+
+**Saturation is a uniform scale**, $\mathbf z \to s\mathbf z$ with
+$s = \min(1,\ 100/\max_k D_k,\ I_{cont}/\max_k I_k)$. It keeps the axis and the circle, gives up
+amplitude, and returns $s$, so a caller can see it. Clipping channels one at a time would hide
+an axis error behind a plausible field.
+
+### 27.4 The per-channel phase offset, and the check that settles it
+
+The firmware delays channel $k$ by $\varphi_{fw}/360$ of a period (`updatePhaseParams`), so its
+phase is a lag: $\varphi_{fw} = -\varphi_k + o_k$. The channel azimuths are measured (A0 B90 C180
+D270, 2026-08-29 az sweep). The phase pattern those azimuths imply on paper **does not spin the
+rotor**, and `SPIN_PHASES` = {270, 90, 180, 0} does. So $o_k$ cannot be derived from geometry.
+It is fitted so that $R = \mathbb 1$ (axis +z) sends exactly `SPIN_PHASES`, which makes the zero-tilt command
+today's spin by construction. The fit is $o = (90, 180, 180, 270)°$.
+
+A reversed winding is a 180° offset, a sign flip of $\mathbf b_k$, and the fit absorbs it
+correctly: tilts then get the right per-channel common-mode sign too. **The 90° parts (A and D
+relative to B/C) have no physical explanation**, and the fit absorbs them without knowing
+whether they are right for tilts. The check that settles it runs in FLIGHT. Step $\hat n$ by 10°
+toward ±x and ±y and read the realised tilt azimuth, as `mixer_sign.py` does. A constant
+rotation between command and response means $o_k$ is fine and the frame is rotated. A
+reflection or a non-constant error means the offsets are wrong. Until that runs, `vec=` is
+trustworthy at $\hat n = +z$ and unverified elsewhere.
+
+### 27.5 The command is an orientation, and its third degree of freedom is the clock
+
+`VectorField::settingsFor` takes $R\in SO(3)$, or a unit quaternion on the wire, rather than an
+axis: $\hat e_1 = R\hat x$, $\hat e_2 = R\hat y$, $\hat n = R\hat z$. A rotating field has only
+two physical degrees of freedom, its axis on $S^2$. The third, the twist $\beta$ about $\hat n$,
+is §27.1's global phase: it leaves every duty unchanged and shifts every channel's phase by
+$-\beta$. The self-check asserts exactly that.
+
+That makes the twist harmless as a value and dangerous as a step. `setPhase` takes effect at
+once, so a twist jump of $\Delta\beta$ between two commands steps the field direction by
+$\Delta\beta$ under a rotor locked at lag $\varphi$, and step-out occurs once $\varphi + \Delta\beta$
+passes $\pi/2$ (§12.3). An axis-only API would have to choose $\hat e_1$ itself, and every rule
+for that is discontinuous somewhere on the sphere (the hairy-ball theorem). Handing the twist to
+the caller as part of $R$ moves that choice to where the trajectory is known. A slerp between
+unit quaternions keeps it continuous for free, which is why the wire format is
+`vec=<x_mm>:<y_mm>:<z_mm>:<qw>:<qx>:<qy>:<qz>:<b_mT>`.
+
+The firmware solves on the board with the running frequency and keeps the target, so a later
+`freq=` re-solves it: duty depends on $|Z(f)|$, the axis does not. An unusable request (`q = 0`,
+`freq = 0`, a singular point) prints `!vec refused` and leaves the previous drive in place. `b` is
+signed: `b < 0` is a 180° phase step on every channel, and `b = 0` turns the coils off
+(`lib/VectorField/notes/vectoring.tex` Algorithm 1). Every accepted command
+echoes `vec scale=…`, and $s < 1$ means §27.3's saturation took amplitude. The C++ was checked
+against the original Python solver to float precision on 40 random cases before the Python was
+deleted; `lib/VectorField/check/self_check.cpp` now carries the invariants.
+
+
+### 27.6 The reachable cone, and the shell where tilt vanishes
+
+**The cone has a closed form.** With $p_k$ the $k$-th row of $P$, §27.1 gives
+$z_k = b\,p_k\cdot(\hat e_1 - i\hat e_2)$, so
+
+$$|z_k|^2 = b^2\,p_k^\top(\mathbb 1 - \hat n\hat n^\top)\,p_k = b^2\,|p_k\times\hat n|^2,
+\qquad
+b_{max}(\mathbf r,\hat n) = \frac{I_{lim}}{\max_k|p_k\times\hat n|},\quad
+I_{lim} = \min\Big(I_{cont},\ \frac{4V}{\pi|Z(f)|}\Big).$$
+
+The twist drops out, as §27.5 requires. For a required $b$, channel $k$ admits the axes
+$|p_k|\sin\theta_k \le I_{lim}/b$: a double cone about $\pm p_k$. **The reachable axes are the
+intersection of four double cones**, so one point and one $b$ give one feasible region on $S^2$.
+$I_{lim}$ is the 2 A continuous rating from 100 Hz up (1.97 A at 50 Hz), so the rating binds,
+not the rail.
+
+On axis at 150 Hz (dipole model), the largest field and the tilt reachable at every azimuth:
+
+| z mm | vertical $b_{max}$ | horizontal $b_{max}$ | full cone for 2 / 3 / 4.5 mT |
+|---|---|---|---|
+| 10 | 6.5 mT | 5.7 mT | 90° / 90° / 90° |
+| 15 | 7.3 | 4.5 | 90 / 90 / 90 |
+| 18 | 7.2 | 2.8 | 90 / 44.5 / 15 |
+| 20 | 6.9 | 1.5 | 34 / 16.5 / 6.5 |
+| 25 | 5.9 | 1.2 | 24 / 11 / 3.5 |
+| 30 | 4.8 | 2.3 | 90 / 21 / 2 |
+
+**A fully horizontal axis is reachable, but only low in the workspace.** It needs
+$b \le 4.5$ mT at 15 mm, and gets no more than 1.2–1.5 mT at 20–25 mm. 15 mm off axis at 15 mm
+height it drops to 3.2 mT.
+
+**The shell.** The smallest singular value of $B$ does not stay away from zero, contrary to
+§12.7's "rank 3 everywhere". It vanishes on a bowl-shaped surface:
+
+| x mm | 0 | 6 | 10 | 15 | 20 |
+|---|---|---|---|---|---|
+| dipole model, z of $\sigma_3 = 0$ | 22.5 | 22.0 | 21.2 | 19.4 | 16.7 |
+| exact loop model (`ai/design/spatial_model`) | 20.8 | 20.3 | 19.4 | 17.5 | 15.0 |
+
+$\sigma_3$ reaches 0.003 mT/A against 2.4 for the strong directions. On axis the lost direction
+is exactly $\hat z$, tipping outward off axis (0.21, 0, 0.98) at 5 mm. It is the height where
+the common mode's on-axis $B_z$ changes sign (§27.2, $\gamma \to 0$). No current makes $B_z$
+there, so **on the shell the only reachable axis is vertical, at any amplitude.** The two models
+disagree on where it is by 1.7 mm. The real coils are 22 mm solenoids, which neither model is.
+The loop model puts §12.2's 20.1 mm working height on the shell itself, so its location has to
+be **measured**: find the height at which a commanded tilt stops producing one.
+
+**What it means for the robot.** The field at a point is fully actuated (6 field numbers from
+8 knobs) everywhere except on the shell. The robot is still underactuated in position: once the
+field is fixed, the one complex null mode (§27.2) is the only freedom left for the gradient
+force's three components. Lateral position therefore goes through thrust tilt
+(`attitude.py`), and the Earnshaw anti-trap (§12.6) is a disturbance the field
+choice sets, not an input.
+
+**Consequences for planning.** The feasible set is $\{(\mathbf r,\hat n):\ b_{lock}(f) \le
+b_{max}(\mathbf r,\hat n)\}$, with $b_{lock}(f) = 1.0\ \text{mT}\,(f/110)^2/0.8$ from §12.3
+(1.05 mT at 101 Hz, 4.56 mT at 210 Hz). At 101 Hz the cone is 90° everywhere on axis except a
+band about ±1 mm around the shell (10.5° at 22 mm). At 210 Hz it is 46.5° at 15 mm and under 7°
+from 20 mm up. Two rules follow:
+
+- **A climb through the shell must cross it with the axis vertical.** Tilt has to be brought
+  in before the band and restored after it, which is a planning problem, not a per-command one.
+- **Saturation must give up tilt, not amplitude, in flight.** `settingsFromCurrents` scales
+  amplitude uniformly to keep the axis (§27.3). Near the shell that drives $b$ under
+  $b_{lock}$, and the rotor steps out. A flight-safe policy holds $b \ge b_{lock}$ and moves
+  $\hat n$ along the great circle toward $\hat z$ until it fits, which $b_{max}$'s closed form
+  makes a one-dimensional bisection.

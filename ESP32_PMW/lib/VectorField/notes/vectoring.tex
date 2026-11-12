@@ -1,0 +1,547 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,enumitem}
+\usepackage{algorithm,algpseudocode}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\vb}[1]{\mathbf{#1}}
+\newcommand{\uv}[1]{\hat{\mathbf{#1}}}
+\newcommand{\jj}{\mathrm{j}}
+\newcommand{\Id}{\mathrm{Id}}
+\renewcommand{\Re}{\operatorname{Re}}
+\renewcommand{\Im}{\operatorname{Im}}
+
+\title{Field Vectoring with a Four-Channel Coil Array\\[2pt]\large Lecture notes on \texttt{lib/VectorField}}
+\author{ESP32\_PMW}
+\date{2026-11-11}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We derive the algorithm in \texttt{VectorField::settingsFor}. Given a point $\vb r$, an
+orientation $R$ and a field strength $b$, it returns each channel's carrier duty and phase so that
+the field at $\vb r$ rotates in a circle of radius $b$ about the axis $R\uv z$. We then derive the
+cost of tilting the axis, the effect of a twist about the axis, the effect of calibration errors,
+and the maximum field the current limits allow for each axis. The longer write-up is
+\texttt{controller/control/theory.md} \S12 and \S27.
+\end{abstract}
+
+\section{Problem statement}
+
+The rotor's spin axis follows the rotation axis of the field at its position, and the rotor's
+thrust points along its spin axis. To tilt the thrust we must set the field's rotation axis.
+
+Per channel, the firmware sets a carrier duty, which sets the current amplitude, and a phase. All
+four channels share one frequency. We want the duties and phases that make, at a point $\vb r$, a
+circular field of strength $b$ rotating about a unit axis $\uv n$.
+
+\paragraph{Notation.} Bold symbols are vectors, hats are unit vectors, and $\jj$ is the
+imaginary unit ($\jj^2=-1$), which frees $i$ for currents. $\Id_3$ is the $3\times3$ identity.
+$\vb r=(x,y,z)$ is a point in the array frame.
+
+\section{Model of the array}
+
+\paragraph{Geometry.} The four channels A, B, C, D sit at azimuths $0^\circ$, $90^\circ$,
+$180^\circ$ and $270^\circ$ (measured 2026-08-29). Each channel is a $2\times2$ block of air-core
+coils, centred $37$\,mm from the array axis, with $21$\,mm between coil centroids. So channel A's
+coils sit at $(37\pm10.5,\ \pm10.5,\ 0)$\,mm. Every coil has radius $a=10.5$\,mm, $N=650$ turns and
+its normal along $+\uv z$. The coil plane is $z=0$. The robot flies at $z$ between about 15 and
+25\,mm, near the array axis.
+
+\paragraph{Currents.} All four coil currents are sinusoids at one shared drive frequency $f$, so
+they all repeat with period $1/f$. We call one such period a \emph{drive cycle}. To say where we
+are inside a drive cycle, we define the \emph{drive angle}
+\begin{equation}
+  \theta(t) = 2\pi f t ,
+\end{equation}
+which advances by $2\pi$ every drive cycle.
+
+Channel $k$'s current has its own amplitude and its own phase offset from $\theta$. We describe
+it by a complex number $I_k$, the channel's \emph{phasor}, and write
+\begin{equation}
+  i_k(t) = \Re\!\big(I_k e^{\jj\theta}\big)
+  = \Re\!\big(|I_k|\,e^{\jj(\theta + \arg(I_k))}\big)
+  = |I_k|\cos\!\big(\theta + \arg(I_k)\big).
+\end{equation}
+Here $|I_k| = \sqrt{\Re(I_k)^2 + \Im(I_k)^2}$ is the magnitude of $I_k$, its length in the
+complex plane, and it is the current amplitude in amps. $\arg(I_k)$ is the angle of $I_k$ in the
+complex plane, measured from the positive real axis. The current peaks at $\theta = -\arg(I_k)$,
+so $\arg(I_k)$ is how far channel $k$ runs ahead of $\theta$. The four phasors form
+$\vb I = (I_A, I_B, I_C, I_D)\in\C^4$.
+
+\paragraph{Field per amp.} We replace each coil by a point dipole. Let $\vb c$ be the coil's
+centroid; we place the dipole at $\vb c$ and give it the coil's moment per amp,
+$\vb m = N\pi a^2\,\uv z$. The robot sits about 35 to 55\,mm from the coil centroids, several coil
+radii away, where the dipole term dominates the field of a loop. Section~7.2 compares this model
+with the exact loop model. A channel's field per amp at $\vb r$ is the sum over its four coils,
+\begin{equation}
+  \vb b_k(\vb r) = \frac{\mu_0}{4\pi}\sum_{\vb c\in k}\left[
+  \frac{3(\vb m\cdot\vb d)\,\vb d}{|\vb d|^5} - \frac{\vb m}{|\vb d|^3}\right],
+  \qquad \vb d = \vb r - \vb c .
+\end{equation}
+We stack the four columns into the \emph{channel matrix}
+\begin{equation}
+  B(\vb r) = [\,\vb b_A\ \ \vb b_B\ \ \vb b_C\ \ \vb b_D\,]\in\R^{3\times4}\quad(\text{T/A}).
+\end{equation}
+Column $k$ is the field that one amp in channel $k$ makes at $\vb r$. Fields superpose, so
+currents $\vb i$ make the field $B\vb i$. At $f\le 250$\,Hz the wavelength is kilometres and
+nothing nearby conducts, so the field is quasi-static and $B$ does not depend on $f$. From here
+on, $B$ is evaluated at the robot's position.
+
+\section{Field over one drive cycle}
+
+Substituting the currents into $\vb B = B\vb i$,
+\begin{equation}
+  \vb B(\theta) = \sum_k \vb b_k\, i_k
+  = \Re\!\big(B\vb I\,e^{\jj\theta}\big)
+  = B\,\Re(\vb I)\,\cos\theta - B\,\Im(\vb I)\,\sin\theta .
+\end{equation}
+In the last step we expand $e^{\jj\theta}=\cos\theta+\jj\sin\theta$ and use that $B$ is real. We
+name the two coefficients:
+\begin{equation}
+  \boxed{\ \vb B(\theta) = \vb u\cos\theta + \vb v\sin\theta,\qquad
+  \vb u = B\,\Re(\vb I),\qquad \vb v = -B\,\Im(\vb I)\ }
+\end{equation}
+$\vb u$ is the field at $\theta=0$ and $\vb v$ is the field at $\theta=\pi/2$. The tip of $\vb B$
+traces an ellipse in the plane spanned by $\vb u$ and $\vb v$.
+
+\paragraph{Rotation axis.} We differentiate, $d\vb B/d\theta = -\vb u\sin\theta + \vb v\cos\theta$,
+and take the cross product:
+\begin{equation}
+  \vb B\times\frac{d\vb B}{d\theta}
+  = \cos^2\theta\,(\vb u\times\vb v) - \sin^2\theta\,(\vb v\times\vb u)
+  = \vb u\times\vb v .
+\end{equation}
+The result does not depend on $\theta$, so the field turns about the fixed direction
+\begin{equation}
+  \uv n = \frac{\vb u\times\vb v}{\lVert\vb u\times\vb v\rVert},
+\end{equation}
+by the right-hand rule. The sign of $\uv n$ gives the spin sense.
+
+\paragraph{Circular field.} $|\vb B(\theta)|^2 = |\vb u|^2\cos^2\theta + |\vb v|^2\sin^2\theta
++ 2\,\vb u\cdot\vb v\,\sin\theta\cos\theta$. This equals $b^2$ for every $\theta$ if and only if
+$|\vb u| = |\vb v| = b$ and $\vb u\cdot\vb v = 0$. Then the field has constant magnitude $b$ and
+turns at the constant rate $2\pi f$.
+
+\section{Commanded orientation}
+
+A circular field of radius $b$ is fixed by $\vb u$ and $\vb v$: two perpendicular vectors of
+length $b$. Their directions $\uv e_1 = \vb u/b$, $\uv e_2 = \vb v/b$ and
+$\uv n = \uv e_1\times\uv e_2$ form a right-handed orthonormal frame, which is the columns of a
+rotation matrix. So the caller supplies a rotation $R\in SO(3)$, or a unit quaternion that the
+library converts to one, and we read its columns as
+\begin{align}
+  \uv e_1 &= R\uv x &&\text{field direction at }\theta=0,\nonumber\\
+  \uv e_2 &= R\uv y &&\text{field direction at }\theta=\pi/2,\\
+  \uv n &= R\uv z &&\text{rotation axis.}\nonumber
+\end{align}
+The target is $\vb u = b\,\uv e_1$, $\vb v = b\,\uv e_2$. Then
+$\vb u\times\vb v = b^2\,\uv e_1\times\uv e_2 = b^2\uv n$, because $\det(R) = +1$. $R=\Id_3$ asks for a
+field that starts along $+x$ and rotates about $+z$.
+
+\paragraph{Twist about the axis.} $R$ has three angles and the axis $\uv n$ has two. We find what
+the third does. We twist $R$ by an angle $\psi$ about its own axis, $R' = R\,R_z(\psi)$. The new
+columns are
+\begin{equation}
+  \uv e_1' = \cos\psi\,\uv e_1 + \sin\psi\,\uv e_2,\qquad
+  \uv e_2' = -\sin\psi\,\uv e_1 + \cos\psi\,\uv e_2,\qquad \uv n' = \uv n .
+\end{equation}
+The solution in Section~5 depends on $R$ only through $\uv e_1 - \jj\uv e_2$, which transforms as
+\begin{equation}
+  \uv e_1' - \jj\uv e_2'
+  = (\cos\psi + \jj\sin\psi)\,\uv e_1 + (\sin\psi - \jj\cos\psi)\,\uv e_2
+  = e^{\jj\psi}\,(\uv e_1 - \jj\uv e_2),
+\end{equation}
+since $\sin\psi - \jj\cos\psi = -\jj e^{\jj\psi}$. The solution is linear in this vector, so
+$\vb I' = e^{\jj\psi}\vb I$. Each amplitude $|I_k|$ is unchanged and each phase advances by $\psi$.
+In the field,
+\begin{equation}
+  \vb B'(\theta) = \Re\!\big(B\,e^{\jj\psi}\vb I\,e^{\jj\theta}\big) = \vb B(\theta+\psi),
+\end{equation}
+the same field shifted in time by $\psi/(2\pi f)$. The twist sets the time origin and nothing else.
+
+\paragraph{Continuity of the twist.} The firmware applies a new phase at once, so a step
+$\Delta\psi$ in the twist steps the field direction by $\Delta\psi$. A synchronous rotor that lags
+the field by $\varphi$ makes torque $\propto\sin\varphi$, which peaks at $\varphi=\pi/2$, so it
+slips once $\varphi+\Delta\psi>\pi/2$. The twist must therefore change continuously along a
+trajectory. If the API took only $\uv n$, the library would have to choose $\uv e_1$ as a function
+of $\uv n$, a tangent vector field on $S^2$, and by the hairy-ball theorem every such choice is
+discontinuous somewhere. So the caller supplies the twist, and a quaternion slerp between
+commands keeps it continuous.
+
+\section{Inversion}
+
+\subsection{Real linear system}
+The field is nonlinear in amplitude and phase, because of the cosine, but linear in the real and
+imaginary parts of $\vb I$. We set
+\begin{equation}
+  \vb x = \Re(\vb I),\qquad \vb y = -\Im(\vb I)\qquad(\vb x,\vb y\in\R^4),
+\end{equation}
+so that
+\begin{equation}
+  i_k(t) = \Re\big((x_k - \jj y_k)(\cos\theta + \jj\sin\theta)\big) = x_k\cos\theta + y_k\sin\theta .
+\end{equation}
+$\vb x$ is the cosine part of each channel's current and $\vb y$ the sine part. Section~3 gives
+$\vb u = B\vb x$ and $\vb v = B\vb y$, and the target is
+\begin{equation}
+  \begin{bmatrix} B & 0\\ 0 & B\end{bmatrix}
+  \begin{bmatrix}\vb x\\ \vb y\end{bmatrix}
+  = \begin{bmatrix} b\,\uv e_1\\ b\,\uv e_2\end{bmatrix}.
+\end{equation}
+That is six equations in eight unknowns. The matrix is block diagonal, so it splits into two
+independent problems, $B\vb x = b\uv e_1$ and $B\vb y = b\uv e_2$, each three equations in four
+unknowns. Wherever $B$ has rank 3, each has a one-parameter family of solutions, and we need a
+rule to pick one.
+
+\subsection{Minimum-heat solution}
+We pick the solution that dissipates the least power, because coil temperature is the binding
+limit on the rig. The mean ohmic power in channel $k$ is
+$R_s\langle i_k^2\rangle = \tfrac{R_s}{2}(x_k^2+y_k^2)$, with $R_s$ the series resistance. Summed
+over channels it is $\tfrac{R_s}{2}\big(\lVert\vb x\rVert^2+\lVert\vb y\rVert^2\big)$. The two
+blocks share no unknowns, so we minimise each norm separately. For one block with target $\vb t$
+we solve
+\begin{equation}
+  \min_{\vb x}\ \tfrac12\lVert\vb x\rVert^2\quad\text{subject to}\quad B\vb x=\vb t .
+\end{equation}
+We form the Lagrangian $\mathcal L = \tfrac12\lVert\vb x\rVert^2 - \bm\lambda^\top(B\vb x-\vb t)$.
+Setting $\partial\mathcal L/\partial\vb x = 0$ gives $\vb x = B^\top\bm\lambda$. Substituting this
+into the constraint, we get $BB^\top\bm\lambda = \vb t$, so
+\begin{equation}
+  \vb x = P\,\vb t,\qquad P = B^\top(BB^\top)^{-1}\in\R^{4\times3},
+\end{equation}
+the pseudo-inverse of $B$. This is the global minimum. Any other solution is $\vb x+\bm\eta$ with
+$B\bm\eta = 0$, and $\vb x^\top\bm\eta = \bm\lambda^\top B\bm\eta = 0$, so
+$\lVert\vb x+\bm\eta\rVert^2 = \lVert\vb x\rVert^2 + \lVert\bm\eta\rVert^2 \ge \lVert\vb x\rVert^2$.
+
+We apply $P$ to both blocks and recombine $\vb I = \vb x - \jj\vb y$:
+\begin{equation}
+  \boxed{\ \vb I = P(\vb u - \jj\vb v) = b\,P\,(\uv e_1 - \jj\uv e_2)\ }
+\end{equation}
+It is exact wherever $B$ has rank 3, because then $BP = BB^\top(BB^\top)^{-1} = \Id_3$. The
+firmware inverts the $3\times3$ Gram matrix $G = BB^\top$ as $\operatorname{adj}(G)/\det(G)$.
+
+\subsection{Heat as a function of the axis}
+$P^\top P = G^{-1}BB^\top G^{-1} = G^{-1}$, so $\lVert P\vb t\rVert^2 = \vb t^\top G^{-1}\vb t$ and
+\begin{equation}
+  \lVert\vb x\rVert^2 + \lVert\vb y\rVert^2
+  = b^2\big(\uv e_1^\top G^{-1}\uv e_1 + \uv e_2^\top G^{-1}\uv e_2\big)
+  = b^2\big(\operatorname{tr}G^{-1} - \uv n^\top G^{-1}\uv n\big).
+\end{equation}
+The second step writes $\vb t^\top G^{-1}\vb t = \operatorname{tr}(G^{-1}\vb t\vb t^\top)$ and uses
+$\uv e_1\uv e_1^\top + \uv e_2\uv e_2^\top = \Id_3 - \uv n\uv n^\top$. The heat depends on $\uv n$
+and not on the twist. It is minimised by the $\uv n$ that maximises $\uv n^\top G^{-1}\uv n$,
+the eigenvector of $G$ with the smallest eigenvalue $\sigma_3^2$.
+
+\subsection{Solution on the array axis}
+We write the singular value decomposition $B = \sum_j\sigma_j\,\vb a_j\vb w_j^\top$, with field
+directions $\vb a_j\in\R^3$ and drive patterns $\vb w_j\in\R^4$. Then
+$P = \sum_j\sigma_j^{-1}\vb w_j\vb a_j^\top$: field along $\vb a_j$ is made by the pattern
+$\vb w_j$ at $1/\sigma_j$ amps per tesla.
+
+On the array axis, $\vb r = (0,0,z)$, the four-fold symmetry fixes the form of $B$. Channel A's
+coils lie at $+x$. A $+\uv z$ dipole at $(+x_c,0,0)$ gives $\vb d = (-x_c,0,z)$ and an
+$x$-component $\propto 3z(-x_c)/|\vb d|^5<0$, so channel A's field at the axis points toward $-x$.
+Rotating by $90^\circ$ for each channel,
+\begin{equation}
+  B = \begin{bmatrix} -\beta & 0 & \beta & 0\\ 0 & -\beta & 0 & \beta\\ \gamma&\gamma&\gamma&\gamma
+  \end{bmatrix},
+  \qquad
+  G = BB^\top = \operatorname{diag}(2\beta^2,\ 2\beta^2,\ 4\gamma^2),
+\end{equation}
+where $\beta>0$ is one channel's inward field per amp and $\gamma$ its vertical field per amp. The
+off-diagonal entries of $G$ vanish because $\gamma(-\beta+\beta) = 0$. $G$ is diagonal, so the
+$\vb a_j$ are the coordinate axes, $\sigma_j = \sqrt{G_{jj}}$, and
+$\vb w_j = B^\top\vb a_j/\sigma_j$:
+\begin{center}
+\begin{tabular}{lll}\toprule
+$\vb a_j$ & $\sigma_j$ & $\vb w_j$\\\midrule
+$\uv x$ & $\sqrt2\,\beta$ & $(-1,0,1,0)/\sqrt2$, A against C\\
+$\uv y$ & $\sqrt2\,\beta$ & $(0,-1,0,1)/\sqrt2$, B against D\\
+$\uv z$ & $2\gamma$ & $(1,1,1,1)/2$, the common mode\\
+none & $0$ & $(1,-1,1,-1)/2$, the null mode\\\bottomrule
+\end{tabular}
+\end{center}
+The null mode satisfies $B\vb w = 0$: it makes no field at $\vb r$ and the minimum-norm solution
+contains none of it. At $z = 20.1$\,mm, $\sigma = (2.42,\ 2.42,\ 0.36)$\,mT/A, so vertical field
+costs $2.42/0.36 = 6.7$ times more current per tesla than horizontal field.
+
+The rows of $P = B^\top G^{-1}$ are
+\begin{equation}
+  \vb p_A = \Big(-\tfrac{1}{2\beta},\,0,\,\tfrac{1}{4\gamma}\Big),\quad
+  \vb p_B = \Big(0,\,-\tfrac{1}{2\beta},\,\tfrac{1}{4\gamma}\Big),\quad
+  \vb p_C = \Big(\tfrac{1}{2\beta},\,0,\,\tfrac{1}{4\gamma}\Big),\quad
+  \vb p_D = \Big(0,\,\tfrac{1}{2\beta},\,\tfrac{1}{4\gamma}\Big),
+\end{equation}
+and $I_k = b\,\vb p_k\cdot(\uv e_1 - \jj\uv e_2)$.
+
+\paragraph{Vertical axis.} $R = \Id_3$ gives $\uv e_1 - \jj\uv e_2 = (1,-\jj,0)$, so
+\begin{equation}
+  \vb I = \frac{b}{2\beta}\,(-1,\ \jj,\ 1,\ -\jj).
+\end{equation}
+The four phasors have equal magnitude and angles $180^\circ$, $90^\circ$, $0^\circ$ and $-90^\circ$:
+each channel lags the previous one by $90^\circ$.
+
+\paragraph{Tilted axis.} We tilt by $\alpha$ toward $+x$, taking $R$ as a rotation about $\uv y$:
+$\uv e_1 = (\cos\alpha,0,-\sin\alpha)$, $\uv e_2 = \uv y$, $\uv n = (\sin\alpha,0,\cos\alpha)$. Then
+\begin{equation}
+  I_k = b\big(p_{k,x}\cos\alpha - \jj\,p_{k,y} - p_{k,z}\sin\alpha\big),
+  \qquad
+  \vb I = \frac{b}{2\beta}\,(-\cos\alpha,\ \jj,\ \cos\alpha,\ -\jj)
+  \;-\;\frac{b\sin\alpha}{4\gamma}\,(1,1,1,1).
+\end{equation}
+The tilt puts a vertical component $-b\sin\alpha$ into $\vb u$, and only the common mode makes
+vertical field, so every channel gains the same real term. Its size relative to the A--C drive is
+\begin{equation}
+  \frac{\sin\alpha/(4\gamma)}{\cos\alpha/(2\beta)} = \frac{\beta}{2\gamma}\tan\alpha
+  \approx 4.8\tan\alpha\qquad(z=20.1\text{ mm}).
+\end{equation}
+At $\alpha = 10^\circ$ this ratio is $0.84$. From Section~5.3, with
+$\operatorname{tr}G^{-1} = 1/\beta^2 + 1/(4\gamma^2)$, a vertical axis costs
+$\operatorname{tr}G^{-1} - 1/(4\gamma^2) = 1/\beta^2$ and a horizontal axis costs
+$\operatorname{tr}G^{-1} - 1/(2\beta^2) = 1/(2\beta^2) + 1/(4\gamma^2)$ per $b^2$. Their ratio is
+$\tfrac12 + (\beta/2\gamma)^2 \approx 23$ at $20.1$\,mm.
+
+\section{From currents to drive settings}
+
+\paragraph{Amplitude.} Each H-bridge switches the coil between $+V$ and $-V$ at the drive
+frequency, and a 20\,kHz carrier gates it with duty $D$. The RLC filters out the carrier, so the
+coil sees a square wave of height $DV$. A square wave of height $A$ has fundamental amplitude
+$\tfrac4\pi A$, and the RLC also attenuates the higher harmonics, so
+\begin{equation}
+  |I| = \frac{4DV}{\pi|Z(f)|},\qquad
+  |Z(f)| = \sqrt{R_s^2 + \Big(\omega L_s - \frac{1}{\omega C_s}\Big)^2},\quad \omega=2\pi f
+  \qquad\Longrightarrow\qquad
+  D_k = \frac{\pi|Z(f)|\,|I_k|}{4V g_k},
+\end{equation}
+where $g_k$ is a per-channel gain trim, 1 until fitted. With $V = 12$\,V, $R_s = 6.9\,\Omega$,
+$L_s = 1.4$\,mH and $C_s = 800\,\mu$F, the nominal resonance is $f_0\approx150$\,Hz; it has not
+been measured on the current capacitor bank. At $f_0$, $|Z| = R_s$ and $D=100\%$ gives
+$|I| = 2.2$\,A, so near resonance the $2$\,A continuous limit binds before the duty limit.
+
+\paragraph{Saturation.} If any channel exceeds $100\%$ duty or $I_{cont}=2$\,A, the library scales
+the whole set by
+\begin{equation}
+  s = \min\!\Big(1,\ \frac{100\%}{\max_k D_k},\ \frac{I_{cont}}{\max_k |I_k|}\Big).
+\end{equation}
+$\vb I\to s\vb I$ gives $\vb u\to s\vb u$ and $\vb v\to s\vb v$, so $\uv n$ and circularity are
+unchanged and the field becomes $sb$. The library reports $s$ as \texttt{fieldFraction}.
+Section~7.3 gives the policy flight needs instead.
+
+\paragraph{Phase.} The firmware delays channel $k$ by $\varphi_k/360^\circ$ of a period, so its
+phase setting is a lag, of opposite sign to $\arg(I_k)$. With a per-channel offset $o_k$,
+\begin{equation}
+  \varphi_k = o_k - \arg(I_k) \pmod{360^\circ}.
+\end{equation}
+The offsets absorb winding direction, wiring, and any phase the drive electronics add. The phase
+pattern predicted from the azimuths alone does not spin the rotor, and the empirical
+\texttt{SPIN\_PHASES} does, so we fit $o_k$ in the constructor: $R=\Id_3$ at $(0,0,15)$\,mm must
+send exactly \texttt{SPIN\_PHASES}. The fit is $o = (90^\circ, 180^\circ, 180^\circ, 270^\circ)$.
+A reversed winding appears as a $180^\circ$ offset. We cannot yet explain the $90^\circ$ parts, so
+we treat the tilt direction as unverified until we run a step test on the rig.
+
+\paragraph{Calibration errors.} We suppose the real currents are $\kappa_k I_k$ for some complex
+$\kappa_k$, an error in impedance, gain or phase. If all four share one $\kappa$, the field is
+\begin{equation}
+  \Re\!\big(B\,\kappa\vb I\,e^{\jj\theta}\big) = |\kappa|\,\Re\!\big(B\vb I\,e^{\jj(\theta+\arg(\kappa))}\big)
+  = |\kappa|\,\vb B(\theta+\arg(\kappa)),
+\end{equation}
+the commanded field scaled by $|\kappa|$ and shifted in time, with the same axis. If the
+$\kappa_k$ differ, the field is $\Re(B\operatorname{diag}(\kappa)\vb I e^{\jj\theta})$, which in
+general has a different axis. So the RLC values set the field magnitude only, and the axis depends
+only on the channel-to-channel trims $g_k$ and $o_k$.
+
+\section{Algorithm}
+
+Algorithm~\ref{alg:settings} is \texttt{VectorField::settingsFor}. It never refuses with an
+error. Every input gets a defined output, and the outputs that make no field are all
+$D_k=0$. Channels are indexed $k=1,\dots,4$ (A, B, C, D), and every $\max_k$ is over those four.
+
+\begin{algorithm}[H]
+\caption{\texttt{VectorField::settingsFor}$(\vb r, R, b, f)$}\label{alg:settings}
+\begin{algorithmic}[1]
+\Require point $\vb r\in\R^3$ (m, array frame); orientation $R\in\R^{3\times3}$ or quaternion
+  $q\in\R^4$; field radius $b\in\R$ (T, signed); drive frequency $f$ (Hz)
+\Require per-channel gain trim $g_k$ (1 until fitted) and phase offset $o_k$ (deg, fitted to
+  \texttt{SPIN\_PHASES}, Section~6)
+\Ensure carrier duty $D_k$ (\%), phase lag $\varphi_k$ (deg), field fraction $s\in[0,1]$
+\If{a quaternion was given}
+  \If{$\lVert q\rVert = 0$}
+    \State \Return $D_k = 0$, $s = 0$ \Comment{no orientation: the caller keeps its previous drive}
+  \EndIf
+  \State $R \gets R(q/\lVert q\rVert)$ \Comment{every nonzero $q$ gives a rotation}
+\ElsIf{$RR^\top \ne \Id_3$ or $\det(R) \ne +1$ (each to $10^{-3}$)}
+  \State \Return $D_k = 0$, $s = 0$ \Comment{a stretch or a mirror: the caller keeps its previous drive}
+\EndIf
+\If{$b$ is not finite}
+  \State \Return $D_k = 0$, $s = 0$ \Comment{NaN or $\infty$ from the wire}
+\EndIf
+\State $\uv e_1 \gets R\uv x$, \quad $\uv e_2 \gets R\uv y$ \Comment{Section~4}
+\State $B \gets [\,\vb b_A\ \vb b_B\ \vb b_C\ \vb b_D\,]$ at $\vb r$ \Comment{dipole sum, Section~2; T/A}
+\State $G \gets BB^\top$ \Comment{$3\times3$ Gram matrix}
+\If{$|\det(G)| \le 10^{-40}\ (\mathrm{T/A})^6$}
+  \State \Return $D_k = 0$, $s = 0$ \Comment{$B$ has rank $<3$ at $\vb r$}
+\EndIf
+\State $G^{-1} \gets \operatorname{adj}(G)/\det(G)$
+\State $\vb x \gets B^\top G^{-1}(b\,\uv e_1)$, \quad $\vb y \gets B^\top G^{-1}(b\,\uv e_2)$
+  \Comment{minimum heat, Section~5.2}
+\State $I_k \gets x_k - \jj y_k$, \quad $|I_k| \gets \sqrt{\Re(I_k)^2 + \Im(I_k)^2}$ \Comment{A}
+\If{$f \le 0$}
+  \State \Return $D_k = 0$, $s = 0$ \Comment{$C_s$ blocks DC: $|Z(f)|\to\infty$}
+\EndIf
+\State $\omega \gets 2\pi f$, \quad
+  $|Z(f)| \gets \sqrt{R_s^2 + (\omega L_s - 1/(\omega C_s))^2}$ \Comment{$\Omega$}
+\State $D_k \gets 100\%\cdot\pi\,|Z(f)|\,|I_k|\,/\,(4Vg_k)$ \Comment{Section~6}
+\If{$\max_k |I_k| > 0$}
+  \State $s \gets \min\!\big(1,\ 100\%/\max_k D_k,\ I_{cont}/\max_k |I_k|\big)$
+\Else
+  \State $s \gets 1$ \Comment{$b = 0$: every $D_k = 0$, so the coils are off}
+\EndIf
+\State $D_k \gets s\,D_k$
+\State $\arg(I_k) \gets \operatorname{atan2}\!\big(\Im(I_k),\ \Re(I_k)\big)$
+  \Comment{angle of $I_k$ from the positive real axis}
+\State $\varphi_k \gets \big(o_k - \arg(I_k)\big) \bmod 360^\circ$, \ in $[0^\circ, 360^\circ)$
+\State \Return $D_k$, $\varphi_k$ for $k = 1,\dots,4$, and $s$
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{The safe outputs.} Two kinds of input make no field.
+\begin{itemize}[nosep]
+  \item An orientation that cannot be used ($q=0$, or $R\notin SO(3)$), a non-finite $b$, or a
+        singular $B$ returns $s=0$. The firmware treats $s=0$ as ``do nothing'' and keeps the
+        previous drive.
+  \item $f\le0$ also returns $s=0$. This is the limit of the formula, because the series capacitor
+        blocks DC, so $|Z|\to\infty$, $D_k\to\infty$ and $s\to0$. \texttt{freq=} already rejects
+        $f\le0$, so this case cannot happen in FLIGHT.
+\end{itemize}
+The field radius $b$ is signed. The solve is linear in $b$, so $-b$ gives $\vb I\to-\vb I$, which
+leaves each $|I_k|$ the same and adds $180^\circ$ to each $\arg(I_k)$. That is the field
+$\vb B(\theta+\pi)$, the same as a twist $R\,R_z(\pi)$. So a sign flip in flight is a $180^\circ$
+phase step under a locked rotor, which Section~4 says the rotor will not survive. $b=0$ returns
+$D_k=0$ with $s=1$, and the firmware applies it, so the coils go off.
+The FLIGHT-only command
+\begin{center}
+\texttt{vec=<x\_mm>:<y\_mm>:<z\_mm>:<qw>:<qx>:<qy>:<qz>:<b\_mT>}
+\end{center}
+calls this. The firmware stores the target and re-solves on every \texttt{freq=}, because the
+duties depend on $|Z(f)|$ and the axis does not.
+
+\section{Reachable workspace}
+
+\subsection{Maximum field for a given axis}
+From $I_k = b\,\vb p_k\cdot(\uv e_1 - \jj\uv e_2)$,
+\begin{equation}
+  |I_k|^2 = b^2\big[(\vb p_k\cdot\uv e_1)^2 + (\vb p_k\cdot\uv e_2)^2\big]
+  = b^2\,\vb p_k^\top(\Id_3-\uv n\uv n^\top)\,\vb p_k
+  = b^2\,|\vb p_k\times\uv n|^2 .
+\end{equation}
+The middle step uses $\uv e_1\uv e_1^\top + \uv e_2\uv e_2^\top = \Id_3 - \uv n\uv n^\top$; the
+last uses $|\vb p|^2 - (\vb p\cdot\uv n)^2 = |\vb p\times\uv n|^2$. The twist does not appear.
+Requiring $|I_k|\le I_{lim}$ on every channel gives
+\begin{equation}
+  \boxed{\ b_{max}(\vb r,\uv n) = \frac{I_{lim}}{\max_k|\vb p_k\times\uv n|}\ }
+\end{equation}
+where $I_{lim}$ is the smaller of $I_{cont}$ and the current at $100\%$ duty. Let $\delta_k$ be
+the angle between $\uv n$ and $\vb p_k$, so $|\vb p_k\times\uv n| = |\vb p_k|\sin\delta_k$. For a
+required $b$, channel $k$ allows the axes with $\sin\delta_k\le I_{lim}/(b|\vb p_k|)$, a double
+cone about $\pm\vb p_k$. The reachable axes are the intersection of the four double cones.
+
+On the array axis, a vertical axis gives $|\vb p_k\times\uv z| = 1/(2\beta)$ for every $k$, so
+$b_{max} = 2\beta I_{lim}$. For the horizontal axis $\uv n=\uv x$,
+$|\vb p_k\times\uv x|^2 = |\vb p_k|^2 - p_{k,x}^2$, which is largest for B and D:
+\begin{equation}
+  b_{max}(\uv x) = I_{lim}\Big/\sqrt{\frac{1}{4\beta^2} + \frac{1}{16\gamma^2}} .
+\end{equation}
+At $20.1$\,mm these give $6.8$ and $1.4$\,mT. Table~1 evaluates $b_{max}$ over height.
+
+\begin{table}[h]\centering
+\begin{tabular}{rccccc}\toprule
+$z$ (mm) & vertical $b_{max}$ & horizontal $b_{max}$ & \multicolumn{3}{c}{largest tilt reachable at $b=$}\\
+ & (mT) & (mT) & 2 mT & 3 mT & 4.5 mT\\\midrule
+10 & 6.5 & 5.7 & $90^\circ$ & $90^\circ$ & $90^\circ$\\
+15 & 7.3 & 4.5 & $90^\circ$ & $90^\circ$ & $90^\circ$\\
+18 & 7.2 & 2.8 & $90^\circ$ & $44.5^\circ$ & $15^\circ$\\
+20 & 6.9 & 1.5 & $34^\circ$ & $16.5^\circ$ & $6.5^\circ$\\
+25 & 5.9 & 1.2 & $24^\circ$ & $11^\circ$ & $3.5^\circ$\\
+30 & 4.8 & 2.3 & $90^\circ$ & $21^\circ$ & $2^\circ$\\\bottomrule
+\end{tabular}
+\caption{On the array axis, $150$\,Hz, dipole model, $I_{lim}=2$\,A. ``Largest tilt'' is the
+half-angle of the largest cone about $\uv z$ whose every axis reaches $b$.}
+\end{table}
+
+The horizontal $b_{max}$ has a minimum between 20 and 25\,mm, set by the $1/(16\gamma^2)$ term.
+Section~7.2 derives where $\gamma$ vanishes.
+
+\subsection{The singular shell}
+On the array axis $\sigma_3 = 2\gamma$. A $+\uv z$ dipole at lateral distance $\rho$ makes, at
+height $z$ on the array axis, with $|\vb d|^2 = \rho^2 + z^2$ and $\vb m\cdot\vb d = mz$,
+\begin{equation}
+  B_z \propto \frac{3z^2}{|\vb d|^5} - \frac{1}{|\vb d|^3}
+  = \frac{3z^2 - (\rho^2+z^2)}{(\rho^2+z^2)^{5/2}} = \frac{2z^2-\rho^2}{(\rho^2+z^2)^{5/2}},
+\end{equation}
+which is negative for $z<\rho/\sqrt2$ and positive above. Each channel's inner coils sit at
+$\rho = \sqrt{26.5^2+10.5^2} = 28.5$\,mm and change sign at $20.2$\,mm. Its outer coils sit at
+$\rho = \sqrt{47.5^2+10.5^2} = 48.6$\,mm and change sign at $34.4$\,mm. Between those heights the
+two pairs have opposite sign, and their sum $\gamma$ is zero at $22.4$\,mm. Off the array axis we
+find the zero of $\sigma_3$ numerically:
+
+\begin{table}[h]\centering
+\begin{tabular}{lccccc}\toprule
+$x$ (mm) & 0 & 6 & 10 & 15 & 20\\\midrule
+$z$ where $\sigma_3=0$, dipole model (mm) & 22.4 & 22.0 & 21.2 & 19.4 & 16.7\\
+$z$ where $\sigma_3=0$, exact loop model (mm) & 20.8 & 20.3 & 19.4 & 17.5 & 15.0\\\bottomrule
+\end{tabular}
+\end{table}
+
+Where $\sigma_3 = 0$, $B$ has rank 2 and every field it makes lies in the plane of $\vb a_1$ and
+$\vb a_2$. A circular field must then have $\vb u$ and $\vb v$ in that plane, so
+$\uv n = \pm\vb a_3$, which is $\pm\uv z$ on the array axis. This holds for any current. Near the
+shell the solve succeeds, but $\vb p_k$ contains $1/(4\gamma)$, so the common mode grows without
+bound and $s$ shrinks the field toward zero.
+
+The two models place the shell $1.6$\,mm apart, and the real coils are $22$\,mm-long solenoids,
+which neither model describes. We have to measure the height on the rig, by finding where a
+commanded tilt stops tilting.
+
+\subsection{Consequences for planning}
+The rotor stays phase-locked only if
+$b\ge b_{lock}(f) = 1.0\,\text{mT}\,(f/110\,\text{Hz})^2/0.8$ (theory.md \S12.3: drag torque grows
+as $f^2$, with a 0.8 safety factor on the lock angle). That is $1.05$\,mT at $101$\,Hz and
+$4.56$\,mT at $210$\,Hz. A pose $(\vb r,\uv n)$ is feasible at frequency $f$ when
+$b_{lock}(f)\le b_{max}(\vb r,\uv n)$. From this:
+\begin{enumerate}[nosep]
+  \item We cross the shell with the axis vertical. A climb through it must bring the tilt in
+        before the band and restore it after, so the planner must look ahead along the
+        trajectory.
+  \item In flight, we reduce tilt before amplitude. Scaling $b$ below $b_{lock}$ makes the rotor
+        slip. We keep $b\ge b_{lock}$ and move $\uv n$ along the great circle toward $\uv z$ until
+        $b_{max}\ge b$; $b_{max}$ is closed-form, so this is a one-dimensional bisection. The
+        library's uniform scaling does the opposite.
+  \item We limit the axis slew rate. The rotor's axis follows commands at about $0.5$\,Hz
+        (theory.md \S12.6).
+\end{enumerate}
+
+\paragraph{Underactuation.} Away from the shell there are eight real unknowns and six field
+components, so the field at a point is fully actuated. With the field fixed, the remaining two
+unknowns are the complex amplitude of the null mode, which cannot set all three components of the
+gradient force. Lateral position must therefore be controlled through thrust tilt, and the
+Earnshaw anti-trap (theory.md \S12.6) is a disturbance set by the field choice.
+
+\section{Verification and open items}
+\begin{itemize}[nosep]
+  \item \texttt{lib/VectorField/check/self\_check.cpp} checks:
+        the geometry against the GUI ($4.58$ and $4.29$\,mT);
+        $\sigma=(2.42,2.42,0.36)$\,mT/A at $20.1$\,mm and the null mode;
+        200 random orientations reached to $10^{-3}$\,deg with a circular field;
+        $R=\Id_3$ sending \texttt{SPIN\_PHASES};
+        a twist changing only the phases;
+        saturation keeping the axis;
+        safe outputs for bad input (signed $b$, $b=0$, $f=0$, $q=0$, non-rotations).
+  \item The C++ matched the original Python solver to float precision on 40 cases.
+  \item Open, all needing the rig: the tilt direction (the offsets $o_k$), the shell height, $f_0$,
+        and the gains $g_k$.
+\end{itemize}
+
+\end{document}

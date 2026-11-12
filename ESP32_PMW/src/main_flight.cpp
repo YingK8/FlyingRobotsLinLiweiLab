@@ -6,6 +6,7 @@
 #include "drive_common.h"
 #include "SerialComm.h"
 #include "constants.h"
+#include "VectorField.h"
 
 static const float SPINUP_THROTTLE = 100.0f;
 static const float COIL_AZ[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
@@ -31,6 +32,11 @@ static float seqF0 = 0.0f;      // start frequency of the first segment
 
 static float azSet = 0.0f;      // deg
 static float magSet = 0.0f;     // 0..1
+
+static VectorField vectorField(SPIN_PHASES);
+static bool vectorFieldActive = false;
+static float vectorFieldDuty[NUM_CHANNELS];
+static double targetPoint[3], targetOrientation[4], targetFieldTesla;
 
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -155,11 +161,43 @@ static bool cmdProbe(const String &arg) {
   return true;
 }
 
+static bool applyVectorField(const double point[3], const double orientation[4], double fieldTesla) {
+  const CoilSettings settings = vectorField.settingsFor(point, orientation, fieldTesla, ctl.getFrequency());
+  if (!(settings.fieldFraction > 0.0f)) { Serial.println("!vec refused (q=0, freq=0 or singular)"); return false; }
+  for (int i = 0; i < NUM_CHANNELS; i++) {
+    vectorFieldDuty[i] = settings.dutyPercent[i];
+    ctl.setPhase(i, settings.phaseDegrees[i]);
+  }
+  for (int i = 0; i < 3; i++) targetPoint[i] = point[i];
+  for (int i = 0; i < 4; i++) targetOrientation[i] = orientation[i];
+  targetFieldTesla = fieldTesla;
+  vectorFieldActive = true;
+  Serial.printf("vec scale=%.2f duty=%.0f,%.0f,%.0f,%.0f\n", settings.fieldFraction, settings.dutyPercent[0],
+                settings.dutyPercent[1], settings.dutyPercent[2], settings.dutyPercent[3]);
+  return true;
+}
+
+static bool cmdVec(const String &arg) {
+  if (state != FLIGHT) { Serial.printf("!vec state=%d\n", (int)state); return false; }
+  float fields[8] = {0.0f, 0.0f, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+  splitFloats(arg, fields, 8);
+  const double pointMeters[3] = {fields[0] * 1e-3, fields[1] * 1e-3, fields[2] * 1e-3};
+  const double quaternion[4] = {fields[3], fields[4], fields[5], fields[6]};
+  return applyVectorField(pointMeters, quaternion, fields[7] * 1e-3);
+}
+
+static void returnToMixer() {
+  if (!vectorFieldActive) return;
+  vectorFieldActive = false;
+  for (int i = 0; i < NUM_CHANNELS; i++) ctl.setPhase(i, SPIN_PHASES[i]);
+}
+
 static bool cmdFreq(const String &arg) {
   float hz = arg.toFloat();
   if (state != FLIGHT) { Serial.printf("!freq state=%d\n", (int)state); return false; }
   if (hz <= 0.0f) { Serial.printf("!freq=%.2f\n", hz); return false; }
   ctl.setGlobalFrequency(hz);
+  if (vectorFieldActive) applyVectorField(targetPoint, targetOrientation, targetFieldTesla);
   return true;
 }
 
@@ -173,6 +211,8 @@ static void dispatch(String cmd) {
   const String key = (eq < 0) ? cmd : cmd.substring(0, eq);
   const String arg = (eq < 0) ? String() : cmd.substring(eq + 1);
 
+  if (key == "az" || key == "mag" || key == "hover" || key == "land" || key == "stop") returnToMixer();
+
   bool ok;
   if (key == "throttle")   { collective = clampf(arg.toFloat(), 0.0f, 100.0f); ok = true; }
   else if (key == "az")    { azSet = arg.toFloat();                            ok = true; }
@@ -184,8 +224,14 @@ static void dispatch(String cmd) {
   else if (key == "freq")   ok = cmdFreq(arg);
   else if (key == "seq")    ok = cmdSeq(arg);
   else if (key == "probe")  ok = cmdProbe(arg);
+  else if (key == "vec")    ok = cmdVec(arg);
+  else if (key == "hello") {
+    Serial.printf("hello baud=%lu crc=1 fw=%s %s\n", (unsigned long)SERIAL_BAUD, __DATE__, __TIME__);
+    return;
+  }
+  else if (key == "ping")  { Serial.printf("pong=%s us=%lu\n", arg.c_str(), (unsigned long)micros()); return; }
   else {
-    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|hover|land|stop|freq=|probe=)\n",
+    Serial.printf("? '%s' (seq=|throttle=|az=|mag=|hover|land|stop|freq=|probe=|vec=|hello|ping=)\n",
                   cmd.c_str());
     return;
   }
@@ -221,7 +267,8 @@ void loop() {
       if (seq.isDone()) { state = FLIGHT; Serial.println("state=2 (FLIGHT)"); }
       break;
     case FLIGHT:
-      applyMixer();
+      if (vectorFieldActive) for (int i = 0; i < NUM_CHANNELS; i++) ctl.setCarrierDutyCycle(i, vectorFieldDuty[i]);
+      else applyMixer();
       break;
     case LANDING: {
       static unsigned long lastStep = 0;

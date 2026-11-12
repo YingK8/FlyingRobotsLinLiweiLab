@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import numpy as np
 
-THRESH = 90             # `disc_pose.DIFF_THRESH`, the plate-subtracted disc threshold
+THRESH = 55             # plate-subtracted; the rim's shadowed side reads 55-90 and broke at 90 (theory.md 23.6)
+CLOSE_PX = 5            # closes the rim's 1-2 px gaps so the fill holds; without it view B's p90 was 1.7-6.9 deg off
 MIN_PX = 200            # guess: fewer pixels than this is not the rotor at ~140 mm
 MAX_ROUND = 0.95        # guess: lambda_min/lambda_max above this has no minor axis to read
 MIN_SIN = np.sin(np.radians(5.0))   # guess: planes closer than 5 deg do not intersect well
@@ -43,14 +44,20 @@ def mask(gray, plate=None, thresh=THRESH, alpha=ALPHA):
         thicker than an edge-on disc, never bigger -- and it is grown back by ``alpha*b``
         inside the mask, so the disc's edge stays at full resolution.
 
-        Holes are NOT filled: a ring's moments already equal the filled disc's, and the
-        fill closed rod + legs + disc into one fake blob bigger than the disc.
+        Before that, the largest outer contour is drawn filled (`theory.md` 23.6):
+        the real robot is a thin rim round frozen blades that are THICKER than the rim, so
+        without the fill the thickest core is a blade and the minor axis turns with it.
     """
 
     import cv2
 
     d = gray if plate is None else cv2.absdiff(gray, plate)
-    m = (d > thresh).astype(np.uint8)
+    m = cv2.morphologyEx((d > thresh).astype(np.uint8), cv2.MORPH_CLOSE,
+                         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (CLOSE_PX, CLOSE_PX)))
+    cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cs:
+        return None
+    m = cv2.drawContours(np.zeros_like(m), [max(cs, key=cv2.contourArea)], -1, 1, cv2.FILLED)
     dt = cv2.distanceTransform(m, cv2.DIST_L2, 3)
     r = alpha * float(dt.max())
     n, lab, st, _ = cv2.connectedComponentsWithStats((dt > r).astype(np.uint8), connectivity=8)

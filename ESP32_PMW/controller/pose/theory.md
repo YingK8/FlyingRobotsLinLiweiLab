@@ -3735,9 +3735,11 @@ radius, and the distance transform gives that radius directly in one O(N) pass. 
    edge-on disc, rarely bigger.
 4. It is grown back by $\alpha b$ inside the mask, so the disc's edge keeps full resolution.
 
-**Holes are not filled.** A ring's moments equal the filled disc's already, and filling
-closed rod + legs + disc into one fake blob bigger than the disc (that was every bad frame
-in the first hub run).
+**Holes are filled (reversed 2026-11-11, 23.6).** The first version left them open,
+because a ring's moments equal the filled disc's and filling closed the synthetic
+rod + legs + disc into one blob. The real robot then failed: frozen blades sit inside
+the rim and are thicker than it, so the thickest core was a blade. With the fill the
+synthetic hub case is 12/20 against 13/20 before, so it fails in the same way.
 
 **Open: the hub.** This rig's cameras are both roughly level (`stereo_rig.json`), so an
 upright robot is **edge-on to both views**. The rendered hub -- a guess at 4 mm across,
@@ -3786,7 +3788,7 @@ Python agree bit for bit (`--stage axis`, max 0).
 
 | Concept | Code |
 |---|---|
-| Scale-adaptive rod filter, no hole fill (23.3) | `axis_pose.mask`, `ALPHA` |
+| Close, largest outer contour drawn filled (23.6), then scale-adaptive rod filter (23.3) | `axis_pose.mask`, `THRESH`, `CLOSE_PX`, `ALPHA` |
 | Moments -> centroid, minor axis, refusals | `axis_pose.moments`, `axis_pose.c` `axis_view` |
 | Undistorted world ray (OpenCV fixed point) | `axis_pose._ray`, `axis_pose.c` `ray` |
 | Two planes, eigenvector by continuity, sign (23.2) | `axis_pose.pose` ``ref``, `axis_pose.c` `axis_pose` |
@@ -3794,3 +3796,70 @@ Python agree bit for bit (`--stage axis`, max 0).
 | One home for the constants | `axis_pose.CFG`, passed in as `struct axis_cfg` |
 | Synthetic bodies (23.3, 23.4) | `axis_pose._render`, `CASES`, `_self_check` |
 | Parity | `native_parity.py` `stage_axis` |
+
+### 23.6 The real robot, and 640x400
+
+On `LLM/runs/sync_check_20261106_191129_0fd047` (1280x800), the shipped mask kept a
+**frozen blade**, not the disc. The rim is thin and the blades inside it are thicker, so
+the thickest core of the thresholded silhouette is a blade lobe, and its minor axis turns
+with the blade: 54 deg frame-to-frame jitter in view A and 26 deg in view B. At 640x400 the
+blade blob was 51-90 px and `MIN_PX` = 200 refused every frame. That refusal was
+the "640x400 does not resolve the disc" report.
+
+**The threshold itself is not resolution-dependent.** A 640x400 twin made by `INTER_AREA`
+2x2 binning thresholds to 0.98-1.01 x 1/4 of the full-resolution area. What mattered was
+which pixels went into the moments. Error is measured against an ellipse fitted to the
+rim's outer contour, every 20th frame:
+
+| mask fed to the moments | A / B, p50 | why |
+|---|---|---|
+| every pixel > 90 in the ROI | 33 / 51 deg | small bright blobs off the disc (A: a 110 px blob, likely the blinking sync LED; B: a 181 px blob at the ROI top edge) carry 84 % / 61 % of the second moments through the r^2 lever arm. The plate removes the static markers |
+| largest blob | 0.9 / 4.0 deg | rim + blades; the blades turn |
+| largest blob, threshold 55, close 5 px, fill | 0.2 / 0.1 deg | solid disc; blades inside it no longer count |
+
+The threshold drops from 90 to 55 because view B's rim is shadowed on one side (55-90 grey
+after the plate) and broke into fragments at 90 that no fill can close. The 5 px closing
+bridges the remaining 1-2 px gaps: without it view B's p90 was 1.7-6.9 deg.
+
+After (`mask` as shipped, full frame / 640x400 twin):
+
+| view | solved | vs rim ellipse p50 / p90 | jitter |
+|---|---|---|---|
+| A | 96 % / 96 % | 0.15 / 0.42, 0.43 / 1.05 deg | 0.85 / 1.17 deg |
+| B | 100 % / 96 % | 0.10 / 0.28, 0.21 / 0.55 deg | 0.69 / 0.84 deg |
+
+Full and half resolution agree to 0.42 / 0.32 deg p50.
+
+**Negative results**, on view A with the filled disc:
+- Coverage-weighted moments, which use the partial-pixel edge, gave full-vs-half 0.44 deg
+  against 0.33 deg for binary moments.
+- A direct ellipse fit to the outer contour gave 0.34 deg.
+- Two-view check (format as below), shipped mask then each refit, full / half:
+  convex hull of the mask: gap 0.080 / 0.145 mm, axis 2nd-diff 1.88 / 2.55 deg;
+  ellipse fitted by maximising soft IoU with the mask (Nelder-Mead from the moments ellipse;
+  fitted IoU p50 0.96): 0.075 / 0.122 mm, 1.93 / 2.48 deg; shipped: 0.072 / 0.108 mm,
+  2.05 / 2.41 deg. The mask boundary is already an ellipse to 4 % of its area, and moments
+  average zero-mean staircase error over the whole perimeter, so refitting it changes nothing.
+
+Neither beats binary moments, so neither is used.
+
+**Two-view check.** Each mask variant goes through `pose` with the run's `rig.json`, every 4th
+frame. The 640x400 run uses the twin with K halved, which simulates the mode and does not
+replace recalibrating it. The ray gap is not built from the masks, so it is an independent
+score:
+
+| mask | solved, full / 640x400 | ray gap p50 | axis 2nd-diff p50 |
+|---|---|---|---|
+| old (threshold 90, rod filter) | 4.9 % / 0 % | 0.29 mm | -- |
+| shipped (55, close, largest contour filled, rod filter) | 91.5 % / 91.5 % | 0.072 / 0.108 mm | 2.05 / 2.41 deg |
+| without the closing | 77 % / 81 % | 0.13 / 0.14 mm | 2.4 / 2.3 deg |
+| without the rod filter | 91.4 % / 91.5 % | 0.091 / 0.098 mm | 2.06 / 2.15 deg |
+
+Drawing the largest *outer contour* filled does "largest blob" and "fill holes" in one call.
+It ranks blobs by enclosed area, so a hollow rim outranks solid clutter (the
+`segment.silhouette_hull` trap).
+
+The rod filter makes no measurable difference here. It stays anyway: the error it removes
+(23.3) moves both centroids along the axis, which raises the triangulated point without
+opening the ray gap, so this table cannot see it.
+

@@ -39,6 +39,7 @@ inline void driveBoot(bool activeLed = true) {
   forceAllGatesLow();
   // 1 kB RX buffer: an overflow is silent and the coils hold their last command
   Serial.setRxBufferSize(1024);
+  Serial.setTxBufferSize(1024);
   Serial.begin(SERIAL_BAUD);
   delay(1000);
   initResetButton();

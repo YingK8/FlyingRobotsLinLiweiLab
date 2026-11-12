@@ -357,6 +357,9 @@ class CommandLink:
                 else:
                     time.sleep(1.5)  # legacy non-sync startup
                     self.drain()
+                if self.comm.handshake() is None:
+                    raise RuntimeError("no `hello` from the firmware: wrong baud, firmware older "
+                                       "than 2026-11-10 (reflash -e flight), or board not running")
             except BaseException:
                 self.close()
                 raise

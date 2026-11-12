@@ -5,9 +5,15 @@ Non-blocking, newline-framed serial send/receive for ESP32 sketches. Call
 depends on a whole line arriving inside one call.
 
 Generalizes a reader that the experiment mains used to build inline. Framing is
-plain ASCII terminated by `\n`, `\r`, or `\r\n` -- no checksum, no binary
-framing -- matching the PC-side tools (`ai/experiments/run_experiment.py`,
-`ai/experiments/trigger_reset_log.py`).
+plain ASCII terminated by `\n`, `\r`, or `\r\n`, mirrored on the host by
+`controller/control/link.py`.
+
+**Optional checksum.** A line ending in `*hh` carries CRC-8/SMBUS (poly 0x07, init 0)
+of everything before the `*`. A bad one prints `!crc <line>` and is dropped. A line
+without `*hh` is accepted as-is, so typing into `pio device monitor` still works; the
+price is that corruption which deletes the `*` gets through. The host appends it only
+after `hello` answers `crc=1`, and never on `stop`/`land`, so the kill parses on any
+firmware.
 
 ## Usage
 

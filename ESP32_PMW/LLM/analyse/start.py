@@ -123,11 +123,9 @@ def find_led(video_path, times, start_host_s, on_s, gap_s, before_s=1.0, after_s
     raise ValueError(f"{video_path}: no blinking spot decodes the START pulse pair; pass the LED ROI by hand")
 
 
-#: Host receipt of a camera frame minus the moment the LED changed, measured on two
-#: 2026-11-05 takes (sync_check_..._201924, _202040; 1280x800 @ 120 fps, auto exposure)
-#: against the serial-envelope clock below: 8 LED edges, 16-28 ms, mean 22 ms. It holds
-#: only for that mode and that estimator; under auto exposure it moves with exposure.
-CAMERA_LATENCY_S = 0.022
+#: Host receipt minus LED change, sync_check_..._201924 and _202040 against the
+#: serial-envelope clock below. One definition, shared with the controllers.
+from controller.control.constants import CAMERA_LATENCY_S
 
 
 def serial_offset(rows):

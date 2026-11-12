@@ -45,6 +45,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from controller.control import attitude
+from controller.control import axis_hover
 from controller.control import predictor
 from controller.control import ramp
 from controller.control import z_track
@@ -357,9 +358,10 @@ class CommandLink:
                 else:
                     time.sleep(1.5)  # legacy non-sync startup
                     self.drain()
-                if self.comm.handshake() is None:
-                    raise RuntimeError("no `hello` from the firmware: wrong baud, firmware older "
-                                       "than 2026-11-10 (reflash -e flight), or board not running")
+                    # SYNC_READY already proves the link, and that path sends nothing before START
+                    if self.comm.handshake() is None:
+                        raise RuntimeError("no `hello` from the firmware: wrong baud, firmware older "
+                                           "than 2026-11-10 (reflash -e flight), or board not running")
             except BaseException:
                 self.close()
                 raise
@@ -470,6 +472,20 @@ class CommandLink:
         return False
 
 
+def _axis_controller(args):
+    if getattr(args, "law", "lqr") != "axis":
+        return None
+    if args.axis_response is None and not args.identify_axis:
+        raise ValueError("law='axis' needs axis_response (fit it first: identify_axis=True on the "
+                         "stand, then `axis_hover.py fit`). The seeded precession is a model "
+                         "guess and its phase may be off by more than the certified 15 deg.")
+    response = (axis_hover.AxisResponse.load(args.axis_response) if args.axis_response
+                else axis_hover.AxisResponse())
+    return axis_hover.AxisHoverController(
+        response, hover_point_mm=(0.0, 0.0, args.hover_z_mm if args.hover_z_mm is not None else 15.0),
+        coil_offset_mm=args.coil_offset_mm, coil_yaw_rad=math.radians(args.coil_yaw_deg))
+
+
 def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                     threaded=False) -> None:
     """Fly `ticks` on a fixed ts cadence. `ctrl` is the (x, y) controller pair; ztrk owns z.
@@ -505,7 +521,7 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
     ts = ctrl_x.ts
     # Bound before the try, so a failure to start the pose thread still reaches a
     # `finally` that can de-energise instead of a NameError that hides it.
-    feed = None
+    feed = axis = None
     try:
         # `takeoff=True` does NOT command the ramp here. The datum is not set until the
         # estimator has held a still robot for a moment, and until it is, `tick.xyz_mm`
@@ -562,6 +578,9 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
         id_phase = -1             # which dither azimuth is commanded
         id_active = False         # the dither owns az=/mag= this tick
         lost_land_s = getattr(args, "lost_land_s", LOST_LAND_S)
+        axis, axis_schedule, axis_due = _axis_controller(args), None, t_start
+        if axis is not None and args.identify_axis:
+            axis_schedule = axis_hover.tilt_step_schedule()
         n_seen = 0
         while True:
             if landed:
@@ -860,6 +879,26 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                 print(f"FLIGHT at {link.freq or float('nan'):.1f} Hz")
                 link.send(f"throttle={args.throttle:.0f}")
                 _anchor(ctrl, ztrk, link.freq)
+                if axis is not None:
+                    axis.start(link.freq or axis.hover_frequency_hz)
+
+            if axis is not None:
+                if fresh and tick.xyz_mm is not None and tick.pose is not None:
+                    axis.observe(tick.xyz_mm, tick.pose.normal, tick.t - C.CAMERA_LATENCY_S)
+                if now >= axis_due:
+                    axis_due = max(axis_due + axis.step_s, now - axis.step_s)
+                    tilt_override = (axis_schedule(now - t_flight)
+                                     if axis_schedule is not None else None)
+                    command = axis.command(now, tilt_override) if armed else None
+                    if command is not None:
+                        if (prev_freq is None or now - t_resend >= RESEND_S
+                                or abs(command.frequency_hz - prev_freq) > FREQ_DEADBAND_HZ):
+                            link.send(f"freq={command.frequency_hz:.2f}")
+                            prev_freq, t_resend = command.frequency_hz, now
+                        link.send(command.vec_line)
+                viz.push(tick.pose, u=(0.0, 0.0, prev_freq or 0.0, args.throttle, 0.0),
+                         t=tick.t, frames=tick.frames, lost=tick.lost, spin=tick.spin)
+                continue
 
             # Push the miss too, or the trace interpolates straight over a dropout.
             # The interval the MEASUREMENT moved over, for the rate estimate: shutter
@@ -872,13 +911,13 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
                 if t_meas is not None and tick.t > t_meas:
                     dt_meas = tick.t - t_meas
                 t_meas = tick.t
-                xyz_mm = pred.update(tick.xyz_mm, t=tick.t)
-                tv.update(tick.xyz_mm, tick.t)
-                # From the SHUTTER, not from now: `tick.t` is the capture stamp, so the
-                # next step propagates this pose forward by its full pipeline age. That
-                # is the latency compensation `filter.predict_ahead` was written for and
-                # never wired to, and here it costs nothing.
-                t_pred = tick.t
+                shutter = tick.t - C.CAMERA_LATENCY_S
+                xyz_mm = pred.update(tick.xyz_mm, t=shutter)
+                tv.update(tick.xyz_mm, shutter)
+                # From the SHUTTER, not from now. `tick.t` is the host receipt of the
+                # frame, which trails the shutter by CAMERA_LATENCY_S (22 ms measured);
+                # without the shift the predictor propagated only the 3 ms of compute.
+                t_pred = shutter
             else:
                 if fresh:
                     viz.push(tick.pose, t=tick.t, frames=tick.frames, lost=tick.lost,
@@ -973,6 +1012,11 @@ def controller_loop(ticks, link: CommandLink, ctrl, args, ztrk=None, rows=None,
     finally:
         land("loop exit")
         link.send("stop")
+        if axis is not None and axis.command_log:
+            axis_log = os.path.splitext(link.log.name)[0] + "_axis.npz"
+            axis.save_log(axis_log)
+            print(f"axis log: {axis_log}  (fit: python controller/control/axis_hover.py fit "
+                  f"{axis_log} <response.json>)")
         # Clock health, printed unconditionally: the design rate is a claim, and this is
         # the only place that says whether the loop kept it. Reported AFTER the coils are
         # off -- nothing here is allowed to delay that.
@@ -1088,6 +1132,12 @@ class RunConfig:
     record: object = None  # film the run: a flight dir, or True for results/flights/
     telemetry_path: str | None = None  # exclusive JSONL tee from the existing serial reader
     sync_start: bool = False  # flight firmware v1 + recording + one START per run
+    law: str = "lqr"  # "axis": steer the field axis with vec= (axis_hover.py) instead of az/mag
+    axis_response: str | None = None  # AxisResponse json from `axis_hover.py fit`
+    identify_axis: bool = False  # law="axis" only: open-loop tilt steps, log for the fit
+    coil_offset_mm: tuple = (0.0, 0.0, 0.0)  # datum origin in the coil-array frame
+    coil_yaw_deg: float = 0.0  # datum x-axis azimuth in the coil-array frame
+    tracker: bool = True  # native C++ capture + interleaved tracker, 220+ Hz (pose/theory.md 22.5)
     viz_port: int = 8080
 
     def __post_init__(self):
@@ -1120,7 +1170,7 @@ def fly(cfg=None, **kw):
             specs=cfg.camera, rig_path=cfg.rig, width=cfg.width, height=cfg.height,
             fps=cfg.fps,
             port=cfg.viz_port, axes=tuple(cfg.axes), label="hover",
-            record=cfg.record,
+            record=cfg.record, tracker=cfg.tracker,
         )
     else:
         own_viz = lv.make_viz(

@@ -5229,3 +5229,67 @@ from 20 mm up. Two rules follow:
   $b_{lock}$, and the rotor steps out. A flight-safe policy holds $b \ge b_{lock}$ and moves
   $\hat n$ along the great circle toward $\hat z$ until it fits, which $b_{max}$'s closed form
   makes a one-dimensional bisection.
+
+## 29. Hover by steering the field axis (`axis_hover.py`)
+
+The full derivation, the proof and the numbers are in `axis_hover_report.tex`; this chapter
+keeps the conclusions next to §28, whose `vec=` they drive.
+
+### 29.1 The attitude plant is a rotation, not a double integrator
+
+With $\sigma = (n_x + \jj n_y)/n_z$ the rotor-axis tilt and $\nu$ the field-axis tilt (complex,
+rad), the cycle-averaged aligning torque turns the spin axis about the field axis:
+$\dot\sigma = \lambda(\nu - \sigma)$, $\lambda = \Omega_p e^{\jj\psi}$. §12's re-allocating plant
+gives $\lambda_0 = 3.52\,e^{-\jj 77.2^\circ}$ rad/s, where $\arg z = \operatorname{atan2}(\Im z,
+\Re z)$ and the sign of $\psi$ follows the spin sense. A real-gain PID on the tilt error is
+rotated by $\psi$ and spirals; a D term on attitude does nothing, because the plant is
+first order. One complex multiply fixes it: $\nu = \sigma + (k/\hat\lambda)(\sigma_{ref} -
+\sigma)$ makes the nominal loop $\dot\sigma = k(\sigma_{ref} - \sigma)$ with $k$ real.
+
+### 29.2 The law
+
+- Lateral, complex $w = x + \jj y$ (mm): PD on position with poles $(-12, -4 \pm 4\jj)$ rad/s
+  gives $\sigma_{ref} = -(K_p w + K_d v)/g$; the inner loop above; plus the cancelled tilt bias
+  and the identified leak $\hat\kappa w$. Clamp $|\nu| \le 0.35$ rad.
+- Vertical: PD on $z$ with poles $-2.22 \pm 2.22\jj$ rad/s, minus the thrust bias, gives $a_z$;
+  then $f = \hat f_h\sqrt{1 + a_z/g}$, clipped to $[85, 115]$ Hz and slewed at no more than 5 Hz/s.
+  That band is at least 75 Hz below the coil resonance and inside the $f^2$ range (§18.17).
+- `vec=` carries the *predicted* robot position, so VectorField removes most of the
+  $1.4^\circ$/mm geometric axis tilt, and the minimal rotation $\hat z \to \hat n$, so the twist
+  is identically zero (§28.5).
+- Latency: the pose stamp is host receipt, and the shutter is `CAMERA_LATENCY_S` = 22 ms
+  earlier. The observer corrects the estimate stored at the shutter step and replays the logged
+  commands forward to now. This is exact feed-forward; interpolating between poses adds lag
+  and no information.
+
+### 29.3 Identification (the commanded vector is unknown)
+
+$\dot\sigma = \lambda a\,\nu_{cmd} - \lambda\sigma + \lambda\kappa\,w + \lambda c$ is linear in
+its four complex unknowns. One least-squares solve on a tilt-step take (`identify_axis=True`)
+gives $\hat\lambda, \hat a, \hat\kappa, \hat c$. The coil pose only shifts $\hat a$ (gain and yaw)
+and $\hat c$ (offset). `law="axis"` refuses to fly without a fitted `response.json`.
+
+### 29.4 What is proven
+
+Exactly, for the delay-augmented loop as coded, with 16.7–33.3 ms of true delay against an
+assumed 25 ms: robust Schur stability for precession gain $\times[0.7, 1.4]$, phase $\pm15^\circ$
+and thrust ratio $[0.77, 1.26]$ with the leak cancelled; separately for a residual leak of
+$\pm 0.004$ rad/mm; and the vertical loop for any $f_h \in [71, 143]$ Hz. The method is structured
+small gain on the plant step, with the per-parameter directions taken from the Fréchet derivative
+of the matrix exponential, exact $H_\infty$ norms (Cayley transform plus Hamiltonian bisection) and
+branch-and-bound over the parameters. A phase-lock energy lemma shows that the 5 Hz/s slew keeps
+lock down to about a quarter of the modelled step-out torque.
+
+### 29.5 Negative results
+
+- A slow design (poles $-6, -1.2 \pm 1.2\jj$) tolerates $\pm40^\circ$ of precession phase but only
+  $3.6\times10^{-4}$ rad/mm of leak. Its outer stiffness, $2\times10^{-4}$ rad/mm, is 35 times
+  smaller than a 30% residual of the geometric tilt. **The leak sets a floor on the lateral
+  bandwidth**, and that floor is why the old "≤ 0.8 Hz" rule is exceeded (0.9 Hz).
+- Integrators overshot by 115 mm with $f_h$ 6% off; bias states replace them.
+- Trusting the 0.0039 rad tilt measurement costs about 1 mm RMS, since $g/\omega^2 \approx$
+  3400 mm/rad. The observer weights tilt at 0.1 rad and lets position carry it.
+- A common quadratic Lyapunov ellipsoid (0.006 mm admissible) and the unstructured complex
+  stability radius (millions of cells) were both too conservative to use.
+- The joint four-parameter box is not proven, only sampled: covering it needs about $7\times10^5$
+  cells, because complex small gain treats the real $\kappa$ as complex.

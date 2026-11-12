@@ -1380,6 +1380,7 @@ def _why_no_pose(before, after):
 #: How long one tracker read waits. Matches `MonoCamera.read`'s own 2 s, so both paths
 #: give up after the same ~10 s of silence.
 CAMERA_TIMEOUT_S = 2.0
+STATS_EVERY_S = 1.0
 
 #: Frames of nothing-at-all before the viewer explains itself. A live run that shows an
 #: empty scene and says nothing is the worst failure mode here: the cameras are fine, the
@@ -1550,7 +1551,7 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=40
             meta={"source": "live_viz.stereo_frames", "specs": specs,
                   "rotate180": bool(rotate180)})
         print(f"recording -> {rec.dir}")
-    lost, last_seen, misses, t_prev = 0, None, 0, None
+    lost, last_seen, misses, t_prev, t_stats = 0, None, 0, None, -math.inf
     if trk is not None:
         # Started here rather than at construction: everything between the two can raise
         # (no rig, no plates, a busy viser port), and the `finally` that stops the
@@ -1592,8 +1593,10 @@ def stereo_frames(specs="camera:0,camera:1", rig_path=None, width=640, height=40
                 # here at all -- `read` returns None and the miss branch above `continue`s
                 # -- so that expression is always False and `lost` would sit at 0 while
                 # the estimator solved nothing. It cost a five-minute preview to notice.
-                # The estimator's own counter is the true one.
-                lost = trk.stats()["n_lost"]
+                # The estimator's own counter is the true one. Read once a second, not per
+                # pose: `stats` copies up to 20k skew samples and sorts them under the GIL.
+                if t_cap - t_stats >= STATS_EVERY_S:
+                    lost, t_stats = trk.stats()["n_lost"], t_cap
             else:
                 item = src.read()
                 if item is None:

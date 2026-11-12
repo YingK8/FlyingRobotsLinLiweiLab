@@ -1,0 +1,482 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,mathtools,amssymb,amsthm,bm,booktabs,enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\vb}[1]{\mathbf{#1}}
+\newcommand{\uv}[1]{\hat{\mathbf{#1}}}
+\newcommand{\jj}{\mathrm{j}}
+\renewcommand{\Re}{\operatorname{Re}}
+\renewcommand{\Im}{\operatorname{Im}}
+\newcommand{\norm}[1]{\lVert #1 \rVert}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+
+\InputIfFileExists{axis_hover_results.tex}{}{%
+  \newcommand{\certLateralD}{(run axis\_hover\_proof.py)}\newcommand{\certLateralC}{?}%
+  \newcommand{\certLateralE}{?}\newcommand{\certVerticalC}{?}\newcommand{\certVerticalD}{?}%
+  \newcommand{\certVerticalE}{?}\newcommand{\regionLateralMm}{?}\newcommand{\regionHeightBandMm}{?}%
+  \newcommand{\regionHeightSlewMm}{?}\newcommand{\regionHzPerMm}{?}\newcommand{\lockMargin}{?}%
+  \newcommand{\lockTorqueScale}{?}\newcommand{\certLeakC}{?}\newcommand{\certLeakD}{?}%
+  \newcommand{\certLeakE}{?}\newcommand{\evidenceRadius}{?}}
+
+\title{Hover by Steering the Field Axis\\[2pt]\large Attitude by \texttt{vec=}, altitude by \texttt{freq=}: model, controller, identification and a stability certificate}
+\author{ESP32\_PMW \quad \texttt{controller/control/axis\_hover.py}, \texttt{axis\_hover\_proof.py}}
+\date{2026-11-12}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\begin{abstract}
+We design a hover controller for the magnetically spun rotor. It steers the rotation axis of the
+coil field with the \texttt{vec=} command (\texttt{lib/VectorField}) to set the thrust direction,
+and it sets the field frequency with \texttt{freq=} to set the thrust magnitude. A PID on attitude
+is correct in spirit, but the attitude plant is \emph{gyroscopic}: the rotor axis precesses about
+the field axis, with a phase of about $77^\circ$. A PID that tilts the field toward the wanted axis
+therefore drives the axis sideways. We write the plant in complex form, cancel the precession phase
+with an identified complex gain, and close the loop as a cascade PD with a disturbance observer. The
+observer predicts across the measured latency by rewinding and replaying the logged commands. We give
+a regression that identifies the commanded-to-actual axis map from flight video. We then prove
+robust Schur stability for 17--33\,ms of latency over an explicit box of precession, gain and thrust
+errors, and separately over a line of residual axis leak. The proof uses a structured small-gain
+bound, exact $H_\infty$ norms and branch-and-bound over the parameters. The joint four-parameter box
+is supported by exact eigenvalues at its corners and at 3000 random points, but it is not proven. We also bound the frequency excursion, so that the loop stays in a band far from the 190\,Hz
+coil resonance, and we show with an energy argument that the commanded frequency slew cannot break
+phase lock. The main negative result is that the residual, position-dependent field-axis error
+(the ``axis leak'') sets the minimum lateral bandwidth. A slow, phase-robust design is destroyed by
+a leak of only $0.02^\circ$/mm.
+\end{abstract}
+
+\tableofcontents
+
+\section{Verdict: is this the right way to hover?}
+
+\textbf{Yes, with three changes to the plain-PID idea.} All three are forced by the physics below.
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Attitude cannot be a PID on the tilt error.} The rotor axis obeys
+  $\dot\sigma=\lambda(\nu-\sigma)$ with complex $\lambda=\Omega_p e^{\jj\psi}$ and $\psi\approx-77^\circ$
+  (\S\ref{sec:model}). The tilt is a first-order, \emph{rotating} response to the field tilt, not a
+  double integrator. A D term on attitude adds nothing. Feeding back the tilt error with a real gain
+  makes the axis spiral once $|\psi|$ approaches $90^\circ$. The fix is one complex multiply: command
+  $\nu=\sigma+(k/\hat\lambda)(\sigma_{\mathrm{ref}}-\sigma)$, so that the nominal closed attitude loop
+  is $\dot\sigma=k(\sigma_{\mathrm{ref}}-\sigma)$ with real $k$.
+\item \textbf{The integral terms are replaced by bias states in the observer.} A plain integrator
+  overshot by 115\,mm when the hover frequency was mis-estimated by 6\% (\S\ref{sec:negative}). An
+  estimated thrust bias and an estimated tilt bias give the same zero steady-state error for constant
+  disturbances, and they act at observer speed.
+\item \textbf{The lateral bandwidth has a floor, set by the axis leak.} When the robot is off-axis,
+  the field axis tilts with position. Whatever part \texttt{vec=}'s geometry compensation does not
+  remove acts as positive position feedback. The design tolerates
+  $|\kappa|\le 0.004$\,rad/mm ($0.23^\circ$/mm, about 16\% of the modelled $1.4^\circ$/mm) and
+  needs the precession estimate to within $\times[0.7,1.4]$ and $\pm15^\circ$. Both numbers come from
+  identification, so \textbf{identification is not optional}.
+\end{enumerate}
+LQR or MPC on the same model (\texttt{design\_hover\_lqr.py}, \texttt{LLM/design/spatial\_mpc.py})
+would give similar gains. The cascade is preferred because each gain has a physical meaning, the
+law is three complex multiply-adds, and it can be certified by the method below. A frequency-only
+altitude loop, decoupled from attitude, is correct to first order. The coupling is second order in
+tilt and bounded in \S\ref{sec:coupling}.
+
+\section{Notation}
+\label{sec:notation}
+All lateral quantities are complex numbers. For a horizontal vector $(a_x,a_y)$ we write
+$a=a_x+\jj a_y\in\C$. A rotation by $\phi$ is multiplication by $e^{\jj\phi}$.
+$\arg z=\operatorname{atan2}(\Im z,\Re z)\in(-\pi,\pi]$, where $\operatorname{atan2}(y,x)$ is the
+angle of the point $(x,y)$ measured from the $+x$ axis. $\norm{\cdot}$ is the spectral norm and
+$\norm{\cdot}_F$ the Frobenius norm. $\rho(A)$ is the spectral radius. $A^H$ is the conjugate
+transpose. $\det(M)$ is the determinant. Time steps are indexed $k\in\{0,1,2,\dots\}$.
+
+\begin{center}\begin{tabular}{lll}
+\toprule
+symbol & meaning & unit \\ \midrule
+$w=x+\jj y$ & lateral offset from the hover point (datum frame) & mm \\
+$v=\dot w$ & lateral velocity & mm/s \\
+$\sigma=(n_x+\jj n_y)/n_z$ & rotor-axis tilt, $\uv n$ the measured unit axis with $n_z>0$ & rad \\
+$\nu$ & field-axis tilt at the rotor (datum frame) & rad \\
+$\nu_{\mathrm{cmd}}$ & tilt sent in \texttt{vec=} (coil frame) & rad \\
+$z$ & height error, datum frame & mm \\
+$f$, $f_h$ & field frequency; frequency at which thrust equals weight & Hz \\
+$g$ & $9810$ & mm/s$^2$ \\
+$\lambda=\Omega_p e^{\jj\psi}$ & precession gain of the rotor axis & rad/s \\
+$\kappa$ & axis leak: field tilt per mm of offset not compensated & rad/mm \\
+$\beta=(f/f_h)^2$ & thrust ratio & -- \\
+$T=1/120$ & control period & s \\
+$d$, $\hat d=3$ & true and assumed measurement delay & steps \\
+\bottomrule
+\end{tabular}\end{center}
+
+\section{Plant}
+\label{sec:model}
+
+\subsection{Rotor axis}
+The cycle-averaged torque of the rotating field on the spinning magnet has an aligning component
+perpendicular to the spin. Acting on the angular momentum $L=I\omega$, this component turns the
+spin axis \emph{perpendicular} to both the spin axis and the field axis, which is precession. Slip
+and drag add a component toward the field axis. In tilt coordinates this gives
+\begin{equation}
+\dot\sigma=\lambda\,(\nu-\sigma),\qquad \lambda=\Omega_p e^{\jj\psi}.\label{eq:precession}
+\end{equation}
+Pure precession is $|\psi|=90^\circ$, and pure alignment is $\psi=0$. The multi-coil plant in
+\texttt{LLM/design/spatial\_model.py}, with the axis re-allocated each step, has the eigenvalues
+$-0.78\pm 3.43\jj$\,rad/s. The seed is therefore $\lambda_0=3.52\,e^{-\jj 77.2^\circ}$\,rad/s, with
+the sign of $\psi$ set by the spin sense. The seed is a model value and must be measured
+(\S\ref{sec:identify}).
+
+\subsection{Field axis and the leak}
+\texttt{vec=x:y:z:q:b} solves for duty and phase so that the field at the commanded point rotates
+about $R(q)\uv z$ (\texttt{theory.md} \S28). The true axis differs from the commanded one through
+channel gain and phase trims, the coil-to-camera registration, and model error. We write
+\begin{equation}
+\nu=a\,\nu_{\mathrm{cmd}}+c+\kappa\,w,\label{eq:fieldmap}
+\end{equation}
+where $a\in\C$ absorbs gain and yaw, $c\in\C$ is a constant offset (it includes the robot's crooked
+$1.6^\circ$ seat), and $\kappa$ is the residual dependence on position. Without compensation the
+field axis tilts by $1.4^\circ$/mm off-axis (\texttt{spatial\_model}), and this is the open-loop
+divergence. The controller sends the \emph{predicted robot position} as the \texttt{vec=} point, so
+VectorField removes most of the dependence, and $\kappa$ is what remains.
+
+\subsection{Translation}
+Thrust is $mg\beta$ along the rotor axis. For small tilt,
+\begin{equation}
+\dot w=v,\qquad \dot v=g\beta\,\sigma,\qquad \ddot z=g\Big(\beta\cos|\sigma|-1\Big),\qquad
+\beta=\big(f/f_h\big)^2 .\label{eq:translation}
+\end{equation}
+The measured $f_h\approx101$\,Hz (\texttt{theory.md} 18.17), and the $f^2$ law breaks down above
+about 110\,Hz. We therefore keep $f\in[85,115]$\,Hz, which is $\ge75$\,Hz below the coil resonance.
+
+\subsection{Model used by the controller}
+The lateral state is $x=(w,v,\sigma,b_\sigma)\in\C^4$, where $b_\sigma$ is a constant tilt bias. The
+input is $u=\nu$, and the measurements are $y=(w,\sigma)$:
+\begin{equation}
+\dot x=\begin{pmatrix}0&1&0&0\\0&0&g&0\\ \hat\lambda\hat\kappa&0&-\hat\lambda&\hat\lambda\\0&0&0&0\end{pmatrix}x
++\begin{pmatrix}0\\0\\ \hat\lambda\\0\end{pmatrix}u .\label{eq:lateral}
+\end{equation}
+The vertical state is $(z,\dot z,b_z)\in\R^3$ with input $a_z$ (mm/s$^2$), $\ddot z=a_z+b_z$, and
+measurement $z$. Both models are discretised exactly (zero-order hold, block matrix exponential;
+\texttt{discretised}).
+
+\section{Controller}
+\label{sec:controller}
+
+\subsection{Lateral: complex cascade PD}
+Inner loop: $u=\sigma+(k/\hat\lambda)(\sigma_{\mathrm{ref}}-\sigma)-b_\sigma-\hat\kappa w$, which gives
+$\dot\sigma=k(\sigma_{\mathrm{ref}}-\sigma)$ when the model is exact. Outer loop:
+$\sigma_{\mathrm{ref}}=-(K_p w+K_d v)/g$. The characteristic polynomial is
+\[
+s^2(s+k)+k(K_d s+K_p)=s^3+k s^2+kK_d s+kK_p ,
+\]
+so the three poles $p_1,p_2,p_3$ fix $k=c_1$, $K_d=c_2/c_1$ and $K_p=c_3/c_1$, where
+$\prod_{i=1}^{3}(s-p_i)=s^3+c_1s^2+c_2s+c_3$ (\texttt{lateral\_feedback}). The shipped poles are
+$(-12,\,-4\pm4\jj)$\,rad/s. The outer natural frequency is $5.7$\,rad/s ($0.9$\,Hz), and
+\S\ref{sec:negative} explains why it cannot be lower. The state-feedback row is
+\[
+K=\Big(\tfrac{c_3}{\hat\lambda g}+\hat\kappa,\ \tfrac{c_2}{\hat\lambda g},\ \tfrac{c_1}{\hat\lambda}-1,\ 1\Big),\qquad u=-K\hat x .
+\]
+The command is clamped to $|u|\le0.35$\,rad. It is sent as
+$\nu_{\mathrm{cmd}}=(u-\hat c)/\hat a$, as the axis $\uv n\propto(\Re\nu_{\mathrm{cmd}},\Im\nu_{\mathrm{cmd}},1)$
+and the quaternion $q=\big(1+n_z,\,-n_y,\,n_x,\,0\big)/\norm{\cdot}$. This is the minimal rotation
+$\uv z\to\uv n$, so the twist about the axis is identically zero and never jumps (\texttt{theory.md}
+\S28.5).
+
+\subsection{Vertical: PD on acceleration, mapped to frequency}
+$a_z=-K_pz-K_d\dot z-b_z$, with poles $-2.22\pm2.22\jj$\,rad/s. The frequency that delivers $a_z$ is
+\[
+f=\hat f_h\sqrt{1+a_z/g},
+\]
+clamped to the band $[85,115]$\,Hz and then slew-limited to $5$\,Hz/s. The \emph{achieved}
+acceleration $g\big((f/\hat f_h)^2-1\big)$ is fed back into the observer, so saturation cannot wind
+up the bias.
+
+\subsection{Latency: rewind and replay}
+\label{sec:latency}
+A pose stamped at host receipt $t_{\mathrm{rx}}$ was exposed at
+$t_{\mathrm{sh}}=t_{\mathrm{rx}}-0.022$\,s (\texttt{constants.CAMERA\_LATENCY\_S}, measured from LED
+edges). At step $k$ the controller holds its history $\{(\hat x_j,u_j)\}_{j=k-12}^{k-1}$. A
+measurement with age $\hat d=\operatorname{round}((t_k-t_{\mathrm{sh}})/T)$ is handled in two steps.
+First it corrects the stored estimate $\hat x_{k-\hat d}\leftarrow\hat x_{k-\hat d}+L(y-C\hat x_{k-\hat d})$.
+Then it replays $\hat x_{j+1}=\Phi\hat x_j+\Gamma u_j$ for $j=k-\hat d,\dots,k-1$, overwriting the
+history (\texttt{DelayedLoop.correct}). This is a Kalman filter on the delayed time line plus an exact
+model predictor, and it is the feed-forward that interpolating between pose estimates cannot give:
+interpolation adds no information and adds a sample of lag, while the replay uses the commands that
+were actually applied. $L$ is the steady-state Kalman gain from the discrete Riccati equation.
+Its noise levels are: position $0.034$\,mm (\texttt{noise\_model.json}); tilt $0.1$\,rad, on purpose
+25$\times$ the measured $0.0039$ (\S\ref{sec:negative}); acceleration $30$\,mm/s$^2$; tilt rate
+$0.3$\,rad/s; bias drift $0.01$\,rad/s and $300$\,mm/s$^3$.
+
+\section{Identifying the commanded-to-actual axis map from video}
+\label{sec:identify}
+Combining \eqref{eq:precession} and \eqref{eq:fieldmap} gives a model that is linear in its unknowns:
+\begin{equation}
+\dot\sigma=\underbrace{\lambda a}_{\alpha}\,\nu_{\mathrm{cmd}}\;\underbrace{-\lambda}_{\beta_\sigma}\,\sigma
+\;+\;\underbrace{\lambda\kappa}_{\delta}\,w\;+\;\underbrace{\lambda c}_{\gamma}.
+\end{equation}
+Given the measured axis $\sigma(t)$, offset $w(t)$ and the held command $\nu_{\mathrm{cmd}}(t)$, one
+complex least-squares solve returns $(\alpha,\beta_\sigma,\delta,\gamma)$, and then $\hat\lambda=-\beta_\sigma$,
+$\hat a=\alpha/\hat\lambda$, $\hat\kappa=\delta/\hat\lambda$ and $\hat c=\gamma/\hat\lambda$
+(\texttt{fit\_axis\_response}). $\dot\sigma$ and $\sigma$ come from a quadratic Savitzky--Golay
+filter (15 samples) on a uniform resample. The coil poses enter only through $\hat a$, $\hat c$
+and the \texttt{vec=} point offset. If the registration is wrong, $\hat a$ and $\hat c$ absorb the
+error.
+
+\paragraph{Experiment.} \texttt{fly(law="axis", identify\_axis=True, ...)} holds altitude closed-loop
+and sends open-loop tilt steps of $0.05$\,rad: zero, then eight azimuths, each for $1.5$\,s, with
+zero in between. It writes \texttt{<run>\_axis.npz}. Then run
+\texttt{python controller/control/axis\_hover.py fit <run>\_axis.npz response.json} and fly with
+\texttt{axis\_response="response.json"}. The runner refuses \texttt{law="axis"} without a fitted
+response.
+
+\paragraph{Cautions.} The video axis is unsigned, so the fit pins $n_z>0$. Spin rate and spin sense
+are not observable above about 26\,Hz (blade strobe), so the sign of $\psi$ is a fit output, not an
+input. Takes with dropped frames are mistimed and must be excluded. Stay clear of the singular shell
+at $z\approx20.8\pm1.5$\,mm above the coils, where $a\to0$; the controller refuses hover points there.
+If the rod constrains the tilt on the stand, run the steps in free hover with the seed and a small
+amplitude instead. The same regression works on closed-loop flight logs, since $\nu_{\mathrm{cmd}}$
+is logged.
+
+\section{Stability certificate}
+\label{sec:proof}
+
+\subsection{The closed loop as an exact linear recursion}
+Let the true lateral plant (\eqref{eq:precession}--\eqref{eq:translation}, bias removed, since a
+constant disturbance does not affect stability) have the ZOH step $[\Phi_p\ \Gamma_p](\theta)$ for
+the parameters
+$\theta=(|\lambda/\lambda_0|,\ \arg(\lambda/\lambda_0),\ \beta,\ \kappa)$. The augmented state is
+\[
+\zeta_k=\big(x^p_k,\,x^p_{k-1},\dots,x^p_{k-d};\ e_k;\ u_{k-\hat d},\dots,u_{k-1}\big),
+\]
+where $e_k$ is the stored estimate in the slot that the incoming measurement corrects. One step of
+\texttt{DelayedLoop} is then exactly
+\[
+\zeta_{k+1}=\mathcal A(\theta)\zeta_k,\qquad \mathcal A(\theta)=\mathcal A_0+E\,[\Phi_p\ \Gamma_p](\theta)\,F ,
+\]
+with $E$ inserting the new plant state and $F$ extracting $(x^p_k,u_k)$ (\texttt{closed\_loop}). The
+map is affine in the plant step. That structure is what makes the proof tractable.
+
+\subsection{Theorem}
+\begin{theorem}\label{thm:main}
+Let the true delay be $d\in\{2,3,4\}$ steps ($16.7$--$33.3$\,ms), with $\hat d=3$ assumed. Then
+$\rho(\mathcal A(\theta))<1$ for every constant $\theta$ in each of the following sets:
+\begin{enumerate}[label=(\alph*)]
+\item $\Theta_1=[0.7,1.4]\times[-15^\circ,15^\circ]\times[0.77,1.26]\times\{0\}$, which covers
+  precession gain, precession phase and thrust ratio with the leak identified and cancelled;
+\item $\Theta_2=\{1\}\times\{0\}\times\{1\}\times[-0.004,0.004]$\,rad/mm, which covers the residual
+  leak at the nominal precession.
+\end{enumerate}
+The vertical loop is Schur stable for every $\beta\in[0.5,2]$ and $d\in\{2,3,4\}$, so $f_h$ may lie
+anywhere in $[71,143]$\,Hz around the assumed $101$\,Hz.
+\end{theorem}
+The joint box $\Theta_1\times[-0.004,0.004]$ is \emph{not} proven. Covering it would take about
+$7\times10^5$ cells, roughly 30\,h, because the small-gain bound treats the real parameter $\kappa$ as
+if it were complex. The worst spectral radius over its $2^4$ corners and 3000 uniform samples, at all
+three delays, is \evidenceRadius.
+
+\begin{proof}
+\emph{Step 1 (one stable point).} At the centre $\theta_c$ of a cell, $\rho(\mathcal A(\theta_c))<1$
+is checked directly.
+
+\emph{Step 2 (no eigenvalue crosses the unit circle).} By continuity of the eigenvalues, stability
+holds on a connected cell if $\det(zI-\mathcal A(\theta))\neq0$ for all $|z|=1$ and all $\theta$ in
+the cell. Write $\mathcal A(\theta)=\mathcal A_c+E\Delta F$ with
+$\Delta=[\Phi_p\Gamma_p](\theta)-[\Phi_p\Gamma_p](\theta_c)$ and
+$G(z)=F(zI-\mathcal A_c)^{-1}E$. Since $zI-\mathcal A=(zI-\mathcal A_c)(I-(zI-\mathcal A_c)^{-1}E\Delta F)$,
+it suffices that $\sup_{|z|=1}\norm{G(z)\Delta}<1$, which is the small-gain condition.
+
+\emph{Step 3 (structured bound on $\Delta$).} Let $X(\theta)=T\,D M(\theta)D^{-1}$ be the scaled
+generator of the ZOH block, with $D$ the diagonal scaling $(|\lambda_0|^2/g,\ |\lambda_0|/g,\ 1,\ 1)$.
+The scaling is a similarity, so it leaves the stability question unchanged and balances
+mm against rad. With $\mathrm{L}_X(\cdot)$ the Fréchet derivative of $\exp$ at $X_c$, and
+$Y=X(\theta)-X_c=\sum_i(\theta_i-\theta_{c,i})\partial_iX+Y_2$,
+\[
+\Delta=\sum_i(\theta_i-\theta_{c,i})\,\mathrm{L}_X(\partial_iX)+\mathrm{L}_X(Y_2)+R,\qquad
+\norm{R}\le\tfrac12\norm{Y}^2e^{\norm{X_c}+\norm Y}.
+\]
+$\mathrm{L}_X(\partial_iX)$ is the upper-right block of $\exp\begin{psmallmatrix}X_c&\partial_iX\\0&X_c\end{psmallmatrix}$.
+$Y_2$ collects the curvature of $\lambda=\lambda_0 re^{\jj\phi}$ and of the product $\lambda\kappa$,
+bounded entrywise by
+$|\lambda_0|(h_rh_\phi+\tfrac12 r_{\max}h_\phi^2)$ and its product rule (\texttt{LateralUncertainty.curvature}).
+Hence
+\[
+\sup_{|z|=1}\norm{G\Delta}\le\sum_i h_i\,\norm{G\,\mathrm{L}_X(\partial_iX)}_\infty
++\norm{G}_\infty\Big(\norm{Y_2}e^{\norm{X_c}}+\tfrac12\norm Y^2e^{\norm{X_c}+\norm Y}\Big),
+\]
+where $h_i$ are the cell half-widths. The certificate requires the right-hand side to be $<1$.
+
+\emph{Step 4 (exact $H_\infty$ norms).} Each $\norm{\cdot}_\infty$ is computed with the Cayley transform
+$z=(1+s)/(1-s)$, which maps the unit circle onto the imaginary axis and preserves the peak gain. It is
+followed by the Hamiltonian test (Boyd--Balakrishnan): $\gamma>\norm{G}_\infty$ if and only if the
+Hamiltonian $H(\gamma)$ has no imaginary eigenvalue. Bisection keeps an upper end $\gamma$ at which
+no crossing is found (\texttt{peak\_gain}). A dense unit-circle grid agrees with it to $0.5\%$ and
+sits on the safe side.
+
+\emph{Step 5 (cover).} Each set is split along its widest normalised side until every cell satisfies
+Steps 1--3 (\texttt{certify}). For $d=2,3,4$ the run needed:
+$\Theta_1$: \certLateralC, \certLateralD, \certLateralE\ cells; $\Theta_2$: \certLeakC, \certLeakD,
+\certLeakE\ cells; vertical: \certVerticalC, \certVerticalD, \certVerticalE\ cell(s).
+\end{proof}
+
+\paragraph{What the theorem does not cover.} (i) The arithmetic is IEEE double, not interval
+arithmetic, so this is a computer-assisted proof up to rounding. The reported slacks exceed rounding
+by many orders of magnitude, but they are not formally enclosed. (ii) Parameters are frozen. Slow
+variation is covered by the usual slowly-varying argument; fast switching, such as frame dropouts
+(a missing correction), is not. (iii) The plant is the linearisation; saturation is handled in
+\S\ref{sec:band} and phase lock in \S\ref{sec:lock}. (iv) The leak is certified on its own, not jointly with
+the other three errors, and it is modelled as isotropic, a real $\kappa$ along $w$. An anisotropic or
+rotated leak (a general real $2\times2$ map) needs another dimension. A real-parameter ($\mu$) bound
+would remove the complex-$\kappa$ conservatism and is the natural next step. (v) The pose filter that feeds \texttt{tick.pose} is not in the model; at $500$\,mm/s$^2$
+process noise it is nearly transparent at $1$\,Hz.
+
+\subsection{Staying in the band: no saturation for small errors}
+\label{sec:band}
+For the nominal loop we iterate $\zeta_{k+1}=\mathcal A\zeta_k$ from a consistent initial offset (plant
+and estimate agree) until it decays below $10^{-6}$. We record the peak field-tilt command and the
+peak $|a_z|$ and $|\Delta a_z|$ per mm of initial offset. By linearity:
+\begin{itemize}[leftmargin=*]
+\item a lateral offset of up to \regionLateralMm\,mm never reaches the $0.35$\,rad tilt clamp;
+\item a height error of up to \regionHeightBandMm\,mm never leaves $[85,115]$\,Hz, and up to
+  \regionHeightSlewMm\,mm never meets the $5$\,Hz/s slew limit;
+\item the frequency moves by at most \regionHzPerMm\,Hz per mm of height error.
+\end{itemize}
+The loop therefore never commands within $75$\,Hz of the coil resonance. In simulation the steady
+frequency ripple is $0.34$\,Hz peak-to-peak.
+
+\subsection{Phase lock under the frequency slew}
+\label{sec:lock}
+\begin{lemma}
+Let the lag $\delta$ obey $I\ddot\delta=\tau(\ell-\sin\delta)$ with load
+$\ell=(k_{\mathrm{drag}}f^2+2\pi I\dot f)/\tau$, and let $\dot f$ switch from $-\dot f_{\max}$ to
+$+\dot f_{\max}$ (the worst slew reversal). Lock is kept if
+$U(\pi-\arcsin\ell_+)>U(\arcsin\ell_-)$, with $U(\delta)=-\cos\delta-\ell_+\delta$.
+\end{lemma}
+\begin{proof}
+$U$ is the potential of the post-switch dynamics. The rotor starts at rest relative to the old
+equilibrium $\arcsin\ell_-$ with energy $U(\arcsin\ell_-)$. The separatrix passes through the saddle
+$\pi-\arcsin\ell_+$. With no damping (a conservative assumption) the orbit is bounded inside the
+lock basin if and only if its energy is below the saddle.
+\end{proof}
+With \texttt{z\_track.TorqueLimits} at $f_h=101$\,Hz, $\dot f_{\max}=5$\,Hz/s and every $f$ in the
+band, the margin is \lockMargin\ ($>0$). It stays positive down to \lockTorqueScale$\times$ the
+modelled peak torque. The slew term is negligible: $2\pi I\dot f_{\max}\approx 0.5\%$ of the peak
+torque. What matters is the drag at the top of the band. The modelled torque depends on the stale
+$F_{\mathrm{STEPOUT}}=225$\,Hz, so this lemma says how wrong the step-out torque may be (up to a
+factor $1/$\lockTorqueScale) before the band must shrink.
+
+\subsection{Coupling between attitude and altitude}
+\label{sec:coupling}
+Tilt reduces vertical thrust by $g\beta(1-\cos|\sigma|)\le g\beta|\sigma|^2/2$. At the $0.35$\,rad
+clamp this is $\le6\%\,g$; at the $\le0.02$\,rad of steady hover it is $0.02\%\,g$. The vertical loop is
+exponentially stable and its bias state absorbs the constant part. The remainder is quadratic in a
+state that decays exponentially, so the cascade is locally exponentially stable. Frequency changes
+$\beta$ in the lateral loop, and Theorem~\ref{thm:main} covers $\beta\in[0.77,1.26]$, which is
+$f\in[89,113]$\,Hz at $f_h=101$.
+
+\section{Latency budget and the pose pipeline}
+\label{sec:pose}
+\begin{center}\begin{tabular}{lrl}
+\toprule
+stage & time & source \\ \midrule
+exposure $\to$ host receipt (USB, MJPEG decode, AVFoundation) & 16--28\,ms & LED edges, \texttt{LLM/analyse/start.py} \\
+segmentation + estimation (native tracker) & 3.3\,ms & \texttt{pose/theory.md} 22.5 \\
+control step + \texttt{vec=} on the wire at 921600 baud & 1.3\,ms & \texttt{theory.md} 19.13 \\
+firmware solve + apply & $<1$\,ms & -- \\ \midrule
+total & 21--33\,ms & covered: $d\in\{2,3,4\}$ \\
+\bottomrule
+\end{tabular}\end{center}
+
+\paragraph{Is the 120\,Hz requirement met?} The native tracker (C++ capture, interleaved pairing)
+delivers 221--240 poses/s on the live rig with zero lost out of 34\,700. The hover runner, however,
+was calling \texttt{stereo\_frames} without \texttt{tracker=True}, and so flew on the Python path at
+65--100\,Hz. \textbf{Changed:} \texttt{RunConfig.tracker=True} by default. The controller runs at a fixed
+$120$\,Hz on the newest pose, which leaves $1.8\times$ headroom.
+
+\paragraph{The largest latency term was not compensated.} \texttt{tick.t} is the host receipt time,
+not the shutter time, so the existing predictor propagated only about 3\,ms. \textbf{Changed:} both the
+LQR path and the axis law now use $t_{\mathrm{sh}}=t_{\mathrm{rx}}-22$\,ms. The constant was moved to
+\texttt{control/constants.py} and is shared with the video alignment.
+
+\paragraph{Compute.} \textbf{Changed:} \texttt{live\_viz} no longer calls \texttt{trk.stats()} on every pose.
+That call copies up to 20\,000 skew samples and sorts them under the GIL; it now runs once a second.
+\textbf{Left as measured opportunities} (each needs a native rebuild and a parity run):
+\begin{enumerate}[leftmargin=*]
+\item \texttt{segment()} runs absdiff, thresholds, morphology and connected components on the full
+  frame even when the ROI is known. It is 82\% of the 3.3\,ms. An ROI window would roughly halve
+  the cost per pose.
+\item a full-frame \texttt{float32} buffer is allocated per call in \texttt{ring\_weight}, the structuring
+  element is rebuilt per call, and there are five full-frame passes in \texttt{RunningPlate::update};
+\item a \texttt{std::thread} is created per pose when both views are fresh (\texttt{stereo.cpp:240});
+\item both frames are deep-cloned per worker step, and \texttt{result\_py} copies about 1\,MB of masks into Python per pose;
+\item \texttt{best\_format} may select MJPEG. A raw (YUYV/GREY) mode would remove the host decode,
+  about 6\,ms of CPU, and part of the 22\,ms latency, if the USB bandwidth allows it at 640$\times$400.
+\end{enumerate}
+None of these is needed for hover at 120\,Hz. The latency in item 5 is the only one that would move
+the certificate: it lowers $d$.
+
+\paragraph{Why not a faster control clock?} The loop poles are at most $12$\,rad/s. At $T=1/120$\,s,
+ZOH costs $\omega T/2$ of phase: $1.4^\circ$ at the $5.7$\,rad/s outer crossover and $2.9^\circ$ at the
+inner pole. A 500\,Hz clock would recover about $2^\circ$ of that, consistent with \texttt{theory.md}
+19.14. The outer loop sits at $0.9$\,Hz, just above the old $0.8$\,Hz rule. That rule came from one
+uncompensated frame of delay on the az/mag plant; here the delay is predicted across and certified.
+
+\section{Disturbance rejection, in simulation}
+\label{sec:sim}
+\texttt{axis\_hover.simulate} implements \eqref{eq:precession}--\eqref{eq:translation} with ground
+contact, measurement noise ($0.034$\,mm, $0.0039$\,rad) and a pure delay. Results over 40\,s:
+\begin{center}\begin{tabular}{lcccc}
+\toprule
+case & lateral RMS & height RMS & overshoot $z$ & $f$ range \\ \midrule
+nominal, mid-air start, 25\,ms & 0.13\,mm & 0.13\,mm & 0.65\,mm & 100.8--101.2\,Hz \\
+takeoff from rest, true $f_h=94$\,Hz ($-7\%$) & 0.13\,mm & 0.13\,mm & 0.62\,mm & 91.2--94.2\,Hz \\
+takeoff from rest, true $f_h=108$\,Hz ($+7\%$) & 0.13\,mm & 0.13\,mm & 0.68\,mm & 103.7--108.2\,Hz \\
+crooked seat, $c=0.028$\,rad ($1.6^\circ$) & 0.13\,mm & 0.13\,mm & 0.65\,mm & 98.0--101.2\,Hz \\
+corner: $\lambda\times1.3e^{\jj15^\circ}$, $\kappa=0.004$, 33\,ms & 0.19\,mm & 0.14\,mm & 0.66\,mm & 100.8--101.2\,Hz \\
+\bottomrule
+\end{tabular}\end{center}
+The self-check also flies six random plants (gain $0.75$--$1.35$, phase $\pm18^\circ$,
+$|\kappa|\le0.005$, $f_h\in[92,110]$\,Hz, 16--33\,ms, takeoff from rest), and it recovers a
+synthetic $(\lambda,a,c,\kappa)$ from a tilt-step take to within 10\%.
+
+\section{Negative results}
+\label{sec:negative}
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Integral action overshoots.} PID with integrators, started mid-air with $f_h$ off by
+  6\%, climbed 115\,mm before the integrator caught up. Replaced by bias states.
+\item \textbf{Trusting the tilt measurement costs a millimetre.} A tilt error $e$ produces a lateral
+  acceleration $ge$, and $g/\omega^2\approx 3400$\,mm/rad at $0.27$\,Hz. With the measured
+  $0.0039$\,rad per frame, the hover wandered by about 1\,mm RMS whatever the process noise. Weighting
+  the tilt measurement at $0.1$\,rad lets position, which is $g$-exact, carry the tilt estimate.
+\item \textbf{The slow, phase-robust design fails on the leak.} Poles $(-6,-1.2\pm1.2\jj)$ tolerate
+  $\pm40^\circ$ of precession phase and a $\times[0.5,2]$ gain error. They tolerate only
+  $|\kappa|\le3.6\times10^{-4}$\,rad/mm ($0.02^\circ$/mm), because the outer stiffness
+  $K_p/g=2\times10^{-4}$\,rad/mm is 35$\times$ smaller than a leak of 30\% of the modelled
+  $1.4^\circ$/mm. Trade-off (phase
+  tolerance at gains $[0.7,1.4]$, leak tolerance):
+  \begin{center}\begin{tabular}{lcc}
+  \toprule poles (rad/s) & phase & $|\kappa|_{\max}$ (rad/mm) \\ \midrule
+  $-9,\ -3\pm3\jj$ & $30^\circ$ & 0.0031 \\
+  $-12,\ -4\pm4\jj$ (shipped) & $20^\circ$ & 0.0059 \\
+  $-15,\ -5\pm5\jj$ & $10^\circ$ & 0.0112 \\ \bottomrule
+  \end{tabular}\end{center}
+  The certified box uses $15^\circ$ and $0.004$ to leave room at the corners.
+\item \textbf{A common quadratic Lyapunov function and an unstructured small gain are too
+  conservative.} With $P$ from $\mathcal A^HP\mathcal A-P=-I$, the invariant ellipsoid admitted only
+  $0.006$\,mm. The unstructured complex stability radius ($8\times10^{-6}$ before scaling,
+  $10^{-3}$ after) needed millions of cells. The per-direction $H_\infty$ bound of Step 3 is about
+  100$\times$ tighter.
+\end{enumerate}
+
+\section{Unmeasured, in order of what blocks hover}
+\begin{enumerate}[leftmargin=*]
+\item $\lambda$ (rate and phase, sign by spin sense), $a$, $c$ and $\kappa$: run the identification take.
+\item The coil-to-camera registration. The holder survey is unconfirmed; this report assumes the
+  coil pose is known (\texttt{coil\_offset\_mm}, \texttt{coil\_yaw\_deg}).
+\item $f_h$ to $\pm7\%$. It is certified over a much wider range, but the band $[85,115]$ assumes it.
+\item The step-out torque. The lemma tolerates down to \lockTorqueScale$\times$ the model value.
+\item The singular-shell height. The controller refuses $19.3$--$22.3$\,mm; the true height must be measured.
+\item The VectorField \texttt{scale=} reply is not yet read back. If it drops below 1, the field is
+  weaker than commanded. Land on it once a flight shows it happening.
+\end{enumerate}
+
+\end{document}

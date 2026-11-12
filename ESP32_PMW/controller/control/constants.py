@@ -36,6 +36,12 @@ F_HOVER_TRACK_HZ = 190.0
 # match and not a step-out at all.
 F_STEPOUT_HZ = 225.0
 
+#: Host receipt of a camera frame minus the moment the LED changed: 8 LED edges on the
+#: 2026-11-05 sync-check takes (1280x800 @ 120 fps, auto exposure), 16-28 ms, mean 22 ms.
+#: Moves with exposure. The pose stamp `tick.t` is the receipt time, so the shutter is this
+#: much earlier; `LLM/analyse/start.py` aligns video with it, the controllers predict across it.
+CAMERA_LATENCY_S = 0.022
+
 # MEASURED 2026-08-29, and STALE as of 2026-09-01. Coil current peaked here and fell above
 # it, so torque margin is worse past resonance -- but lift goes as f^2 and wins anyway until
 # step-out. Optimise for lift.

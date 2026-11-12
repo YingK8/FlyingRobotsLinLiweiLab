@@ -203,6 +203,8 @@ uv run python controller/control/coil_phase.py  # per-channel current phase; --m
 uv run python controller/report.py results/tilt_sweep/<take>   # the whole offline pipeline
 uv run python LLM/analyse/spinup.py --all       # did the rotor turn on each take?
 uv run python controller/control/link.py --rtt # hello + ping round trip; drives nothing
+uv run python controller/control/axis_hover.py        # field-axis hover law: sim + fit self-check
+uv run python controller/control/axis_hover_proof.py  # its stability certificate (minutes)
 c++ -std=c++17 -Ilib/VectorField/src lib/VectorField/src/VectorField.cpp \
     lib/VectorField/check/self_check.cpp -o /tmp/vf && /tmp/vf   # VectorField self-check
 ```

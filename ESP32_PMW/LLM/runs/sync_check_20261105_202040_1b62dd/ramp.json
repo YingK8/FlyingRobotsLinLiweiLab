@@ -1,0 +1,6 @@
+{
+  "note": "2026-11-05 operator request: one cubic ramp, no linear segments, no hold. f = 1 + 194*(t/20)^3 over 20 s (POLYNOMIAL k=3). Starts at zero slope: ~5.4 s below the ~4.9 Hz capture window; slope peaks at 29.1 Hz/s at the end. Host sends stop at 20 s. Not bench-validated.",
+  "segments": [
+    {"from_hz": 1.0, "to_hz": 195.0, "seconds": 20.0, "shape": "poly", "k": 3.0}
+  ]
+}

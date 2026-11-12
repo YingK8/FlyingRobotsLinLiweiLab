@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "method": "host_clock",
+  "clocks": {
+    "camera_A": {
+      "source_name": "camera_A",
+      "scale": 1.0,
+      "offset_s": -126709.33644009099,
+      "method": "single_anchor_offset",
+      "drift_measured": false,
+      "residual_max_s": 0.0,
+      "anchors": [
+        {
+          "source_time_s": 126709.33644009099,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        }
+      ],
+      "limitation": "clock drift is unmeasured"
+    },
+    "camera_B": {
+      "source_name": "camera_B",
+      "scale": 1.0,
+      "offset_s": -126709.33644009099,
+      "method": "single_anchor_offset",
+      "drift_measured": false,
+      "residual_max_s": 0.0,
+      "anchors": [
+        {
+          "source_time_s": 126709.33644009099,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        }
+      ],
+      "limitation": "clock drift is unmeasured"
+    },
+    "esp": {
+      "source_name": "esp",
+      "scale": 1.0,
+      "offset_s": -6.9918245,
+      "method": "single_anchor_offset",
+      "drift_measured": false,
+      "residual_max_s": 0.0,
+      "anchors": [
+        {
+          "source_time_s": 6.9918245,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        }
+      ],
+      "limitation": "clock drift is unmeasured",
+      "evidence": "raw/telemetry.jsonl line 21: START GPIO-call midpoint"
+    }
+  },
+  "association": "host monotonic clock: ESP32 via the lower envelope of telemetry receipt (56 lines, median lag 4.6 ms above it); cameras via frame receipt minus 22 ms (CAMERA_LATENCY_S)",
+  "serial_offset_s": 126702.322615591,
+  "camera_latency_s": 0.022,
+  "expected_error_s": 0.004,
+  "hardware_sync_validated": false,
+  "led_config": {
+    "threshold": 160,
+    "low_threshold": 80,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  },
+  "input_sha256": {
+    "raw/camera/frames.csv": "085a7f6560abd7741642aa33b68b441049da9de269dc20d5079e6650a6d8bae6",
+    "raw/camera/A/A.mp4": "b3fa2acf143051af87c91f189daf3f69d2d0d19fda7df02b1c711242756846f9",
+    "raw/camera/B/B.mp4": "14ec0245ae8771192451f2d7677efc0a429d3db1ec96d2b8469d24c84c0c24fb",
+    "raw/telemetry.jsonl": "9aa19bd80a8d840f1e918e36d27e3de9b85244df25f7054e932d9acbff0c903f"
+  },
+  "device_start": {
+    "led0_us": 6991806,
+    "led1_us": 6991843,
+    "drive0_us": 6991844,
+    "drive1_us": 6992184,
+    "on_us": 30000,
+    "gap_us": 30000,
+    "raw_line_number": 21,
+    "host_receive_s": 126709.320291166,
+    "led_reference_device_s": 6.9918245,
+    "drive_apply_interval_t_s": [
+      1.9500000000505224e-05,
+      0.0003595000000000681
+    ],
+    "measurement_kind": "software_call_brackets_not_measured_current_onset"
+  },
+  "device_stop": {
+    "t0_us": 26996245,
+    "t1_us": 26996291,
+    "on_us": 30000,
+    "gap_us": 30000,
+    "raw_line_number": 65,
+    "host_receive_s": 126729.319951583,
+    "stop_reference_device_t_s": 20.0044435
+  }
+}

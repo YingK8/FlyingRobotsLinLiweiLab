@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "max_stereo_skew_s": 0.01,
+  "led": {
+    "threshold": 160,
+    "low_threshold": 80,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  },
+  "takeoff": {
+    "baseline_start_s": 0.0,
+    "baseline_end_s": 0.2,
+    "min_height_mm": 1.0,
+    "noise_sigma_factor": 5.0,
+    "min_upward_speed_mm_s": 1.0,
+    "sustain_s": 0.05,
+    "max_gap_s": 0.05,
+    "min_baseline_samples": 5
+  },
+  "export": {
+    "pre_roll_s": 0.2,
+    "post_takeoff_s": 2.0
+  },
+  "defaults_status": "engineering starting values; validate on stationary/spinning bearing recordings"
+}

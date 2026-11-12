@@ -1,0 +1,438 @@
+{
+  "schema_version": 1,
+  "run": "sync_check_20261106_192101_055744",
+  "calibration_verified": false,
+  "led_rois_xywh": [
+    [
+      249,
+      228,
+      57,
+      57
+    ],
+    [
+      815,
+      245,
+      51,
+      51
+    ]
+  ],
+  "sync_method": "led",
+  "clocks": {
+    "camera_A": {
+      "source_name": "camera_A",
+      "scale": 1.0000144757701066,
+      "offset_s": -175972.13499279728,
+      "method": "affine",
+      "drift_measured": true,
+      "residual_max_s": 1.4644285784015665e-11,
+      "anchors": [
+        {
+          "source_time_s": 175969.5876975,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        },
+        {
+          "source_time_s": 175989.586634,
+          "experiment_time_s": 19.999226,
+          "residual_s": 1.4644285784015665e-11
+        }
+      ],
+      "limitation": "average scale estimated from events; residual is not an optical synchronization bound"
+    },
+    "camera_B": {
+      "source_name": "camera_B",
+      "scale": 1.0003206652001755,
+      "offset_s": -176026.01731830038,
+      "method": "affine",
+      "drift_measured": true,
+      "residual_max_s": 2.9103830456733704e-11,
+      "anchors": [
+        {
+          "source_time_s": 175969.5899945,
+          "experiment_time_s": 0.0,
+          "residual_s": -2.9103830456733704e-11
+        },
+        {
+          "source_time_s": 175989.5828095,
+          "experiment_time_s": 19.999226,
+          "residual_s": -1.4459544672718039e-11
+        }
+      ],
+      "limitation": "average scale estimated from events; residual is not an optical synchronization bound"
+    },
+    "esp": {
+      "source_name": "esp",
+      "scale": 1.0,
+      "offset_s": -6.210451,
+      "method": "single_anchor_offset",
+      "drift_measured": false,
+      "residual_max_s": 0.0,
+      "anchors": [
+        {
+          "source_time_s": 6.210451,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        }
+      ],
+      "limitation": "clock drift is unmeasured",
+      "evidence": "raw/telemetry.jsonl line 18: LED GPIO call midpoint; optical/electrical delay unvalidated"
+    }
+  },
+  "ramp": {
+    "file": "ramp.json",
+    "label": "1->195Hz/20s/POLY/k3",
+    "duration_s": 20.0,
+    "note": "2026-11-05 operator request: one cubic ramp, no linear segments, no hold. f = 1 + 194*(t/20)^3 over 20 s (POLYNOMIAL k=3). Starts at zero slope: ~5.4 s below the ~4.9 Hz capture window; slope peaks at 29.1 Hz/s at the end. Host sends stop at 20 s. Not bench-validated.",
+    "seq_sent": [
+      "seq=clear",
+      "seq=ramp:1:195:20000:0:3",
+      "seq=go"
+    ],
+    "segments": [
+      {
+        "from_hz": 1.0,
+        "to_hz": 195.0,
+        "seconds": 20.0,
+        "mode": 0,
+        "k": 3.0
+      }
+    ]
+  },
+  "duty": null,
+  "run_record": null,
+  "image_size": [
+    1280,
+    800
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "camera_indices": [
+    1,
+    0
+  ],
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "convention": "OpenCV camera axes (+x right, +y down, +z forward); p_A = T_camA_from_cam @ p_cam; mm",
+  "cameras": {
+    "A": {
+      "K": [
+        [
+          1303.3696816521463,
+          0.0,
+          637.5171198800531
+        ],
+        [
+          0.0,
+          1299.3681311231032,
+          439.7349021586333
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fx": 1303.3696816521463,
+      "fy": 1299.3681311231032,
+      "cx": 637.5171198800531,
+      "cy": 439.7349021586333,
+      "dist_k1k2p1p2k3": [
+        -0.40191219449435855,
+        0.20521779753009675,
+        0.00034761409194885857,
+        0.0007332846528435067,
+        -0.01860528498698978
+      ],
+      "rms_px": 0.3357506473341187,
+      "T_camA_from_cam": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "B": {
+      "K": [
+        [
+          1272.6985264240907,
+          0.0,
+          724.3577778872238
+        ],
+        [
+          0.0,
+          1273.8140644897953,
+          419.92732410063866
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fx": 1272.6985264240907,
+      "fy": 1273.8140644897953,
+      "cx": 724.3577778872238,
+      "cy": 419.92732410063866,
+      "dist_k1k2p1p2k3": [
+        -0.4069797779968828,
+        0.2650720658959435,
+        0.0015790176227492112,
+        0.0003032313539720426,
+        -0.15062839079609433
+      ],
+      "rms_px": 0.29319382997335824,
+      "T_camA_from_cam": [
+        [
+          -0.16709820328965655,
+          0.0023188829949699523,
+          -0.9859375300895203,
+          331.1855251917655
+        ],
+        [
+          0.001953530256385742,
+          0.9999960499129169,
+          0.0020208607325103434,
+          -2.7043662702457922
+        ],
+        [
+          0.9859383216900062,
+          -0.0015883765984350089,
+          -0.16710207324529383,
+          397.7780606461577
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  "extrinsics": {
+    "T_camA_from_camB": [
+      [
+        -0.16709820328965655,
+        0.0023188829949699523,
+        -0.9859375300895203,
+        331.1855251917655
+      ],
+      [
+        0.001953530256385742,
+        0.9999960499129169,
+        0.0020208607325103434,
+        -2.7043662702457922
+      ],
+      [
+        0.9859383216900062,
+        -0.0015883765984350089,
+        -0.16710207324529383,
+        397.7780606461577
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "baseline_mm": 517.6084922264002,
+    "optical_axis_separation_deg": 99.61937000657664,
+    "stereo_rms_px": 0.29780349568317616,
+    "n_pairs": 6,
+    "pair_spread": {
+      "rot_deg_median": 0.07527607819902069,
+      "rot_deg_max": 0.18761796508784032,
+      "trans_mm_median": 0.4055164626549481,
+      "trans_mm_max": 1.114149939285658
+    }
+  },
+  "board": {
+    "board": "10x10_letter_apriltag",
+    "squares": [
+      10,
+      10
+    ],
+    "square_mm": 20.32,
+    "marker_mm": 15.0,
+    "square_mm_measured": false
+  },
+  "world": {
+    "definition": "plumb-up z; x_hint projected perpendicular to z; y=z cross x",
+    "units": "mm",
+    "R_camA_from_world": [
+      [
+        0.9256515588430629,
+        -0.0908339129846819,
+        0.36731239002148963
+      ],
+      [
+        0.270722656649289,
+        -0.5192094081143487,
+        -0.810636067358404
+      ],
+      [
+        0.2643452946208024,
+        0.8498063254515343,
+        -0.4560161997499675
+      ]
+    ],
+    "origin_in_camA_mm": [
+      -77.32141308330881,
+      40.12518815578977,
+      390.91289263523055
+    ],
+    "up_in_camA": [
+      0.36731239002148963,
+      -0.810636067358404,
+      -0.4560161997499675
+    ],
+    "origin": "mounting-boss axis, UNSURVEYED",
+    "method": "viser_app_rope_x_holder",
+    "fixture_fit_rms_px": 0.7600515956007194,
+    "T_camA_from_fixture": [
+      [
+        0.9324526231156672,
+        -0.08656376703333432,
+        0.35076889811057976,
+        -122.56889837368433
+      ],
+      [
+        0.25529683694846084,
+        -0.5291149375908138,
+        -0.809234766839871,
+        33.04370157154451
+      ],
+      [
+        0.25564747346457917,
+        0.844123271243761,
+        -0.47127515556828314,
+        369.3950483506744
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "holder_tilt_from_rope_deg": 1.2920268768034542,
+    "physical_accuracy_validated": false,
+    "camera_poses": {
+      "A": {
+        "position_world_mm": [
+          -42.626094758304916,
+          -318.39028017699286,
+          239.19064950087935
+        ],
+        "R_world_from_cam": [
+          [
+            0.9256515588430629,
+            0.270722656649289,
+            0.2643452946208024
+          ],
+          [
+            -0.0908339129846819,
+            -0.5192094081143487,
+            0.8498063254515343
+          ],
+          [
+            0.36731239002148963,
+            -0.810636067358404,
+            -0.4560161997499675
+          ]
+        ],
+        "elevation_deg": 27.13033738899233,
+        "note": "elevation: optical axis below the world xy plane, positive looking down"
+      },
+      "B": {
+        "position_world_mm": [
+          368.3549283156776,
+          -9.034712880600278,
+          181.63821357782484
+        ],
+        "R_world_from_cam": [
+          [
+            0.10648230867099205,
+            0.2724481850504064,
+            -0.9562601656467944
+          ],
+          [
+            0.8520205146465948,
+            -0.5207678028887083,
+            -0.05349708492824085
+          ],
+          [
+            -0.5125646891480602,
+            -0.8090567853600925,
+            -0.2875840007742877
+          ]
+        ],
+        "elevation_deg": 16.713368825804125,
+        "note": "elevation: optical axis below the world xy plane, positive looking down"
+      }
+    }
+  },
+  "sources": {
+    "stereo_rig": {
+      "path": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/calibration_append/fit_20261105_213821_458879_770999f9/stereo_rig.json",
+      "sha256": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0"
+    },
+    "sync": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/processed/sync.json",
+      "sha256": "eefc2e217df5d4514a1c10c9193ccbb132a654018b4cacab4ccb53f146c0f83e"
+    },
+    "video_A": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/raw/camera/A/A.mp4",
+      "sha256": "d564ee24e1aff547ef9be3b2316be8aeb805e7d52bf2f791a688bfd3a8f278e2"
+    },
+    "video_B": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/raw/camera/B/B.mp4",
+      "sha256": "c69f061ee52d07f73d58566bd5c19239d484744b1b6be345f1e0030c112aa7d3"
+    },
+    "telemetry.jsonl": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/raw/telemetry.jsonl",
+      "sha256": "f063ccbdf82f308a5dbda3e4ea38e7bb14f05f0d907a66ea9d8dea9eaab30b7f"
+    },
+    "manifest.json": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/manifest.json",
+      "sha256": "f383932d0a9d28ae094a07290a71695ac0daaf61fa4bf485e473a89c7a31f70d"
+    },
+    "config.json": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/config.json",
+      "sha256": "289c77ada3261ff760ca24be2e8bfb1f5c8ad9a7333d1d898ad4ac651b89f8ec"
+    },
+    "capture_meta.json": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/raw/camera/meta.json",
+      "sha256": "6ed0aaee01c02a86bf1ed03a4fb921ccb8a8a64cd4f3200794b7baad9244cf45"
+    },
+    "ramp": {
+      "path": "LLM/runs/sync_check_20261106_192101_055744/ramp.json",
+      "sha256": "7fab89212865af3e80ed64a6c59470925546cba1e784cd67c1becb7f91254287"
+    }
+  }
+}

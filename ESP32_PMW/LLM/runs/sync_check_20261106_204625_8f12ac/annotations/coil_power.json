@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "written_utc": "2026-11-07T04:47:32.595224+00:00",
+  "source": "measured after the run (Bench.analyse)",
+  "rule": "powered = peak |I| >= 0.1 A while the device reports f > 5.0 Hz",
+  "coils": {
+    "A": {
+      "current_max_A": 2.27,
+      "powered": true
+    },
+    "B": {
+      "current_max_A": 2.55,
+      "powered": true
+    },
+    "C": {
+      "current_max_A": 2.55,
+      "powered": true
+    },
+    "D": {
+      "current_max_A": 1.93,
+      "powered": true
+    }
+  },
+  "duty_planned_pct": {
+    "A": 100.0,
+    "B": 100.0,
+    "C": 100.0,
+    "D": 100.0
+  },
+  "duty_effective_pct": {
+    "A": 100.0,
+    "B": 100.0,
+    "C": 100.0,
+    "D": 100.0
+  }
+}

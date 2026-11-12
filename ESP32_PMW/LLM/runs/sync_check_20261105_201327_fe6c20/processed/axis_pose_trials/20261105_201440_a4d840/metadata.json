@@ -1,0 +1,60 @@
+{
+  "status": "experimental_only",
+  "method": "controller.pose.axis_pose (Python)",
+  "frames": 3199,
+  "accepted": 0,
+  "reasons": {
+    "missing_or_degenerate_view": 2989,
+    "stereo_skew_exceeds_limit": 210
+  },
+  "physical_accuracy_validated": false,
+  "orientation_valid": false,
+  "position_valid": false,
+  "coordinate_frame": "camera_A",
+  "time_basis": "mean host capture time minus first saved pair; NOT LED zero",
+  "background_mode": "threshold",
+  "background_confirmed": false,
+  "preprocessing_confirmed": false,
+  "reference_axis_camera": [
+    0.0,
+    -1.0,
+    0.0
+  ],
+  "robot_rois": {
+    "A": [
+      41,
+      117,
+      200,
+      200
+    ],
+    "B": [
+      921,
+      120,
+      200,
+      200
+    ]
+  },
+  "threshold": 90.0,
+  "max_skew_s": 0.01,
+  "max_gap_s": 0.05,
+  "max_step_deg": 20.0,
+  "max_frames": null,
+  "core_config": {
+    "min_px": 200,
+    "max_round": 0.95,
+    "min_sin": 0.08715574274765817,
+    "iters": 20,
+    "max_gap_mm": 1.0
+  },
+  "core_alpha": 0.5,
+  "input_sha256": {
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261105_201327_fe6c20/raw/camera/frames.csv": "9f73cfe092c66b52364fa2acdca8c2f070b798fa486b05a35a364548dd0fdcd8",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261105_201327_fe6c20/raw/camera/meta.json": "86a272e180cb67973d6dcfd9323e9b79b83f85f24a2b48b2d600d12a029e48bc",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261105_201327_fe6c20/raw/camera/A/A.mp4": "17ab85a399fd607bcea249e5202bb9dc2bdfdb667ca48a06176d2cc2f9f291c1",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261105_201327_fe6c20/raw/camera/B/B.mp4": "aa15935d3ae02b23e88eb803f6a11b9c0fd9cb682612b0fac61573b016a613f5",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/calibration_append/fit_20261105_213821_458879_770999f9/stereo_rig.json": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/axis_pose.py": "52a263f6a7d11a848df89e344f3431bc8fa5e5392dbb0294c49c04c47574e708",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/pose/axis_pose.py": "3a14d3d9713b6beb26dbe5816c4a03b147c041cf0f112b76c462170a7fc33940"
+  },
+  "limitation": "Silhouette centroid proxy and unsigned axis, branch/sign selected by reference. No roll, gravity frame, takeoff or physical accuracy claim; inspect hub/blade contamination."
+}

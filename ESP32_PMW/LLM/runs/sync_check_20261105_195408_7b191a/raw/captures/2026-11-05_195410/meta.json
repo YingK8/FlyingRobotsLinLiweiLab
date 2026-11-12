@@ -1,0 +1,84 @@
+{
+  "session_id": "20261105_195038_25983a",
+  "camera_config": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "requested": {
+    "width": 1280,
+    "height": 800,
+    "fps": 120
+  },
+  "cameras": [
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    }
+  ],
+  "camera_settings": null,
+  "note": "LLM browser panel",
+  "mode_kind": "flight_frequency_open_loop",
+  "auto_start_preroll_s": 5.0,
+  "host_start_send_complete_s": 120637.245616708,
+  "drive_start_sent": true,
+  "drive_stop_attempted": true,
+  "drive_stop_acknowledged": true,
+  "capture_error": "Encoder errors/queue drops; stopping attempt",
+  "capture_counters": [
+    {
+      "grabbed": 25502,
+      "overwritten_before_consumption": 1364
+    },
+    {
+      "grabbed": 25389,
+      "overwritten_before_consumption": 1251
+    }
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "fps": 120.0,
+  "fps_semantics": "constant_rate_playback_only",
+  "timestamp_semantics": "host_read_completion_not_exposure",
+  "codec": "avc1",
+  "fps_measured": 102.39,
+  "n_frames": 860,
+  "dropped": 1,
+  "encoder_errors": 0,
+  "encoder_finalized": true,
+  "skew": {},
+  "created": "2026-11-05T19:54:18"
+}

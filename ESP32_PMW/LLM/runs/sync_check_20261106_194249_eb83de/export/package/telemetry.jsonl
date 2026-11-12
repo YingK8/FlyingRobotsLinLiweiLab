@@ -1,0 +1,76 @@
+{"host_receive_s": 177272.914533458, "line": "\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\ufffd\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000[flight] phase trim off (uncalibrated)"}
+{"host_receive_s": 177272.914969958, "line": "SYNC_READY v=1"}
+{"host_receive_s": 177272.916738083, "line": "t=1142 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177273.379324583, "line": "t=1643 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177273.878431458, "line": "t=2143 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177274.375311458, "line": "t=2644 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177274.884179333, "line": "t=3145 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177275.379724416, "line": "t=3646 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177275.882328166, "line": "t=4147 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177276.380197791, "line": "t=4648 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177276.881511333, "line": "t=5148 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177277.38342775, "line": "t=5649 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177277.878120541, "line": "t=6150 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 177277.94156825, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=set"}
+{"host_receive_s": 177277.941659416, "line": "seq cleared"}
+{"host_receive_s": 177277.941692416, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=set"}
+{"host_receive_s": 177277.9417225, "line": "seq+ 1: 1.00 -> 230.00 Hz over 23608 ms mode 0 k 3.00"}
+{"host_receive_s": 177277.942080791, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=set"}
+{"host_receive_s": 177277.942128916, "line": "seq+ 2: 230.00 -> 230.00 Hz over 10000 ms mode 0 k 1.00"}
+{"host_receive_s": 177277.942164708, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=set"}
+{"host_receive_s": 177277.946233958, "line": "SYNC_START v=2 led0=6215101 led1=6215158 drive0=6215159 drive1=6215362 on_us=30000 gap_us=30000"}
+{"host_receive_s": 177277.946306666, "line": "seq go: 2 segment(s) from 1.00 Hz"}
+{"host_receive_s": 177277.946359666, "line": "state=1 col=100 az=0 mag=0.00 freq=1.00 duty=set"}
+{"host_receive_s": 177278.379930958, "line": "t=6651 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.003 bal=0 trip=0"}
+{"host_receive_s": 177278.883069083, "line": "t=7152 freq=1.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.004 bal=0 trip=0"}
+{"host_receive_s": 177279.382570416, "line": "t=7653 freq=1.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.003 bal=0 trip=0"}
+{"host_receive_s": 177279.885884, "line": "t=8153 freq=1.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.002 bal=0 trip=0"}
+{"host_receive_s": 177280.386511041, "line": "t=8654 freq=1.2 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.001 bal=0 trip=0"}
+{"host_receive_s": 177280.889692541, "line": "t=9155 freq=1.4 | I[A]: A=0.01 B=0.11 C=0.00 D=0.14 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.139 bal=0 trip=0"}
+{"host_receive_s": 177281.387072875, "line": "t=9656 freq=1.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.02 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.022 bal=0 trip=0"}
+{"host_receive_s": 177281.891306291, "line": "t=10156 freq=2.1 | I[A]: A=0.00 B=0.01 C=0.00 D=0.05 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.046 bal=0 trip=0"}
+{"host_receive_s": 177282.385799375, "line": "t=10657 freq=2.5 | I[A]: A=0.00 B=0.01 C=0.00 D=0.01 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.008 bal=0 trip=0"}
+{"host_receive_s": 177282.890359666, "line": "t=11158 freq=3.1 | I[A]: A=0.00 B=0.03 C=0.00 D=0.03 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.029 bal=0 trip=0"}
+{"host_receive_s": 177283.392989208, "line": "t=11658 freq=3.8 | I[A]: A=0.00 B=0.01 C=0.00 D=0.01 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.014 bal=0 trip=0"}
+{"host_receive_s": 177283.88983325, "line": "t=12159 freq=4.6 | I[A]: A=0.00 B=0.13 C=0.00 D=0.13 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.129 bal=0 trip=0"}
+{"host_receive_s": 177284.390616083, "line": "t=12660 freq=5.6 | I[A]: A=0.00 B=0.09 C=0.00 D=0.11 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.114 bal=0 trip=0"}
+{"host_receive_s": 177284.895549208, "line": "t=13161 freq=6.8 | I[A]: A=0.00 B=0.09 C=0.00 D=0.09 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.094 bal=0 trip=0"}
+{"host_receive_s": 177285.395386, "line": "t=13661 freq=8.1 | I[A]: A=0.00 B=0.05 C=0.00 D=0.07 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.067 bal=0 trip=0"}
+{"host_receive_s": 177285.889804875, "line": "t=14162 freq=9.7 | I[A]: A=0.00 B=0.08 C=0.00 D=0.09 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.093 bal=0 trip=0"}
+{"host_receive_s": 177286.395386291, "line": "t=14663 freq=11.4 | I[A]: A=0.00 B=0.16 C=0.00 D=0.17 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.175 bal=0 trip=0"}
+{"host_receive_s": 177286.902653333, "line": "t=15164 freq=13.4 | I[A]: A=0.00 B=0.17 C=0.00 D=0.14 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.170 bal=0 trip=0"}
+{"host_receive_s": 177287.398211875, "line": "t=15664 freq=15.6 | I[A]: A=0.00 B=0.26 C=0.00 D=0.23 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.262 bal=0 trip=0"}
+{"host_receive_s": 177287.895385291, "line": "t=16165 freq=18.1 | I[A]: A=0.00 B=0.26 C=0.00 D=0.32 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.317 bal=0 trip=0"}
+{"host_receive_s": 177288.400039291, "line": "t=16666 freq=20.9 | I[A]: A=0.00 B=0.32 C=0.00 D=0.23 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.316 bal=0 trip=0"}
+{"host_receive_s": 177288.899178583, "line": "t=17167 freq=23.9 | I[A]: A=0.00 B=0.28 C=0.00 D=0.27 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.283 bal=0 trip=0"}
+{"host_receive_s": 177289.40207425, "line": "t=17667 freq=27.1 | I[A]: A=0.00 B=0.36 C=0.00 D=0.43 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.428 bal=0 trip=0"}
+{"host_receive_s": 177289.895860208, "line": "t=18168 freq=30.7 | I[A]: A=0.00 B=0.47 C=0.00 D=0.45 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.474 bal=0 trip=0"}
+{"host_receive_s": 177290.399709916, "line": "t=18669 freq=34.6 | I[A]: A=0.00 B=0.45 C=0.00 D=0.41 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.447 bal=0 trip=0"}
+{"host_receive_s": 177290.897346041, "line": "t=19169 freq=38.8 | I[A]: A=0.00 B=0.61 C=0.00 D=0.56 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.614 bal=0 trip=0"}
+{"host_receive_s": 177291.405696, "line": "t=19670 freq=43.3 | I[A]: A=0.00 B=0.68 C=0.00 D=0.59 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.677 bal=0 trip=0"}
+{"host_receive_s": 177291.905452416, "line": "t=20171 freq=48.2 | I[A]: A=0.00 B=0.75 C=0.00 D=0.68 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.752 bal=0 trip=0"}
+{"host_receive_s": 177292.399419041, "line": "t=20671 freq=53.5 | I[A]: A=0.00 B=0.76 C=0.00 D=0.59 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.758 bal=0 trip=0"}
+{"host_receive_s": 177292.900927791, "line": "t=21172 freq=59.2 | I[A]: A=0.00 B=0.85 C=0.00 D=0.82 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.851 bal=0 trip=0"}
+{"host_receive_s": 177293.4091565, "line": "t=21673 freq=65.2 | I[A]: A=0.00 B=0.93 C=0.00 D=0.86 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.933 bal=0 trip=0"}
+{"host_receive_s": 177293.906290666, "line": "t=22174 freq=71.6 | I[A]: A=0.00 B=0.97 C=0.00 D=0.93 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=0.966 bal=0 trip=0"}
+{"host_receive_s": 177294.404004625, "line": "t=22674 freq=78.5 | I[A]: A=0.00 B=1.17 C=0.00 D=1.03 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.169 bal=0 trip=0"}
+{"host_receive_s": 177294.911692333, "line": "t=23175 freq=85.8 | I[A]: A=0.00 B=1.26 C=0.00 D=1.26 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.259 bal=0 trip=0"}
+{"host_receive_s": 177295.406858208, "line": "t=23676 freq=93.5 | I[A]: A=0.00 B=1.51 C=0.00 D=1.41 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.506 bal=0 trip=0"}
+{"host_receive_s": 177295.916234041, "line": "t=24177 freq=101.7 | I[A]: A=0.00 B=1.90 C=0.00 D=1.68 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.897 bal=0 trip=0"}
+{"host_receive_s": 177296.411919958, "line": "t=24677 freq=110.3 | I[A]: A=0.00 B=2.11 C=0.00 D=1.94 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.114 bal=0 trip=0"}
+{"host_receive_s": 177296.906587625, "line": "t=25178 freq=119.4 | I[A]: A=0.00 B=2.33 C=0.00 D=2.13 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.334 bal=0 trip=0"}
+{"host_receive_s": 177297.410416375, "line": "t=25679 freq=129.1 | I[A]: A=0.00 B=2.38 C=0.00 D=2.04 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.384 bal=0 trip=0"}
+{"host_receive_s": 177297.914003, "line": "t=26180 freq=139.2 | I[A]: A=0.00 B=2.33 C=0.00 D=2.21 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.332 bal=0 trip=0"}
+{"host_receive_s": 177298.41479925, "line": "t=26680 freq=149.9 | I[A]: A=0.00 B=2.48 C=0.00 D=2.19 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.482 bal=0 trip=0"}
+{"host_receive_s": 177298.914237958, "line": "t=27181 freq=161.1 | I[A]: A=0.00 B=2.28 C=0.00 D=2.02 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.279 bal=0 trip=0"}
+{"host_receive_s": 177299.41330225, "line": "t=27682 freq=172.8 | I[A]: A=0.00 B=2.05 C=0.00 D=1.82 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=2.055 bal=0 trip=0"}
+{"host_receive_s": 177299.912740833, "line": "t=28182 freq=185.1 | I[A]: A=0.00 B=1.78 C=0.01 D=1.59 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.779 bal=0 trip=0"}
+{"host_receive_s": 177300.417083, "line": "t=28683 freq=197.9 | I[A]: A=0.00 B=1.54 C=0.00 D=1.41 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.538 bal=0 trip=0"}
+{"host_receive_s": 177300.916657791, "line": "t=29184 freq=211.4 | I[A]: A=0.00 B=1.40 C=0.00 D=1.24 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.396 bal=0 trip=0"}
+{"host_receive_s": 177301.420342833, "line": "t=29685 freq=225.5 | I[A]: A=0.02 B=1.20 C=0.00 D=1.08 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.198 bal=0 trip=0"}
+{"host_receive_s": 177301.916472416, "line": "t=30186 freq=230.0 | I[A]: A=0.00 B=1.18 C=0.00 D=1.03 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.184 bal=0 trip=0"}
+{"host_receive_s": 177302.418285625, "line": "t=30687 freq=230.0 | I[A]: A=0.00 B=1.07 C=0.00 D=1.00 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.075 bal=0 trip=0"}
+{"host_receive_s": 177302.918438166, "line": "t=31187 freq=230.0 | I[A]: A=0.00 B=1.13 C=0.00 D=0.97 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.135 bal=0 trip=0"}
+{"host_receive_s": 177303.422911708, "line": "t=31688 freq=230.0 | I[A]: A=0.00 B=1.11 C=0.00 D=1.04 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.110 bal=0 trip=0"}
+{"host_receive_s": 177303.922218041, "line": "t=32188 freq=230.0 | I[A]: A=0.00 B=1.16 C=0.00 D=0.97 | duty[%]: A=95.4 B=93.5 C=97.1 D=89.1 | spread=1.161 bal=0 trip=0"}
+{"host_receive_s": 177304.309897875, "line": "[block] button pressed -- gates off, press again to restart"}

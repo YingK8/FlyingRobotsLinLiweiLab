@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "clocks": {},
+  "association": "firmware-declared START/STOP markers decoded in both cameras",
+  "hardware_sync_validated": false,
+  "led": {
+    "A": {
+      "status": "uncertain",
+      "edges": [],
+      "transitions": [],
+      "reason": "no dark observation; LED may already be on or ROI/thresholds may be wrong",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 160,
+        "low_threshold": 80,
+        "min_on_s": 0.008002000002306886,
+        "timing_kind": "host_capture_receipt",
+        "frame_period_s": 0.008002000002306886
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/A/A.mp4",
+      "roi": [
+        140,
+        407,
+        3,
+        3
+      ],
+      "decoded_frames": 3201
+    }
+  },
+  "markers": {
+    "A": {
+      "markers": [],
+      "tolerance_s": 0.016004000004613772,
+      "frame_period_s": 0.008002000002306886,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    }
+  },
+  "input_sha256": {
+    "raw/camera/frames.csv": "4359ba70cecf6e1f1161a548a3c4992ad58010d4f4530dc2737d98be1f781939",
+    "raw/camera/A/A.mp4": "671f61cd511f56d5ea827898ba9bb16b0a1b5913d6f792d23c0352fcc775af79",
+    "raw/camera/B/B.mp4": "080555b1742c7fcca6d03fbb1dc6708153c6a62d7f18f873ad52467ea4746ac9"
+  },
+  "led_config": {
+    "threshold": 160,
+    "low_threshold": 80,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  }
+}

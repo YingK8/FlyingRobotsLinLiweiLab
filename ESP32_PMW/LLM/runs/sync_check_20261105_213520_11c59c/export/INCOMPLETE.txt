@@ -1,0 +1,1 @@
+Host-clock sync changed or failed; rerun sync then process.

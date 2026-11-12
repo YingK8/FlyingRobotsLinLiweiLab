@@ -1,0 +1,107 @@
+{
+  "source_directory": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261105_213520_11c59c/raw/captures/2026-11-05_213522",
+  "imported_at_utc": "2026-11-06T05:36:02.974023+00:00",
+  "sha256": {
+    "A/A.mp4": "b3fa2acf143051af87c91f189daf3f69d2d0d19fda7df02b1c711242756846f9",
+    "B/B.mp4": "14ec0245ae8771192451f2d7677efc0a429d3db1ec96d2b8469d24c84c0c24fb",
+    "frames.csv": "085a7f6560abd7741642aa33b68b441049da9de269dc20d5079e6650a6d8bae6",
+    "meta.json": "0b1f59b35ae6aa72de4eb93ec962302e77e5d579c83a56575e8cf39a9aa3fe26"
+  },
+  "validation": {
+    "session_id": "20261105_213442_21d346",
+    "camera_config": {
+      "indices": [
+        1,
+        0
+      ],
+      "width": 1280,
+      "height": 800,
+      "fps": 120,
+      "rotate180": [
+        false,
+        false
+      ],
+      "backend": "auto",
+      "codec": "auto",
+      "exposure_s": null,
+      "gain": 100,
+      "auto_exposure": true
+    },
+    "camera_indices": [
+      1,
+      0
+    ],
+    "rotate180": [
+      false,
+      false
+    ],
+    "requested": {
+      "width": 1280,
+      "height": 800,
+      "fps": 120
+    },
+    "cameras": [
+      {
+        "width": 1280,
+        "height": 800,
+        "fps": 120.00048,
+        "backend": "AVFOUNDATION",
+        "fourcc": -1
+      },
+      {
+        "width": 1280,
+        "height": 800,
+        "fps": 120.00048,
+        "backend": "AVFOUNDATION",
+        "fourcc": -1
+      }
+    ],
+    "camera_settings": null,
+    "note": "LLM browser panel",
+    "mode_kind": "flight_frequency_open_loop",
+    "auto_start_preroll_s": 5.0,
+    "host_start_send_complete_s": 126709.306669875,
+    "host_scheduled_stop_send_complete_s": 126729.313301666,
+    "drive_start_sent": true,
+    "drive_stop_acknowledged": true,
+    "drive_stop_attempted": true,
+    "capture_counters": [
+      {
+        "grabbed": 7274,
+        "overwritten_before_consumption": 386
+      },
+      {
+        "grabbed": 7255,
+        "overwritten_before_consumption": 367
+      }
+    ],
+    "mode": [
+      1280,
+      800
+    ],
+    "fps": 120.0,
+    "fps_semantics": "constant_rate_playback_only",
+    "timestamp_semantics": "host_read_completion_not_exposure",
+    "codec": "avc1",
+    "fps_measured": 114.47,
+    "n_frames": 3185,
+    "dropped": 0,
+    "encoder_errors": 0,
+    "encoder_finalized": true,
+    "skew": {},
+    "created": "2026-11-05T21:35:50",
+    "validated_written_frames": 3185,
+    "dropped_capture_rows": 0,
+    "legacy_index": false,
+    "decoded_image_sizes": {
+      "A": [
+        1280,
+        800
+      ],
+      "B": [
+        1280,
+        800
+      ]
+    }
+  }
+}

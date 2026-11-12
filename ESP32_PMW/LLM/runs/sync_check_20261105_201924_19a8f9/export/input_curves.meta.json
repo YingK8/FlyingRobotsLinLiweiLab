@@ -1,0 +1,10 @@
+{
+  "status": "inputs_only_not_full_pipeline",
+  "current_samples": 56,
+  "hardware_sync_validated": false,
+  "input_sha256": {
+    "ramp.json": "7fab89212865af3e80ed64a6c59470925546cba1e784cd67c1becb7f91254287",
+    "processed/sync.json": "41f656b8789ec1f2f8492cc09657ea4c5ce9eecf29efbb3113b1b07baf716517",
+    "raw/telemetry.jsonl": "50b98ece51c29e29ad508e7e7bec327d6bd08bf13fa4b7cbc08ce6d652d07e3d"
+  }
+}

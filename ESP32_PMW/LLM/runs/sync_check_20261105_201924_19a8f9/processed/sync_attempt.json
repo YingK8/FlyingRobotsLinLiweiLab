@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "clocks": {},
+  "association": "firmware-declared START/STOP markers decoded in both cameras",
+  "hardware_sync_validated": false,
+  "led": {
+    "A": {
+      "status": "detected",
+      "edges": [
+        {
+          "level": true,
+          "source_time_s": 122155.75402,
+          "lower_s": 122155.750966,
+          "upper_s": 122155.757074,
+          "frame_index": 940,
+          "confirmation_frame_index": 941,
+          "confirmation_source_time_s": 122155.766616
+        }
+      ],
+      "transitions": [
+        {
+          "level": false,
+          "source_time_s": 122155.300923,
+          "lower_s": 122155.29449,
+          "upper_s": 122155.307356,
+          "frame_index": 885,
+          "confirmation_frame_index": 887,
+          "confirmation_source_time_s": 122155.318279
+        },
+        {
+          "level": true,
+          "source_time_s": 122155.75402,
+          "lower_s": 122155.750966,
+          "upper_s": 122155.757074,
+          "frame_index": 940,
+          "confirmation_frame_index": 941,
+          "confirmation_source_time_s": 122155.766616
+        }
+      ],
+      "reason": "level changes held for at least min_on_s",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 160,
+        "low_threshold": 80,
+        "min_on_s": 0.008044000001973473,
+        "timing_kind": "host_capture_receipt",
+        "frame_period_s": 0.008044000001973473
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/A/A.mp4",
+      "roi": [
+        140,
+        407,
+        3,
+        3
+      ],
+      "decoded_frames": 3198
+    }
+  },
+  "markers": {
+    "A": {
+      "markers": [],
+      "tolerance_s": 0.016088000003946945,
+      "frame_period_s": 0.008044000001973473,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    }
+  },
+  "input_sha256": {
+    "raw/camera/frames.csv": "6bd6ff72a15c37aa7be3b68b9d2923ddbc3e28c3b50999d6b4120b58dd4c1c46",
+    "raw/camera/A/A.mp4": "eb44d02ec8060c0bf8c102612c95534a860f9af6fcd281242c57abb9078230df",
+    "raw/camera/B/B.mp4": "228275446434f4004e76077c799372b328b067dea50633309e15b8770b0f207a"
+  },
+  "led_config": {
+    "threshold": 160,
+    "low_threshold": 80,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  }
+}

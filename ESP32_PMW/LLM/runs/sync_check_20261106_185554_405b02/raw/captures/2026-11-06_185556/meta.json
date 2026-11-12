@@ -1,0 +1,166 @@
+{
+  "session_id": "20261106_185501_3d5cc3",
+  "camera_config": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "requested": {
+    "width": 1280,
+    "height": 800,
+    "fps": 120
+  },
+  "cameras": [
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    }
+  ],
+  "camera_settings": null,
+  "note": "LLM browser panel",
+  "mode_kind": "flight_frequency_open_loop",
+  "auto_start_preroll_s": 5.0,
+  "drive_start_sent": false,
+  "drive_stop_attempted": true,
+  "drive_stop_acknowledged": true,
+  "capture_error": "Encoder errors/queue drops; stopping attempt",
+  "capture_counters": [
+    {
+      "grabbed": 5914,
+      "overwritten_before_consumption": 296
+    },
+    {
+      "grabbed": 5896,
+      "overwritten_before_consumption": 278
+    }
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "fps": 120.0,
+  "fps_semantics": "constant_rate_playback_only",
+  "timestamp_semantics": "host_read_completion_not_exposure",
+  "codec": "avc1",
+  "fps_measured": 116.4,
+  "n_frames": 240,
+  "dropped": 1,
+  "encoder_errors": 0,
+  "encoder_finalized": true,
+  "queue_depth_max": 64,
+  "queue_trace": [
+    [
+      0,
+      0
+    ],
+    [
+      12,
+      0
+    ],
+    [
+      24,
+      0
+    ],
+    [
+      36,
+      0
+    ],
+    [
+      48,
+      2
+    ],
+    [
+      60,
+      9
+    ],
+    [
+      72,
+      13
+    ],
+    [
+      84,
+      21
+    ],
+    [
+      96,
+      21
+    ],
+    [
+      108,
+      25
+    ],
+    [
+      120,
+      29
+    ],
+    [
+      132,
+      33
+    ],
+    [
+      144,
+      37
+    ],
+    [
+      156,
+      37
+    ],
+    [
+      168,
+      41
+    ],
+    [
+      180,
+      45
+    ],
+    [
+      192,
+      49
+    ],
+    [
+      204,
+      49
+    ],
+    [
+      216,
+      53
+    ],
+    [
+      228,
+      57
+    ]
+  ],
+  "skew": {},
+  "created": "2026-11-06T18:55:58"
+}

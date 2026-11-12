@@ -70,6 +70,7 @@ class CharucoSpec:
     marker_mm: float
     dict_name: str = "DICT_4X4_100"
     name: str = ""
+    min_fit_corners: int = 0  # 0: `fit_corners` uses MIN_FIT_FRAC; else this board's own floor
 
     def __post_init__(self):
         if not all(math.isfinite(v) and v > 0 for v in (self.square_mm, self.marker_mm)):
@@ -113,6 +114,7 @@ class CharucoSpec:
             self.marker_mm * k,
             self.dict_name,
             self.name,
+            self.min_fit_corners,
         )
 
     def summary(self):
@@ -147,8 +149,13 @@ BOARDS = {
     # 480 px at 600 dpi, so rasterising does not move the pitch), 6.35 mm each side -- clear
     # of a ~4 mm printer edge and the crop marks. 36h11 AprilTags (587 ids, 50 used).
     # Nominal until the print is measured.
+    # min_fit_corners 24 (30%), not half: MIN_FIT_FRAC guards against thin strips on a board
+    # 3 corners wide; 24 of a 9x9 grid is a ~5x5 patch. On the LLM rig every pair sits at
+    # 50-60 deg (16.5d) and there the tags stop decoding (~1.5 px per tag cell): the
+    # 2026-11-11 frame, shrunk to 31 px squares and foreshortened to 60 deg, gave 27
+    # corners, so the half-board floor of 40 refused most pairs (section 16.5e).
     "10x10_letter_apriltag": CharucoSpec(10, 10, 20.32, 15.0, "DICT_APRILTAG_36h11",
-                                         "10x10_letter_apriltag"),
+                                         "10x10_letter_apriltag", min_fit_corners=24),
 }
 
 
@@ -271,6 +278,8 @@ NATIVE_W, NATIVE_H = 1280, 800  # ELP OV9281 native: 119 fps, full field of view
 def fit_corners(spec, frac=MIN_FIT_FRAC):
     """How many corners a view must deliver to be worth calibrating from."""
 
+    if spec.min_fit_corners:
+        return max(MIN_CORNERS, spec.min_fit_corners)
     return max(MIN_CORNERS, int(round(frac * spec.n_corners)))
 
 

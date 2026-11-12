@@ -134,7 +134,10 @@ class App:
         # Millimetres: viser's default camera (3, 3, 3) would sit inside the platform.
         s.scene.set_up_direction("+z")
         s.initial_camera.position, s.initial_camera.look_at = VIEW_FROM_MM, (0.0, 0.0, 40.0)
-        s.initial_camera.near, s.initial_camera.far = 5.0, 5000.0
+        # near < 1: viser draws the background image (every camera overlay, `big`) on a
+        # plane 1 scene unit in front of the camera (client App.tsx BackgroundImage); at
+        # near=5 that plane was clipped and Calibrate's preview never appeared.
+        s.initial_camera.near, s.initial_camera.far = 0.5, 5000.0
         s.scene.add_grid("/grid", width=400.0, height=400.0, cell_size=10.0, section_size=50.0)
         # E-STOP: set from viser's thread, acted on by the main thread (signals and serial
         # stay there, theory.md 19.6). In a run the panel sees it at the next frame and
@@ -232,10 +235,24 @@ class App:
 
     def big(self, view):
         """The large view: replaces the 3D scene until '3D view' is ticked."""
-        show = view is not None and not self.show3d.value
-        self.server.scene.set_background_image(
-            (cv2.cvtColor(view, cv2.COLOR_BGR2RGB) if view.ndim == 3 else cv2.cvtColor(view, cv2.COLOR_GRAY2RGB))
-            if show else None, format="jpeg")
+        if view is None or self.show3d.value:
+            self.server.scene.set_background_image(None)
+            return
+        rgb = cv2.cvtColor(view, cv2.COLOR_BGR2RGB if view.ndim == 3 else cv2.COLOR_GRAY2RGB)
+        # viser stretches the background to fill the canvas: letterbox to the browser's
+        # aspect and send no more pixels than it shows. ponytail: first client's canvas only.
+        cam = next(iter(self.server.get_clients().values()), None)
+        cam = cam and cam.camera
+        if cam and cam.image_width:
+            h, w = rgb.shape[:2]
+            s = min(cam.image_width / w, cam.image_height / h, 1.0)
+            if s < 1.0:
+                rgb = cv2.resize(rgb, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA)
+            h, w = rgb.shape[:2]
+            H, W = max(h, round(w / cam.aspect)), max(w, round(h * cam.aspect))
+            y, x = (H - h) // 2, (W - w) // 2
+            rgb = cv2.copyMakeBorder(rgb, y, H - h - y, x, W - w - x, cv2.BORDER_CONSTANT)
+        self.server.scene.set_background_image(rgb, format="jpeg")
 
     def states(self):
         """Which steps can run, from in-memory state only (it is polled at 5 Hz)."""

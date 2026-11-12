@@ -363,6 +363,11 @@ def self_test():
                             np.zeros(5)) is None, "a non-finite pose must come back as None"
     print("shutter: still passes, 440 px/s refused, duplicate pose refused\n  ok\n")
 
+    tag = BOARDS["10x10_letter_apriltag"]
+    assert fit_corners(tag) == 24 == fit_corners(tag.with_square_mm(20.0)), "override survives a re-pitch"
+    assert fit_corners(BOARDS["4x12_6mm"]) == 16, "boards without an override keep MIN_FIT_FRAC"
+    print("board floor: 10x10 override 24, 4x12 keeps half\n  ok\n")
+
     print("all self-tests passed")
 
 

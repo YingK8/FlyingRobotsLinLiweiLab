@@ -193,8 +193,11 @@ def guide_quads(spec, look, normal, K):
 # ---- pair mode (theory.md 16.5d) ------------------------------------------------------
 PAIR_TILTS_DEG = (0.0, 15.0, 30.0)  # rings round the bisector; the outer one survives only
                                     # where it keeps both cameras under the incidence cap
-PAIR_MARGIN_DEG = 3.0               # targets sit this far under MAX_INCIDENCE_DEG, so a hand
-                                    # a few degrees off still clears `not edge-on`
+PAIR_MARGIN_DEG = 8.0               # targets sit this far under MAX_INCIDENCE_DEG, so a hand
+                                    # a few degrees off still clears `not edge-on`. 3 kept the
+                                    # +/-30 ring at 56/56 deg on the 99.6 deg rig: 5 deg of lean
+                                    # toward one camera put the other past 60, unholdable by
+                                    # hand (operator, 2026-11-11). 8 keeps >= 9.5 (theory 16.5d)
 
 
 def rel_rotation(looks, last=None):

@@ -712,11 +712,28 @@ baseline: lean 15 deg toward A and B passes 60.
 `rel_rotation` takes B -> A from any frame both cameras posed (rough K, a few degrees).
 `pair_targets` builds the bisector plus 15 and 30 deg rings round it, and keeps only the
 normals both cameras see under `MAX_INCIDENCE_DEG - PAIR_MARGIN_DEG`. On this rig that is
-five: the bisector, then +/-15 and +/-30 deg across the baseline. Each panel draws the same
+three: the bisector, then +/-15 deg across the baseline. Each panel draws the same
 target in its own frame (`in_camera`) and names the edges to bring nearer. Once every pair
 target is filled the guide drops to the per-camera mode of 16.5c. Rolling the board in its
 own plane does not move its normal, so the targets cannot ask for it, but `new pose`
 counts it: roll for extra pairs once the targets are done.
+
+**The margin is lean slack, not a rounding allowance.** The first margin was 3 deg, which
+kept +/-30 deg across the baseline as well: 56 deg in both cameras. What a hand gets wrong is
+the lean *along* the baseline, and every degree of it raises one camera's incidence while
+lowering the other's. Leaning from a target toward one camera until the other passes 60 deg
+(axes 99.6 deg apart, calibration of 2026-11-05) gives this much room:
+
+| target | incidence A / B | lean before one camera passes 60 |
+|---|---|---|
+| bisector | 49.8 / 49.8 | 10.5 deg |
+| +/-15 across | 51.4 / 51.4 | 9.5 deg |
+| +/-30 across | 56.0 / 56.0 | 5.0 deg |
+
+On the bench the +/-30 targets could not be filled. Matching the ghost in one panel always
+pushed the other camera past the cap (operator, 2026-11-11). `PAIR_MARGIN_DEG` is now 8,
+so `max_inc` is 52 deg and only the first two rows remain. The rule is general rather than a
+deleted ring: on a rig with its axes closer together, the 30 deg ring comes back by itself.
 
 **The variety gate was the cap.** `tilt variety` refuses a seventh pair in a 15 deg band
 until the set's orientation spread reaches 25 deg. It measured that spread over the
@@ -725,6 +742,32 @@ baseline, that is a permanent stop at about six: the two rounds that day saved e
 and 7. The spread exists for camera A's intrinsics, which are fitted from pairs and solos
 together (16.5a), so it is now measured over that whole set (`gates(..., variety=solo[0])`).
 The solos supply the spread, and the band stops binding once they have.
+
+### 16.5e The half-board floor, on a board that is not a strip
+
+`MIN_FIT_FRAC = 0.5` (14.3a) was measured on the 4x12 board, which is 3 corners wide. A
+view with a third of its corners is a thin strip there, and the views that blew up to 1.9 px
+all had 11-18 of 33. The 10x10 AprilTag board has a 9x9 corner grid, so 24 corners is
+roughly a 5x5 patch: a well-conditioned homography, not a strip.
+
+On the LLM rig the floor was the real limit on pairs. Every pair sits at 50-60 deg (16.5d),
+and at that tilt the 36h11 tags stop decoding before the chessboard corners blur. One tag
+cell is about 1.5 px at 31 px squares foreshortened to 60 deg. Measured on the 2026-11-11
+frame (camera A, 53 corners as shot), shrunk and squashed to imitate range and tilt:
+
+| squares | tilt | corners (default detector) |
+|---|---|---|
+| ~90 px | 0-60 deg | 53 |
+| ~45 px | 60 deg | 44 |
+| ~31 px | 60 deg | 27 |
+
+The half-board floor of 40 refused most of what the rig can produce. Retuning the detector
+did not help: a wider adaptive-threshold sweep, a smaller minimum perimeter, a looser error
+correction and `tryRefineMarkers` found the same 53 corners at up to 60 deg, at 3-5x the
+time (62 -> 319 ms). This is a resolution limit, not a threshold. The board now carries its
+own floor, `min_fit_corners=24` (30 %), and `fit_corners` uses it in place of the fraction.
+Boards without one keep 0.5. The held-out check (`verify_bag`) still judges the result.
+A bigger print, or holding the board nearer, is the way to get more corners per view.
 
 ### 16.6 What does not work
 

@@ -1,0 +1,8 @@
+{
+  "note": "1 to 20 Hz linearly in 5 s, then 20 to 170 Hz linearly in 15 s, then hold 170 Hz for 10 s (30 s total). Hold duration retained from the previous profile pending operator preference.",
+  "segments": [
+    {"from_hz": 1.0, "to_hz": 20.0, "seconds": 5.0, "shape": "linear"},
+    {"from_hz": 20.0, "to_hz": 170.0, "seconds": 15.0, "shape": "linear"},
+    {"from_hz": 170.0, "to_hz": 170.0, "seconds": 10.0, "shape": "linear"}
+  ]
+}

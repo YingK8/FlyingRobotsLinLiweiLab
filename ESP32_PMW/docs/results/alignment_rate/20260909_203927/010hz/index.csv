@@ -1,0 +1,2 @@
+freq_hz,repeat,outcome,flight,log,heat_c,telemetry_samples
+10.0,1,ok,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-09_203936,/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260909_203936/sweep.log,0.464,41

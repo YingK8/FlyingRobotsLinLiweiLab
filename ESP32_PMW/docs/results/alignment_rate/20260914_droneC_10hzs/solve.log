@@ -1,0 +1,283 @@
+69 takes to solve (stride 1, 4 workers)
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=9, pipe_handle=17)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 286, in run_path
+  File "<frozen runpy>", line 254, in _get_code_from_file
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/<stdin>'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=9, pipe_handle=19)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 286, in run_path
+  File "<frozen runpy>", line 254, in _get_code_from_file
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/<stdin>'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=9, pipe_handle=21)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 286, in run_path
+  File "<frozen runpy>", line 254, in _get_code_from_file
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/<stdin>'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=9, pipe_handle=23)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/spawn.py", line 297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 286, in run_path
+  File "<frozen runpy>", line 254, in _get_code_from_file
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/<stdin>'
+[1/69] FAILED 10.0 Hz 2026-09-14_092327: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[2/69] FAILED 10.0 Hz 2026-09-14_092439: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[3/69] FAILED 10.0 Hz 2026-09-14_092552: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[4/69] FAILED 10.0 Hz 2026-09-14_092705: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[5/69] FAILED 10.0 Hz 2026-09-14_092817: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[6/69] FAILED 10.0 Hz 2026-09-14_092930: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[7/69] FAILED 10.0 Hz 2026-09-14_093043: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[8/69] FAILED 10.0 Hz 2026-09-14_093157: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[9/69] FAILED 10.0 Hz 2026-09-14_093310: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[10/69] FAILED 10.0 Hz 2026-09-14_093423: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[11/69] FAILED 20.0 Hz 2026-09-14_093547: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[12/69] FAILED 20.0 Hz 2026-09-14_093700: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[13/69] FAILED 20.0 Hz 2026-09-14_093814: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[14/69] FAILED 20.0 Hz 2026-09-14_093926: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[15/69] FAILED 20.0 Hz 2026-09-14_094039: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[16/69] FAILED 20.0 Hz 2026-09-14_094152: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[17/69] FAILED 20.0 Hz 2026-09-14_094305: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[18/69] FAILED 20.0 Hz 2026-09-14_094419: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[19/69] FAILED 20.0 Hz 2026-09-14_094532: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[20/69] FAILED 20.0 Hz 2026-09-14_094645: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[21/69] FAILED 30.0 Hz 2026-09-14_094810: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[22/69] FAILED 30.0 Hz 2026-09-14_094924: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[23/69] FAILED 30.0 Hz 2026-09-14_095038: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[24/69] FAILED 30.0 Hz 2026-09-14_095152: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[25/69] FAILED 30.0 Hz 2026-09-14_095306: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[26/69] FAILED 30.0 Hz 2026-09-14_095421: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[27/69] FAILED 30.0 Hz 2026-09-14_095535: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[28/69] FAILED 30.0 Hz 2026-09-14_095649: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[29/69] FAILED 30.0 Hz 2026-09-14_095803: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[30/69] FAILED 30.0 Hz 2026-09-14_095917: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[31/69] FAILED 40.0 Hz 2026-09-14_100043: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[32/69] FAILED 40.0 Hz 2026-09-14_100158: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[33/69] FAILED 40.0 Hz 2026-09-14_100313: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[34/69] FAILED 40.0 Hz 2026-09-14_100428: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[35/69] FAILED 40.0 Hz 2026-09-14_100544: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[36/69] FAILED 40.0 Hz 2026-09-14_100659: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[37/69] FAILED 40.0 Hz 2026-09-14_100815: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[38/69] FAILED 40.0 Hz 2026-09-14_100930: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[39/69] FAILED 40.0 Hz 2026-09-14_101046: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[40/69] FAILED 40.0 Hz 2026-09-14_101201: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[41/69] FAILED 50.0 Hz 2026-09-14_112833: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[42/69] FAILED 50.0 Hz 2026-09-14_112949: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[43/69] FAILED 50.0 Hz 2026-09-14_113106: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[44/69] FAILED 50.0 Hz 2026-09-14_113222: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[45/69] FAILED 50.0 Hz 2026-09-14_113338: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[46/69] FAILED 50.0 Hz 2026-09-14_113454: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[47/69] FAILED 50.0 Hz 2026-09-14_113610: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[48/69] FAILED 50.0 Hz 2026-09-14_113726: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[49/69] FAILED 60.0 Hz 2026-09-14_113854: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[50/69] FAILED 60.0 Hz 2026-09-14_114006: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[51/69] FAILED 60.0 Hz 2026-09-14_114118: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[52/69] FAILED 60.0 Hz 2026-09-14_114231: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[53/69] FAILED 60.0 Hz 2026-09-14_114428: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[54/69] FAILED 60.0 Hz 2026-09-14_114710: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[55/69] FAILED 60.0 Hz 2026-09-14_114953: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[56/69] FAILED 60.0 Hz 2026-09-14_115226: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[57/69] FAILED 60.0 Hz 2026-09-14_115505: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[58/69] FAILED 60.0 Hz 2026-09-14_115741: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[59/69] FAILED 70.0 Hz 2026-09-14_120150: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[60/69] FAILED 70.0 Hz 2026-09-14_120514: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[61/69] FAILED 70.0 Hz 2026-09-14_120855: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[62/69] FAILED 70.0 Hz 2026-09-14_121229: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[63/69] FAILED 70.0 Hz 2026-09-14_121600: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[64/69] FAILED 70.0 Hz 2026-09-14_121938: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[65/69] FAILED 70.0 Hz 2026-09-14_122318: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[66/69] FAILED 70.0 Hz 2026-09-14_122649: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[67/69] FAILED 70.0 Hz 2026-09-14_123030: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[68/69] FAILED 70.0 Hz 2026-09-14_123404: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+[69/69] FAILED 80.0 Hz 2026-09-14_123952: BrokenProcessPool: A process in the process pool was terminated abruptly while the future was running or pending.
+solve done
+69 takes to solve (stride 1, 4 workers)
+[1/69] ok 10.0 Hz 2026-09-14_092705
+[2/69] ok 10.0 Hz 2026-09-14_092439
+[3/69] ok 10.0 Hz 2026-09-14_092552
+[4/69] ok 10.0 Hz 2026-09-14_092327
+[5/69] ok 10.0 Hz 2026-09-14_092817
+[6/69] ok 10.0 Hz 2026-09-14_093043
+[7/69] ok 10.0 Hz 2026-09-14_093157
+[8/69] ok 10.0 Hz 2026-09-14_092930
+[9/69] ok 10.0 Hz 2026-09-14_093310
+[10/69] ok 10.0 Hz 2026-09-14_093423
+[11/69] ok 20.0 Hz 2026-09-14_093700
+[12/69] ok 20.0 Hz 2026-09-14_093547
+[13/69] ok 20.0 Hz 2026-09-14_093926
+[14/69] ok 20.0 Hz 2026-09-14_093814
+[15/69] ok 20.0 Hz 2026-09-14_094039
+[16/69] ok 20.0 Hz 2026-09-14_094152
+[17/69] ok 20.0 Hz 2026-09-14_094305
+[18/69] ok 20.0 Hz 2026-09-14_094419
+[19/69] ok 20.0 Hz 2026-09-14_094532
+[20/69] ok 20.0 Hz 2026-09-14_094645
+[21/69] ok 30.0 Hz 2026-09-14_094810
+[22/69] ok 30.0 Hz 2026-09-14_095152
+[23/69] ok 30.0 Hz 2026-09-14_094924
+[24/69] ok 30.0 Hz 2026-09-14_095038
+[25/69] ok 30.0 Hz 2026-09-14_095306
+[26/69] ok 30.0 Hz 2026-09-14_095535
+[27/69] ok 30.0 Hz 2026-09-14_095421
+[28/69] ok 30.0 Hz 2026-09-14_095649
+[29/69] ok 30.0 Hz 2026-09-14_095803
+[30/69] ok 30.0 Hz 2026-09-14_095917
+[31/69] ok 40.0 Hz 2026-09-14_100043
+[32/69] ok 40.0 Hz 2026-09-14_100158
+[33/69] ok 40.0 Hz 2026-09-14_100428
+[34/69] ok 40.0 Hz 2026-09-14_100313
+[35/69] ok 40.0 Hz 2026-09-14_100544
+[36/69] ok 40.0 Hz 2026-09-14_100659
+[37/69] ok 40.0 Hz 2026-09-14_100815
+[38/69] ok 40.0 Hz 2026-09-14_100930
+[39/69] ok 40.0 Hz 2026-09-14_101046
+[40/69] ok 40.0 Hz 2026-09-14_101201
+[41/69] ok 50.0 Hz 2026-09-14_112833
+[42/69] ok 50.0 Hz 2026-09-14_112949
+[43/69] ok 50.0 Hz 2026-09-14_113106
+[44/69] ok 50.0 Hz 2026-09-14_113222
+[45/69] ok 50.0 Hz 2026-09-14_113338
+[46/69] ok 50.0 Hz 2026-09-14_113610
+[47/69] ok 50.0 Hz 2026-09-14_113454
+[48/69] ok 50.0 Hz 2026-09-14_113726
+[49/69] ok 60.0 Hz 2026-09-14_113854
+[50/69] ok 60.0 Hz 2026-09-14_114118
+[51/69] ok 60.0 Hz 2026-09-14_114006
+[52/69] ok 60.0 Hz 2026-09-14_114231
+[53/69] ok 60.0 Hz 2026-09-14_114428
+[54/69] ok 60.0 Hz 2026-09-14_114710
+[55/69] ok 60.0 Hz 2026-09-14_114953
+[56/69] ok 60.0 Hz 2026-09-14_115226
+[57/69] ok 60.0 Hz 2026-09-14_115741
+[58/69] ok 60.0 Hz 2026-09-14_115505
+[59/69] ok 70.0 Hz 2026-09-14_120150
+[60/69] ok 70.0 Hz 2026-09-14_120514
+[61/69] ok 70.0 Hz 2026-09-14_120855
+[62/69] ok 70.0 Hz 2026-09-14_121229
+[63/69] ok 70.0 Hz 2026-09-14_121600
+[64/69] ok 70.0 Hz 2026-09-14_121938
+[65/69] ok 70.0 Hz 2026-09-14_122649
+[66/69] ok 70.0 Hz 2026-09-14_123030
+[67/69] ok 70.0 Hz 2026-09-14_122318
+[68/69] ok 80.0 Hz 2026-09-14_123952
+[69/69] ok 70.0 Hz 2026-09-14_123404
+2026-09-14_092439: 9630/9630 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092439
+2026-09-14_092930: 9480/9480 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092930
+2026-09-14_093700: 9769/9769 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093700
+2026-09-14_094039: 9766/9766 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094039
+2026-09-14_094532: 9774/9774 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094532
+2026-09-14_095038: 9986/9986 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095038
+2026-09-14_095649: 9988/9988 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095649
+2026-09-14_100158: 10197/10197 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100158
+2026-09-14_100659: 10199/10199 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100659
+2026-09-14_101201: 10195/10195 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_101201
+2026-09-14_113222: 10349/10349 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113222
+2026-09-14_113726: 10400/10400 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113726
+2026-09-14_114231: 9509/9509 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114231
+2026-09-14_115226: 9563/9563 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_115226
+2026-09-14_120514: 9770/9770 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_120514
+2026-09-14_121938: 9770/9770 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_121938
+2026-09-14_123404: 8848/8848 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_123404
+2026-09-14_092705: 9578/9578 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092705
+2026-09-14_092817: 9610/9610 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092817
+2026-09-14_093310: 9576/9576 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093310
+2026-09-14_093814: 9746/9746 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093814
+2026-09-14_094419: 9773/9773 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094419
+2026-09-14_094924: 9982/9982 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094924
+2026-09-14_095535: 9983/9983 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095535
+2026-09-14_095917: 9987/9987 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095917
+2026-09-14_100428: 10195/10195 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100428
+2026-09-14_100815: 10193/10193 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100815
+2026-09-14_112833: 10328/10328 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_112833
+2026-09-14_113338: 10401/10401 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113338
+2026-09-14_113854: 9516/9516 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113854
+2026-09-14_114428: 9564/9564 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114428
+2026-09-14_115505: 9563/9563 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_115505
+2026-09-14_121229: 9776/9776 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_121229
+2026-09-14_122649: 9041/9041 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_122649
+2026-09-14_123952: 3119/3119 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_123952
+2026-09-14_092327: 9639/9639 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092327
+2026-09-14_093157: 9501/9501 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093157
+2026-09-14_093547: 9776/9776 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093547
+2026-09-14_094152: 9753/9753 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094152
+2026-09-14_094645: 9774/9774 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094645
+2026-09-14_095152: 9652/9652 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095152
+2026-09-14_095421: 9979/9979 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095421
+2026-09-14_100043: 10192/10192 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100043
+2026-09-14_100544: 10198/10198 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100544
+2026-09-14_101046: 10200/10200 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_101046
+2026-09-14_113106: 10279/10385 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113106
+2026-09-14_113610: 10400/10400 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113610
+2026-09-14_114006: 9565/9565 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114006
+2026-09-14_114953: 9566/9566 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114953
+2026-09-14_120150: 9561/9561 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_120150
+2026-09-14_121600: 9769/9769 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_121600
+2026-09-14_123030: 8591/8591 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_123030
+2026-09-14_092552: 9628/9628 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_092552
+2026-09-14_093043: 9471/9471 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093043
+2026-09-14_093423: 9639/9639 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093423
+2026-09-14_093926: 9763/9763 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_093926
+2026-09-14_094305: 9761/9762 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094305
+2026-09-14_094810: 9987/9987 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_094810
+2026-09-14_095306: 9978/9978 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095306
+2026-09-14_095803: 9985/9985 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_095803
+2026-09-14_100313: 10193/10193 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100313
+2026-09-14_100930: 10200/10200 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_100930
+2026-09-14_112949: 10327/10327 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_112949
+2026-09-14_113454: 10398/10398 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_113454
+2026-09-14_114118: 9564/9564 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114118
+2026-09-14_114710: 9562/9562 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_114710
+2026-09-14_115741: 9561/9561 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_115741
+2026-09-14_120855: 9781/9781 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_120855
+2026-09-14_122318: 9777/9777 frames solved -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/flights/2026-09-14_122318
+solve done

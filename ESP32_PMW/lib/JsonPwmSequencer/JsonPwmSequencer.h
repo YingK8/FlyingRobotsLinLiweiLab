@@ -3,26 +3,21 @@
 #include <Arduino.h>
 #include <vector>
 
-// Forward declaration for ArduinoJson
 class JsonVariant;
 
 class JsonPwmSequencer : public PwmSequencer {
 public:
   JsonPwmSequencer(PwmController *phaseCtrl);
 
-  /**
-   * @brief Load and compile a JSON schedule from SPIFFS. Full schema: README.md.
-   *        Object {resolution_ms, initial_freq, initial_duty, direction,
-   *        schedule:[...]}; a bare array is the schedule with defaults
-   *        (resolution_ms 25, initial_freq 0 = DC, initial_duty {50,50,50,50},
-   *        direction CCW).
-   * @return False if the file can't be opened or parsed.
-   */
+  // Absent keys fall back to project defaults; a bare array is the schedule.
   bool loadFromJsonFile(const char *filename);
 
-  /** @brief Telemetry label for queue step `i`, or "" if none / out of range.
-   *  Callers poll labelForStep(currentIndex()) each loop() and print on change. */
-  const char *labelForStep(size_t i) const;
+  // The schedule sends nothing over serial; this label is the only host marker.
+  const String &stepLabel() const {
+    static const String kNone;
+    size_t i = currentIndex();
+    return i < _stepLabels.size() ? _stepLabels[i] : kNone;
+  }
 
 private:
   std::vector<String> _stepLabels;

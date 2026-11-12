@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "units": "mm",
+  "dictionary": "DICT_APRILTAG_36h11",
+  "tag_black_edge_mm": 25.0,
+  "survey_confirmed": false,
+  "cad_source": "CAD/coil_array_mount/coil_array_mount_body1.step (outside ESP32_PMW)",
+  "bearing_center_fixture_mm": null,
+  "x_hint_fixture": [
+    1,
+    0,
+    0
+  ],
+  "corner_order": "decoded canonical tag TL,TR,BR,BL, including black border; not white paper margin",
+  "note": "User confirms bearing at tray center in plan; tags on each corner cube top and two outward sides, not the two coil-facing sides or bottom. IDs 1-12 still need face/orientation mapping; bearing reference height and tag placement offsets remain unknown. 25 mm black-edge interpretation needs confirmation.",
+  "markers": [
+    {
+      "id": 1,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 2,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 3,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 4,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 5,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 6,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 7,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 8,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 9,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 10,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 11,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    },
+    {
+      "id": 12,
+      "block": null,
+      "face": null,
+      "corners_fixture_mm": null
+    }
+  ],
+  "physical_layout": {
+    "source": "User clarification 2026-10-27",
+    "bearing_planar_location": "center of coil-array tray; numerical CAD coordinates and bearing reference height not yet established",
+    "blocks": "four corner cubes",
+    "tagged_faces_per_block": [
+      "top",
+      "outward side 1",
+      "outward side 2"
+    ],
+    "untagged_faces_per_block": [
+      "coil-facing side 1",
+      "coil-facing side 2",
+      "bottom"
+    ],
+    "tag_placement_on_face": "in-plane centering/offset and rotation not yet confirmed"
+  }
+}

@@ -42,9 +42,9 @@ the notch. The board tied directly to the hub had a low-impedance return and sta
 
 ### Grounding configurations compared
 
-Files: `left_ground.csv`, `right_ground_17.csv`, `seperate_ground.csv`
+Files: `debug/left_ground.csv`, `debug/right_ground_17.csv`, `debug/seperate_ground.csv`
 (all in **kHz** units; `plot_grounds.py` normalizes to Hz).
-Graph: **`ground_compare.png`** (4-grid, one panel per channel, three configs overlaid).
+Graph: **`debug/ground_compare.png`** (4-grid, one panel per channel, three configs overlaid).
 
 | Config | Peak freq (A/B/C/D) | Peak level | Channel match | Notch? |
 |---|---|---|---|---|
@@ -65,9 +65,9 @@ Graph: **`ground_compare.png`** (4-grid, one panel per channel, three configs ov
 
 ## 3. 190 Hz matching (separate grounds)
 
-Files: `seperate_ground.csv`, `seperate_ground-40sec.csv`
+Files: `debug/seperate_ground.csv`, `seperate_ground-40sec.csv`
 Script: `plot_separate.py` (auto-detects Hz/kHz units; dashed line at f₀ = 190 Hz)
-Graphs: `separate_all.png`, `separate_grid.png`,
+Graphs: `debug/separate_all.png`, `debug/separate_grid.png`,
 `seperate_ground-40sec_all.png`, `seperate_ground-40sec_grid.png`
 
 Response value **at 190 Hz** (40-sec slow sweep, cleanest):
@@ -157,6 +157,10 @@ I_load(V_CS) = g · (V_CS − offset)
 | D | **−40.8 mV** | 9.17 | 23,290 | 0.968 | 9.87 |
 
 Graph: **`calibration_fit.png`** (4-grid, CS vs current with fit line + offset).
+
+> **Superseded.** These gains are from this 2026-06-18 rig. The live firmware
+> carries its own recalibrated values in `ESP32_PMW/src/drive_common.h` (`SENS`);
+> use those, not the table above. The findings below still hold.
 
 **Findings:**
 - **B and D share an identical ~−40 mV CS offset** — they're on the **same board**, so this is

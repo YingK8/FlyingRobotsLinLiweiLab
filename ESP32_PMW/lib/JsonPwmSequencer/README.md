@@ -24,11 +24,11 @@ arguments the loader used to take, so the call site is just
 `seq.loadFromJsonFile("/experiment.json")`. All are optional:
 
 | key | default | meaning |
-| --- | --- | --- |
+|---|---|---|
 | `resolution_ms` | `25` | compile step resolution (ms) |
 | `initial_freq` | `0.0` | starting global drive frequency (Hz); `0` = DC/stationary until the schedule ramps it up |
 | `initial_duty` | `[50,50,50,50]` | starting commutation duty per channel (A,B,C,D) |
-| `direction` | `"CCW"` | seeds all four phases from the project `CW {270,90,180,0}` / `CCW {90,270,180,0}` convention |
+| `direction` | `"CCW"` | seeds A/B/C/D phases from the project `CW {0,90,180,270}` / `CCW {0,270,180,90}` convention (operator-confirmed 2026-10-28; opposite pairs A/C and B/D) |
 | `initial_phase` | (from `direction`) | optional explicit `float[4]` phase override, per channel |
 
 A bare top-level **array** is still accepted — it is treated as the `schedule`
@@ -46,7 +46,7 @@ are logged as a warning at load time but don't abort the rest of the file.
 `method` is one of:
 
 | method | fields used | effect |
-| --- | --- | --- |
+|---|---|---|
 | `addDutyCycleTask` | `channels`, `value` | instantly set the channel's commutation duty (0-100%) |
 | `addPhaseTask` | `channels`, `value` | instantly set the channel's phase (degrees) |
 | `addCarrierDutyCycleTask` | `channels`, `value` | instantly set the channel's carrier duty (0-100%) |
@@ -58,9 +58,16 @@ are logged as a warning at load time but don't abort the rest of the file.
 | `addCarrierEaseRampTask` | `from`, `to`, `duration_ms`, `shape` | S-curve ramp of carrier duty, all channels identically |
 | `addCarrierExponentialRampTask` | `from`, `to`, `duration_ms`, `shape` | exponential ramp of carrier duty, all channels identically |
 | `addPhaseRampTask` | `channels`, `from`, `to`, `duration_ms`, `shape` | S-curve ramp of one channel's phase, others unchanged (`shape` optional) |
-| `setDirection` | `value` (0=CW, non-zero=CCW) | instantly set all 4 channels' phase to the project's CW `{270,90,180,0}` or CCW `{90,270,180,0}` convention. `value` defaults to `0`, so omitting it means **CW** — note this is the opposite of the top-level `direction` key, which defaults to CCW |
+| `setDirection` | `value` (0=CW, 1=CCW) | instantly set all 4 channels' phase to the project's CW `{0,90,180,270}` or CCW `{0,270,180,90}` convention; reversing direction swaps B/D |
 | `activateChannels` | `mask` (0-15 bitmask), `value` (ON carrier duty %) | instantly set carrier duty to `value` for masked channels, `0` for the rest |
-| `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation (`labelForStep()`); no hardware effect, does not advance the queue |
+| `label` | `value` (string) | tags every step from here until the next `label`, for telemetry correlation; no hardware effect, does not advance the queue |
+
+For every per-channel method (`addDutyCycleTask`, `addPhaseTask`,
+`addCarrierDutyCycleTask`, and `addPhaseRampTask`), the target `"channels"` is a
+**single int** (`"channels": 0`) or an **int array** (`"channels": [0, 3]`). An array
+applies the same value to every listed channel in one queue step, so they change
+*simultaneously*, unlike consecutive single-channel calls, which produce one step per
+channel a compile tick apart. Out-of-range indices are dropped.
 
 `addLinearRampTask` / `addCarrierRampTask` keep their historical names but are
 really *power* ramps (firmware `TaskMode::POLYNOMIAL`). Omitting `shape` gives
@@ -75,11 +82,7 @@ schedules need no edit:
 There is **no loop/repeat primitive** — an experiment that needs repeats
 (e.g. a coupling sweep across several current levels) must be unrolled into
 the flat array by whatever generates the JSON (see
-`ai/gen_coupling_experiment.py`), keeping the on-device queue linear.
-
-The schedules actually shipped on the device, and a longer prose walkthrough of
-every method and its effects, are catalogued in
-[`spiffs_data/README.md`](../../spiffs_data/README.md).
+`ai/experiments/gen_coupling_experiment.py`), keeping the on-device queue linear.
 
 ## Example
 
@@ -95,13 +98,24 @@ every method and its effects, are catalogued in
     { "method": "activateChannels", "mask": 1, "value": 100.0 },
     { "method": "addWaitTask", "duration_ms": 3000 },
     { "method": "activateChannels", "mask": 0, "value": 0.0 },
+    { "method": "addWaitTask", "duration_ms": 2000 },
+    { "method": "label", "value": "CW_I100_PAIR_AB" },
+    { "method": "activateChannels", "mask": 3, "value": 100.0 },
+    { "method": "addWaitTask", "duration_ms": 3000 },
+    { "method": "activateChannels", "mask": 0, "value": 0.0 },
     { "method": "addWaitTask", "duration_ms": 2000 }
   ]
 }
 ```
 
-See `EXAMPLES.md` for more, and `example_profile.json` for a minimal file you
-can load as-is.
+One current level, one direction, one solo then one pair. This is the pattern
+`ai/experiments/gen_coupling_experiment.py` repeats across all 11 combos (4 solos,
+6 pairs, ALL) and every current level, for both directions.
+
+`mask` is a 4-bit channel bitmask (bit 0=A, 1=B, 2=C, 3=D), so `1` is solo A,
+`3` is A+B, and `15` is all four.
+
+See `example_profile.json` for a minimal file you can load as-is.
 
 ## Usage
 

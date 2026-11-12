@@ -1,0 +1,30 @@
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/controller/control/alignment_rate.py:1604: UserWarning: This figure includes Axes that are not compatible with tight_layout, so results might be incorrect.
+  fig.tight_layout()
+  120 Hz: 0 usable repeats, skipped
+  10 take(s) REFUSED -- solved below 2x the drive frequency, so the once-per-rev wobble is aliased (kept on disk):
+       40 Hz  2026-09-09_211035  solved  51.1 Hz, needs 80
+       40 Hz  2026-09-09_211152  solved  51.1 Hz, needs 80
+       40 Hz  2026-09-09_211311  solved  51.0 Hz, needs 80
+       40 Hz  2026-09-09_211427  solved  51.2 Hz, needs 80
+       40 Hz  2026-09-09_211543  solved  51.2 Hz, needs 80
+      120 Hz  2026-09-10_023604  solved 234.0 Hz, needs 240
+      120 Hz  2026-09-10_023747  solved 235.0 Hz, needs 240
+      120 Hz  2026-09-10_023931  solved 222.7 Hz, needs 240
+      120 Hz  2026-09-10_033958  solved 231.2 Hz, needs 240
+      120 Hz  2026-09-10_034305  solved 230.5 Hz, needs 240
+pre-cut tilt band: 3.9-28.0 deg (median 16.0, robust sigma 4.0)
+
+ freq   n |   median     MAD |  modal     mean     sd |  rate fit     MAD     jump     HINGE     mad  lag ms
+   10  22 |    24.07    9.00 | 18/22     25.48   6.01 |    163.28   85.78   151.70    332.59  186.21    53.6
+   20  16 |    42.59    2.65 | 16/16     42.15   2.98 |    219.98   59.99   244.81    936.89  292.36    48.1
+   30  10 |    38.03    2.06 |  8/10     37.20   1.64 |    210.27   57.53   151.13   1008.49  280.81    62.1
+   40  14 |    36.39    4.37 | 12/14     36.41   3.26 |    263.23   43.29   281.97    677.31  331.06    47.2
+   50  10 |    27.87    4.90 |  9/10     29.92   4.54 |    315.93  174.53   366.94   1766.11  601.72    48.8
+   60   9 |    42.05    8.22 |  6/9      40.88   3.83 |    306.08   10.21   227.71   1280.03  287.73    71.4
+   70   5 |    46.59   19.96 |  3/5      42.47   8.12 |    310.58   13.24   495.25   1369.86   26.51    60.0
+   80   5 |    48.83    2.69 |  5/5      46.55   5.43 |    357.09   12.49   280.60   2079.93  166.08    72.8
+   90   5 |    43.26    1.77 |  4/5      43.99   0.95 |    334.17    3.54   215.97   1358.26  269.06    60.8
+  100   5 |    41.76    4.01 |  5/5      40.77   3.69 |    279.25   42.42   175.63   1114.27  209.88    67.3
+  110   5 |    40.22    1.38 |  5/5      39.76   1.88 |    270.37   14.58   119.63    719.21   78.84    71.0
+
+-> results/alignment_rate/compare_1_vs_B/design1_campaign

@@ -1,0 +1,8 @@
+{
+  "note": "Reproduces the 50 Hz ramp of 2026-09-14 (results/alignment_rate/20260914_droneC_10hzs/050hz/tilt.json, commit 863a6c0): 3 s settle + 7 s hold. Frequency only: no A/C cut, current firmware defaults. Not bench-validated on the present setup.",
+  "segments": [
+    {"from_hz": 2.0, "to_hz": 5.0, "seconds": 5.0, "shape": "ease", "k": 2.0},
+    {"from_hz": 5.0, "to_hz": 50.0, "seconds": 4.5, "shape": "ease", "k": 2.0},
+    {"from_hz": 50.0, "to_hz": 50.0, "seconds": 10.0, "shape": "linear"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "note": "1 to 20 Hz linearly in 5 s, then 20 to 150 Hz linearly in 15 s, then hold 150 Hz for 5 s (25 s total).",
+  "segments": [
+    {"from_hz": 1.0, "to_hz": 20.0, "seconds": 5.0, "shape": "linear"},
+    {"from_hz": 20.0, "to_hz": 150.0, "seconds": 15.0, "shape": "linear"},
+    {"from_hz": 150.0, "to_hz": 150.0, "seconds": 5.0, "shape": "linear"}
+  ]
+}

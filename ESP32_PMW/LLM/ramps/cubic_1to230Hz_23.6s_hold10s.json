@@ -1,0 +1,7 @@
+{
+  "note": "2026-11-06 operator request: cubic_1to195Hz_20s stretched to a higher top, then a hold. f = 1 + 229*(t/23.6)^3 (POLYNOMIAL k=3); the duration scales with the span (20 s * 229/194 = 23.6 s), so the ramp velocity is unchanged: mean 9.7 Hz/s, end slope 29.1 Hz/s, the same as the 195 Hz ramp. Then hold 230 Hz for 10 s; 33.6 s of drive (cap MAX_RAMP_S 55 s). Below the ~4.9 Hz capture window for ~6.1 s (5.4 s before). 230 Hz and 10 s are defaults chosen for the request, not measured optima. Not bench-validated.",
+  "segments": [
+    {"from_hz": 1.0, "to_hz": 230.0, "seconds": 23.6, "shape": "poly", "k": 3.0},
+    {"from_hz": 230.0, "to_hz": 230.0, "seconds": 10.0, "shape": "linear"}
+  ]
+}

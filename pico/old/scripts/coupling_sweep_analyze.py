@@ -1,4 +1,5 @@
-"""Analyze ONE long PicoScope recording of the automated coupling sweep
+"""
+Analyze ONE long PicoScope recording of the automated coupling sweep
 (main_coupling_test firmware: A -> B -> C -> D -> ALL, with off-gaps).
 
 Auto-detects each driven burst by which channels are active, so the recording
@@ -11,6 +12,7 @@ SOLO vs COMBINED:
 
 Usage:  python3 coupling_sweep_analyze.py sweep.csv
 """
+
 import os
 import sys
 import numpy as np
@@ -18,20 +20,33 @@ import pandas as pd
 
 CH = ["Channel A", "Channel B", "Channel C", "Channel D"]
 G = {"Channel A": 15.26, "Channel B": 15.28, "Channel C": 15.57, "Channel D": 15.34}
-OFFSET = {"Channel A": 0.0, "Channel B": -0.0404,
-          "Channel C": 0.0, "Channel D": -0.0408}
+OFFSET = {
+    "Channel A": 0.0,
+    "Channel B": -0.0404,
+    "Channel C": 0.0,
+    "Channel D": -0.0408,
+}
 W = 41
-ON_A = 2.0          # a channel counts as "driven" above this current (A)
-MIN_BURST_S = 1.0   # ignore bursts shorter than this (partial at file ends)
+ON_A = 2.0  # a channel counts as "driven" above this current (A)
+MIN_BURST_S = 1.0  # ignore bursts shorter than this (partial at file ends)
 
 
 def env(y):
-    return (pd.Series(y).rolling(W, center=True, min_periods=1).max()
-            .rolling(W, center=True, min_periods=1).mean().values)
+    return (
+        pd.Series(y)
+        .rolling(W, center=True, min_periods=1)
+        .max()
+        .rolling(W, center=True, min_periods=1)
+        .mean()
+        .values
+    )
 
 
 def find_bursts(active, t):
-    """Yield (i0, i1) index spans where `active` (bool array) is True."""
+    """
+    Yield (i0, i1) index spans where `active` (bool array) is True.
+    """
+
     spans, i, n = [], 0, len(active)
     while i < n:
         if active[i]:
@@ -64,14 +79,16 @@ def main():
     solo = {ch: [] for ch in CH}
     comb = {ch: [] for ch in CH}
     print(f"detected {len(bursts)} bursts:")
-    for (i0, i1) in bursts:
+    for i0, i1 in bursts:
         lo = i0 + int(0.25 * (i1 - i0))
-        hi = i0 + int(0.75 * (i1 - i0))           # steady middle of the burst
+        hi = i0 + int(0.75 * (i1 - i0))  # steady middle of the burst
         means = {ch: float(np.mean(cur[ch][lo:hi])) for ch in CH}
         act = [ch for ch in CH if means[ch] > ON_A]
         tag = "".join(c[-1] for c in act)
-        print(f"  {t[i0]:6.1f}-{t[i1-1]:5.1f}s  active=[{tag:4}]  " +
-              "  ".join(f"{c[-1]}={means[c]:.2f}" for c in CH))
+        print(
+            f"  {t[i0]:6.1f}-{t[i1-1]:5.1f}s  active=[{tag:4}]  "
+            + "  ".join(f"{c[-1]}={means[c]:.2f}" for c in CH)
+        )
         if len(act) == 1:
             solo[act[0]].append(means[act[0]])
         elif len(act) >= 3:
@@ -91,11 +108,15 @@ def main():
     sv = [s[ch] for ch in CH if not np.isnan(s[ch])]
     cv = [c[ch] for ch in CH if not np.isnan(c[ch])]
     if sv and cv:
-        print(f"\nspread (max/min):  solo {max(sv)/min(sv):.2f}x   "
-              f"combined {max(cv)/min(cv):.2f}x")
+        print(
+            f"\nspread (max/min):  solo {max(sv)/min(sv):.2f}x   "
+            f"combined {max(cv)/min(cv):.2f}x"
+        )
     print("\ninterpretation:")
     print("  solo matched + combined diverges -> COUPLING / shared-supply interaction")
-    print("  solo already diverges            -> per-channel DRIVE (wiring/bridge/supply)")
+    print(
+        "  solo already diverges            -> per-channel DRIVE (wiring/bridge/supply)"
+    )
 
 
 if __name__ == "__main__":

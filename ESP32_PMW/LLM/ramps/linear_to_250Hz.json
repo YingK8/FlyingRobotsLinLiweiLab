@@ -1,0 +1,6 @@
+{
+  "note": "2 -> 250 Hz linear in 30 s. Was rise_2to210Hz_30s_ease_k2 (a copy of ramp.DEFAULT, 210 Hz ease k=2) until the operator edited the content; renamed 2026-11-02 to say what it does. Not bench-validated.",
+  "segments": [
+    {"from_hz": 2.0, "to_hz": 250.0, "seconds": 30.0, "shape": "linear"}
+  ]
+}

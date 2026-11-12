@@ -1,0 +1,520 @@
+sweep: [(20.0, 10), (50.0, 10)] -> results/alignment_rate/20260912_droneB_rerun
+  0 good takes already on disk, 20 to record
+  disk: 21403 MB free on /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB, 20 takes need ~650 MB
+  before flashing 20 Hz: GATE: MEASURE THE COILS -- a reading below 45 C starts the next take. Write it to /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/ai/thermal/operator_reading. No timeout; Ctrl-C abandons.
+    20 C recorded; gate open
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/spiffs_data/tilt.json: 20 Hz, ramp 9.286 s (dwell 4.2 s), 34 s energised
+   flash with:  pio run -e tilt -t uploadfs && pio run -e tilt -t upload
+   NOTE flashing starts the run.
+  flashed 20 Hz
+[coils] board parked in the bootloader, app not running
+
+=== 20 Hz x 10 ===
+  ramp 9 s (dwell 4.2 s below pull-in), 34 s energised per repeat
+  predicted heat 0.30 C/repeat, 3.0 C for the chunk, against 50 C of headroom now
+    label=FREQ_020HZ
+    label=SETTLE_020HZ
+    label=HOLD_020HZ
+    label=KILL_020HZ
+    label=DOWN_020HZ
+    label=TILT_OFF
+
+-- 20 Hz repeat 1/10 (model says ~20 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~20C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182210
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_182210_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~45C estimated
+  encoder did not finalise; releasing from the caller as a fallback
+  8692 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182210, 3234 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.35 C from 69 telemetry samples
+
+-- 20 Hz repeat 2/10 (model says ~20 C) --
+  20 Hz repeat 2: GATE: MEASURE THE COILS -- a reading below 45 C starts the next take. Write it to /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/ai/thermal/operator_reading. No timeout; Ctrl-C abandons.
+
+sweep interrupted during 20 Hz
+
+sweep done: 0/0 good takes, 0.0 C measured -> results/alignment_rate/20260912_droneB_rerun
+  STILL SHORT: {20.0: 10, 50.0: 10}. Re-run the same command to record them.
+sweep: [(20.0, 10), (50.0, 10)] -> results/alignment_rate/20260912_droneB_rerun
+  1 good takes already on disk, 19 to record
+  disk: 21389 MB free on /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB, 19 takes need ~618 MB
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/spiffs_data/tilt.json: 20 Hz, ramp 9.286 s (dwell 4.2 s), 34 s energised
+   flash with:  pio run -e tilt -t uploadfs && pio run -e tilt -t upload
+   NOTE flashing starts the run.
+  flashed 20 Hz
+[coils] board parked in the bootloader, app not running
+
+=== 20 Hz x 9 ===
+  ramp 9 s (dwell 4.2 s below pull-in), 34 s energised per repeat
+  predicted heat 0.30 C/repeat, 2.7 C for the chunk, against 49 C of headroom now
+    label=FREQ_020HZ
+    label=SETTLE_020HZ
+    label=HOLD_020HZ
+    label=KILL_020HZ
+    label=DOWN_020HZ
+    label=TILT_OFF
+  1 existing repeat(s) in index.csv; appending
+
+-- 20 Hz repeat 2/10 (model says ~21 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~21C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182708
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_182708_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+  label=
+[coils] 50s energised this session -> ~45C estimated
+  9186 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182708, 2113 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.48 C from 69 telemetry samples
+  cooling 0 s before repeat 3
+
+-- 20 Hz repeat 3/10 (model says ~21 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~21C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182807
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_182807_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~46C estimated
+  8846 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182807, 607 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.44 C from 69 telemetry samples
+  cooling 0 s before repeat 4
+
+-- 20 Hz repeat 4/10 (model says ~21 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~21C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182903
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_182903_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~46C estimated
+  10316 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_182903, 2011 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.41 C from 69 telemetry samples
+  cooling 0 s before repeat 5
+
+-- 20 Hz repeat 5/10 (model says ~22 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~22C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183007
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183007_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~46C estimated
+  9127 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183007, 238 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.35 C from 69 telemetry samples
+  cooling 0 s before repeat 6
+
+-- 20 Hz repeat 6/10 (model says ~22 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~22C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183103
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183103_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~47C estimated
+  10128 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183103
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.48 C from 69 telemetry samples
+  cooling 0 s before repeat 7
+
+-- 20 Hz repeat 7/10 (model says ~23 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~23C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183200
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183200_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~47C estimated
+  9737 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183200, 2645 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.44 C from 69 telemetry samples
+  cooling 0 s before repeat 8
+
+-- 20 Hz repeat 8/10 (model says ~23 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~23C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183302
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183301_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~48C estimated
+  9513 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183302, 658 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.35 C from 69 telemetry samples
+  cooling 0 s before repeat 9
+
+-- 20 Hz repeat 9/10 (model says ~23 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~23C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183359
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183359_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~48C estimated
+  9827 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183359, 335 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.47 C from 69 telemetry samples
+  cooling 0 s before repeat 10
+
+-- 20 Hz repeat 10/10 (model says ~24 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~24C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183455
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183455_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~48C estimated
+  8996 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183455, 889 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.46 C from 69 telemetry samples
+
+20 Hz: 10/10 good, 4.2 C added -> results/alignment_rate/20260912_droneB_rerun/020hz
+
+  between chunks: 0 s before the next frequency
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/spiffs_data/tilt.json: 50 Hz, ramp 17.857 s (dwell 4.2 s), 43 s energised
+   flash with:  pio run -e tilt -t uploadfs && pio run -e tilt -t upload
+   NOTE flashing starts the run.
+  flashed 50 Hz
+[coils] board parked in the bootloader, app not running
+
+=== 50 Hz x 10 ===
+  ramp 18 s (dwell 4.2 s below pull-in), 43 s energised per repeat
+  predicted heat 1.93 C/repeat, 19.3 C for the chunk, against 46 C of headroom now
+    label=FREQ_050HZ
+    label=SETTLE_050HZ
+    label=HOLD_050HZ
+    label=KILL_050HZ
+    label=DOWN_050HZ
+    label=TILT_OFF
+
+-- 50 Hz repeat 1/10 (model says ~24 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~24C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183613
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183613_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~53C estimated
+  11919 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183613
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.44 C from 86 telemetry samples
+  cooling 0 s before repeat 2
+
+-- 50 Hz repeat 2/10 (model says ~27 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~27C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183719
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183719_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~56C estimated
+  12120 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183719
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.64 C from 86 telemetry samples
+  cooling 0 s before repeat 3
+
+-- 50 Hz repeat 3/10 (model says ~29 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~29C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183824
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183824_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~58C estimated
+  8594 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183824, 1351 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.39 C from 86 telemetry samples
+  cooling 0 s before repeat 4
+
+-- 50 Hz repeat 4/10 (model says ~32 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~32C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183933
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_183933_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~60C estimated
+  11861 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_183933
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.29 C from 86 telemetry samples
+  cooling 0 s before repeat 5
+
+-- 50 Hz repeat 5/10 (model says ~34 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~34C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184039
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184039_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~63C estimated
+  11086 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184039, 384 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.56 C from 86 telemetry samples
+  cooling 0 s before repeat 6
+
+-- 50 Hz repeat 6/10 (model says ~37 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~37C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184155
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184155_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~65C estimated
+  11067 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184155, 598 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.47 C from 86 telemetry samples
+  cooling 0 s before repeat 7
+
+-- 50 Hz repeat 7/10 (model says ~39 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~39C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184301
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184301_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~67C estimated
+  12132 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184301
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.47 C from 86 telemetry samples
+  cooling 0 s before repeat 8
+
+-- 50 Hz repeat 8/10 (model says ~42 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~42C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184409
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184409_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~70C estimated
+  9859 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184409, 1914 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.55 C from 86 telemetry samples
+  cooling 0 s before repeat 9
+
+-- 50 Hz repeat 9/10 (model says ~44 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~44C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184515
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184515_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~72C estimated
+  11456 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184515, 1280 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.57 C from 85 telemetry samples
+  cooling 0 s before repeat 10
+
+-- 50 Hz repeat 10/10 (model says ~47 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~47C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184621
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260912_184621_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~75C estimated
+  11705 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-12_184621, 108 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.45 C from 86 telemetry samples
+
+50 Hz: 10/10 good, 24.8 C added -> results/alignment_rate/20260912_droneB_rerun/050hz
+
+sweep done: 20/20 good takes, 29.1 C measured -> results/alignment_rate/20260912_droneB_rerun
+=== 2026-09-13 14:32:46 re-record (mistimed_drops) 20 Hz x target 10 -> results/alignment_rate/20260912_droneB_rerun
+sweep: [(20.0, 10)] -> results/alignment_rate/20260912_droneB_rerun
+  7 good takes already on disk, 3 to record
+  disk: 19511 MB free on /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB, 3 takes need ~98 MB
+
+  cooling 20 s before the first 20 Hz take (model ~24 C)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/spiffs_data/tilt.json: 20 Hz, ramp 9.286 s (dwell 4.2 s), 34 s energised
+   flash with:  pio run -e tilt -t uploadfs && pio run -e tilt -t upload
+   NOTE flashing starts the run.
+  flashed 20 Hz
+[coils] board parked in the bootloader, app not running
+
+=== 20 Hz x 3 ===
+  ramp 9 s (dwell 4.2 s below pull-in), 34 s energised per repeat
+  predicted heat 0.30 C/repeat, 0.9 C for the chunk, against 46 C of headroom now
+    label=FREQ_020HZ
+    label=SETTLE_020HZ
+    label=HOLD_020HZ
+    label=KILL_020HZ
+    label=DOWN_020HZ
+    label=TILT_OFF
+  10 existing repeat(s) in index.csv; appending
+
+-- 20 Hz repeat 11/13 (model says ~24 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~24C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143324
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_143324_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+  label=
+[coils] 51s energised this session -> ~49C estimated
+  10110 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143324
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.32 C from 69 telemetry samples
+  cooling 20 s before repeat 12
+
+-- 20 Hz repeat 12/13 (model says ~24 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~24C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143442
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_143442_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~49C estimated
+  9232 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143442
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.32 C from 69 telemetry samples
+  cooling 20 s before repeat 13
+
+-- 20 Hz repeat 13/13 (model says ~25 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~25C now, this run adds ~17C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143601
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_143601_droneB/sweep.log
+  label=SETTLE_020HZ
+  label=HOLD_020HZ
+  label=KILL_020HZ
+  label=DOWN_020HZ
+  label=TILT_OFF
+[coils] 49s energised this session -> ~49C estimated
+  9429 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_143601, 172 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 0.33 C from 69 telemetry samples
+
+20 Hz: 10/13 good, 5.2 C added -> results/alignment_rate/20260912_droneB_rerun/020hz
+
+sweep done: 10/13 good takes, 5.2 C measured -> results/alignment_rate/20260912_droneB_rerun
+=== 2026-09-13 14:47:41 re-record (mistimed_drops) 50 Hz x target 10 -> results/alignment_rate/20260912_droneB_rerun
+sweep: [(50.0, 10)] -> results/alignment_rate/20260912_droneB_rerun
+  8 good takes already on disk, 2 to record
+  disk: 19296 MB free on /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB, 2 takes need ~65 MB
+
+  cooling 20 s before the first 50 Hz take (model ~47 C)
+/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/spiffs_data/tilt.json: 50 Hz, ramp 17.857 s (dwell 4.2 s), 43 s energised
+   flash with:  pio run -e tilt -t uploadfs && pio run -e tilt -t upload
+   NOTE flashing starts the run.
+  flashed 50 Hz
+[coils] board parked in the bootloader, app not running
+
+=== 50 Hz x 2 ===
+  ramp 18 s (dwell 4.2 s below pull-in), 43 s energised per repeat
+  predicted heat 1.93 C/repeat, 3.9 C for the chunk, against 24 C of headroom now
+    label=FREQ_050HZ
+    label=SETTLE_050HZ
+    label=HOLD_050HZ
+    label=KILL_050HZ
+    label=DOWN_050HZ
+    label=TILT_OFF
+  10 existing repeat(s) in index.csv; appending
+
+-- 50 Hz repeat 11/12 (model says ~46 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~46C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_144817
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_144817_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~74C estimated
+  12059 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_144817, 6 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 1.96 C from 86 telemetry samples
+  cooling 20 s before repeat 12
+
+-- 50 Hz repeat 12/12 (model says ~50 C) --
+[coils] THERMAL GATE BYPASSED at the operator's instruction: ~50C now, this run adds ~21C, ceiling is 70C. Watch the coils.
+filming -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_144943
+log      -> /Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/results/tilt_sweep/20260913_144943_droneB/sweep.log
+  label=SETTLE_050HZ
+  label=HOLD_050HZ
+  label=KILL_050HZ
+  label=DOWN_050HZ
+  label=TILT_OFF
+[coils] 58s energised this session -> ~77C estimated
+  11411 frame(s) -> /Volumes/UBUNTU 24_0/ESP32_PMW_flights/droneB/2026-09-13_144943, 948 dropped
+[coils] board parked in the bootloader, app not running
+schedule finished
+  outcome=ok  measured heat 2.03 C from 86 telemetry samples
+
+50 Hz: 10/12 good, 28.8 C added -> results/alignment_rate/20260912_droneB_rerun/050hz
+
+sweep done: 10/12 good takes, 28.8 C measured -> results/alignment_rate/20260912_droneB_rerun

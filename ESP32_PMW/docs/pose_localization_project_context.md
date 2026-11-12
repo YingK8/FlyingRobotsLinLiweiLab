@@ -2,8 +2,19 @@
 
 > Working record. Captures decisions, rig geometry, estimation approach, and the
 > calibration plan for optically localizing the magnetically-driven flying robot.
-> Status: pre-implementation. Open derivations are flagged as **[OPEN]** — they are
-> deliberately left for the engineer to work through, not yet solved here.
+> **Status: superseded in part, kept as the design record.** The pipeline shipped —
+> it lives in `controller/pose/`, and the derivations are written up properly in
+> [`controller/pose/theory.md`](../controller/pose/theory.md) and
+> [`controller/calib/theory.md`](../controller/calib/theory.md), which are the
+> current reference. What survives here is *why* the design is shaped the way it
+> is: the state space (§2), the sensitivity law (§4), and the calibration
+> pitfalls and acceptance criteria (§6).
+>
+> Two things below are historical and were **not** what got built. The RealSense
+> RGB-D plan in §3 was dropped — the rig is a two-camera ELP mono stereo pair
+> (`controller/camera/elp.py`, `controller/calib/stereo_rig.json`) and there is no
+> depth sensor. The §7 items marked **[OPEN]** are all closed; each now names the
+> module that closed it.
 
 ---
 
@@ -60,6 +71,14 @@ and the body does not physically carry meaningfully.
 ---
 
 ## 3. Sensors and their roles
+
+> **Historical — not what was built.** This section planned an RGB-D depth anchor.
+> The rig is instead two identical ELP mono global-shutter cameras in a stereo
+> pair, and depth comes from triangulating the two views rather than from a depth
+> sensor. See [chapter 1](../controller/camera/theory.md) for the sensor and
+> [chapter 3 §12.6](../controller/pose/theory.md) for what the second view buys.
+> Kept because the *roles* argument — one camera for the position anchor, one for
+> attitude — is what motivated the 45°/90° rig geometry that was built.
 
 Two fixed, external cameras watching the coil workspace:
 
@@ -188,18 +207,20 @@ Use **ChArUco** (checkerboard subpixel corners + ArUco identity + occlusion tole
 
 ## 7. Open items — engineer's kernels (deliberately unsolved)
 
-These are the load-bearing derivations/decisions. Left open on purpose.
+These were the load-bearing derivations, left open on purpose at the time. All
+four are now closed; each names where it was solved. The questions are kept
+because they are the shape of the problem, and the answers are in the chapters.
 
-1. **[OPEN] Conic → normal derivation.** Given fitted conic `C` and intrinsics `K`:
+1. **[CLOSED — `controller/pose/conic.py`, chapter 3 §12.1]** Conic → normal derivation. Given fitted conic `C` and intrinsics `K`:
    (a) normalize `C` into the camera frame (`x̂ = K⁻¹x`); (b) predict the **eigenvalue sign
    signature** of the normalized conic for a *circle* projection and justify it from the surface
    `x̂ᵀC′x̂ = 0` in ray space; (c) show the normal is a weighted combination of two eigenvectors and
    that the sign choice = the two-fold ambiguity.
-2. **[OPEN] Azimuthal separation.** What does 90° azimuth separation buy over 0°? Which *component*
+2. **[CLOSED — chapter 3 §12.6, and `calib/theory.md` on the rig]** Azimuthal separation. What does 90° azimuth separation buy over 0°? Which *component*
    of the tilt does each side view measure? (A tilt is a 2-vector — what can one side view not distinguish?)
-3. **[OPEN] Bench geometry.** Does a 45°-angled board reach good incidence at *both* cameras given
+3. **[CLOSED — `controller/calib/sheet.py`, `capture.py`, chapter 2]** Bench geometry. Does a 45°-angled board reach good incidence at *both* cameras given
    coil occlusion, or is a cube / wand method required?
-4. **[OPEN] Filtering.** Per-frame estimates are noisy (undersampled spin). Design a filter on
+4. **[CLOSED — `controller/pose/filter.py`, chapter 3 §14]** Filtering. Per-frame estimates are noisy (undersampled spin). Design a filter on
    `ℝ³ × S²` (manifold EKF/UKF or complementary filter using known drive dynamics) — only after
    the per-frame solve works. Simplest thing first.
 

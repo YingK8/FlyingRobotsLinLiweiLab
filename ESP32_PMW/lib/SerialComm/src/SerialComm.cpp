@@ -13,7 +13,7 @@ String SerialComm::handleSerialComm(const String &outgoing) {
       _rxBuf = "";
       if (line.length() && line.length() <= MAX_LINE_LEN) return line;
     } else if (_rxBuf.length() <= MAX_LINE_LEN) {
-      _rxBuf += c; // stop appending once over the cap; the line is already doomed
+      _rxBuf += c; // stop appending past the cap; an over-long line is already doomed
     }
   }
   return String();

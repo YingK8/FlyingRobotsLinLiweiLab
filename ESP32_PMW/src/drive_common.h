@@ -5,38 +5,55 @@
 
 #include "JsonPwmSequencer.h"
 #include "PwmController.h"
+#include "SyncLedPin.h"
 #include "constants.h"
 #include "reset_button.h"
 #include "safety_startup.h"
 #include "telemetry.h"
 
-static const float PHASES_CW[NUM_CHANNELS] = {270.0f, 90.0f, 180.0f, 0.0f};
+using sync_led::led;
+
+// A/C and B/D are opposite: reversing direction swaps B/D
+static const float PHASES_CW[NUM_CHANNELS] = {0.0f, 90.0f, 180.0f, 270.0f};
 static const float PHASES_CCW[NUM_CHANNELS] = {0.0f, 270.0f, 180.0f, 90.0f};
 static const float INITIAL_DUTY[NUM_CHANNELS] = {50.0f, 50.0f, 50.0f, 50.0f};
 static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-// VNH5019 CS gain, A per V -- per-board calibration (shared across experiments).
-static const float SENS[NUM_CHANNELS] = {15.26f, 15.28f, 15.57f, 15.34f};
+// I = SENS * (mV above the boot zero, after CS_DEAD_MV) / 1000. Both from cs_cal, DC into
+// 2.031 ohm, 2.4-4.4 A, P0+P180 pooled (results/cs_cal/README.md, 2026-11-04). Was
+// {15.26, 15.28, 15.57, 15.34} with no dead zone, which read 1.74-1.88x high.
+static const float SENS[NUM_CHANNELS] = {6.87f, 6.81f, 6.68f, 6.53f};
+// The ADC reads ~0 for the first ~110 mV on the CS pin (fit intercept 105-114 mV on all four,
+// i.e. ~0.75 A), so a sample above the zero gets this added back. Below 2.4 A is NOT
+// measured: the knee's shape is assumed sharp. current_sense.cpp applies it per sample.
+static const float CS_DEAD_MV[NUM_CHANNELS] = {109.0f, 105.0f, 110.0f, 114.0f};
 
-// Boot: serial + force every gate LOW before any driver exists, LED on. Call
-// first in setup(), before ctl.begin(), so the coils can't glitch on and the
-// ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
-inline void driveBoot() {
-  Serial.begin(115200);
-  delay(1000);
+// all zero = uncalibrated and the trim stays off; void when the capacitor bank changes
+static const float COIL_F0_HZ[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
+static const float COIL_Q[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+// call first in setup(), before ctl.begin(), so no gate glitches on
+inline void driveBoot(bool activeLed = true) {
+  // first, before the delay: the carrier pins float from reset until this line, and a
+  // floating carrier drove all four bridges to full on 2026-10-30
   forceAllGatesLow();
+  // 1 kB RX buffer: an overflow is silent and the coils hold their last command
+  Serial.setRxBufferSize(1024);
+  Serial.begin(SERIAL_BAUD);
+  delay(1000);
   initResetButton();
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH); // active indicator; goes LOW when blocked
+  led().attachTo(LED_PIN);
+  if (activeLed) led().holdOn();
 
-  if (!SPIFFS.begin(/*formatOnFail*/ false))
+  if (!SPIFFS.begin(false))
     Serial.println("[driveBoot] SPIFFS mount FAILED -- run `pio run -t uploadfs` to update json changes");
 }
 
-// Shared 2 Hz telemetry line, same field layout the ai/ log parsers expect:
-// "t=.. freq=.. | I[A]: .. | duty[%]: .. | spread=.. bal=.. trip=..".
+// telemetry field layout is protocol: the ai/ log parsers read it by name
 inline void driveTelemetry(PwmController &c) {
-  checkResetButton(); // poll every loop (before the 500 ms print throttle below)
+  // call every loop or a button press is never seen
+  checkResetButton();
+  led().advance();
 
   static unsigned long last = 0;
   unsigned long now = millis();
@@ -49,7 +66,8 @@ inline void driveTelemetry(PwmController &c) {
   for (int i = 0; i < NUM_CHANNELS; i++)
     duty[i] = c.getCarrierDutyCycle(i);
 
-  float imin = im ? im[0] : 0.0f, imax = im ? im[0] : 0.0f;
+  float imin = im ? im[0] : 0.0f;
+  float imax = im ? im[0] : 0.0f;
   if (im)
     for (int i = 1; i < NUM_CHANNELS; i++) {
       if (im[i] < imin) imin = im[i];

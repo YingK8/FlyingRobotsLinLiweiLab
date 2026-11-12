@@ -30,6 +30,18 @@ def find_port(explicit=None):
     return sorted(hits)[0]
 
 
+NEVER_CHECKSUMMED = ("stop", "land")
+
+
+def checksum(text: str) -> int:
+    crc = 0
+    for byte in text.encode():
+        crc ^= byte
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+
 # driveTelemetry prints this at 2 Hz in every state:
 #   "t=17644 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 ... | trip=0"
 # freq= and state= are anchored to a line start or a space/pipe, so the rejection message
@@ -132,6 +144,7 @@ class SerialComm:
         self._rxbuf = ""
         self._drive_since = None
         self._drive_s = 0.0
+        self.checksums_enabled = False
 
     def reset_device(self, pulse_s=0.15):
         """EN-pulse reset via RTS."""
@@ -150,6 +163,8 @@ class SerialComm:
 
         if outgoing:
             self._note_drive(outgoing)
+            if self.checksums_enabled and outgoing.strip().lower() not in NEVER_CHECKSUMMED:
+                outgoing = f"{outgoing}*{checksum(outgoing):02x}"
             self.ser.write((outgoing + "\n").encode())
 
         # One read for everything waiting, not one syscall per byte. `drain()` calls this
@@ -174,6 +189,42 @@ class SerialComm:
             self._rxbuf = ""    # overflow guard: garbage, not a line we lost
         return None
 
+    def handshake(self, timeout_s=0.5):
+        self.handle_serial_comm("hello")
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            reply = self.handle_serial_comm()
+            if reply is None:
+                time.sleep(0.002)
+            elif reply.startswith("hello "):
+                firmware_baud = re.search(r"baud=(\d+)", reply)
+                if firmware_baud and int(firmware_baud.group(1)) != self.ser.baudrate:
+                    raise RuntimeError(f"firmware runs {firmware_baud.group(1)} baud, host {self.ser.baudrate}")
+                self.checksums_enabled = " crc=1" in reply
+                return reply
+        return None
+
+    def measure_round_trip(self, pings=200, timeout_s=0.1):
+        round_trips_ms, lost = [], 0
+        for token in range(pings):
+            sent_at = time.perf_counter()
+            self.handle_serial_comm(f"ping={token}")
+            while True:
+                reply = self.handle_serial_comm()
+                elapsed_s = time.perf_counter() - sent_at
+                if reply is not None and reply.startswith(f"pong={token} "):
+                    round_trips_ms.append(elapsed_s * 1e3)
+                    break
+                if elapsed_s > timeout_s:
+                    lost += 1
+                    break
+        if not round_trips_ms:
+            return None
+        round_trips_ms.sort()
+        median = round_trips_ms[len(round_trips_ms) // 2]
+        slowest_in_twenty = round_trips_ms[int(0.95 * (len(round_trips_ms) - 1))]
+        return median, slowest_in_twenty, round_trips_ms[-1], lost
+
     def _note_drive(self, cmd):
         """Start the clock on anything that energises, stop it on `stop`/`land`.
 
@@ -190,7 +241,7 @@ class SerialComm:
         """
 
         c = cmd.strip().lower()
-        if c.startswith(("seq=go", "freq=", "mag=", "throttle=", "probe=")):
+        if c.startswith(("seq=go", "freq=", "mag=", "throttle=", "probe=", "vec=")):
             if self._drive_since is None:
                 self._drive_since = time.monotonic()
         elif c in ("stop", "land") and self._drive_since is not None:
@@ -325,10 +376,44 @@ def demo():
     got, rest, _ = _drain([b"x" * (SerialComm.MAX_LINE_LEN + 10)])
     assert got == [] and rest == "", (got, rest)
 
+    assert checksum("123456789") == 0xF4
+
+    class RecordingPort:
+        def __init__(self):
+            self.sent, self.in_waiting = [], 0
+
+        def write(self, data):
+            self.sent.append(data.decode())
+
+    link = SerialComm.__new__(SerialComm)
+    link.ser, link._rxbuf, link._drive_since, link._drive_s = RecordingPort(), "", None, 0.0
+    link.checksums_enabled = False
+    link.handle_serial_comm("freq=150.00")
+    assert link.ser.sent[-1] == "freq=150.00\n"
+    link.checksums_enabled = True
+    link.handle_serial_comm("freq=150.00")
+    assert link.ser.sent[-1] == f"freq=150.00*{checksum('freq=150.00'):02x}\n"
+    for kill in NEVER_CHECKSUMMED:
+        link.handle_serial_comm(kill)
+        assert link.ser.sent[-1] == kill + "\n"
+
     print("link: parses zero, live and rejected telemetry; rejects noise; "
           "reads PROBE and counts probe= as drive; "
-          "framer handles split, batched and overflowing reads\n  ok")
+          "framer handles split, batched and overflowing reads; "
+          "CRC-8 matches SMBUS and never touches the kill\n  ok")
 
 
 if __name__ == "__main__":
-    demo()
+    if "--rtt" in sys.argv:
+        port_arguments = [argument for argument in sys.argv[1:] if argument != "--rtt"]
+        link = SerialComm(port=port_arguments[0] if port_arguments else None)
+        try:
+            time.sleep(1.5)
+            print(link.handshake() or "no hello -- old firmware, wrong baud, or board not running")
+            round_trip = link.measure_round_trip()
+            print("no pong" if round_trip is None else
+                  "round trip ms: median %.2f, 95th percentile %.2f, worst %.2f, lost %d" % round_trip)
+        finally:
+            link.close()
+    else:
+        demo()

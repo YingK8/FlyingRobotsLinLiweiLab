@@ -327,6 +327,9 @@ class CommandLink:
             self.comm = SerialComm(port=port)
             self.comm.reset_device()  # reboot firmware to IDLE
             time.sleep(1.5)  # wait out the boot banner
+            if self.comm.handshake() is None:
+                raise RuntimeError("no `hello` from the firmware: wrong baud, firmware older "
+                                   "than 2026-11-10 (reflash -e flight), or board not running")
 
     def send_takeoff(self) -> None:
         """Send every line of the ramp profile, in order.

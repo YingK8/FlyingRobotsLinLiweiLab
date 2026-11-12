@@ -3394,6 +3394,24 @@ thing -- the same class of error as 19.9's phase-lock check measuring its own sa
 It is `latency_s` now, in seconds, and scenario b carries 19.1's measured 15 ms. All seven
 scenarios pass at 500 Hz with the honest number.
 
+**Added 2026-11-10: the link is now checked and measurable.** Three things the table
+above could not see. A corrupted byte in `vec=` or `freq=` parsed into a *different valid
+command* (`toFloat` on garbage is 0). So `lib/SerialComm` now rejects a bad `*hh` CRC-8
+suffix, which the host appends once `hello` has answered `crc=1`. `stop`/`land` are never
+checksummed, so the kill parses on any firmware. The silent baud mismatch is now loud:
+`hover_controller_runner` refuses to fly without a `hello`. `Serial.setTxBufferSize(1024)`
+stops a telemetry line from stalling `loop()` for its 1.3 ms of wire time.
+
+**Still unmeasured: the round trip.** The wire is only part of it. The board is an Adafruit
+ESP32 Feather V2, a classic ESP32 behind a CH9102F bridge with no native USB, so every
+command also crosses the bridge's buffering and USB's 1 ms frames. That is plausibly larger
+than the 0.31 ms of wire. `uv run python controller/control/link.py --rtt` measures it
+(`ping=` -> `pong=`, drives nothing). Only if the wire is a real share of the result is a
+higher baud worth trying. The CH9102F is rated to 4 Mbaud, and 2 000 000 is an exact ÷40 of
+the UART's 80 MHz clock where 921600 is ÷86.8. Change `SERIAL_BAUD`, `link.SerialComm.BAUD`
+and `monitor_speed` together, and keep it only if the RTT and the `!crc` count over a minute
+both improve.
+
 ### 19.14 The tighter design 19.11 promised, and why it is not taken
 
 Written 2026-09-01. 19.11 named a prize:

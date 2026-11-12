@@ -38,6 +38,7 @@ static const float COIL_Q[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 // first in setup(), before ctl.begin(), so the coils can't glitch on and the
 // ADC zero (captured by enableCurrentSense) is taken against a true-off baseline.
 inline void driveBoot() {
+  Serial.setTxBufferSize(1024);
   Serial.begin(SERIAL_BAUD);
   delay(1000);
   forceAllGatesLow();

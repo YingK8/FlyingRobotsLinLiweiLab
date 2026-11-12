@@ -1,0 +1,23 @@
+{
+  "note": "1 to 20 Hz linear ramp in 5 s; then 20 to 195 Hz linear ramp in 20 s; then hold 195 Hz for 5 s (30 s total).",
+  "segments": [
+    {
+      "from_hz": 1.0,
+      "to_hz": 20.0,
+      "seconds": 5.0,
+      "shape": "linear"
+    },
+    {
+      "from_hz": 20.0,
+      "to_hz": 195.0,
+      "seconds": 20.0,
+      "shape": "linear"
+    },
+    {
+      "from_hz": 195.0,
+      "to_hz": 195.0,
+      "seconds": 5.0,
+      "shape": "linear"
+    }
+  ]
+}

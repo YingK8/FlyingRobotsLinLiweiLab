@@ -1,0 +1,89 @@
+{
+  "session_id": "20261105_165647_899bb7",
+  "camera_config": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "requested": {
+    "width": 1280,
+    "height": 800,
+    "fps": 120
+  },
+  "cameras": [
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "fps": 120.00048,
+      "backend": "AVFOUNDATION",
+      "fourcc": -1
+    }
+  ],
+  "camera_settings": [
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    },
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    }
+  ],
+  "note": "LLM browser panel",
+  "mode_kind": "camera_only",
+  "operator_scene_unchanged": true,
+  "capture_error": "Encoder errors/queue drops; stopping attempt",
+  "capture_counters": [
+    {
+      "grabbed": 2152,
+      "overwritten_before_consumption": 52
+    },
+    {
+      "grabbed": 2121,
+      "overwritten_before_consumption": 21
+    }
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "fps": 120.0,
+  "fps_semantics": "constant_rate_playback_only",
+  "timestamp_semantics": "host_read_completion_not_exposure",
+  "codec": "avc1",
+  "fps_measured": 117.72,
+  "n_frames": 361,
+  "dropped": 1,
+  "encoder_errors": 0,
+  "encoder_finalized": true,
+  "skew": {},
+  "created": "2026-11-05T16:57:42"
+}

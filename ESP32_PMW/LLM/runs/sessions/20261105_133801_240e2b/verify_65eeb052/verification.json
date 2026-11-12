@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "kind": "fixed_rig_verification",
+  "session_id": "20261105_133801_240e2b",
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "rig_sha256": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0",
+  "input_sha256": {
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/verify_65eeb052/images/meta.json": "8a6de15f35005b09286e417426b23f90c1835ac10a4edb65b08bab06471dbd0d",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/verify_65eeb052/images/pairs.csv": "dad141d876859137b03b0c45436277409235410e22ed6bdc2f84f40872c4d2e2"
+  },
+  "pairs": [],
+  "normal_spread_deg": 0.0,
+  "translation_spread_mm": 0.0,
+  "limits": {
+    "rms_px": 1.0,
+    "max_point_px": 3,
+    "min_pairs": 5,
+    "min_normal_spread_deg": 10,
+    "min_translation_spread_mm": 20
+  },
+  "physical_accuracy_validated": false,
+  "passed": false
+}

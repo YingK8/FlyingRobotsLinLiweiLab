@@ -1,0 +1,17 @@
+{"host_receive_s": 103407.554338791, "line": "[flight] phase trim off (uncalibrated)"}
+{"host_receive_s": 103407.554528666, "line": "SYNC_READY v=1"}
+{"host_receive_s": 103407.554570875, "line": "t=1142 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 103407.577302083, "line": "seq cleared"}
+{"host_receive_s": 103407.577408708, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 103407.5779525, "line": "seq+ 1: 1.00 -> 20.00 Hz over 5000 ms mode 0 k 1.00"}
+{"host_receive_s": 103407.578095875, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 103407.578815875, "line": "seq+ 2: 20.00 -> 195.00 Hz over 20000 ms mode 0 k 1.00"}
+{"host_receive_s": 103407.579082875, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 103407.579587416, "line": "seq+ 3: 195.00 -> 195.00 Hz over 5000 ms mode 0 k 1.00"}
+{"host_receive_s": 103407.579928833, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 103407.580706291, "line": "SYNC_START v=2 led0=1161432 led1=1161482 drive0=1161482 drive1=1161827 on_us=30000 gap_us=30000"}
+{"host_receive_s": 103407.581406375, "line": "seq go: 3 segment(s) from 1.00 Hz"}
+{"host_receive_s": 103407.582482, "line": "state=1 col=100 az=0 mag=0.00 freq=1.00 duty=off"}
+{"host_receive_s": 103408.056806708, "line": "t=1643 freq=2.8 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 103408.180489416, "line": "SYNC_STOP v=2 t0=1754304 t1=1754342 on_us=30000 gap_us=30000"}
+{"host_receive_s": 103408.181093, "line": "state=4 col=100 az=0 mag=0.00 freq=3.19 duty=off"}

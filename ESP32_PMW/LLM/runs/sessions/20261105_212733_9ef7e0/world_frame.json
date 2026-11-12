@@ -1,0 +1,212 @@
+{
+  "schema_version": 1,
+  "units": "mm",
+  "source_frame": "camera_A",
+  "origin_camera_mm": [
+    -109.07776619338112,
+    54.98050588495261,
+    402.19926761274223
+  ],
+  "R_camera_from_world": [
+    [
+      0.9379786470761047,
+      -0.05716968009758405,
+      0.34194690422172325
+    ],
+    [
+      0.2968507922203149,
+      -0.37707799531869374,
+      -0.877320803699882
+    ],
+    [
+      0.17909680283983834,
+      0.9244153899216389,
+      -0.3367202430632482
+    ]
+  ],
+  "up_camera": [
+    0.34194690422172325,
+    -0.877320803699882,
+    -0.3367202430632482
+  ],
+  "x_hint_camera": [
+    0.9379949888442851,
+    0.2968088616492221,
+    0.17908070959626698
+  ],
+  "definition": "plumb-up z; x_hint projected perpendicular to z; y=z cross x",
+  "evidence": {
+    "method": "viser_app_rope_x_holder",
+    "session_id": "20261105_212733_9ef7e0",
+    "camera": {
+      "indices": [
+        1,
+        0
+      ],
+      "width": 1280,
+      "height": 800,
+      "fps": 120,
+      "rotate180": [
+        false,
+        false
+      ],
+      "backend": "auto",
+      "codec": "auto",
+      "exposure_s": null,
+      "gain": 100,
+      "auto_exposure": true
+    },
+    "rig_sha256": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0",
+    "fixture_fit": {
+      "rms_px": 0.7242026843813493,
+      "max_point_px": 1.383138289406797,
+      "n_observations": 14,
+      "n_unique_landmarks": 11,
+      "cameras": {
+        "A": {
+          "labels": [
+            "P1",
+            "P1_Y_H",
+            "P1_Y_L",
+            "P2",
+            "P2_Y_H",
+            "P2_Y_L",
+            "P3",
+            "P4"
+          ],
+          "n_points": 8,
+          "rms_px": 0.7440645582754826,
+          "max_point_px": 1.2701110500421735,
+          "point_error_px": {
+            "P1": 0.7696650902745119,
+            "P1_Y_H": 0.36796670819228927,
+            "P1_Y_L": 0.38611763418749667,
+            "P2": 1.2701110500421735,
+            "P2_Y_H": 0.7100082443157124,
+            "P2_Y_L": 0.2748702104187898,
+            "P3": 0.26480765343749146,
+            "P4": 1.1354361918520859
+          }
+        },
+        "B": {
+          "labels": [
+            "P2",
+            "P2_X_H",
+            "P2_X_L",
+            "P3",
+            "P3_X_H",
+            "P4"
+          ],
+          "n_points": 6,
+          "rms_px": 0.6968401129214911,
+          "max_point_px": 1.383138289406797,
+          "point_error_px": {
+            "P2": 0.2766922886093088,
+            "P2_X_H": 0.5260466379390916,
+            "P2_X_L": 0.5142328316907828,
+            "P3": 0.5959927880004514,
+            "P3_X_H": 0.16588801594843242,
+            "P4": 1.383138289406797
+          }
+        }
+      },
+      "shared_labels": [
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "jacobian_condition": 7.908790095864947,
+      "initializations": 2,
+      "accepted_initializations": 2,
+      "limits": {
+        "rms_px": 1.0,
+        "max_point_px": 3.0,
+        "min_points_per_camera": 4,
+        "max_jacobian_condition": 100000.0,
+        "distinct_pose_mm": 2.0,
+        "distinct_pose_deg": 1.0
+      },
+      "correspondence_method": "operator_named_ROIs",
+      "stereo_extrinsics_refitted": false,
+      "physical_accuracy_validated": false
+    },
+    "match": {
+      "n3d": 3,
+      "score": 3,
+      "tied_yaws_deg": [
+        274,
+        94,
+        184,
+        4
+      ],
+      "dot_evidence": [
+        78.6,
+        51.0,
+        -0.5,
+        -4.1
+      ],
+      "ambiguous": false,
+      "lines": [
+        7,
+        8
+      ]
+    },
+    "T_camera_A_from_fixture": [
+      [
+        0.9379949888442853,
+        -0.05622175813282401,
+        0.34205922705792324,
+        -154.9181896807786
+      ],
+      [
+        0.29680886164922216,
+        -0.37950839049461127,
+        -0.8762864150440098,
+        44.27330533350953
+      ],
+      [
+        0.179080709596267,
+        0.9234784759032796,
+        -0.33928985247698407,
+        383.63824849074257
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "holder_tilt_from_rope_deg": 0.15883929646731612,
+    "rope_image_ends": {
+      "A": [
+        [
+          140,
+          215
+        ],
+        [
+          200,
+          0
+        ]
+      ],
+      "B": [
+        [
+          936,
+          1
+        ],
+        [
+          1023,
+          223
+        ]
+      ]
+    },
+    "origin": "mounting-boss axis, UNSURVEYED",
+    "physical_accuracy_validated": false,
+    "input_sha256": {
+      "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_212733_9ef7e0/reference_d772925e/A.png": "2ea259d7658093abd642efbfd0b3d05a9180db7a49a0364d3d99b892d664e565",
+      "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_212733_9ef7e0/reference_d772925e/B.png": "61057e74d240bcb2010d8a0f6cb93de53120cbd71d51b40a99a0a1babe4f12d0",
+      "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_212733_9ef7e0/reference_d772925e/meta.json": "c190e90ad341d10386ef1ebf59b7b8d3b4e9020f5429aa7027b2dc917da2805c",
+      "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/analyse/holder_layout.json": "eee355c6d62dd5e21fef7cdf929277df3c15b7cd6a1c7187153375077e9b6fa7"
+    }
+  }
+}

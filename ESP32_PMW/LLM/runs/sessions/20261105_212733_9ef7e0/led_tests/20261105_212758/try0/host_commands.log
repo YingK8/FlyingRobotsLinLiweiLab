@@ -1,0 +1,9 @@
+[126263.017] <- [flight] phase trim off (uncalibrated)
+[126263.017] <- SYNC_READY v=1
+[126263.017] <- t=1142 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0
+[126263.019] -> led=code
+[126263.033] <- SYNC_CODE v=1 word=0x33 bit_us=80000
+[126263.034] <- state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off
+[126263.523] <- t=1643 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0
+[126264.024] <- t=2143 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0
+[126264.520] <- t=2644 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0

@@ -1,0 +1,57 @@
+{
+  "board": {
+    "board": "9x6_letter",
+    "squares": [
+      9,
+      6
+    ],
+    "square_mm": 16.52,
+    "marker_mm": 12.3898,
+    "dictionary": "DICT_4X4_100",
+    "n_corners": 40,
+    "size_mm": [
+      148.68,
+      99.12
+    ]
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "n_pairs": 0,
+  "n_solo": [
+    0,
+    0
+  ],
+  "skew": {
+    "n": 1056,
+    "median_ms": 2.240166999399662,
+    "p95_ms": 11.044457998650614,
+    "max_ms": 40.520624999771826,
+    "dropped": 540
+  },
+  "exposure_s": null,
+  "camera_settings": [
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    },
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    }
+  ],
+  "created": "2026-11-05T20:36:56+00:00"
+}

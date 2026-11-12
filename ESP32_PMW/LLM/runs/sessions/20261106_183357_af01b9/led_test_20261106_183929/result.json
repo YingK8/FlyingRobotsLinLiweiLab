@@ -1,0 +1,9 @@
+{
+  "firmware_acked": true,
+  "rois_xywh": [
+    null,
+    null
+  ],
+  "pairs": 119,
+  "window_s": 1.0
+}

@@ -1,0 +1,6 @@
+# skew_n, 434
+# skew_median_ms, 1.1781045031966642
+# skew_p95_ms, 10.016498151526319
+# skew_max_ms, 19.62887500121724
+# skew_dropped, 153
+index,t_capture,skew_ms,speed_px_s,incidence_a_deg,incidence_b_deg

@@ -1,0 +1,47 @@
+{"host_receive_s": 102966.339266625, "line": "\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\u0000\ufffd\ufffd\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\ufffd\u0000\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd\ufffd\ufffd\u0000\ufffd\ufffd\u0000\ufffd\u0000\ufffd\u0000\ufffd\ufffd\u0000\u0000\ufffd\u0000[flight] phase trim off (uncalibrated)"}
+{"host_receive_s": 102966.339834166, "line": "SYNC_READY v=1"}
+{"host_receive_s": 102966.339915, "line": "t=1142 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102966.366635791, "line": "seq cleared"}
+{"host_receive_s": 102966.3668835, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 102966.367747708, "line": "seq+ 1: 1.00 -> 20.00 Hz over 5000 ms mode 0 k 1.00"}
+{"host_receive_s": 102966.368146458, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 102966.369098958, "line": "seq+ 2: 20.00 -> 195.00 Hz over 20000 ms mode 0 k 1.00"}
+{"host_receive_s": 102966.370177166, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 102966.371666416, "line": "seq+ 3: 195.00 -> 195.00 Hz over 5000 ms mode 0 k 1.00"}
+{"host_receive_s": 102966.372065083, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 102966.372574666, "line": "SYNC_START v=2 led0=1170585 led1=1170635 drive0=1170635 drive1=1170984 on_us=30000 gap_us=30000"}
+{"host_receive_s": 102966.373145625, "line": "seq go: 3 segment(s) from 1.00 Hz"}
+{"host_receive_s": 102966.373837666, "line": "state=1 col=100 az=0 mag=0.00 freq=1.00 duty=off"}
+{"host_receive_s": 102966.829019208, "line": "t=1642 freq=2.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102967.34629475, "line": "t=2142 freq=4.6 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102967.844456958, "line": "t=2642 freq=6.5 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102968.346084833, "line": "t=3142 freq=8.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102968.8315405, "line": "t=3642 freq=10.3 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102969.346685208, "line": "t=4143 freq=12.2 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102969.849620375, "line": "t=4643 freq=14.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102970.33762425, "line": "t=5143 freq=16.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102970.854638333, "line": "t=5643 freq=17.9 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102971.344355458, "line": "t=6143 freq=19.8 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102971.845680041, "line": "t=6643 freq=23.9 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102972.337337875, "line": "t=7143 freq=28.3 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102972.842249625, "line": "t=7643 freq=32.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102973.345567333, "line": "t=8143 freq=37.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102973.840085541, "line": "t=8644 freq=41.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102974.33371575, "line": "t=9144 freq=45.8 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102974.832401, "line": "t=9644 freq=50.2 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102975.332638291, "line": "t=10144 freq=54.6 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102975.854021166, "line": "t=10644 freq=58.9 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102976.336452625, "line": "t=11144 freq=63.3 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102976.836374958, "line": "t=11644 freq=67.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102977.344814416, "line": "t=12144 freq=72.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102977.833350958, "line": "t=12644 freq=76.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102978.353980083, "line": "t=13144 freq=80.8 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102978.849137958, "line": "t=13645 freq=85.2 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102979.335682625, "line": "t=14145 freq=89.6 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102979.837360666, "line": "t=14645 freq=93.9 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102980.3439595, "line": "t=15145 freq=98.3 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102980.853980833, "line": "t=15645 freq=102.7 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102981.337276208, "line": "t=16145 freq=107.1 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102981.844438458, "line": "t=16645 freq=111.4 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=100.0 B=100.0 C=100.0 D=100.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 102981.896601208, "line": "SYNC_STOP v=2 t0=16690627 t1=16690671 on_us=30000 gap_us=30000"}
+{"host_receive_s": 102981.89720025, "line": "state=4 col=100 az=0 mag=0.00 freq=111.88 duty=off"}

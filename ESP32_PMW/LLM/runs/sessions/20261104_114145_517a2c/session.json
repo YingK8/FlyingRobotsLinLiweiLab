@@ -1,0 +1,19 @@
+{
+  "session_id": "20261104_114145_517a2c",
+  "directory": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261104_114145_517a2c",
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 640,
+    "height": 400,
+    "fps": 210,
+    "rotate180": true,
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": 0.002,
+    "gain": 100
+  },
+  "created_utc": "2026-11-04T19:41:45.386090+00:00"
+}

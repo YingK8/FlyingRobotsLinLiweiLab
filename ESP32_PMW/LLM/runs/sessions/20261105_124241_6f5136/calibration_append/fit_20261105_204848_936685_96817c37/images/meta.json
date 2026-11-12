@@ -1,0 +1,55 @@
+{
+  "board": {
+    "board": "10x10_letter_apriltag",
+    "squares": [
+      10,
+      10
+    ],
+    "square_mm": 20.32,
+    "marker_mm": 15.0,
+    "dictionary": "DICT_APRILTAG_36h11",
+    "n_corners": 81,
+    "size_mm": [
+      203.2,
+      203.2
+    ]
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "n_pairs": 13,
+  "n_solo": [
+    60,
+    82
+  ],
+  "skew": {},
+  "exposure_s": null,
+  "camera_settings": [
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    },
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    }
+  ],
+  "created": "2026-11-05T20:51:58+00:00",
+  "source_bags": [
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_124241_6f5136/calibration_append/round_20261105_204252_295122_3f2679df/images",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_124241_6f5136/calibration_append/round_20261105_204848_936685_96817c37/images"
+  ]
+}

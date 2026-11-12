@@ -1,0 +1,57 @@
+{
+  "board": {
+    "board": "10x10_letter_apriltag",
+    "squares": [
+      10,
+      10
+    ],
+    "square_mm": 20.32,
+    "marker_mm": 15.0,
+    "dictionary": "DICT_APRILTAG_36h11",
+    "n_corners": 81,
+    "size_mm": [
+      203.2,
+      203.2
+    ]
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "n_pairs": 6,
+  "n_solo": [
+    32,
+    49
+  ],
+  "skew": {
+    "n": 2341,
+    "median_ms": 1.077624998288229,
+    "p95_ms": 10.214083988103084,
+    "max_ms": 80.4065830016043,
+    "dropped": 832
+  },
+  "exposure_s": null,
+  "camera_settings": [
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    },
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    }
+  ],
+  "created": "2026-11-05T20:47:29+00:00"
+}

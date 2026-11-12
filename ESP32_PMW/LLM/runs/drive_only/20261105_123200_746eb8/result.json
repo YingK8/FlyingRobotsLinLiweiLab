@@ -1,0 +1,12 @@
+{
+  "mode": "drive_only",
+  "video_recorded": false,
+  "optical_sync_validated": false,
+  "serial_port": "/dev/cu.usbserial-0001",
+  "duration_s": 30.0,
+  "status": "interrupted",
+  "start_acknowledged": true,
+  "stop_sent": true,
+  "stop_acknowledged": true,
+  "error": "KeyboardInterrupt"
+}

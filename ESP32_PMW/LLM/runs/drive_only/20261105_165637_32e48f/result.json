@@ -1,0 +1,12 @@
+{
+  "mode": "drive_only",
+  "video_recorded": false,
+  "optical_sync_validated": false,
+  "serial_port": "/dev/cu.usbserial-0001",
+  "duration_s": 20.0,
+  "status": "failed",
+  "start_acknowledged": false,
+  "stop_sent": false,
+  "stop_acknowledged": false,
+  "error": "[Errno 2] could not open port /dev/cu.usbserial-0001: [Errno 2] No such file or directory: '/dev/cu.usbserial-0001'"
+}

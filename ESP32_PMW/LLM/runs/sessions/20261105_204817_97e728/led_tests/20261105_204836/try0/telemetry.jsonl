@@ -1,0 +1,8 @@
+{"host_receive_s": 123899.86547925, "line": "[flight] phase trim off (uncalibrated)"}
+{"host_receive_s": 123899.865616041, "line": "SYNC_READY v=1"}
+{"host_receive_s": 123899.865670791, "line": "t=1142 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 123899.870979041, "line": "SYNC_CODE v=1 word=0x33 bit_us=80000"}
+{"host_receive_s": 123899.871054083, "line": "state=0 col=0 az=0 mag=0.00 freq=0.00 duty=off"}
+{"host_receive_s": 123900.367795666, "line": "t=1643 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 123900.871948208, "line": "t=2143 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}
+{"host_receive_s": 123901.377573958, "line": "t=2644 freq=0.0 | I[A]: A=0.00 B=0.00 C=0.00 D=0.00 | duty[%]: A=0.0 B=0.0 C=0.0 D=0.0 | spread=0.000 bal=0 trip=0"}

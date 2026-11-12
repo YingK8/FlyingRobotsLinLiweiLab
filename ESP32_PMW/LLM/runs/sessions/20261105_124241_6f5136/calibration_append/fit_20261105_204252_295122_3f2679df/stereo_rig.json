@@ -1,0 +1,157 @@
+{
+  "cameras": [
+    {
+      "name": "A",
+      "K": [
+        [
+          1297.5597915484507,
+          0.0,
+          633.6223405710268
+        ],
+        [
+          0.0,
+          1303.0651919611798,
+          439.87737499710994
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "dist": [
+        -0.4167904459606562,
+        0.33546295564644857,
+        0.0018512499967818404,
+        -0.001510152486999617,
+        -0.2959154679040517
+      ],
+      "T_world_cam": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "name": "B",
+      "K": [
+        [
+          1279.9474521994596,
+          0.0,
+          733.1141183476939
+        ],
+        [
+          0.0,
+          1280.7599673218251,
+          433.984474112238
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "dist": [
+        -0.4155259150784409,
+        0.319013571717506,
+        -0.0005563273628143248,
+        -0.0023779459733936988,
+        -0.26547349790148356
+      ],
+      "T_world_cam": [
+        [
+          -0.16281331614558142,
+          0.010993276945235915,
+          -0.9865956476427842,
+          332.8977870192949
+        ],
+        [
+          5.772299646456894e-05,
+          0.999938031020658,
+          0.011132420517821314,
+          -2.0438329234853017
+        ],
+        [
+          0.9866568910992993,
+          0.0017555570441527546,
+          -0.1628038613354428,
+          398.7416586827134
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  ],
+  "convention": "T_world_cam maps camera coords to world; OpenCV camera axes (+z forward, +y down); world +z up",
+  "created": "2026-11-05T20:47:44+00:00",
+  "source": "calib/calibrate.py",
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "world_frame": "camera_A",
+  "world_frame_note": "T_world_camA = I. +z is camera A's optical axis, NOT up. baseline_mm and axis_separation_deg are frame-independent and valid; tilt_seen_deg and any elevation reading are not, until the rig is rebased onto the drone disk frame at integration with the pose estimator.",
+  "square_mm_measured": false,
+  "board": "10x10_letter_apriltag",
+  "squares": [
+    10,
+    10
+  ],
+  "square_mm": 20.32,
+  "marker_mm": 15.0,
+  "dictionary": "DICT_APRILTAG_36h11",
+  "n_corners": 81,
+  "size_mm": [
+    203.2,
+    203.2
+  ],
+  "image_size": [
+    1280,
+    800
+  ],
+  "n_pairs": 6,
+  "rms_px": 0.39257546602856985,
+  "rms_px_intrinsics": {
+    "A": 0.35245252685142664,
+    "B": 0.3313417801291187
+  },
+  "pair_spread": {
+    "rot_deg_median": 0.0756767684084451,
+    "rot_deg_max": 0.3066418090323126,
+    "trans_mm_median": 0.3977607276561943,
+    "trans_mm_max": 1.3658074258069155
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "rotate180": [
+    false,
+    false
+  ]
+}

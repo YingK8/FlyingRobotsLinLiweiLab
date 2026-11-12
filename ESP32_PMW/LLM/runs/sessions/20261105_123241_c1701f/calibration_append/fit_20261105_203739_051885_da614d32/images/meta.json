@@ -1,0 +1,56 @@
+{
+  "board": {
+    "board": "9x6_letter",
+    "squares": [
+      9,
+      6
+    ],
+    "square_mm": 16.52,
+    "marker_mm": 12.3898,
+    "dictionary": "DICT_4X4_100",
+    "n_corners": 40,
+    "size_mm": [
+      148.68,
+      99.12
+    ]
+  },
+  "camera_indices": [
+    1,
+    0
+  ],
+  "elp_ids": [
+    "0x214100032e49281",
+    "0x214200032e49281"
+  ],
+  "mode": [
+    1280,
+    800
+  ],
+  "rotate180": [
+    false,
+    false
+  ],
+  "n_pairs": 0,
+  "n_solo": [
+    0,
+    0
+  ],
+  "skew": {},
+  "exposure_s": null,
+  "camera_settings": [
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    },
+    {
+      "exposure_mode": "auto",
+      "ae_mode": 8
+    }
+  ],
+  "created": "2026-11-05T20:37:53+00:00",
+  "source_bags": [
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_123241_c1701f/calibration_append/round_20261105_203420_160010_54b19b3a/images",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_123241_c1701f/calibration_append/round_20261105_203627_224237_e46e5121/images",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_123241_c1701f/calibration_append/round_20261105_203739_051885_da614d32/images"
+  ]
+}

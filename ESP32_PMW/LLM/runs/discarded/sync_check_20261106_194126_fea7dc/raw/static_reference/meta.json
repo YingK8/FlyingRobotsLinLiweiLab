@@ -1,0 +1,27 @@
+{
+  "session_id": "20261106_193952_8a2150",
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "times": [
+    177112.976481083,
+    177112.971838125
+  ],
+  "averaged_pairs": 1198,
+  "window_s": 10.0
+}

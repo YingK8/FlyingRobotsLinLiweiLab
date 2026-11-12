@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "sync_check_20261106_201341_599572",
+  "source": "real",
+  "created_utc": "2026-11-07T04:13:41.520617+00:00",
+  "pipeline_version": "0.1.0",
+  "git_commit": "ccadb53bc8ce8efda109b1499f9dfee0a118e247",
+  "tracked_worktree_dirty": true,
+  "initial_conditions": {
+    "robot_id": null,
+    "coil_setup_id": null,
+    "bearing_id": null,
+    "notes": ""
+  },
+  "time_zero": "operator-associated START LED pulse; not actual current-rise time",
+  "hardware_validated": false,
+  "camera_session": {
+    "session_id": "20261106_200810_60736f",
+    "directory": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261106_200810_60736f",
+    "camera": {
+      "indices": [
+        1,
+        0
+      ],
+      "width": 1280,
+      "height": 800,
+      "fps": 120,
+      "rotate180": [
+        false,
+        false
+      ],
+      "backend": "auto",
+      "codec": "auto",
+      "exposure_s": null,
+      "gain": 100,
+      "auto_exposure": true
+    },
+    "created_utc": "2026-11-07T04:08:10.303034+00:00"
+  },
+  "operator_warning_review": "",
+  "experiment_mode": "sync_check",
+  "geometry_status": "not_assessed",
+  "plumb_status": "reference_images_only_not_reconstructed",
+  "note_saved_after_run": "2026-11-06T20:15:15"
+}

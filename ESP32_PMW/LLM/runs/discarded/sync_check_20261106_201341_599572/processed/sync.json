@@ -1,0 +1,397 @@
+{
+  "schema_version": 1,
+  "clocks": {
+    "camera_A": {
+      "source_name": "camera_A",
+      "scale": 1.0001178564639348,
+      "offset_s": -179150.51515909517,
+      "method": "affine",
+      "drift_measured": true,
+      "residual_max_s": 1.3415046851150692e-11,
+      "anchors": [
+        {
+          "source_time_s": 179129.403601,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        },
+        {
+          "source_time_s": 179155.3546595,
+          "experiment_time_s": 25.954116999999997,
+          "residual_s": 1.3415046851150692e-11
+        }
+      ],
+      "limitation": "average scale estimated from events; residual is not an optical synchronization bound"
+    },
+    "camera_B": {
+      "source_name": "camera_B",
+      "scale": 0.9996461929352397,
+      "offset_s": -179066.02823533327,
+      "method": "affine",
+      "drift_measured": true,
+      "residual_max_s": 1.3415046851150692e-11,
+      "anchors": [
+        {
+          "source_time_s": 179129.4054845,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        },
+        {
+          "source_time_s": 179155.36878750002,
+          "experiment_time_s": 25.954116999999997,
+          "residual_s": 1.3415046851150692e-11
+        }
+      ],
+      "limitation": "average scale estimated from events; residual is not an optical synchronization bound"
+    },
+    "esp": {
+      "source_name": "esp",
+      "scale": 1.0,
+      "offset_s": -6.195692,
+      "method": "single_anchor_offset",
+      "drift_measured": false,
+      "residual_max_s": 0.0,
+      "anchors": [
+        {
+          "source_time_s": 6.195692,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        }
+      ],
+      "limitation": "clock drift is unmeasured",
+      "evidence": "raw/telemetry.jsonl line 21: LED GPIO call midpoint; optical/electrical delay unvalidated"
+    }
+  },
+  "association": "operator-given START LED ROIs; the firmware-declared pulse pair was decoded in both cameras and matched to the sole device START and STOP",
+  "hardware_sync_validated": false,
+  "led": {
+    "A": {
+      "status": "detected",
+      "edges": [
+        {
+          "level": true,
+          "source_time_s": 179129.403601,
+          "lower_s": 179129.402215,
+          "upper_s": 179129.404987,
+          "frame_index": 604,
+          "confirmation_frame_index": 606,
+          "confirmation_source_time_s": 179129.419788
+        },
+        {
+          "level": true,
+          "source_time_s": 179129.4661085,
+          "lower_s": 179129.462746,
+          "upper_s": 179129.469471,
+          "frame_index": 612,
+          "confirmation_frame_index": 613,
+          "confirmation_source_time_s": 179129.478276
+        },
+        {
+          "level": true,
+          "source_time_s": 179155.38670749997,
+          "lower_s": 179155.382635,
+          "upper_s": 179155.39078,
+          "frame_index": 3729,
+          "confirmation_frame_index": 3730,
+          "confirmation_source_time_s": 179155.400139
+        }
+      ],
+      "transitions": [
+        {
+          "level": true,
+          "source_time_s": 179129.403601,
+          "lower_s": 179129.402215,
+          "upper_s": 179129.404987,
+          "frame_index": 604,
+          "confirmation_frame_index": 606,
+          "confirmation_source_time_s": 179129.419788
+        },
+        {
+          "level": false,
+          "source_time_s": 179129.43319850002,
+          "lower_s": 179129.428209,
+          "upper_s": 179129.438188,
+          "frame_index": 608,
+          "confirmation_frame_index": 610,
+          "confirmation_source_time_s": 179129.454347
+        },
+        {
+          "level": true,
+          "source_time_s": 179129.4661085,
+          "lower_s": 179129.462746,
+          "upper_s": 179129.469471,
+          "frame_index": 612,
+          "confirmation_frame_index": 613,
+          "confirmation_source_time_s": 179129.478276
+        },
+        {
+          "level": false,
+          "source_time_s": 179155.3546595,
+          "lower_s": 179155.35092,
+          "upper_s": 179155.358399,
+          "frame_index": 3725,
+          "confirmation_frame_index": 3726,
+          "confirmation_source_time_s": 179155.369262
+        },
+        {
+          "level": true,
+          "source_time_s": 179155.38670749997,
+          "lower_s": 179155.382635,
+          "upper_s": 179155.39078,
+          "frame_index": 3729,
+          "confirmation_frame_index": 3730,
+          "confirmation_source_time_s": 179155.400139
+        },
+        {
+          "level": false,
+          "source_time_s": 179155.4258455,
+          "lower_s": 179155.420394,
+          "upper_s": 179155.431297,
+          "frame_index": 3733,
+          "confirmation_frame_index": 3735,
+          "confirmation_source_time_s": 179155.444776
+        }
+      ],
+      "reason": "level changes held for at least min_on_s",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 28.941695175438596,
+        "low_threshold": 24.360948934837094,
+        "min_on_s": 0.008108000009087846,
+        "timing_kind": "host_capture_receipt",
+        "threshold_mode": "auto",
+        "frame_period_s": 0.008108000009087846
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/A/A.mp4",
+      "roi": [
+        256,
+        228,
+        57,
+        56
+      ],
+      "decoded_frames": 3964
+    },
+    "B": {
+      "status": "detected",
+      "edges": [
+        {
+          "level": true,
+          "source_time_s": 179129.4054845,
+          "lower_s": 179129.402901,
+          "upper_s": 179129.408068,
+          "frame_index": 605,
+          "confirmation_frame_index": 607,
+          "confirmation_source_time_s": 179129.424238
+        },
+        {
+          "level": true,
+          "source_time_s": 179129.46202749998,
+          "lower_s": 179129.457986,
+          "upper_s": 179129.466069,
+          "frame_index": 612,
+          "confirmation_frame_index": 613,
+          "confirmation_source_time_s": 179129.474483
+        },
+        {
+          "level": true,
+          "source_time_s": 179155.39224199997,
+          "lower_s": 179155.38661,
+          "upper_s": 179155.397874,
+          "frame_index": 3728,
+          "confirmation_frame_index": 3730,
+          "confirmation_source_time_s": 179155.40829
+        }
+      ],
+      "transitions": [
+        {
+          "level": true,
+          "source_time_s": 179129.4054845,
+          "lower_s": 179129.402901,
+          "upper_s": 179129.408068,
+          "frame_index": 605,
+          "confirmation_frame_index": 607,
+          "confirmation_source_time_s": 179129.424238
+        },
+        {
+          "level": false,
+          "source_time_s": 179129.428312,
+          "lower_s": 179129.424238,
+          "upper_s": 179129.432386,
+          "frame_index": 608,
+          "confirmation_frame_index": 609,
+          "confirmation_source_time_s": 179129.441752
+        },
+        {
+          "level": true,
+          "source_time_s": 179129.46202749998,
+          "lower_s": 179129.457986,
+          "upper_s": 179129.466069,
+          "frame_index": 612,
+          "confirmation_frame_index": 613,
+          "confirmation_source_time_s": 179129.474483
+        },
+        {
+          "level": false,
+          "source_time_s": 179155.36878750002,
+          "lower_s": 179155.362948,
+          "upper_s": 179155.374627,
+          "frame_index": 3725,
+          "confirmation_frame_index": 3727,
+          "confirmation_source_time_s": 179155.38661
+        },
+        {
+          "level": true,
+          "source_time_s": 179155.39224199997,
+          "lower_s": 179155.38661,
+          "upper_s": 179155.397874,
+          "frame_index": 3728,
+          "confirmation_frame_index": 3730,
+          "confirmation_source_time_s": 179155.40829
+        },
+        {
+          "level": false,
+          "source_time_s": 179155.4204285,
+          "lower_s": 179155.415732,
+          "upper_s": 179155.425125,
+          "frame_index": 3732,
+          "confirmation_frame_index": 3734,
+          "confirmation_source_time_s": 179155.439721
+        }
+      ],
+      "reason": "level changes held for at least min_on_s",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 27.667920000000002,
+        "low_threshold": 22.07433306122449,
+        "min_on_s": 0.008155999996233732,
+        "timing_kind": "host_capture_receipt",
+        "threshold_mode": "auto",
+        "frame_period_s": 0.008155999996233732
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/B/B.mp4",
+      "roi": [
+        818,
+        245,
+        50,
+        49
+      ],
+      "decoded_frames": 3964
+    }
+  },
+  "markers": {
+    "A": {
+      "markers": [
+        {
+          "kind": "start",
+          "first_source_time_s": 179129.403601,
+          "edges_s": [
+            179129.403601,
+            179129.43319850002,
+            179129.4661085
+          ],
+          "on_s": 0.029597500019008294,
+          "gap_s": 0.032909999979892746,
+          "tolerance_s": 0.01621600001817569
+        },
+        {
+          "kind": "stop",
+          "first_source_time_s": 179155.3546595,
+          "edges_s": [
+            179155.3546595,
+            179155.38670749997,
+            179155.4258455
+          ],
+          "on_s": 0.03204799996456131,
+          "gap_s": 0.03913800002192147,
+          "tolerance_s": 0.01621600001817569
+        }
+      ],
+      "tolerance_s": 0.01621600001817569,
+      "frame_period_s": 0.008108000009087846,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    },
+    "B": {
+      "markers": [
+        {
+          "kind": "start",
+          "first_source_time_s": 179129.4054845,
+          "edges_s": [
+            179129.4054845,
+            179129.428312,
+            179129.46202749998
+          ],
+          "on_s": 0.022827500011771917,
+          "gap_s": 0.03371549997245893,
+          "tolerance_s": 0.016311999992467463
+        },
+        {
+          "kind": "stop",
+          "first_source_time_s": 179155.36878750002,
+          "edges_s": [
+            179155.36878750002,
+            179155.39224199997,
+            179155.4204285
+          ],
+          "on_s": 0.023454499954823405,
+          "gap_s": 0.028186500014271587,
+          "tolerance_s": 0.016311999992467463
+        }
+      ],
+      "tolerance_s": 0.016311999992467463,
+      "frame_period_s": 0.008155999996233732,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    }
+  },
+  "input_sha256": {
+    "raw/camera/frames.csv": "b97c110992bf209ed275cfb9f692e1b1d668711342073f7b7c4f22109e687432",
+    "raw/camera/A/A.mp4": "3add59debc91a79af56469e619f2310031d07976d2ce6623d27091a22d52e3e4",
+    "raw/camera/B/B.mp4": "b2394f047859a1dfc05726a9c58f5555c98f5e8e01729243d2bdf1c4c7c6a094",
+    "raw/telemetry.jsonl": "2b8f77f2f913ce44e561954c00861f5573133d5597c6aee53dfc94464c4eb57c"
+  },
+  "led_config": {
+    "threshold": null,
+    "low_threshold": null,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  },
+  "cross_camera": {
+    "start_skew_s": -0.0018834999937098473,
+    "bound_s": 0.02
+  },
+  "device_start": {
+    "led0_us": 6195663,
+    "led1_us": 6195721,
+    "drive0_us": 6195721,
+    "drive1_us": 6195895,
+    "on_us": 30000,
+    "gap_us": 30000,
+    "raw_line_number": 21,
+    "host_receive_s": 179129.3895605,
+    "led_reference_device_s": 6.195692,
+    "drive_apply_interval_t_s": [
+      2.899999999961267e-05,
+      0.00020299999999995322
+    ],
+    "measurement_kind": "software_call_brackets_not_measured_current_onset",
+    "drift_measured": false
+  },
+  "device_stop": {
+    "t0_us": 32149790,
+    "t1_us": 32149828,
+    "on_us": 30000,
+    "gap_us": 30000,
+    "raw_line_number": 76,
+    "host_receive_s": 179155.345586666,
+    "stop_reference_device_t_s": 25.954116999999997,
+    "measurement_kind": "software_call_brackets_not_measured_current_onset"
+  }
+}

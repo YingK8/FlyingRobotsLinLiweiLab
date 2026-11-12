@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "clocks": {
+    "camera_A": {
+      "source_name": "camera_A",
+      "scale": 1.0000733513023852,
+      "offset_s": -180614.6523992731,
+      "method": "affine",
+      "drift_measured": true,
+      "residual_max_s": 1.7188028778036823e-11,
+      "anchors": [
+        {
+          "source_time_s": 180601.405051,
+          "experiment_time_s": 0.0,
+          "residual_s": 0.0
+        },
+        {
+          "source_time_s": 180616.885349,
+          "experiment_time_s": 15.481433500000001,
+          "residual_s": 1.7188028778036823e-11
+        }
+      ],
+      "limitation": "average scale estimated from events; residual is not an optical synchronization bound"
+    }
+  },
+  "association": "firmware-declared START/STOP markers decoded in both cameras",
+  "hardware_sync_validated": false,
+  "led": {
+    "A": {
+      "status": "detected",
+      "edges": [
+        {
+          "level": true,
+          "source_time_s": 180601.405051,
+          "lower_s": 180601.399371,
+          "upper_s": 180601.410731,
+          "frame_index": 577,
+          "confirmation_frame_index": 579,
+          "confirmation_source_time_s": 180601.426227
+        },
+        {
+          "level": true,
+          "source_time_s": 180601.460347,
+          "lower_s": 180601.456367,
+          "upper_s": 180601.464327,
+          "frame_index": 584,
+          "confirmation_frame_index": 586,
+          "confirmation_source_time_s": 180601.47917
+        },
+        {
+          "level": true,
+          "source_time_s": 180616.91815450002,
+          "lower_s": 180616.913598,
+          "upper_s": 180616.922711,
+          "frame_index": 2439,
+          "confirmation_frame_index": 2441,
+          "confirmation_source_time_s": 180616.937997
+        }
+      ],
+      "transitions": [
+        {
+          "level": true,
+          "source_time_s": 180601.405051,
+          "lower_s": 180601.399371,
+          "upper_s": 180601.410731,
+          "frame_index": 577,
+          "confirmation_frame_index": 579,
+          "confirmation_source_time_s": 180601.426227
+        },
+        {
+          "level": false,
+          "source_time_s": 180601.44078250002,
+          "lower_s": 180601.434405,
+          "upper_s": 180601.44716,
+          "frame_index": 581,
+          "confirmation_frame_index": 583,
+          "confirmation_source_time_s": 180601.456367
+        },
+        {
+          "level": true,
+          "source_time_s": 180601.460347,
+          "lower_s": 180601.456367,
+          "upper_s": 180601.464327,
+          "frame_index": 584,
+          "confirmation_frame_index": 586,
+          "confirmation_source_time_s": 180601.47917
+        },
+        {
+          "level": false,
+          "source_time_s": 180616.885349,
+          "lower_s": 180616.880886,
+          "upper_s": 180616.889812,
+          "frame_index": 2435,
+          "confirmation_frame_index": 2436,
+          "confirmation_source_time_s": 180616.898448
+        },
+        {
+          "level": true,
+          "source_time_s": 180616.91815450002,
+          "lower_s": 180616.913598,
+          "upper_s": 180616.922711,
+          "frame_index": 2439,
+          "confirmation_frame_index": 2441,
+          "confirmation_source_time_s": 180616.937997
+        },
+        {
+          "level": false,
+          "source_time_s": 180616.95097950002,
+          "lower_s": 180616.944842,
+          "upper_s": 180616.957117,
+          "frame_index": 2443,
+          "confirmation_frame_index": 2445,
+          "confirmation_source_time_s": 180616.967471
+        }
+      ],
+      "reason": "level changes held for at least min_on_s",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 28.04727916281933,
+        "low_threshold": 23.755921822099104,
+        "min_on_s": 0.008147000000462867,
+        "timing_kind": "host_capture_receipt",
+        "threshold_mode": "auto",
+        "frame_period_s": 0.008147000000462867
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/A/A.mp4",
+      "roi": [
+        276,
+        217,
+        57,
+        57
+      ],
+      "decoded_frames": 2673
+    },
+    "B": {
+      "status": "detected",
+      "edges": [
+        {
+          "level": true,
+          "source_time_s": 180601.4049895,
+          "lower_s": 180601.400029,
+          "upper_s": 180601.40995,
+          "frame_index": 576,
+          "confirmation_frame_index": 578,
+          "confirmation_source_time_s": 180601.42684
+        },
+        {
+          "level": true,
+          "source_time_s": 180616.91810900002,
+          "lower_s": 180616.91424,
+          "upper_s": 180616.921978,
+          "frame_index": 2438,
+          "confirmation_frame_index": 2439,
+          "confirmation_source_time_s": 180616.930224
+        }
+      ],
+      "transitions": [
+        {
+          "level": true,
+          "source_time_s": 180601.4049895,
+          "lower_s": 180601.400029,
+          "upper_s": 180601.40995,
+          "frame_index": 576,
+          "confirmation_frame_index": 578,
+          "confirmation_source_time_s": 180601.42684
+        },
+        {
+          "level": false,
+          "source_time_s": 180616.88951950002,
+          "lower_s": 180616.88148,
+          "upper_s": 180616.897559,
+          "frame_index": 2435,
+          "confirmation_frame_index": 2436,
+          "confirmation_source_time_s": 180616.907822
+        },
+        {
+          "level": true,
+          "source_time_s": 180616.91810900002,
+          "lower_s": 180616.91424,
+          "upper_s": 180616.921978,
+          "frame_index": 2438,
+          "confirmation_frame_index": 2439,
+          "confirmation_source_time_s": 180616.930224
+        },
+        {
+          "level": false,
+          "source_time_s": 180616.952148,
+          "lower_s": 180616.945456,
+          "upper_s": 180616.95884,
+          "frame_index": 2442,
+          "confirmation_frame_index": 2444,
+          "confirmation_source_time_s": 180616.968216
+        }
+      ],
+      "reason": "level changes held for at least min_on_s",
+      "warnings": [],
+      "timing_kind": "host_capture_receipt",
+      "config": {
+        "threshold": 30.128549019607846,
+        "low_threshold": 25.441254901960786,
+        "min_on_s": 0.00811700000485871,
+        "timing_kind": "host_capture_receipt",
+        "threshold_mode": "auto",
+        "frame_period_s": 0.00811700000485871
+      },
+      "interval_meaning": "bracket of source timestamp observations; exposure and transport latency uncalibrated",
+      "video_path": "raw/camera/B/B.mp4",
+      "roi": [
+        837,
+        231,
+        52,
+        51
+      ],
+      "decoded_frames": 2673
+    }
+  },
+  "markers": {
+    "A": {
+      "markers": [
+        {
+          "kind": "start",
+          "first_source_time_s": 180601.405051,
+          "edges_s": [
+            180601.405051,
+            180601.44078250002,
+            180601.460347
+          ],
+          "on_s": 0.03573150001466274,
+          "gap_s": 0.0195644999621436,
+          "tolerance_s": 0.016294000000925735
+        },
+        {
+          "kind": "stop",
+          "first_source_time_s": 180616.885349,
+          "edges_s": [
+            180616.885349,
+            180616.91815450002,
+            180616.95097950002
+          ],
+          "on_s": 0.03280550002818927,
+          "gap_s": 0.03282500000204891,
+          "tolerance_s": 0.016294000000925735
+        }
+      ],
+      "tolerance_s": 0.016294000000925735,
+      "frame_period_s": 0.008147000000462867,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    },
+    "B": {
+      "markers": [
+        {
+          "kind": "stop",
+          "first_source_time_s": 180616.88951950002,
+          "edges_s": [
+            180616.88951950002,
+            180616.91810900002,
+            180616.952148
+          ],
+          "on_s": 0.028589499997906387,
+          "gap_s": 0.034038999991025776,
+          "tolerance_s": 0.01623400000971742
+        }
+      ],
+      "tolerance_s": 0.01623400000971742,
+      "frame_period_s": 0.00811700000485871,
+      "declared": {
+        "on_s": 0.03,
+        "gap_s": 0.03
+      }
+    }
+  },
+  "input_sha256": {
+    "raw/camera/frames.csv": "6621742bb9815f459757d2ce261c5dde2a4e62fd83f7de4c95039bbd1a380bf7",
+    "raw/camera/A/A.mp4": "b3aefd71f4387053c185474f2435bcda93dcb4da8e91b7490e65893ccfc42779",
+    "raw/camera/B/B.mp4": "04cfa3fd90114a4328491bb0065fa8f493493d00550464b5d14d52c9846ba744"
+  },
+  "led_config": {
+    "threshold": null,
+    "low_threshold": null,
+    "min_on_s": null,
+    "marker_tol_rel": 0.25
+  }
+}

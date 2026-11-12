@@ -1,0 +1,62 @@
+{
+  "integrity": "PASS",
+  "source": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261106_194126_fea7dc/raw/captures/2026-11-06_194128",
+  "decoded_frames_per_camera": 4822,
+  "csv_capture_rows": 4822,
+  "queue_dropped_pairs": 0,
+  "saved_fps_from_timestamps": {
+    "a": 118.67562726322372,
+    "b": 118.68457315951886
+  },
+  "timestamp_span_s": {
+    "a": 40.623336999997264,
+    "b": 40.62027500002296
+  },
+  "frame_gaps": {
+    "a": {
+      "median_ms": 8.033000020077452,
+      "max_ms": 295.8400000061374
+    },
+    "b": {
+      "median_ms": 8.058000006712973,
+      "max_ms": 303.54500000248663
+    }
+  },
+  "playback_fps": 120.0,
+  "host_skew_ms": {
+    "median": 3.8690000073984265,
+    "p95": 12.534649988810997,
+    "max": 142.28999998886138
+  },
+  "warnings": [
+    "A: timestamp gap exceeds 3 requested frame periods",
+    "B: timestamp gap exceeds 3 requested frame periods",
+    "895 pairs exceed 10 ms host timestamp skew"
+  ],
+  "hardware_sync_validated": false,
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "session_id": "20261106_193952_8a2150",
+  "input_sha256": {
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261106_194126_fea7dc/raw/captures/2026-11-06_194128/meta.json": "3e22279b4cb86e70f2feb5db0c33150ecd36a67bb8b493ca40db26bcd4683927",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261106_194126_fea7dc/raw/captures/2026-11-06_194128/frames.csv": "2f836a966fecba691d32533c7fac9150d97ad70d4250fa58f5a379ca6e4764b8",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261106_194126_fea7dc/raw/captures/2026-11-06_194128/A/A.mp4": "903ca2ee0c24d3f6ddd31de0d9edd4625751ce1fa34d2a2fea30cd457ba6e06b",
+    "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sync_check_20261106_194126_fea7dc/raw/captures/2026-11-06_194128/B/B.mp4": "6260ffa0491bab5c5e4db94bf94093a7ea021f2fa9986a962a22af3224c581e5"
+  }
+}

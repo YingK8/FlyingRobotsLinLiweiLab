@@ -1,0 +1,1 @@
+Alignment changed or failed; rerun process after a successful sync.

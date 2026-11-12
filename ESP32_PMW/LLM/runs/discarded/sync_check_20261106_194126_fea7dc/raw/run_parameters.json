@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "written": "before START; planned and host-sent values, not device-applied or measured",
+  "created_utc": "2026-11-07T03:41:27.139194+00:00",
+  "time_anchor": {
+    "unix_s": 1794022887.139222,
+    "monotonic_s": 177188.305348291,
+    "meaning": "unix = monotonic + (unix_s - monotonic_s); same host, same boot"
+  },
+  "duty": {
+    "mode": "design",
+    "channels": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "percent": {
+      "A": 69.1,
+      "B": 81.0,
+      "C": 92.6,
+      "D": 92.0
+    },
+    "command": "duty=69.1:81.0:92.6:92.0",
+    "seed": null,
+    "generator": "numpy.random.default_rng(seed) (PCG64); exponential, rejection below floor",
+    "distribution": "per channel: see design.parameters.duty_*_pct",
+    "meaning": "per-channel multiplier on the ramp's carrier duty (collective*duty/100); sent once in IDLE before seq=go; reset clears it",
+    "device_applied": "telemetry duty[%] -> processed/current.csv duty_applied_*_pct"
+  },
+  "ramp": {
+    "file": "ramp.json",
+    "sha256": "abf6a2f889ae9a8b539fd9c514517c7a0f3a717d678fff8b7abd8344e88410fb",
+    "segments": [
+      {
+        "from_hz": 1.0,
+        "to_hz": 230.0,
+        "seconds": 23.608,
+        "shape": "poly",
+        "k": 3.0
+      },
+      {
+        "from_hz": 230.0,
+        "to_hz": 230.0,
+        "seconds": 10.0,
+        "shape": "linear"
+      }
+    ],
+    "name": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261106_193952_8a2150/ramps/20261106_194124.json"
+  },
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "calibration": {
+    "path": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/calibration_append/fit_20261105_213821_458879_770999f9/stereo_rig.json",
+    "sha256": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0",
+    "exists": true
+  },
+  "world_frame_sha256": "d8c0b15952262b97822b9a1fc8bd324ab7232ba5dc7ee4db4e25aaba32b53e9e",
+  "design": {
+    "seed": 2667405412425360677,
+    "generator": "numpy.random.default_rng(seed) (PCG64)",
+    "duty_scale_pct": 15.0,
+    "parameters": {
+      "f_top_hz": {
+        "mode": "fixed",
+        "lo": 100.0,
+        "hi": 260.0,
+        "step": 5.0,
+        "value": 230.0,
+        "rule": "fixed"
+      },
+      "rate_hz_s": {
+        "mode": "fixed",
+        "lo": 4.0,
+        "hi": 20.0,
+        "step": 0.5,
+        "value": 9.7,
+        "rule": "fixed"
+      },
+      "hold_s": {
+        "mode": "fixed",
+        "lo": 0.0,
+        "hi": 20.0,
+        "step": 1.0,
+        "value": 10.0,
+        "rule": "fixed"
+      },
+      "duty_A_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 69.1,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_B_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 81.0,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_C_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 92.6,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_D_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 92.0,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      }
+    }
+  },
+  "led_rois_xywh": [
+    [
+      254,
+      227,
+      57,
+      57
+    ],
+    [
+      819,
+      246,
+      48,
+      47
+    ]
+  ],
+  "note_at_start": "",
+  "software": {
+    "git": {
+      "commit": "ccadb53bc8ce8efda109b1499f9dfee0a118e247",
+      "dirty_files": 22
+    },
+    "python": "3.13.7",
+    "numpy": "2.5.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "host": "wifi-10-44-110-59.wifi.berkeley.edu"
+  }
+}

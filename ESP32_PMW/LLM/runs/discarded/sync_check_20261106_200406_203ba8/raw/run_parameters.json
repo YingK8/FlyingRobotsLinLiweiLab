@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "written": "before START; planned and host-sent values, not device-applied or measured",
+  "created_utc": "2026-11-07T04:04:06.928849+00:00",
+  "time_anchor": {
+    "unix_s": 1794024246.9288661,
+    "monotonic_s": 178548.079033291,
+    "meaning": "unix = monotonic + (unix_s - monotonic_s); same host, same boot"
+  },
+  "duty": {
+    "mode": "design",
+    "channels": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "percent": {
+      "A": 71.9,
+      "B": 77.3,
+      "C": 71.1,
+      "D": 90.6
+    },
+    "command": "duty=71.9:77.3:71.1:90.6",
+    "seed": null,
+    "generator": "numpy.random.default_rng(seed) (PCG64); exponential, rejection below floor",
+    "distribution": "per channel: see design.parameters.duty_*_pct",
+    "meaning": "per-channel multiplier on the ramp's carrier duty (collective*duty/100); duty=100 on all coils sent in IDLE before seq=go; this duty sent by the host when the PLANNED frequency reaches 200 Hz (capture meta host_duty_switch_send_complete_s); reset clears it",
+    "switch_at_planned_hz": 200.0,
+    "device_applied": "telemetry duty[%] -> processed/current.csv duty_applied_*_pct"
+  },
+  "ramp": {
+    "file": "ramp.json",
+    "sha256": "a7c2cadf5f5d7bafc6b83ed14b491d95b0110cbc9bc31fbbd3e863ceccd86c44",
+    "segments": [
+      {
+        "from_hz": 1.0,
+        "to_hz": 230.0,
+        "seconds": 23.608,
+        "shape": "poly",
+        "k": 3.0
+      },
+      {
+        "from_hz": 230.0,
+        "to_hz": 230.0,
+        "seconds": 10.0,
+        "shape": "linear"
+      }
+    ],
+    "name": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261106_200250_66eeb3/ramps/20261106_200404.json"
+  },
+  "camera": {
+    "indices": [
+      1,
+      0
+    ],
+    "width": 1280,
+    "height": 800,
+    "fps": 120,
+    "rotate180": [
+      false,
+      false
+    ],
+    "backend": "auto",
+    "codec": "auto",
+    "exposure_s": null,
+    "gain": 100,
+    "auto_exposure": true
+  },
+  "calibration": {
+    "path": "/Users/meli/Desktop/Kevin/UCB/FlyingRobotsLinLiweiLab/ESP32_PMW/LLM/runs/sessions/20261105_133801_240e2b/calibration_append/fit_20261105_213821_458879_770999f9/stereo_rig.json",
+    "sha256": "c64c94d061b8e992b150fa7b0a04c759e2f68ba22543a3399aebaf86c4ca27c0",
+    "exists": true
+  },
+  "world_frame_sha256": "2ed18d182ea28188c246fde1521a1a270cb28beda74be12ca7fe1ba4237b1630",
+  "design": {
+    "seed": 4936154401152662053,
+    "generator": "numpy.random.default_rng(seed) (PCG64)",
+    "duty_scale_pct": 15.0,
+    "parameters": {
+      "f_top_hz": {
+        "mode": "fixed",
+        "lo": 100.0,
+        "hi": 260.0,
+        "step": 5.0,
+        "value": 230.0,
+        "rule": "fixed"
+      },
+      "rate_hz_s": {
+        "mode": "fixed",
+        "lo": 4.0,
+        "hi": 20.0,
+        "step": 0.5,
+        "value": 9.7,
+        "rule": "fixed"
+      },
+      "hold_s": {
+        "mode": "fixed",
+        "lo": 0.0,
+        "hi": 20.0,
+        "step": 1.0,
+        "value": 10.0,
+        "rule": "fixed"
+      },
+      "duty_A_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 71.9,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_B_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 77.3,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_C_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 71.1,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_D_pct": {
+        "mode": "random",
+        "lo": 30.0,
+        "hi": 100.0,
+        "step": 5.0,
+        "value": 90.6,
+        "rule": "100 - Exponential(mean 15.0), redrawn below 30.0"
+      },
+      "duty_switch_hz": {
+        "mode": "fixed",
+        "lo": 1.0,
+        "hi": 260.0,
+        "step": 5.0,
+        "value": 200.0,
+        "rule": "fixed"
+      }
+    }
+  },
+  "led_rois_xywh": [
+    [
+      255,
+      226,
+      57,
+      56
+    ],
+    [
+      820,
+      246,
+      48,
+      48
+    ]
+  ],
+  "note_at_start": "",
+  "software": {
+    "git": {
+      "commit": "ccadb53bc8ce8efda109b1499f9dfee0a118e247",
+      "dirty_files": 24
+    },
+    "python": "3.13.7",
+    "numpy": "2.5.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "host": "wifi-10-44-110-59.wifi.berkeley.edu"
+  }
+}

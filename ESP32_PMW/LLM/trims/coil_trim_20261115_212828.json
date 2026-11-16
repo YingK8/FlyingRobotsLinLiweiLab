@@ -1,0 +1,160 @@
+{
+  "kind": "coil_trim",
+  "created": "2026-11-15T21:28:28",
+  "method": "weakest coil 100 %, others * weakest/own; median ratio to the 4-coil mean per band",
+  "bin_hz": 20.0,
+  "f_from_hz": 60.0,
+  "below_first_knot": "100 % all coils",
+  "runs": [
+    "sync_check_20261115_032444_e94aea",
+    "sync_check_20261115_032703_c4da76",
+    "sync_check_20261115_032833_5ea338",
+    "sync_check_20261115_032926_4a7ae9",
+    "sync_check_20261115_121011_811bf9",
+    "sync_check_20261115_121724_7706db",
+    "sync_check_20261115_133657_94bebe",
+    "sync_check_20261115_134738_bd4697",
+    "sync_check_20261115_143644_588846",
+    "sync_check_20261115_145855_cc4614",
+    "sync_check_20261115_150746_09b89a",
+    "sync_check_20261115_212130_fb03c1"
+  ],
+  "n_samples": 304,
+  "knots": [
+    {
+      "hz": 60.0,
+      "duty_pct": [
+        89.5,
+        94.3,
+        100.0,
+        98.8
+      ],
+      "field_fraction": 0.949,
+      "n": 35,
+      "runs": 11,
+      "held": false
+    },
+    {
+      "hz": 80.0,
+      "duty_pct": [
+        83.6,
+        87.5,
+        100.0,
+        99.4
+      ],
+      "field_fraction": 0.925,
+      "n": 21,
+      "runs": 10,
+      "held": false
+    },
+    {
+      "hz": 100.0,
+      "duty_pct": [
+        83.8,
+        80.5,
+        94.5,
+        100.0
+      ],
+      "field_fraction": 0.89,
+      "n": 28,
+      "runs": 10,
+      "held": false
+    },
+    {
+      "hz": 120.0,
+      "duty_pct": [
+        85.8,
+        73.7,
+        78.4,
+        100.0
+      ],
+      "field_fraction": 0.839,
+      "n": 19,
+      "runs": 10,
+      "held": false
+    },
+    {
+      "hz": 140.0,
+      "duty_pct": [
+        92.7,
+        71.0,
+        70.5,
+        100.0
+      ],
+      "field_fraction": 0.817,
+      "n": 12,
+      "runs": 7,
+      "held": false
+    },
+    {
+      "hz": 160.0,
+      "duty_pct": [
+        100.0,
+        70.1,
+        69.1,
+        93.0
+      ],
+      "field_fraction": 0.809,
+      "n": 9,
+      "runs": 5,
+      "held": false
+    },
+    {
+      "hz": 180.0,
+      "duty_pct": [
+        100.0,
+        61.2,
+        61.8,
+        72.9
+      ],
+      "field_fraction": 0.712,
+      "n": 6,
+      "runs": 5,
+      "held": false
+    },
+    {
+      "hz": 200.0,
+      "duty_pct": [
+        100.0,
+        64.2,
+        64.2,
+        71.9
+      ],
+      "field_fraction": 0.728,
+      "n": 8,
+      "runs": 4,
+      "held": false
+    },
+    {
+      "hz": 220.0,
+      "duty_pct": [
+        100.0,
+        64.8,
+        62.6,
+        67.6
+      ],
+      "field_fraction": 0.715,
+      "n": 3,
+      "runs": 3,
+      "held": false
+    },
+    {
+      "hz": 240.0,
+      "duty_pct": [
+        100.0,
+        68.8,
+        66.7,
+        72.0
+      ],
+      "field_fraction": 0.753,
+      "n": 15,
+      "runs": 3,
+      "held": false
+    }
+  ],
+  "caveats": [
+    "amplitude only: per-coil current PHASE is not corrected",
+    "measured on the CS estimate at ~2 Hz telemetry during ramps",
+    "duty is assumed proportional to coil current (linear RLC)"
+  ]
+}

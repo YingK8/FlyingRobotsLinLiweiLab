@@ -26,15 +26,20 @@ from LLM.record.randomise import CHANNELS, DEFAULT as DUTY_DEFAULT, draw_duty
 
 MODES = ("fixed", "random", "step")
 F_START_HZ = 1.0
-# value, lo, hi, step, mode. Defaults: the 2026-11-06 cubic_1to230Hz_23.6s_hold10s ramp
-# (mean 9.7 Hz/s is cubic_1to195Hz_20s's) and the per-coil random duty. Bounds are
-# operator-editable guards, not measured limits: f_top above ~195 Hz is unflown here.
+# value, lo, hi, step, mode. Defaults (operator 2026-11-15, "revert to the last one that
+# works"): sync_check_20261106_191129, noted "good takeoff" -- cubic 1 -> 195 Hz in 20 s,
+# no hold, all coils 100 %. Every run since at 230 Hz + 10 s hold, with random duty
+# (from 20261106_194249 on), is noted flung off sideways or similar (runs_index.csv).
+# Then (operator, same day) top raised to 220 Hz, then 250 Hz, at the same 9.7 Hz/s, so
+# 25.67 s, then a 2 s hold at 250 Hz (operator). 250 Hz was flown once with a 10 s hold
+# (20261106_202636, no note). Random duty is one dropdown away (mode "random"). Bounds are operator-editable guards,
+# not measured limits.
 PARAMS = {
-    "f_top_hz":    {"label": "Top frequency (Hz)", "value": 230.0, "lo": 100.0, "hi": 260.0, "step": 5.0, "mode": "fixed"},
+    "f_top_hz":    {"label": "Top frequency (Hz)", "value": 250.0, "lo": 100.0, "hi": 260.0, "step": 5.0, "mode": "fixed"},
     "rate_hz_s":   {"label": "Mean ramp rate (Hz/s)", "value": 9.7, "lo": 4.0, "hi": 20.0, "step": 0.5, "mode": "fixed"},
-    "hold_s":      {"label": "Hold at top (s)", "value": 10.0, "lo": 0.0, "hi": 20.0, "step": 1.0, "mode": "fixed"},
+    "hold_s":      {"label": "Hold at top (s)", "value": 2.0, "lo": 0.0, "hi": 20.0, "step": 1.0, "mode": "fixed"},
     **{f"duty_{c}_pct": {"label": f"Duty coil {c} (%)", "value": 100.0, "lo": DUTY_DEFAULT["floor_pct"],
-                         "hi": 100.0, "step": 5.0, "mode": "random"} for c in CHANNELS},
+                         "hi": 100.0, "step": 5.0, "mode": "fixed"} for c in CHANNELS},
     # All coils 100 % on the way up, the duty above only from here (operator 2026-11-06:
     # capture and spin-up at full drive). Planned host-time frequency, not measured
     # takeoff; capped at f_top by Bench.run. 200 Hz is the operator's figure.
@@ -119,9 +124,16 @@ def advance(specs):
 def _self_check():
     import tempfile
     specs = {k: dict(v) for k, v in PARAMS.items()}
+    d = plan(specs, seed=3)
+    assert segments(d["parameters"]["f_top_hz"]["value"], d["parameters"]["rate_hz_s"]["value"],
+                    d["parameters"]["hold_s"]["value"]) == [
+        {"from_hz": 1.0, "to_hz": 250.0, "seconds": 25.67, "shape": "poly", "k": 3.0},
+        {"from_hz": 250.0, "to_hz": 250.0, "seconds": 2.0, "shape": "linear"}], "2026-11-06 takeoff to 250 Hz, 2 s hold"
+    assert duty_values(d) == [100.0] * len(CHANNELS), "default duty: all coils 100 %"
+    for c in CHANNELS:
+        specs[f"duty_{c}_pct"]["mode"] = "random"
     a, b = plan(specs, seed=3), plan(specs, seed=3)
     assert a == b, "same seed, same design"
-    assert a["parameters"]["f_top_hz"]["value"] == 230.0
     assert a["parameters"]["duty_switch_hz"]["value"] == 200.0
     duties = duty_values(a)
     assert all(30 <= d <= 100 for d in duties) and len(set(duties)) > 1, duties

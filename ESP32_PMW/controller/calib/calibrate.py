@@ -347,6 +347,11 @@ def load_views(spec, pair_dir=PAIR_DIR, pattern="*.png", min_corners=None):
 
 # ---- per-camera intrinsics ----------------------------------------------------------
 MIN_VIEWS = 8  # 4 is the algebraic minimum; 4 is not a calibration
+OUTLIER_VIEW_RATIO = 2.5  # a view whose RMS is over this x the median view's is dropped and
+# the fit redone (section 14.5b). A guess, from one bag: the misread view sat at 3.2x, the
+# next worst at 1.1x; 2.5 leaves margin both ways.
+OUTLIER_VIEW_MIN_PX = 1.0  # and over the acceptance RMS limit (results.MAX_RMS_PX): a view the
+# gate would pass alone is never dropped, so a near-noise-free bag keeps every view
 MIN_ORIENT_SPREAD_DEG = 25.0  # of `orientation_spread_deg`. The textbook set -- face-on
 # plus 40 deg tilted four ways -- scores 35.8 deg, and a
 # set that only ever tilts one way about 10.
@@ -368,7 +373,7 @@ def calibrate_intrinsics(
     wants the same image and only needs eight corners shared with the other camera.
     """
     need = fit_corners(spec) if min_corners is None else min_corners
-    obj_pts, img_pts, thin = [], [], 0
+    obj_pts, img_pts, names, thin = [], [], [], 0
     for v in views:
         if len(v["ids"]) < need:
             thin += 1
@@ -377,6 +382,7 @@ def calibrate_intrinsics(
         if o is not None:
             obj_pts.append(o)
             img_pts.append(i)
+            names.append(v["index"])
     if len(obj_pts) < MIN_VIEWS:
         raise RuntimeError(
             f"camera {name}: {len(obj_pts)} usable views, need {MIN_VIEWS}"
@@ -388,12 +394,26 @@ def calibrate_intrinsics(
     steep = [
         i for i, rv in enumerate(rvecs) if board_incidence_deg(rv) > max_incidence_deg
     ]
-    if steep and len(obj_pts) - len(steep) >= MIN_VIEWS:
-        obj_pts = [o for i, o in enumerate(obj_pts) if i not in set(steep)]
-        img_pts = [p for i, p in enumerate(img_pts) if i not in set(steep)]
+    dropped = {}
+
+    def drop(bad, why):
+        nonlocal obj_pts, img_pts, names, rms, K, dist, rvecs, std_K, per_view
+        dropped.update({names[i]: why(i) for i in bad})
+        keep = [i for i in range(len(obj_pts)) if i not in set(bad)]
+        obj_pts, img_pts, names = ([x[i] for i in keep] for x in (obj_pts, img_pts, names))
         rms, K, dist, rvecs, _, std_K, _, per_view = cv2.calibrateCameraExtended(
             obj_pts, img_pts, image_size, None, None
         )
+
+    if steep and len(obj_pts) - len(steep) >= MIN_VIEWS:
+        drop(steep, lambda i: f"incidence {board_incidence_deg(rvecs[i]):.0f} deg")
+    # A view whose corners were misread (the tag border taken for the corner, section 14.5b)
+    # pulls the distortion toward itself; one such view failed a whole bag on 2026-11-16.
+    errs = np.asarray(per_view, dtype=np.float64).ravel()
+    limit = max(OUTLIER_VIEW_RATIO * np.median(errs), OUTLIER_VIEW_MIN_PX)
+    outliers = [i for i, e in enumerate(errs) if e > limit]
+    if outliers and len(obj_pts) - len(outliers) >= MIN_VIEWS:
+        drop(outliers, lambda i: f"view RMS {errs[i]:.2f} px vs median {np.median(errs):.2f}")
     dist = np.asarray(dist, dtype=np.float64).ravel()
     per_view = np.asarray(per_view, dtype=np.float64).ravel().tolist()
     std_K = np.asarray(std_K, dtype=np.float64).ravel()  # fx, fy, cx, cy, then dist
@@ -408,15 +428,16 @@ def calibrate_intrinsics(
         "orientation_spread_deg": spread,
         "std_fx_fy_cx_cy": std_K[:4].tolist(),
         "image_size": list(image_size),
+        "dropped_views": dropped,
     }
 
     print(
         f"camera {name}: {len(obj_pts)} views, RMS {rms:.4f} px, "
         f"worst view {max(per_view):.4f} px"
-        + (f"  ({thin} under {need} corners" if thin else "")
-        + (f", {len(steep)} over {max_incidence_deg:.0f} deg" if steep else "")
-        + (")" if thin or steep else "")
+        + (f"  ({thin} under {need} corners)" if thin else "")
     )
+    for view, why in dropped.items():
+        print(f"  dropped {view}: {why}")
     print(f"  fx={K[0,0]:.2f} fy={K[1,1]:.2f} cx={K[0,2]:.2f} cy={K[1,2]:.2f}")
     print(
         f"  +/-  {std_K[0]:.2f}      {std_K[1]:.2f}      {std_K[2]:.2f}     "
@@ -625,6 +646,11 @@ def refine_extrinsic(
 
 
 # ---- solve --------------------------------------------------------------------------
+def without_dropped(views, info):
+    """The views the intrinsic fit kept: a view it dropped as misread must not pair either."""
+    return [v for v in views if v["index"] not in info.get("dropped_views", {})]
+
+
 def run_calibration(spec, pair_dir=PAIR_DIR):
     """A capture bag -> a gated result. Everything downstream reads the returned dict."""
 
@@ -637,6 +663,7 @@ def run_calibration(spec, pair_dir=PAIR_DIR):
     print()
     K_b, dist_b, intr_b = calibrate_intrinsics(spec, views_b, image_size, "B")
     print()
+    views_a, views_b = without_dropped(views_a, intr_a), without_dropped(views_b, intr_b)
 
     T_ba, pairs, seed_T, spread, stereo_info = calibrate_extrinsics(
         spec, views_a, views_b, K_a, dist_a, K_b, dist_b, image_size

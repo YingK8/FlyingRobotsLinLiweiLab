@@ -26,7 +26,7 @@ from controller.calib.calibrate import (BOARDS, HERE, MIN_COMMON_CORNERS, SPEC,
                        seed_extrinsic, solve_board_pose)
 from controller.calib.capture import (GUIDE_TARGETS, _look, _pose_key, _rough_K, capture,
                      gates, guide_quads, in_camera, next_target, pair_targets, read_meta,
-                     rel_rotation, solo_ok, write_meta)
+                     rel_rotation, select, solo_ok, write_meta)
 from controller.calib.rig import StereoRig
 from controller.camera import sources
 from controller.calib.zeroing import frame_from_normal
@@ -224,6 +224,21 @@ def test_bag_reuse():
         assert read_meta(bag)["n_pairs"] == 26
 
 
+def test_misread_view_dropped():
+    """One view with misread corners is dropped from the lens fit and from pairing."""
+    from controller.calib.calibrate import calibrate_intrinsics, without_dropped
+    rig_true = StereoRig.from_spherical(elev_deg=(45, 45), azim_deg=(0, 90), range_mm=300)
+    views_a, _, _ = _synthetic_pairs(TEST_SPEC, rig_true, n=14, seed=3, noise_px=0.2)
+    bad = views_a[5]
+    bad["corners"] = bad["corners"].copy()
+    bad["corners"][:6] += 6.0      # a corner locked onto the tag border, several px off
+    _, _, info = calibrate_intrinsics(TEST_SPEC, views_a, (960, 720), "A")
+    assert list(info["dropped_views"]) == [bad["index"]], info["dropped_views"]
+    assert info["rms_px"] < 0.5, info["rms_px"]
+    kept = without_dropped(views_a, info)
+    assert bad not in kept and len(kept) == len(views_a) - 1
+
+
 def test_exact():
     """Noise-free: the solve must return the rig it was given, to numerical precision."""
     rig_true = StereoRig.from_spherical(elev_deg=(45, 45), azim_deg=(0, 90), range_mm=300)
@@ -326,7 +341,8 @@ def self_test():
     """Everything that runs without a camera: the synthetic round trip, and this file."""
 
     for fn in (test_units_are_mm, test_marker_scales_with_square, test_solo_keeps_unpaired,
-               test_guide_targets, test_pair_guide, test_bag_reuse, test_mixed_hemisphere_is_refused, test_exact, test_noise, test_disjoint_ids):
+               test_guide_targets, test_pair_guide, test_bag_reuse, test_mixed_hemisphere_is_refused, test_exact, test_noise, test_disjoint_ids,
+               test_misread_view_dropped):
         print(f"{fn.__name__}: {fn.__doc__.splitlines()[0]}")
         fn()
         print("  ok\n")
@@ -362,6 +378,33 @@ def self_test():
                             np.arange(6).reshape(-1, 1), _rough_K((800, 1280)),
                             np.zeros(5)) is None, "a non-finite pose must come back as None"
     print("shutter: still passes, 440 px/s refused, duplicate pose refused\n  ok\n")
+
+    # Record now, choose later (theory.md 16.5f): a still burst is kept as a pair, the same
+    # pose again is a duplicate, and a burst whose partner frame is 30 px away is moving.
+    import tempfile, json as _json
+    with tempfile.TemporaryDirectory() as tmp:
+        raw = Path(tmp) / "raw"
+        moved = np.roll(img, 30, axis=1)
+        for tag in "AB":
+            (raw / tag).mkdir(parents=True)
+            for i, (m, f) in enumerate([(img, img), (img, img), (img, moved)]):
+                cv2.imwrite(str(raw / tag / f"f_{i:05d}_m.png"), m)
+                cv2.imwrite(str(raw / tag / f"f_{i:05d}.png"), f)
+        dt = 1 / 120
+        (raw / "frames.csv").write_text("index,t_a_m,t_b_m,t_a,t_b,skew_ms\n" + "".join(
+            f"{i},{i},{i},{i + dt},{i + dt},0.5\n" for i in range(3)))
+        (raw / "meta.json").write_text(_json.dumps({"board": SPEC.summary(), "skew": {}}))
+        n, m = select(raw, Path(tmp) / "bag", SPEC, 0.002)
+        assert (n, m) == (1, [0, 0]), (n, m)
+        assert sorted(f.name for f in (Path(tmp) / "bag/A").iterdir()) == ["pair_000.png"]
+        assert read_meta(Path(tmp) / "bag")["n_pairs"] == 1
+        try:
+            select(raw, Path(tmp) / "bag", SPEC, 0.002)
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError("select must not write over an existing bag")
+    print("select: still burst kept, duplicate and moving bursts refused\n  ok\n")
 
     tag = BOARDS["10x10_letter_apriltag"]
     assert fit_corners(tag) == 24 == fit_corners(tag.with_square_mm(20.0)), "override survives a re-pitch"

@@ -22,6 +22,12 @@ static const float CARRIER_ZERO[NUM_CHANNELS] = {0.0f, 0.0f, 0.0f, 0.0f};
 // I = SENS * (mV above the boot zero, after CS_DEAD_MV) / 1000. Both from cs_cal, DC into
 // 2.031 ohm, 2.4-4.4 A, P0+P180 pooled (results/cs_cal/README.md, 2026-11-04). Was
 // {15.26, 15.28, 15.57, 15.34} with no dead zone, which read 1.74-1.88x high.
+// CS pulldowns measured 2026-11-15 (operator): A 2.541, B 3.477, C 2.577, D 2.551 kohm (were
+// ~2.53-2.54 on all four). SENS * R is 16.7-17.5 kA.ohm/V on A/C/D, but 23.7 on B at 3.477 kohm:
+// either B's sense mirror differs (and this end-to-end fit already absorbs the resistor), or
+// B was changed after the 2026-11-04 cs_cal and reads 1.37x high (true SENS_B ~4.96). Every
+// run since 2026-11-05 shows B steady at 1.05-1.25x the A/C/D mean, so no change happened
+// during them. Unresolved: re-run cs_cal on B before trusting B's amps.
 static const float SENS[NUM_CHANNELS] = {6.87f, 6.81f, 6.68f, 6.53f};
 // The ADC reads ~0 for the first ~110 mV on the CS pin (fit intercept 105-114 mV on all four,
 // i.e. ~0.75 A), so a sample above the zero gets this added back. Below 2.4 A is NOT

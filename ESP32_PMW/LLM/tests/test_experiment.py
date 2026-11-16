@@ -190,10 +190,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(_planned_phase(planned,25), '计划结束')
 
     def test_panel_stop_priority_and_exception_cleanup(self):
-        from LLM.record.panel import run_panel
+        from LLM.record.panel import POSTROLL_S, run_panel
         for mode in ('manual', 'manual_failure', 'automatic', 'cancel_countdown',
                      'interrupt_countdown', 'interrupt_drive', 'stop_unconfirmed',
-                     'stop_error', 'bright_led', 'no_ready', 'estop_drive', 'estop_countdown', 'finish_drive'):
+                     'stop_error', 'bright_led', 'no_ready', 'estop_drive', 'estop_countdown', 'finish_drive',
+                     'embedded_finish'):
             events=[];handles={};clock=[0.]
             import threading
             estop, finish = threading.Event(), threading.Event()
@@ -221,12 +222,12 @@ class WorkflowTests(unittest.TestCase):
                     self.n+=1;clock[0]+=.1;self.last_stamps=(clock[0],clock[0])
                     if not automatic and self.n==1:handles['Record'].callback(None)
                     if not automatic and self.n==5:handles['START ramp + LED'].callback(None)
-                    if automatic and self.n==3:handles['START ramp + LED'].callback(None)
+                    if automatic and self.n==3 and handles:handles['START ramp + LED'].callback(None)
                     if mode=='cancel_countdown' and self.n==50:handles['Stop / finish'].callback(None)
                     if mode=='interrupt_countdown' and self.n==30:raise KeyboardInterrupt
                     if mode=='estop_countdown' and self.n==30:estop.set()
                     if mode=='estop_drive' and self.n==55:estop.set()
-                    if mode=='finish_drive' and self.n==55:finish.set()
+                    if mode in ('finish_drive', 'embedded_finish') and self.n==55:finish.set()
                     if mode in ('interrupt_drive', 'stop_unconfirmed', 'stop_error') and self.n==55:raise KeyboardInterrupt
                     if not automatic and self.n==6:
                         if mode=='manual_failure':raise OSError('fake camera failure')
@@ -276,11 +277,16 @@ class WorkflowTests(unittest.TestCase):
                            side_effect=lambda exposure, gain, **kw: events.append(('exposure',exposure,kw))) as configure, \
                      patch('controller.control.hover_controller_runner._thermal_gate',
                            side_effect=AssertionError('LLM must not wait on thermal model')):
-                    args=dict(output_root=root/'takes',max_seconds=10,run=run,ramp_path=pattern,
+                    args=dict(output_root=root/'takes',max_seconds=15,run=run,ramp_path=pattern,   # 5 pre + 1 ramp + POSTROLL_S
                               serial_port='FAKE',roi_a=[0,0,5,5],roi_b=[0,0,5,5])
                     args['auto_start']=automatic
                     args['stop_event'],args['finish_event']=estop,finish
                     args['duty_switch']=(26.0,'duty=50.0:60.0:70.0:80.0')   # mid-ramp of 2->50 Hz in 1 s
+                    said=[]
+                    if mode=='automatic':   # the coil trim: two knots on the 2->50 Hz ramp
+                        args['duty_schedule']=[(40.0,'duty=80.0:80.0:80.0:80.0'),(10.0,'duty=90.0:90.0:90.0:90.0')]
+                    if mode=='embedded_finish':   # the viser app: its server, its status line, no widgets
+                        args['server'],args['say']=Server(),said.append
                     if mode=='manual_failure':
                         with self.assertRaisesRegex(OSError,'fake'):run_panel(s,**args)
                     elif mode=='bright_led':
@@ -295,10 +301,13 @@ class WorkflowTests(unittest.TestCase):
                         self.assertEqual(writers[-1].meta['drive_stop_acknowledged'],result['drive_stop_acknowledged'])
                         if mode=='stop_error':self.assertIn('fake serial',result['drive_stop_error'])
                         self.assertEqual(result['drive_estop'], mode.startswith('estop'))
-                        if mode in ('estop_drive', 'finish_drive'):   # stop at once, then the 2 s post-roll
+                        if mode=='embedded_finish':
+                            self.assertEqual(handles,{},'embedded: the panel adds no buttons')
+                            self.assertTrue(said and 'RECORDING' in said[-1],said[-1:])
+                        if mode in ('estop_drive', 'finish_drive', 'embedded_finish'):   # stop at once, then POSTROLL_S post-roll
                             self.assertEqual(events.count('timed_stop'),1)
                             m=writers[-1].meta
-                            self.assertAlmostEqual(clock[0]-m['host_early_stop_send_complete_s'],2.0,delta=.25)
+                            self.assertAlmostEqual(clock[0]-m['host_early_stop_send_complete_s'],POSTROLL_S,delta=.25)
                         if mode.startswith('estop'):
                             self.assertIn('stop', events)          # firmware stop sent, take saved
                             self.assertTrue(writers[-1].meta['drive_estop'])
@@ -308,6 +317,11 @@ class WorkflowTests(unittest.TestCase):
                         self.assertLess(events.index('START'),events.index('duty=50.0:60.0:70.0:80.0'))
                         self.assertLess(events.index('duty=50.0:60.0:70.0:80.0'),events.index('timed_stop'))
                         self.assertEqual(writers[-1].meta['duty_switch_planned_hz'],26.0)
+                        trims=['duty=90.0:90.0:90.0:90.0','duty=80.0:80.0:80.0:80.0']
+                        self.assertEqual([e for e in events if e in trims],trims)   # once each, in hz order
+                        self.assertLess(events.index('START'),events.index(trims[0]))
+                        self.assertLess(events.index(trims[1]),events.index('timed_stop'))
+                        self.assertEqual([x['planned_hz'] for x in writers[-1].meta['host_duty_schedule_sent']],[10.0,40.0])
                         frequency_lines = [str(c.args[0]) for c in output.call_args_list
                                            if c.args and 'ESP 回报频率' in str(c.args[0])]
                         self.assertTrue(any('RAMP' in line and '37.5 Hz' in line for line in frequency_lines))
@@ -315,7 +329,7 @@ class WorkflowTests(unittest.TestCase):
                         self.assertLess(len(frequency_lines),15)  # throttle output, not one line per frame
                 self.assertEqual(events.count('START'),int(mode in ('manual','manual_failure','automatic',
                                                                    'interrupt_drive','stop_unconfirmed','stop_error',
-                                                                   'estop_drive','finish_drive')))
+                                                                   'estop_drive','finish_drive','embedded_finish')))
                 if mode=='automatic':
                     self.assertGreaterEqual(start_times[0],5)
                     self.assertLess(start_times[0],5.11)
@@ -327,7 +341,8 @@ class WorkflowTests(unittest.TestCase):
                 self.assertLess(events.index(('exposure',None,{'auto_exposure':True})),events.index('link_open'))
                 self.assertLess(events.index('stop'),events.index('link_closed'))
                 self.assertLess(events.index('stop'),events.index('writer_closed'))
-                for e in ('link_closed','camera_closed','server_closed'):self.assertIn(e,events)
+                for e in ('link_closed','camera_closed') + (() if mode=='embedded_finish' else ('server_closed',)):
+                    self.assertIn(e,events)   # the app's own server is never stopped by the panel
 
 
 def run():

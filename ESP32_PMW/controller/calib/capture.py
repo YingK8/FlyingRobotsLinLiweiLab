@@ -13,7 +13,9 @@ re-shooting it. Overwriting an hour of board-waving must be asked for: ``overrid
 
 from __future__ import annotations
 
+import csv
 import json
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -554,7 +556,7 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
         print("camera settings (UVC): " + "; ".join(map(str, settings)))
     # Auto exposure is not measured per frame. Use at least a requested frame period
     # for the still-board blur gate; never present this bound as an exposure reading.
-    gate_exposure_s = exposure_s or max(AUTO_EXPOSURE_S, 1.0 / fps if fps else 0.0)
+    gate_exposure_s = gate_exposure(exposure_s, fps)
 
     old = [f for tag in tags for f in (out_dir / tag).glob("*.png")]
     n = len(list((out_dir / tags[0]).glob("pair_*.png"))) if append else 0
@@ -697,3 +699,135 @@ def capture(out_dir=PAIR_DIR, indices=None, spec=None, width=NATIVE_W, height=NA
         print(f"  skew of the pairs saved: median {np.median(sk):.2f} ms, "
               f"worst {sk.max():.2f} ms")
     return out_dir
+
+
+def gate_exposure(exposure_s, fps):
+    """The exposure the blur gate assumes: the set one, or under auto (not reported per
+    frame by macOS) at least a frame period -- a bound, never presented as a reading."""
+
+    return exposure_s or max(AUTO_EXPOSURE_S, 1.0 / fps if fps else 0.0)
+
+
+# ---- record now, choose later (theory.md 16.5f) -------------------------------------
+RECORD_HZ = 5.0    # bursts kept per second. A guess: a hand re-poses a board in ~1 s, so 5
+                   # keeps several candidates per pose at 4 PNGs (~2 MB) per burst
+PNG_FAST = [cv2.IMWRITE_PNG_COMPRESSION, 1]   # still lossless; level 1 keeps the writes short
+RAW_COLUMNS = ("index", "t_a_m", "t_b_m", "t_a", "t_b", "skew_ms")
+
+
+def record_board(out_dir, src, sink, spec, indices, mode, rotate180, exposure_s=None,
+                 camera_settings=None, max_skew_s=0.002, rate_hz=RECORD_HZ):
+    """Record ungated board footage into ``out_dir``, until ``sink.show`` returns ``q``.
+
+    Nothing is judged here: `select` runs the same gates on what was recorded, later, so the
+    operator only has to move the board and pause. Each burst is two consecutive pairs:
+    ``f_NNNNN.png`` (the candidate) and ``f_NNNNN_m.png`` one frame earlier, its motion
+    partner, so the speed the stillness gates read is over one frame period and not over
+    ``1/rate_hz`` -- hand tremor near ``rate_hz`` would alias to zero across a burst gap.
+    Lossless PNG, as every calibration image here. ``src`` stays the caller's.
+    """
+
+    out_dir = Path(out_dir)
+    if (out_dir / "meta.json").exists():
+        raise FileExistsError(f"{out_dir} is a finished recording; it is evidence, not overwritten")
+    tags = "AB"[:len(indices)]
+    for tag in tags:
+        (out_dir / tag).mkdir(parents=True, exist_ok=True)
+    caller_skew, src.max_skew_s = src.max_skew_s, max_skew_s
+    rows, t_last = [], float("-inf")
+    sink = sink.open()
+    try:
+        while True:
+            item = src.read()
+            if item is None:
+                print("source ended")
+                break
+            frames, stamps = list(item[1]), list(src.last_stamps)
+            if item[0] - t_last >= 1.0 / rate_hz:
+                partner, partner_stamps = frames, stamps
+                item = src.read()
+                if item is None:
+                    print("source ended")
+                    break
+                frames, stamps, t_last = list(item[1]), list(src.last_stamps), item[0]
+                i = len(rows)
+                for tag, m, f in zip(tags, partner, frames):
+                    cv2.imwrite(str(out_dir / tag / f"f_{i:05d}_m.png"), m, PNG_FAST)
+                    cv2.imwrite(str(out_dir / tag / f"f_{i:05d}.png"), f, PNG_FAST)
+                rows.append((i, *partner_stamps, *stamps, src.last_skew * 1e3))
+            if sink.due():
+                looks = [_look(spec, f) for f in frames]
+                footer = f"RECORDING  {len(rows)} burst(s)   move the board, pause at each pose   Done = stop"
+                if sink.show(_overlay(spec, frames, looks, [], footer, 640 if sink.inline else None)) == ord("q"):
+                    break
+    except KeyboardInterrupt:
+        print("\ninterrupted")
+    finally:
+        sink.close()
+        stats = src.skew_stats() if hasattr(src, "skew_stats") else {}
+        src.max_skew_s = caller_skew
+    with open(out_dir / "frames.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(RAW_COLUMNS)
+        w.writerows(rows)
+    write_meta(out_dir, spec, indices, mode, rotate180, 0, [0] * len(tags), stats, exposure_s,
+               camera_settings)
+    print(f"recorded {len(rows)} burst(s) in {out_dir}")
+    return len(rows)
+
+
+def select(raw_dir, out_dir, spec, exposure_s, max_blur_px=MAX_BLUR_PX):
+    """A `record_board` recording -> a bag (`pair_*` / `solo_*`) that `load_views` reads.
+
+    The live shutter's gates, in recording order, with one exception: ``tilt variety`` is
+    a steering device for an operator who can still be asked to tilt, and offline there is
+    none (theory.md 16.5f). A frame whose speed cannot be measured -- its motion partner
+    shows no shared corners -- is refused, where live it passed as "unknown". The raw
+    recording is only read; ``out_dir`` must not exist yet. Returns ``(n_pairs, n_solo)``.
+    """
+
+    raw, out = Path(raw_dir), Path(out_dir)
+    meta = read_meta(raw)
+    if not meta:
+        raise FileNotFoundError(f"{raw} has no meta.json: not a finished recording")
+    for tag in "AB":
+        (out / tag).mkdir(parents=True)
+    with open(raw / "frames.csv", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    saved, solo, kept, n, m = [], [[], []], [], 0, [0, 0]
+    for row in rows:
+        i = int(row["index"])
+        looks = []
+        for tag in "AB":
+            prev = _look(spec, cv2.imread(str(raw / tag / f"f_{i:05d}_m.png"), cv2.IMREAD_GRAYSCALE))["by_id"]
+            dt = float(row[f"t_{tag.lower()}"]) - float(row[f"t_{tag.lower()}_m"])
+            looks.append(_look(spec, cv2.imread(str(raw / tag / f"f_{i:05d}.png"), cv2.IMREAD_GRAYSCALE),
+                               prev, dt))
+        measured = [bool(np.isfinite(lk["speed"])) for lk in looks]
+        skew_s = float(row["skew_ms"]) / 1e3
+        _, checks = gates(spec, looks, skew_s, saved, exposure_s, max_blur_px, variety=solo[0])
+        if all(measured) and all(ok for name, ok, _ in checks if name != "tilt variety"):
+            for tag in "AB":
+                shutil.copy2(raw / tag / f"f_{i:05d}.png", out / tag / f"pair_{n:03d}.png")
+            saved.append(_pose_key(looks[0]))
+            for k, lk in enumerate(looks):
+                solo[k].append(_pose_key(lk))
+            kept.append((n, float(row["t_a"]), skew_s * 1e3, max(lk["speed"] for lk in looks),
+                         *[lk["incidence"] for lk in looks]))
+            n += 1
+            continue
+        for k, (tag, lk) in enumerate(zip("AB", looks)):
+            if measured[k] and solo_ok(lk, solo[k], exposure_s, max_blur_px, spec):
+                shutil.copy2(raw / tag / f"f_{i:05d}.png", out / tag / f"solo_{tag}_{m[k]:03d}.png")
+                solo[k].append(_pose_key(lk))
+                m[k] += 1
+    with open(out / "pairs.csv", "w") as fh:
+        for k, v in (meta.get("skew") or {}).items():
+            fh.write(f"# skew_{k}, {v}\n")
+        fh.write("index,t_capture,skew_ms,speed_px_s,incidence_a_deg,incidence_b_deg\n")
+        for r in kept:
+            fh.write(",".join(f"{x:.4f}" if isinstance(x, float) else str(x) for x in r) + "\n")
+    meta.update(n_pairs=n, n_solo=m, selected_from=str(raw.resolve()), n_bursts=len(rows))
+    (out / "meta.json").write_text(json.dumps(meta, indent=2))
+    print(f"selected {n} pair(s) + {m[0]}/{m[1]} solo (A/B) from {len(rows)} burst(s) in {raw}")
+    return n, m

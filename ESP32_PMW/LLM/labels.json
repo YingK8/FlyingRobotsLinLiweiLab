@@ -1,0 +1,12 @@
+{
+  "about": "Run label presets for the viser app (2 · Run -> Labels). Click a bubble to toggle it; the picks are saved to manifest.json 'labels' with the note. Edit freely: categories and options are read at app start. Seeded from the 2026-11-15/16 run notes.",
+  "categories": {
+    "Setup": ["pipette tip", "no pipette tip", "short stem", "long stem", "light preload", "tight fit", "loose fit", "coil trim on"],
+    "Assist": ["no human assist", "hand-assisted spin-up", "some human assist", "poked it"],
+    "Outcome": ["lifted off", "hovered", "stayed in stand", "spun up then failed", "flung off", "spun off", "fell apart", "pipette tip fell off", "bearing came off", "never spun"],
+    "Cause": ["precession", "coil imbalance at resonance", "not tight enough", "step-out", "mechanical failure", "unknown"],
+    "Impression": ["promising", "went well for a while", "bad run", "reference run"],
+    "Action": ["analyse precession", "model pipette-bearing dynamics", "tune coil balance", "tighten fit", "repeat run", "check video"],
+    "Data": ["LED sync failed", "camera dropped out", "stopped early", "coils hot"]
+  }
+}

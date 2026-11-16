@@ -336,6 +336,44 @@ structure. It still cannot mean a *wrong* rig while the seed agrees to $0.25°$ 
 radial trend is flat, and at 30 um of total uncertainty, doubling one axis changes nothing
 a 10 mm robot can feel. It prints as `[WARN]` and is worth chasing on its own time.
 
+### 14.5b One misread view can fail a bag, so it is dropped before the gate
+
+**What happened (2026-11-16).** A bag of 21 views for camera $A$ (20 after the held-out
+split) failed on one gate: "A residuals structureless", outer/inner $2.63$ against the
+limit. Every other gate passed. Fitting $A$'s lens alone and reading each corner's
+residual $e_{v,j} = \lVert \pi(K, d, R_v, t_v, X_j) - x_{v,j} \rVert$ (view $v$, corner
+$j$, $\pi$ the projection) gave a median of $0.27$ px. Only 7 of 1006 corners were over
+2 px, and the worst three were all in one view, `pair_002`, at 5.7, 3.9 and 3.9 px. That
+view's RMS was $1.46$ px. The median view's was $0.34$, and the next worst $0.51$.
+
+**Cause.** The three bad corners were at the far edge of a $55°$-incidence view. There an
+$s = 20.32$ mm square spans about 25 px across the tilt. The AprilTag's own black border is
+$(s - m)/2 = 2.66$ mm from the chessboard corner ($m = 15$ mm, the marker side), which comes
+to 3-4 px in the image. That is inside the sub-pixel refiner's window, and the refinement
+settled on the tag's edge. The doubled white lines at those corners are identical in the
+frame and in its motion partner, so it is not motion. Re-refining every corner with a
+smaller explicit window (`cornerSubPix`, half-width 2 or 3 px) made the fit **worse** in
+all four camera-bags tried ($0.49 \to 0.89$ px RMS on $A$). The detector is right almost
+everywhere, and a few views are wrong.
+
+**The rule.** After the lens fit (and the incidence drop of §14.3c), a view is dropped if
+its RMS is over $\max(2.5\,\tilde e,\ 1.0\ \text{px})$, where $\tilde e$ is the median view
+RMS. The fit is then redone, and the view is also kept out of pairing
+(`calibrate.without_dropped`), because its corners are wrong for the extrinsic too.
+- **The factor 2.5 is a guess from one bag:** the misread view sat at $3.2\tilde e$ and the
+  next worst at $1.1\tilde e$.
+- **The 1 px floor is the gate's own RMS limit**, so a view the gate would pass alone is
+  never dropped.
+- **The rule needs `MIN_VIEWS` left over.**
+- **It runs once, not to convergence**, so it cannot whittle a bag down to the views that
+  agree with each other.
+
+**This does not loosen the gate.** The gate still judges the refit, and the dropped views
+are printed and stored in `info["dropped_views"]`. With `pair_002` out, the same bag
+passed every gate: outer/inner $1.17$, joint RMS $0.51$ px, 6 pairs. What it does not
+fix: a bag whose bad views are a large share of it. The median then moves, and the
+radial gate stays the backstop.
+
 ### 14.6 Measured behaviour
 
 Synthetic round trip against a known rig, board on the bisector, $300$ mm range,
@@ -769,6 +807,36 @@ own floor, `min_fit_corners=24` (30 %), and `fit_corners` uses it in place of th
 Boards without one keep 0.5. The held-out check (`verify_bag`) still judges the result.
 A bigger print, or holding the board nearer, is the way to get more corners per view.
 
+### 16.5f Record now, choose later (2026-11-15)
+
+**Operator, 2026-11-15:** live capture was too hard. The guide asked for tilts the hand
+could not hold, and every refusal had to be fixed while holding the board. So the viser app
+now splits capture into two steps. `capture.record_board` saves board footage with no gates
+at all. `capture.select` later runs the gates of §16.5 on what was saved.
+
+This does not reopen §16.4. What §16.4 deleted was the *correction* of motion. Selection
+still keeps only frames where $v\Delta \le 0.1$ px and $v\tau \le 0.5$ px, so the board must
+still pause at each pose. The difference is that pausing is now the operator's only job.
+
+* **Speed is measured over one frame, not over the burst gap.** Each burst is two
+  consecutive pairs. The first is the motion partner (`f_NNNNN_m.png`) and the second is
+  the candidate (`f_NNNNN.png`). So $v$ is measured over $T \approx 8$ ms, the same
+  quantity the live loop measured. If $v$ were measured between bursts, $1/f_\mathrm{rec}$
+  apart, hand tremor near $f_\mathrm{rec}$ would alias to zero and pass as still.
+* **Unknown speed is refused.** Live, a frame with no previous frame passed its stillness
+  gates as "unknown". Offline, a candidate whose partner shares no corners is dropped.
+* **`tilt variety` is not applied offline.** It steers an operator who can still be asked
+  to tilt (§16.5d), and after the recording there is nobody to steer. The physical gates,
+  and pose novelty, are applied unchanged.
+* **Geometry is unchanged.** A *pair* still needs the board within `MAX_INCIDENCE_DEG` of
+  both optical axes. On the LLM rig the axes are ~99° apart, so pairs exist only within
+  about ±20° of the bisector, whatever the capture method. Solo frames cover each camera's
+  intrinsics (§16.5a).
+* **Cost.** `RECORD_HZ = 5` bursts/s is a guess, not a measurement. It writes 4 lossless
+  PNGs per burst, measured at ~450 MB/min for 1280×800 frames. The recording (`raw/`) is
+  evidence and is never overwritten. `select` writes a new bag beside it, which
+  `load_views` reads unchanged.
+
 ### 16.6 What does not work
 
 * **Hardware trigger.** The OV9281 has an FSIN pin and a documented external-trigger mode,
@@ -789,6 +857,7 @@ A bigger print, or holding the board nearer, is the way to get more corners per 
   $\tau \le 5$ ms, so anything up to the 4.76 ms frame period costs no shots, only blur.
 * **Recording continuously and choosing afterwards.** Correct, and about 270 lines including
   a lossless codec, a writer thread and a timestamp sidecar. §16.4 is why it is gone.
+  *Restored 2026-11-15 without the correction, as selection only:* §16.5f.
 
 ### 16.7 Correspondence with the implementation
 
@@ -802,6 +871,7 @@ A bigger print, or holding the board nearer, is the way to get more corners per 
 | The refusing shutter (§16.5) | `capture.capture` |
 | Solo frames for intrinsics (§16.5a) | `capture.solo_ok`, `calibrate.load_views` |
 | One bag per session, reused not re-shot (§16.5b) | `capture.write_meta`, `capture(..., override=)` |
+| Record now, choose later (§16.5f) | `capture.record_board`, `capture.select`, viser *Record calibration footage* / *Calibrate from last recording* |
 | Live-loop counterpart, deliberately different | [§17](../pose/theory.md) (ch. 3) |
 
 ## 17. Printed holder checker landmarks

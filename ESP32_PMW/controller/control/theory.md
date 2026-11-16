@@ -3917,6 +3917,66 @@ uv run python controller/control/coil_phase.py --measure   # probe sweep, ENERGI
 uv run python controller/control/coil_phase.py --fit results/takeoff/<run>.csv
 ```
 
+### 22.10 The amplitude imbalance, measured, and a trim scheduled by frequency (2026-11-15)
+
+The operator's note on `sync_check_20261115_212130_fb03c1` ("the coil imbalance at
+resonance messed it up") prompted the first per-band look at all four channels on the
+800 µF bank. The data are 12 LLM bench runs from 2026-11-14/15, each ramping 1 Hz to
+195–250 Hz with all four coils at 100 % duty: 304 current-sense samples at ~2 Hz, every coil
+above 0.15 A.
+
+**It is not one imbalance.** The median ratio of each coil's current to the four-coil mean,
+in 20 Hz bands, has an interquartile range of at most 0.10 across runs above 40 Hz:
+
+| band (Hz) | A | B | C | D |
+|---|---|---|---|---|
+| 80–100 | 1.11 | 1.06 | 0.93 | 0.93 |
+| 120–140 | 0.98 | 1.14 | 1.07 | 0.84 |
+| 160–180 | 0.81 | 1.15 | 1.17 | 0.87 |
+| 220–240 | 0.71 | 1.10 | 1.14 | 1.06 |
+
+A goes from the strongest coil to the weakest across ~120 Hz. A constant per-coil trim would
+correct one end of the ramp and double the error at the other, which is 22.6's argument
+again, this time for amplitude.
+
+**Why: the coils do not share a resonance.** Using `coil_phase.fit_channel` on the pooled
+|I|(f) (shape route, 22.2):
+
+| coil | $f_0$ (Hz) | $Q$ |
+|---|---|---|
+| A | 113 | 1.30 |
+| B | 136 | 1.16 |
+| C | 145 | 1.10 |
+| D | 133 | 0.83 |
+
+The fit is stable for A across runs (109–115 Hz). For D it is **bimodal**: 110–118 Hz in the
+early runs and 133–141 Hz in the later ones. Something changed between them, and until that
+is explained the D number is not a constant. These are shape fits; 22.7 says to put them
+beside a probe measurement, never to average the two.
+
+**The phase consequence is the bigger one.** With the values above, $\theta_k$ differs by
+~30° between A and C at 160 Hz and ~14° at 250 Hz. The amplitude trim below does not touch
+this (22.7 item 3). The firmware phase trim (`setPhaseTrim`, 22.6) would correct it, given
+measured `COIL_F0_HZ` / `COIL_Q` and a reflash. It is still disarmed.
+
+**The amplitude trim.** `LLM/analyse/coil_trim.py` builds, per 20 Hz band from 60 Hz, a duty
+for each coil: the weakest coil stays at 100 %, and the others are scaled by
+weakest / own.
+- Duty can only fall, so balance costs field: `field_fraction` (weakest / mean) is 0.95 at
+  60 Hz, 0.81 at 160 Hz and ~0.72 from 180 Hz.
+- The run panel sends each band's `duty=` once, when the PLANNED frequency crosses it
+  (`run_panel(duty_schedule=)`). This is host-side, needs no reflash, and is counted as drive.
+- The run snapshots the schedule it flew into `raw/coil_trim.json`.
+- It assumes duty is proportional to current (linear RLC). It is measured on the CS
+  estimate, which lags a fast ramp equally on all channels, so the ratios survive.
+- **It is unflown as of writing.**
+
+**The firmware balance loop was not used.** `CurrentBalanceController` is in
+`lib/PwmController` but `main_flight` never enables it: there is no command for it, and
+enabling it needs a reflash. Its hold logic also freezes the target current at the first
+follower, which would fight a ramp whose currents rise 2x into resonance and fall 2x past
+it. Fly the trim first, then compare.
+
 ## 23. The channel-0 amplitude sweep, and why its photographs can be trusted
 
 `spiffs_data/tilt.json` holds coils B, C and D at 100% carrier and steps coil A through

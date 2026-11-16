@@ -28,6 +28,12 @@ def run():
             raise AssertionError(f"{module.__name__} checks failed")
     import runpy
     runpy.run_module("LLM.record.ramps", run_name="__main__")   # every LLM/ramps file loads
+    from LLM.record.upload import _self_check as upload_checks
+    upload_checks()
+    from LLM.analyse.holder_rig import _self_check as holder_rig_checks
+    holder_rig_checks()
+    from LLM.analyse.coil_trim import _self_check as coil_trim_checks
+    coil_trim_checks()
     test_pipeline.run()
     from LLM.tests import test_bench
     test_bench.run()

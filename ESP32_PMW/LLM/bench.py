@@ -6,6 +6,8 @@ and `drive_without_cameras` energise the coils.
 from pathlib import Path
 from uuid import uuid4
 
+import numpy as np
+
 from controller.calib.calibrate import BOARDS
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -102,16 +104,37 @@ class Bench:
 
     def calibrate_intrinsics(self, bag=None):
         """K and distortion for each camera, from the collected frames."""
-        from controller.calib.calibrate import calibrate_intrinsics, load_views
+        from controller.calib.calibrate import calibrate_intrinsics, load_views, without_dropped
         bag = Path(bag) if bag else self._calibration_bag
         if bag is None:
             raise ValueError("collect_charuco_frames() first, or pass an existing bag")
         self._calibration_bag = bag
         views_a, views_b, size = load_views(self.board, bag)
-        self._views = (views_a, views_b, size)
         self._intrinsics = {tag: calibrate_intrinsics(self.board, views, size, tag)
                             for tag, views in (("A", views_a), ("B", views_b))}
+        # A view an intrinsic fit dropped as misread is not paired for the extrinsic either.
+        self._views = (without_dropped(views_a, self._intrinsics["A"][2]),
+                       without_dropped(views_b, self._intrinsics["B"][2]), size)
         return {tag: info for tag, (_, _, info) in self._intrinsics.items()}
+
+    def save_intrinsics(self, path):
+        """Both lenses alone (K, dist, fit info) as JSON: what the holder pose needs when the
+        board could not be shown to both cameras (LLM/analyse/holder_rig.py)."""
+        from datetime import datetime
+        from LLM.record.io import write_json
+        if self._intrinsics is None:
+            raise ValueError("calibrate_intrinsics() first")
+        c, size = self.camera, self._views[2]
+        out = dict(kind="lenses_only", image_size=[int(size[0]), int(size[1])], rotate180=c["rotate180"],
+                   camera_indices=list(c["indices"]), board=self.board.summary(), bag=str(self._calibration_bag),
+                   created=datetime.now().isoformat(timespec="seconds"),
+                   cameras={tag: dict(K=np.asarray(K).tolist(), dist=np.asarray(d).ravel().tolist(),
+                                      info={k: (np.asarray(v).tolist() if isinstance(v, np.ndarray) else v)
+                                            for k, v in info.items() if k in
+                                            ("n_views", "rms_px", "orientation_spread_deg", "std_fx_fy_cx_cy")})
+                            for tag, (K, d, info) in self._intrinsics.items()})
+        write_json(path, out)
+        return Path(path)
 
     def calibrate_extrinsics(self):
         """A->B pose with intrinsics held fixed; judged, then saved as stereo_rig.json."""
@@ -161,6 +184,21 @@ class Bench:
         capture(bag, indices=c["indices"], spec=self.board, width=c["width"], height=c["height"],
                 rotate180=c["rotate180"], backend=c["backend"], fps=c["fps"],
                 exposure_s=c["exposure_s"], gain=c["gain"], auto_exposure=c.get("auto_exposure", False), **kw)
+
+    def record_calibration(self, folder, src, sink, exposure_s=None):
+        """Ungated board footage into ``folder`` (`capture.record_board`); no solve.
+        ``exposure_s``: the exposure the caller set for this recording, else the session's."""
+        from controller.calib.capture import record_board
+        c = self.camera
+        return record_board(folder, src, sink, self.board, c["indices"], (c["width"], c["height"]),
+                            c["rotate180"], exposure_s or c["exposure_s"])
+
+    def select_calibration(self, raw, bag, exposure_s=None):
+        """The gated pairs and solos of a `record_calibration` recording, as a bag. The blur
+        gate uses the exposure the footage was recorded at."""
+        from controller.calib.capture import gate_exposure, select
+        c = self.camera
+        return select(raw, bag, self.board, gate_exposure(exposure_s or c["exposure_s"], c["fps"]))
 
     # ---- scene ------------------------------------------------------------------------
     def photograph_reference(self):
@@ -248,7 +286,7 @@ class Bench:
 
     def run(self, ramp, *, note="", warnings_reviewed="", led_a=None, led_b=None, extra_seconds=30,
             auto_start=False, server=None, src=None, preview=None, led_code=True, duty="random", design=None,
-            stop_event=None, finish_event=None, duty_switch_hz=None, finish=True):
+            stop_event=None, finish_event=None, duty_switch_hz=None, finish=True, say=None, trim=None):
         """Record -> START (LED + drive) -> automatic stop -> import. ENERGISES THE COILS.
 
         `ramp` is a name in LLM/ramps (or a path). Call analyse() afterwards.
@@ -257,7 +295,10 @@ class Bench:
         trial or reference. finish=False returns the take path without the audit + import
         (`experiment.finish_take`), for a caller that runs it off the main thread. duty_switch_hz: all coils 100 % until the planned frequency
         reaches it (capped at the ramp's top), then `duty`. LED ROIs [x,y,w,h] are optional: without them they are found
-        from the START pulse during analyse(). server/src: the viser app's, reused.
+        from the START pulse during analyse(). server/src: the viser app's, reused; say: the app's
+        status line, so the run panel adds no widgets of its own (`run_panel`). trim: a coil-trim
+        schedule (LLM/trims/*.json, `analyse/coil_trim.py`): per-band duty sent as the planned
+        frequency crosses each knot; needs the design duty at 100 % (the trim only lowers it).
         """
         from LLM.record.experiment import finish_take, prepare_run, prepare_sync_run
         from LLM.record.panel import run_panel
@@ -279,6 +320,15 @@ class Bench:
         # raw/run_parameters.json records it with everything else BEFORE START.
         from LLM.record.randomise import duty_command, write_parameters
         segments = load_ramp(run / "ramp.json")
+        schedule = []
+        if trim is not None:
+            from LLM.analyse.coil_trim import commands
+            from LLM.record.io import read_json
+            if duty not in (None,) and (isinstance(duty, str) or any(float(d) != 100.0 for d in duty)):
+                raise ValueError("coil trim needs every coil's design duty fixed at 100 %: it only lowers duty")
+            snapshot(Path(trim), run / "raw/coil_trim.json")      # what this run flew, before START
+            schedule = commands(read_json(Path(trim)), max(s[1] for s in segments))
+            duty_switch_hz = None                                   # the trim replaces the single switch
         if duty_switch_hz is not None and float(duty_switch_hz) <= segments[0][0]:
             duty_switch_hz = None               # at/below the ramp start: the duty from START
         if duty_switch_hz is not None:
@@ -292,12 +342,14 @@ class Bench:
             pre, switch = [duty_command([100.0] * 4)], (duty_switch_hz, duty_cmd)
         print("Duty:", duty_cmd or "none (100 %)", f"from {duty_switch_hz:g} Hz, 100 % below" if switch else "")
         print("Ramp:", label(segments))
+        if schedule:
+            print("Coil trim:", f"{len(schedule)} knots from {schedule[0][0]:g} Hz ({Path(trim).name})")
         result = run_panel(self.session, output_root=run / "raw/captures", run=run,
                            ramp_path=run / "ramp.json", serial_port=port, roi_a=led_a, roi_b=led_b,
                            max_seconds=duration_s(segments) + extra_seconds, auto_start=auto_start,
                            server=server, src=src, preview=preview, led_code=led_code,
                            pre_commands=pre, duty_switch=switch, stop_event=stop_event,
-                           finish_event=finish_event)
+                           finish_event=finish_event, say=say, duty_schedule=schedule)
         if result["take"] is None:
             raise ValueError("Preview only, nothing recorded; call run() again for a new run")
         if not finish:
